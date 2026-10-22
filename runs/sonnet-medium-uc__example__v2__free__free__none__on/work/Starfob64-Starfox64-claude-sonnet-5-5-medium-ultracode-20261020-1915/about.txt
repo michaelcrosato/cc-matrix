@@ -1,0 +1,28 @@
+## STARFOB 64
+A spiritual successor to Starfox 64 (N64). Original characters, stages, art and music — everything here is generated procedurally in code. No assets are loaded.
+Title picked by RNG (secrets.randbelow) from 50 brainstormed riffs on the source name.
+
+## Source Information
+- Date: 2026-10-20 19:15
+- Source: Starfox 64 for N64
+- Tech: Three.js r180 (three@0.180.0, WebGPURenderer + TSL node materials + PostProcessing/bloom, loaded from jsDelivr via import map, no WebGL fallback); Rapier 3D 0.19.3 (@dimforge/rapier3d-compat, WASM inlined); Web Audio API (all sfx, radio babble and music synthesized live); Gamepad API (PS5-first, with rumble); vanilla ES modules bundled by a small Python script; DOM/CSS HUD and menus.
+- Art Direction: Stylized cel shading — 4-step toon ramp (MeshToonNodeMaterial), inverted-hull ink outlines with smoothed normals, banded gradient sky with sun disc, flat-color stylized terrain, bloom on emissives.
+- Animation: Procedural animation — critically damped springs (banking, pitch, roll), tween/keyframe tracks, hierarchical part rigs (detachable wings), two-bone IK walk cycle on the Bulwark Walker, arc-length trail following for the Leviathan, particle systems, Rapier rigid-body debris.
+- Testing: The prompt said "Write no tests, do no tests, testing will be done separately." Accordingly no tests were written and nothing was executed or run in a browser during development; the code is unverified at runtime.
+- Environment: Claude Code CLI (headless); Linux; browser unknown
+- Model: Anthropic, claude-sonnet-5-5, reasoning effort medium-ultracode
+- Usage: unknown (no cost or token estimate was available in the session)
+
+## Engine Feedback
+- What did you like most about the engine? Three.js TSL: cel shading, the banded sky and terrain patterns were a few lines of node code, and MeshToonNodeMaterial gave the toon ramp for free. Rapier's swept ray-casts, shape queries and inlined-WASM compat build made robust bullets and a no-hosting single file easy.
+- Did you get stuck or guess wrong? Because testing was off-limits I had to recall r180/Rapier 0.19 APIs from memory (PostProcessing naming, instance colors on node materials, which collider pairs raise events — sensor-vs-sensor does not). I designed around the riskiest guesses (ray-cast bullets instead of sensor events) and wrapped post-processing in a fallback, but none of it was confirmed by running it.
+- What was the most important thing you had to build yourself? The game framework: rail and all-range flight controllers, the entity/director/event-script layer, multi-part bosses, the HUD and controller-first menu system, the input layer, and the procedural audio and music engine.
+- What was the hardest part about using the engine? Not being able to see it run: WebGPU/TSL and Rapier event semantics are easy to get subtly wrong, and there is no animation or game-state layer, so springs, tweens, IK and state flow all had to be written by hand.
+- If you had to remove or overhaul one thing from the engine, what would that be? The churn in naming and entry points around post-processing and node-material setup between releases (PostProcessing vs RenderPipeline, import paths) — a stable facade would remove a lot of guesswork.
+- If you could change one thing about the engine, what would it be? A first-class outline/edge-detect pass for toon rendering in three/webgpu, so ink lines do not need inverted-hull meshes with hand-smoothed normals.
+
+## Prompt Feedback
+- What did you like most about this prompt? The concrete bar ("feature-complete demo" with named reference demos), the attract-mode and 10-foot controller-first requirements, and the realistic gamepad axis-inversion quirk with a pragmatic toggle fix — they turned a vague genre clone into a checkable spec.
+- What was confusing? "Silently brainstorm 50 titles" while also using real code for the RNG; the SOURCE placeholder versus the filename pattern with brackets; "no tests" combined with "polished, feature-complete"; and "Usage: only if estimates are available" when none are exposed.
+- What was the hardest thing to do? Delivering a very broad scope (three rail stages, an all-range stage, four bosses, wingmen, menus, audio, attract mode) as one file of GPU and physics code without ever running it.
+- If there was one test you could have run, what would that test be? A headless Chromium smoke test with WebGPU enabled that loads the page, logs console and shader errors, and screenshots the title, each stage, and each boss intro to catch API mismatches and rendering bugs.

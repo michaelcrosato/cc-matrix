@@ -1,0 +1,9 @@
+<!doctype html><html><body style="margin:0"><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}</script>
+<script type="module">
+import * as THREE from 'three/webgpu';
+const r = new THREE.WebGPURenderer({antialias:true}); r.setSize(innerWidth, innerHeight); await r.init(); document.body.appendChild(r.domElement);
+console.log('backend', r.backend.isWebGPUBackend);
+const s = new THREE.Scene(); s.background = new THREE.Color(0x3366aa); const c = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 100); c.position.z = 4;
+const m = new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshToonMaterial({color:0xff8800})); s.add(m); s.add(new THREE.DirectionalLight(0xffffff, 3));
+r.setAnimationLoop(() => { m.rotation.y += 0.02; r.render(s, c); });
+</script></body></html>

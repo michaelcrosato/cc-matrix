@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<!--
+  GRAVITY KESTREL: a spiritual successor to Starfox 64 (N64), playable demo.
+  Single-file build. Controller first (PS5 / Xbox / generic), keyboard secondary.
+
+  SOURCE INFORMATION
+  - Date: 2026-10-20 14:48
+  - Source: Starfox 64 for N64
+  - Tech: Three.js r160 (ES module, jsDelivr CDN), vanilla JavaScript (ES2020+), Web Gamepad API, Web Audio API, HTML/CSS overlays
+  - Art Direction: low-poly stylised space; procedural geometry; dusk-lit plains; neon accents; Arwing-inspired silver and blue ship
+  - Animation: per-frame delta-time simulation via requestAnimationFrame; procedural motion (sine paths, exponential smoothing, barrel-roll rotation); pooled additive point particles; CSS transitions for UI
+  - Testing: prompt says "No restriction on testing"
+  - Environment: Claude Code CLI (headless); Linux (WSL2); browser unknown
+  - Model: Anthropic, claude-haiku-5-5, reasoning effort low
+  - Usage: unknown
+
+  ENGINE FEEDBACK
+  - Liked most: Three.js scene graph and built-in shadows/fog/tone mapping; no build step needed with an import map.
+  - Stuck or guessed wrong: ship nose and enemy facing conventions (ship nose is -z, enemies face +z); shadow camera bounds for a moving ship.
+  - Most important thing built myself: lock-on, attract AI, wave scheduler, scrolling terrain height model, unified keyboard + gamepad input with edge detection.
+  - Hardest part: no physics or collision helpers, so distance checks were hand-rolled; keeping pooled effects cheap without a profiler.
+  - Remove or overhaul: the lack of built-in input abstraction; a gamepad helper with edge events would save time.
+  - Change one thing: ship-in-scene helpers (orientation and bounds) so game-space code is less error-prone.
+
+  PROMPT FEEDBACK
+  - Liked most: explicit "done" criteria and the controller-first, 10-foot rules.
+  - Confusing: the unexplained SOURCE token in the filename; "CRTICAL" typo; the usage field has no way to know token counts.
+  - Hardest: fitting a full feature-complete demo (menus, attract, three stages, boss, settings) into one low-effort pass.
+  - One test to run: a scripted full playthrough on a real controller plus a phone-size touch emulation, checking the attract timer and invert toggles.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Gravity Kestrel · Starfox 64 spiritual successor (demo)</title>
+<style>
+  :root {
+    --ink: #eaf6ff;
+    --dim: #93a6c4;
+    --accent: #6fd3ff;
+    --warn: #ff7a5c;
+    --gold: #ffd34d;
+    --green: #6dff9a;
+    --panel: rgba(5, 8, 20, 0.8);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; height: 100%; overflow: hidden; background: #03040a; color: var(--ink);
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif; user-select: none;
+  }
+  #c { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+  .hidden { display: none !important; }
+
+  /* ---- panels (10-foot: large type, generous margins) ---- */
+  .panel {
+    position: fixed; inset: 0; padding: 7vh 7vw; display: flex; flex-direction: column;
+    justify-content: center; align-items: flex-start;
+    background: linear-gradient(90deg, rgba(3, 4, 10, 0.72), rgba(3, 4, 10, 0.1) 65%);
+  }
+  #menu h1 {
+    margin: 0 0 0.2em; font-size: clamp(44px, 6.4vw, 96px); font-weight: 800; letter-spacing: 0.04em;
+    text-shadow: 0 0 24px rgba(111, 211, 255, 0.5);
+  }
+  #menuBody { max-width: 60ch; margin-bottom: 1.2em; color: var(--dim); font-size: clamp(20px, 2vw, 28px); }
+  #menuBody .sub { margin: 0; color: var(--accent); }
+  #menuBody .stats { display: grid; grid-template-columns: repeat(2, auto); gap: 0.4em 2.4em; font-size: clamp(22px, 2.2vw, 30px); }
+  #menuBody .stats div { display: flex; justify-content: space-between; gap: 1.5em; min-width: 16em; }
+  #menuBody .stats span { color: var(--dim); }
+  #menuBody .stats b { color: #fff; }
+  #menuBody .stats .rank b { color: var(--gold); font-size: 1.4em; }
+  #menuList { list-style: none; margin: 0; padding: 0; min-width: min(560px, 80vw); }
+  #menuList li {
+    font-size: clamp(28px, 3.2vw, 46px); padding: 0.28em 0.9em; margin: 0.12em 0; border-left: 6px solid transparent;
+    color: var(--dim); cursor: pointer;
+  }
+  #menuList li.sel {
+    color: #fff; border-color: var(--accent);
+    background: linear-gradient(90deg, rgba(111, 211, 255, 0.28), rgba(111, 211, 255, 0));
+  }
+  #menuList li.sel::before { content: "▸  "; color: var(--accent); }
+  #menuHint {
+    margin-top: 2em; color: var(--dim); font-size: clamp(16px, 1.5vw, 20px); letter-spacing: 0.02em;
+  }
+  #menuHint b { color: var(--ink); font-weight: 600; }
+
+  /* ---- no-controller screen ---- */
+  #nocontroller h1 { font-size: clamp(40px, 5vw, 72px); margin: 0 0 0.4em; }
+  #nocontroller p { font-size: clamp(22px, 2.4vw, 32px); color: var(--dim); max-width: 36ch; margin: 0 0 1.2em; }
+  button.big {
+    font: inherit; font-size: clamp(24px, 2.6vw, 34px); padding: 0.45em 1.1em; color: #fff; cursor: pointer;
+    background: rgba(111, 211, 255, 0.18); border: 2px solid var(--accent); border-radius: 10px;
+  }
+
+  /* ---- about / credits ---- */
+  #about { overflow-y: auto; justify-content: flex-start; align-items: stretch; padding-top: 6vh; padding-bottom: 6vh; }
+  #about .doc { max-width: 110ch; margin: 0 auto; width: 100%; font-size: clamp(18px, 1.7vw, 24px); line-height: 1.5; color: var(--dim); }
+  #about h1 { margin: 0 0 0.3em; color: #fff; font-size: clamp(40px, 4.6vw, 64px); }
+  #about h2 { color: var(--accent); font-size: clamp(24px, 2.4vw, 32px); margin: 1.2em 0 0.3em; letter-spacing: 0.04em; }
+  #about ul { margin: 0; padding-left: 1.2em; }
+  #about li { margin: 0.2em 0; }
+  #about .hint { margin-top: 1.6em; color: var(--ink); }
+
+  /* ---- HUD ---- */
+  #hud { position: fixed; inset: 0; pointer-events: none; font-variant-numeric: tabular-nums; }
+  #hud .corner { position: absolute; }
+  #topL { top: 3vh; left: 3vw; }
+  #stageName { font-size: clamp(20px, 2vw, 28px); font-weight: 700; text-shadow: 0 0 10px rgba(0, 0, 0, 0.8); }
+  #stageSub { font-size: clamp(14px, 1.3vw, 18px); color: var(--dim); }
+  #score { font-size: clamp(34px, 3.6vw, 52px); font-weight: 800; letter-spacing: 0.06em; margin-top: 0.1em; }
+  #combo { font-size: clamp(18px, 1.8vw, 24px); color: var(--gold); min-height: 1.2em; }
+  #bossBar {
+    position: absolute; top: 3vh; left: 50%; transform: translateX(-50%); width: min(34vw, 460px); text-align: center;
+  }
+  #bossLabel { font-weight: 800; letter-spacing: 0.12em; color: var(--warn); font-size: clamp(16px, 1.6vw, 22px); }
+  #bossTrack { height: 14px; margin: 0.4em 0; background: rgba(255, 255, 255, 0.12); border-radius: 7px; overflow: hidden; }
+  #bossFill { height: 100%; width: 100%; background: linear-gradient(90deg, #ff7a33, #ffd34d); }
+  #podsLeft { font-size: clamp(14px, 1.3vw, 18px); color: var(--dim); letter-spacing: 0.08em; }
+  #bottomL { bottom: 4vh; left: 3vw; width: min(32vw, 420px); }
+  .lbl { font-size: clamp(14px, 1.3vw, 18px); letter-spacing: 0.16em; color: var(--dim); margin-bottom: 0.3em; }
+  #shieldTrack { height: 18px; background: rgba(255, 255, 255, 0.12); border-radius: 9px; overflow: hidden; }
+  #shieldFill { height: 100%; width: 100%; background: linear-gradient(90deg, #3ad17a, #6dff9a); box-shadow: 0 0 14px rgba(109, 255, 154, 0.5); transition: width 0.15s; }
+  #shieldFill.low { background: linear-gradient(90deg, #ff4d3d, #ff9a5c); box-shadow: 0 0 14px rgba(255, 77, 61, 0.6); }
+  #bottomR { bottom: 4vh; right: 3vw; text-align: right; font-size: clamp(18px, 1.9vw, 26px); font-weight: 700; letter-spacing: 0.06em; line-height: 1.5; }
+  #bombs { color: var(--gold); }
+  #missiles { color: var(--accent); }
+  #locksTxt { color: var(--warn); min-height: 1.5em; }
+  #reticle {
+    position: absolute; left: 50%; top: 50%; width: 9vmin; height: 9vmin; transform: translate(-50%, -50%);
+    border: 2px solid rgba(234, 246, 255, 0.55); border-radius: 50%; transition: border-color 0.12s, transform 0.12s;
+  }
+  #reticle::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px;
+    background: #fff; border-radius: 50%;
+  }
+  #reticle.hot { border-color: var(--warn); transform: translate(-50%, -50%) scale(1.15); }
+  #locks { position: absolute; inset: 0; pointer-events: none; }
+  .lockbox {
+    position: absolute; left: 0; top: 0; width: 64px; height: 64px; margin: -32px 0 0 -32px;
+    border: 3px solid rgba(255, 122, 92, 0.5); transition: border-color 0.1s;
+    box-shadow: inset 0 0 0 2px rgba(0, 0, 0, 0.15);
+  }
+  .lockbox.on { border-color: var(--warn); box-shadow: 0 0 14px rgba(255, 122, 92, 0.6); }
+  #demo {
+    position: absolute; top: 3vh; right: 3vw; font-weight: 800; letter-spacing: 0.2em; color: var(--gold);
+    font-size: clamp(16px, 1.6vw, 22px); animation: blink 1.6s steps(2, start) infinite;
+  }
+  @keyframes blink { to { visibility: hidden; } }
+
+  /* ---- banner, screen effects ---- */
+  #banner {
+    position: fixed; top: 14vh; left: 50%; transform: translate(-50%, -8px); opacity: 0; pointer-events: none;
+    font-size: clamp(22px, 2.6vw, 36px); font-weight: 800; letter-spacing: 0.08em; text-align: center; max-width: 90vw;
+    text-shadow: 0 0 16px rgba(0, 0, 0, 0.9); transition: opacity 0.3s, transform 0.3s;
+  }
+  #banner.show { opacity: 1; transform: translate(-50%, 0); }
+  .fx { position: fixed; inset: 0; pointer-events: none; opacity: 0; }
+  #flash { background: #fff; }
+  #hurt { background: radial-gradient(ellipse at center, transparent 45%, rgba(255, 40, 40, 0.55) 100%); }
+  .fx.on { animation: fxfade 0.45s ease-out forwards; }
+  @keyframes fxfade { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud" class="hidden">
+  <div id="topL" class="corner">
+    <div id="stageName"></div>
+    <div id="stageSub"></div>
+    <div id="score">00000000</div>
+    <div id="combo"></div>
+  </div>
+  <div id="bossBar" class="hidden">
+    <div id="bossLabel">GRAVITY CORE</div>
+    <div id="bossTrack"><div id="bossFill"></div></div>
+    <div id="podsLeft"></div>
+  </div>
+  <div id="bottomL" class="corner">
+    <div class="lbl">SHIELD</div>
+    <div id="shieldTrack"><div id="shieldFill"></div></div>
+  </div>
+  <div id="bottomR" class="corner">
+    <div id="bombs"></div>
+    <div id="missiles"></div>
+    <div id="locksTxt"></div>
+  </div>
+  <div id="reticle"></div>
+  <div id="locks"></div>
+  <div id="demo" class="hidden">DEMO · PRESS ANY BUTTON</div>
+</div>
+
+<div id="banner"></div>
+<div id="flash" class="fx"></div>
+<div id="hurt" class="fx"></div>
+
+<div id="menu" class="panel hidden">
+  <h1 id="menuTitle"></h1>
+  <div id="menuBody"></div>
+  <ul id="menuList"></ul>
+  <div id="menuHint"><b>Stick / D-pad</b> navigate · <b>A</b> select · <b>B</b> back · Keyboard: arrows · Enter · Esc</div>
+</div>
+
+<div id="nocontroller" class="panel hidden">
+  <h1>GRAVITY KESTREL</h1>
+  <p>Controller or keyboard required.</p>
+  <p>Connect a PS5-compatible controller or use a keyboard to play.</p>
+  <button id="ncSettings" class="big" type="button">Settings</button>
+</div>
+
+<section id="about" class="panel hidden">
+  <div class="doc">
+    <h1>About &amp; Credits</h1>
+    <p>Gravity Kestrel is an original spiritual successor to Starfox 64 for N64, built as a playable vertical slice. Three stages (Plains of Corvex, Ember Asteroid Belt, Gravity Core) plus a boss, lock-on missiles, smart bombs, barrel roll, boost and brake, combo scoring, and an attract-mode demo that starts after 10 seconds on the title screen.</p>
+    <h2>Controls</h2>
+    <ul>
+      <li><b>Controller:</b> left stick fly · A laser (hold) · Y or RB missiles (lock-on fires at locked targets) · X smart bomb · B barrel roll · RT boost · LT brake · Start pause</li>
+      <li><b>Keyboard:</b> arrows or WASD fly · Space or J laser · K missiles · B bomb · Q or E barrel roll · Shift boost · Ctrl brake · Esc or P pause</li>
+      <li><b>Settings:</b> invert horizontal and vertical stick, screen shake on or off (saved on this device)</li>
+    </ul>
+    <h2>Source Information</h2>
+    <ul>
+      <li>Date: 2026-10-20 14:48</li>
+      <li>Source: Starfox 64 for N64</li>
+      <li>Tech: Three.js r160 (ES module via jsDelivr CDN), vanilla JavaScript, Web Gamepad API, Web Audio API, HTML/CSS overlays</li>
+      <li>Art Direction: low-poly stylised space; procedural geometry; dusk-lit plains; neon accents; Arwing-inspired silver and blue ship</li>
+      <li>Animation: per-frame delta-time simulation via requestAnimationFrame; procedural motion (sine paths, exponential smoothing, barrel-roll rotation); pooled additive point particles; CSS transitions for UI</li>
+      <li>Testing: prompt says "No restriction on testing"</li>
+      <li>Environment: Claude Code CLI (headless); Linux (WSL2); browser unknown</li>
+      <li>Model: Anthropic, claude-haiku-5-5, reasoning effort low</li>
+      <li>Usage: unknown</li>
+    </ul>
+    <h2>Engine Feedback</h2>
+    <ul>
+      <li>What did you like most about the engine? The Three.js scene graph and built-in shadows, fog and tone mapping; no build step needed with an import map.</li>
+      <li>Did you get stuck or guess wrong? Ship nose and enemy facing conventions (ship nose is -z, enemies face +z); shadow camera bounds for a moving ship.</li>
+      <li>What was the most important thing you had to build yourself? Lock-on, the attract AI, the wave scheduler, the scrolling terrain height model, and unified keyboard + gamepad input with edge detection.</li>
+      <li>What was the hardest part about using the engine? No physics or collision helpers, so distance checks were hand-rolled; keeping pooled effects cheap without a profiler.</li>
+      <li>If you had to remove or overhaul one thing from the engine, what would that be? The lack of a built-in input abstraction; a gamepad helper with edge events would save time.</li>
+      <li>If you could change one thing about the engine, what would it be? Ship-in-scene helpers (orientation and bounds) so game-space code is less error-prone.</li>
+    </ul>
+    <h2>Prompt Feedback</h2>
+    <ul>
+      <li>What did you like most about this prompt? The explicit "done" criteria and the controller-first, 10-foot rules.</li>
+      <li>What was confusing? The unexplained SOURCE token in the filename; the "CRTICAL" typo; the usage field has no way to know token counts.</li>
+      <li>What was the hardest thing to do? Fitting a full feature-complete demo (menus, attract, three stages, boss, settings) into one low-effort pass.</li>
+      <li>If there was one test you could have run, what would that test be? A scripted full playthrough on a real controller plus a phone-size touch emulation, checking the attract timer and invert toggles.</li>
+    </ul>
+    <p class="hint">Press <b>B</b> / <b>Esc</b> or <b>A</b> to return.</p>
+    <button id="aboutBack" class="big" type="button">Back</button>
+  </div>
+</section>
+
+<script type="module">
+/*__GAME__*/
+</script>
+</body>
+</html>

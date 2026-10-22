@@ -1,0 +1,27 @@
+{
+  "source": [
+    "Date: 2026-10-20 19:15",
+    "Source: Starfox 64 for N64",
+    "Tech: Three.js r180 (WebGPURenderer, no WebGL fallback; TSL node materials; PostProcessing + BloomNode), Rapier 3D 0.19.3 (@dimforge/rapier3d-compat: Rapier queries, trimesh terrain, dynamic debris bodies), Web Audio API (procedural music sequencer, synthesized SFX and radio voices), Gamepad API (standard mapping, PS glyphs, rumble), vanilla ES modules from jsDelivr via an import map, Google Fonts (Russo One, Exo 2)",
+    "Art Direction: stylized cel-shading: MeshToonNodeMaterial with a 4-step ramp, stepped rim light, inverted-hull ink outlines, flat-shaded low-poly terrain with vertex colors, a toon water shader, cel-shaded particle explosions, bloom on glows",
+    "Animation: procedural, written in code: banking, barrel rolls, somersault/U-turn maneuvers, walk cycles for the boss and tanks, rail-relative flight patterns, AI steering, a scripted intro/clear camera, and Rapier rigid-body debris",
+    "Testing: the prompt set no restrictions on testing. I tested in headless Chromium using a software (SwiftShader) WebGPU adapter, because no hardware GPU was reachable in WSL2. Tests used a deterministic simulation hook, an AI test pilot, scripted UI walkthroughs, an emulated touch device (Pixel 7) and a faked DualSense gamepad. Real-GPU frame rate, real controllers and iOS Safari were not tested",
+    "Environment: Claude Code CLI (headless); Linux; browser unknown",
+    "Model: Anthropic, claude-opus-5-5, reasoning effort medium-ultracode",
+    "Usage: unknown. A rough estimate is ~0.5M tokens in total (~0.32M in the main session plus ~0.2M across two helper subagents for audio and models); a cost estimate in USD and the session time are not available"
+  ],
+  "engine": [
+    ["What did you like most about the engine?", "Three.js r180's TSL let shader-level effects (toon rim light, inverted-hull outlines, animated toon water, hashed starfield sky, post vignette/damage/flash) be written in plain JS next to the game code, and they ran unchanged on the WebGPU backend. Rapier's compat build initializes from a single file with no wasm hosting step."],
+    ["Did you get stuck or guess wrong?", "Yes, twice. (1) I triggered player death (which spawns debris rigid bodies) inside a Rapier intersectionsWithShape callback. wasm-bindgen silently swallowed the resulting error, so the respawn never fired. The fix was to collect overlaps first and handle them afterwards. (2) I guessed Matrix4.lookAt's eye/target convention backwards for non-camera objects, so ships flew tail-first until I fixed it."],
+    ["What was the most important thing you had to build yourself?", "A branching, loopable rail system (arc-length frames, segment chaining, fork choosers, checkpoint restore) with a data-driven event interpreter. Every on-rails encounter, the route split and the circling boss arena are built on it. Outlines, the particle system, the menus and the attract-mode AI were also custom."],
+    ["What was the hardest part about using the engine?", "Testing WebGPU without a GPU: the software adapter ran at ~0.25 FPS at 720p, so I had to separate simulation from rendering to verify gameplay. On the API side, WebGPURenderer quietly falls back to WebGL2 unless you check the backend yourself, and r180 has no built-in toon outline pass."],
+    ["If you had to remove or overhaul one thing from engine, what would that be?", "The silent WebGL2 fallback in WebGPURenderer. A strict mode that throws when WebGPU is unavailable would make 'no fallback' requirements explicit."],
+    ["If you could change one thing about the engine, what would it be?", "Ship an official cel/toon outline post pass (normal+depth edge detection) for WebGPU, and in Rapier, raise a loud error when the world is mutated from inside a query callback instead of failing silently."]
+  ],
+  "prompt": [
+    ["What did you like most about this prompt?", "The concrete quality bar (feature-complete demos like the MGS2 Tanker or Doom Episode 1), plus specific, testable UX requirements: attract mode after 10 s, touch-only gate, inverted-axis toggles, controller-first 10-foot UI."],
+    ["What was confusing?", "'Reasoning effort medium-ultracode' and the file name's mixed GameTitle-SOURCE pattern needed interpretation (I used StarkFox-Starfox64). 'WEBGPU, no fallback' could mean no WebGL renderer, or no degraded path at all; I read it as the first and show an explanatory error. The Usage line asks for estimates that aren't exposed to the model."],
+    ["What was the hardest thing to do?", "Making two full missions (an on-rails mission with a branching route and a walking boss, and an all-range dogfight with a capital-ship boss) feel complete and balanced while only being able to watch them through a software renderer at a fraction of a frame per second."],
+    ["If there was one test you could of run, what would that test be?", "A real-hardware playtest with a DualSense on a GPU machine at 60+ FPS, to tune feel (steering response, boss HP, damage) and confirm rumble, glyphs and timings. The automated AI pilot can't judge fun or fairness."]
+  ]
+}

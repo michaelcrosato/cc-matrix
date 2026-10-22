@@ -1,0 +1,13 @@
+import glob, json, os, re, subprocess, sys
+here = os.path.dirname(os.path.abspath(__file__))
+name = os.path.basename(here)
+about = open(os.path.join(here, 'about.txt'), encoding='utf-8').read()
+src = ''.join(open(f, encoding='utf-8').read() + '\n' for f in sorted(glob.glob(os.path.join(here, 'src', '*.js'))))
+src = src.replace('%%ABOUT_JSON%%', json.dumps(about).replace('</', '<\\/'))
+tpl = open(os.path.join(here, 'template.html'), encoding='utf-8').read()
+out = tpl.replace('%%ABOUT_COMMENT%%', about.replace('--', '- -')).replace('%%SCRIPT%%', src)
+dst = os.path.join(here, '..', name + '.html')
+open(dst, 'w', encoding='utf-8').write(out)
+tmp = os.path.join('/tmp', name + '.check.mjs'); open(tmp, 'w', encoding='utf-8').write(src)
+r = subprocess.run(['node', '--check', tmp], capture_output=True, text=True)
+print(r.stderr or 'syntax ok'); print(os.path.getsize(dst), 'bytes ->', os.path.abspath(dst))

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<!--SOURCE_COMMENT-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Starfux 64</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js",
+    "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"
+  }
+}
+</script>
+<style>
+  :root {
+    --ink: #eaf6ff;
+    --dim: #8fb3cc;
+    --accent: #ffd23f;
+    --accent2: #3fd4ff;
+    --danger: #ff5a6e;
+    --panel: rgba(6, 14, 30, 0.82);
+    --line: rgba(120, 200, 255, 0.35);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: #02050c; color: var(--ink); overflow: hidden;
+    font-family: "Trebuchet MS", "Segoe UI", Roboto, Helvetica, Arial, sans-serif; user-select: none; }
+  #stage { position: fixed; inset: 0; }
+  #stage canvas { display: block; width: 100%; height: 100%; }
+  #ui { position: fixed; inset: 0; pointer-events: none; }
+  .hidden { display: none !important; }
+
+  /* HUD */
+  #hud { position: absolute; inset: 0; }
+  #hud .corner { position: absolute; font-size: clamp(18px, 2.2vw, 30px); text-shadow: 0 2px 6px #000; }
+  #hud-shield { left: 3vw; bottom: 4vh; width: min(360px, 40vw); }
+  #hud-shield .label { font-size: clamp(14px, 1.6vw, 20px); color: var(--dim); letter-spacing: 0.12em; margin-bottom: 6px; }
+  .bar { height: clamp(14px, 1.8vw, 22px); background: rgba(255,255,255,0.12); border: 2px solid var(--line); border-radius: 4px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; width: 100%; background: linear-gradient(90deg, #3fd4ff, #7dffb0); transition: width 0.15s linear, background 0.2s; }
+  #hud-score { right: 3vw; top: 3vh; text-align: right; }
+  #hud-score .big { font-size: clamp(30px, 4vw, 56px); font-weight: 800; color: var(--accent); font-variant-numeric: tabular-nums; }
+  #hud-score .small { color: var(--dim); font-size: clamp(16px, 1.8vw, 24px); }
+  #hud-bl { left: 3vw; top: 3vh; }
+  #hud-bl .row { display: flex; gap: 0.6em; align-items: center; margin-bottom: 0.3em; }
+  .pip { width: 1.1em; height: 1.1em; border-radius: 50%; border: 2px solid var(--accent2); display: inline-block; background: var(--accent2); }
+  .pip.off { background: transparent; border-color: rgba(255,255,255,0.25); }
+  .bomb { width: 0.9em; height: 0.9em; transform: rotate(45deg); border: 2px solid var(--accent); display: inline-block; background: var(--accent); }
+  .bomb.off { background: transparent; border-color: rgba(255,255,255,0.25); }
+  #hud-stage { left: 50%; top: 3vh; transform: translateX(-50%); color: var(--dim); font-size: clamp(16px, 1.8vw, 24px); letter-spacing: 0.15em; text-transform: uppercase; }
+  #hud-wing { left: 3vw; bottom: 16vh; width: min(360px, 40vw); }
+  .wingrow { display: flex; justify-content: space-between; font-size: clamp(14px, 1.5vw, 19px); margin-bottom: 4px; color: var(--dim); }
+  .wingrow.down { color: #5a6676; text-decoration: line-through; }
+  #hud-boss { left: 50%; top: 9vh; transform: translateX(-50%); width: min(60vw, 720px); }
+  #hud-boss .label { text-align: center; font-size: clamp(16px, 1.8vw, 24px); color: var(--danger); letter-spacing: 0.15em; margin-bottom: 6px; }
+  #hud-boss .bar > i { background: linear-gradient(90deg, #ff5a6e, #ffb35a); }
+  #reticle { position: absolute; left: 50%; top: 50%; width: 9vmin; height: 9vmin; margin: -4.5vmin 0 0 -4.5vmin;
+    border: 3px solid var(--accent2); border-radius: 50%; box-shadow: 0 0 12px rgba(63,212,255,0.6); }
+  #reticle::before, #reticle::after { content: ""; position: absolute; background: var(--accent2); }
+  #reticle::before { left: 50%; top: -0.9vmin; width: 3px; height: calc(100% + 1.8vmin); margin-left: -1.5px; }
+  #reticle::after { top: 50%; left: -0.9vmin; height: 3px; width: calc(100% + 1.8vmin); margin-top: -1.5px; }
+  .lock { position: absolute; width: 6vmin; height: 6vmin; margin: -3vmin 0 0 -3vmin; border: 3px solid var(--danger); transform: rotate(45deg); }
+  .lock.pending { border-color: var(--accent); }
+  #hud-hint { left: 50%; bottom: 3vh; transform: translateX(-50%); color: var(--dim); font-size: clamp(14px, 1.5vw, 18px); white-space: nowrap; }
+  #flash { position: absolute; inset: 0; background: #fff; opacity: 0; transition: opacity 0.6s ease-out; }
+  #flash.on { opacity: 0.65; transition: none; }
+  #hud-damage { position: absolute; inset: 0; box-shadow: inset 0 0 14vmin 4vmin rgba(255,60,80,0); transition: box-shadow 0.2s; }
+  #hud-damage.on { box-shadow: inset 0 0 14vmin 4vmin rgba(255,60,80,0.55); }
+
+  /* Comms */
+  #comms { position: absolute; left: 50%; bottom: 10vh; transform: translateX(-50%); width: min(78vw, 1000px); }
+  .comm { background: var(--panel); border: 2px solid var(--line); border-left: 6px solid var(--accent2); border-radius: 10px;
+    padding: 0.6em 1em; margin-top: 0.5em; font-size: clamp(18px, 2.2vw, 28px); animation: commIn 0.25s ease-out; }
+  .comm b { color: var(--accent2); margin-right: 0.4em; }
+  @keyframes commIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  #banner { position: absolute; left: 50%; top: 40%; transform: translate(-50%, -50%); font-size: clamp(40px, 7vw, 110px); font-weight: 900;
+    color: var(--accent); text-shadow: 0 6px 20px #000; letter-spacing: 0.06em; text-align: center; white-space: nowrap; }
+  #banner small { display: block; font-size: 0.32em; color: var(--ink); letter-spacing: 0.2em; font-weight: 600; margin-top: 0.3em; }
+
+  /* Menus */
+  #menu { position: absolute; inset: 0; pointer-events: auto; display: flex; align-items: center; justify-content: center;
+    background: radial-gradient(ellipse at 50% 40%, rgba(10,30,60,0.35), rgba(0,0,0,0.75)); }
+  #menu .panel { width: min(72vw, 980px); max-height: 92vh; display: flex; flex-direction: column; gap: 1.2vh;
+    background: var(--panel); border: 2px solid var(--line); border-radius: 18px; padding: 3.5vh 3vw; box-shadow: 0 20px 60px #000; }
+  #menu h1 { margin: 0; font-size: clamp(38px, 6vw, 96px); font-weight: 900; letter-spacing: 0.04em; text-align: center; color: var(--accent);
+    text-shadow: 0 4px 0 #7a4b00, 0 10px 30px #000; }
+  #menu h2 { margin: 0; font-size: clamp(26px, 3.4vw, 50px); color: var(--accent2); text-align: center; letter-spacing: 0.08em; }
+  #menu .sub { text-align: center; color: var(--dim); font-size: clamp(16px, 1.9vw, 24px); margin-top: -0.4vh; }
+  #menu .items { display: flex; flex-direction: column; gap: 1vh; overflow: hidden; }
+  .item { display: flex; justify-content: space-between; align-items: center; gap: 2vw; padding: 1.3vh 2vw; font-size: clamp(20px, 2.6vw, 36px);
+    border: 2px solid transparent; border-radius: 12px; background: rgba(255,255,255,0.04); cursor: pointer; }
+  .item .val { color: var(--accent2); font-variant-numeric: tabular-nums; }
+  .item.focus { border-color: var(--accent); background: rgba(255,210,63,0.14); color: var(--accent); transform: scale(1.02); }
+  .item.disabled { opacity: 0.4; }
+  .item .hint { font-size: 0.55em; color: var(--dim); }
+  .body { font-size: clamp(16px, 1.9vw, 24px); line-height: 1.45; color: var(--ink); overflow: hidden; }
+  .body p { margin: 0.5em 0; }
+  .body .k { color: var(--accent2); font-weight: 700; }
+  .body .h { color: var(--accent); font-weight: 800; margin-top: 0.8em; }
+  .body .mono { font-family: Consolas, "Courier New", monospace; font-size: 0.85em; color: var(--dim); white-space: pre-wrap; }
+  .body .scroller { max-height: 62vh; overflow: hidden; }
+  .footer { display: flex; justify-content: space-between; color: var(--dim); font-size: clamp(14px, 1.6vw, 20px); margin-top: 0.4vh; }
+  .results { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6vh 2vw; font-size: clamp(18px, 2.2vw, 30px); }
+  .results div span { color: var(--dim); }
+  .results div b { float: right; font-variant-numeric: tabular-nums; color: var(--accent2); }
+  .medal { font-size: clamp(40px, 6vw, 90px); font-weight: 900; text-align: center; letter-spacing: 0.1em; }
+  .medal.Gold { color: #ffd23f; } .medal.Silver { color: #d9e6f2; } .medal.Bronze { color: #e89a5b; } .medal.None { color: var(--dim); }
+
+  #gate, #fatal { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3vh; text-align: center;
+    background: #02050c; padding: 6vw; pointer-events: auto; }
+  #gate h1, #fatal h1 { font-size: clamp(30px, 5vw, 70px); margin: 0; color: var(--accent); }
+  #gate p, #fatal p { font-size: clamp(18px, 2.4vw, 30px); color: var(--dim); margin: 0; max-width: 40em; line-height: 1.4; }
+  #gate .item, #fatal .item { min-width: min(60vw, 520px); justify-content: center; }
+  #prompt { position: absolute; left: 0; right: 0; bottom: 6vh; text-align: center; font-size: clamp(20px, 2.6vw, 34px); color: var(--ink);
+    letter-spacing: 0.2em; animation: blink 1.6s ease-in-out infinite; text-shadow: 0 2px 10px #000; }
+  @keyframes blink { 0%,100% { opacity: 0.35; } 50% { opacity: 1; } }
+  #attract-tag { position: absolute; top: 3vh; left: 50%; transform: translateX(-50%); color: var(--accent2); letter-spacing: 0.3em; font-size: clamp(14px, 1.6vw, 20px); }
+  #toast { position: absolute; right: 3vw; bottom: 3vh; background: var(--panel); border: 2px solid var(--line); padding: 0.6em 1em; border-radius: 10px;
+    font-size: clamp(16px, 1.8vw, 22px); opacity: 0; transition: opacity 0.3s; }
+  #toast.on { opacity: 1; }
+  #menu.wide .panel { width: min(88vw, 1240px); }
+  #menu.compact .panel { width: min(64vw, 820px); }
+  #menu.title .panel { background: rgba(6, 14, 30, 0.7); }
+  .scrollInner { transition: transform 0.12s ease-out; }
+  .lock.pending { border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="ui">
+  <div id="hud" class="hidden">
+    <div id="hud-bl" class="corner"></div>
+    <div id="hud-score" class="corner"></div>
+    <div id="hud-stage"></div>
+    <div id="hud-shield" class="corner"><div class="label">SHIELD</div><div class="bar"><i id="shield-fill"></i></div></div>
+    <div id="hud-wing" class="corner"></div>
+    <div id="hud-boss" class="hidden"><div class="label" id="boss-label"></div><div class="bar"><i id="boss-fill"></i></div></div>
+    <div id="reticle"></div>
+    <div id="hud-hint"></div>
+    <div id="comms"></div>
+    <div id="banner" class="hidden"></div>
+    <div id="hud-damage"></div>
+    <div id="flash"></div>
+  </div>
+  <div id="attract-tag" class="hidden">ATTRACT MODE</div>
+  <div id="prompt" class="hidden">PRESS ANY BUTTON</div>
+  <div id="menu" class="hidden"></div>
+  <div id="toast"></div>
+</div>
+<div id="gate" class="hidden">
+  <h1>Controller or keyboard required</h1>
+  <p>Starfux 64 is built for a controller on a big screen. Connect a PS5-compatible controller or use a keyboard to play.</p>
+  <div class="item focus" id="gate-settings">Settings</div>
+</div>
+<div id="fatal" class="hidden">
+  <h1>WebGPU required</h1>
+  <p id="fatal-text">This build renders only with WebGPU and has no fallback. Use a browser with WebGPU enabled.</p>
+</div>
+<script type="module">
+/*BUNDLE*/
+</script>
+</body>
+</html>

@@ -1,0 +1,108 @@
+<!--@@HEADER_COMMENT@@-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sparfox 64 — Verdant Reach Demo</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Russo+One&family=Rajdhani:wght@500;700&display=swap">
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/webgpu": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js",
+    "three/tsl": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "@dimforge/rapier3d-compat": "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"
+  }
+}
+</script>
+<style>
+:root{
+  --acc:#ffd23f; --acc2:#3fd0ff; --bad:#ff4d5e; --ok:#5dff8f;
+  --panel:rgba(8,14,32,.78); --line:rgba(255,255,255,.14);
+  --fs:clamp(16px,2.4vh,34px);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{width:100%;height:100%;overflow:hidden;background:#05070f;color:#fff;font-family:Rajdhani,system-ui,sans-serif;font-weight:700;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+#app{position:fixed;inset:0}
+#app canvas.gl{position:absolute;inset:0;width:100%!important;height:100%!important;display:block}
+#hud{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+#comms{position:absolute;left:50%;bottom:6vh;transform:translateX(-50%) translateY(20px);display:flex;gap:1.6vh;align-items:center;padding:1.2vh 2.4vh 1.2vh 1.2vh;background:var(--panel);border:2px solid var(--line);border-radius:1.6vh;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none;width:min(92vw,90vh)}
+#comms.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#comms canvas{width:12vh;height:12vh;border-radius:1vh;flex:none;background:#123}
+#comms .cname{font-family:"Russo One",sans-serif;font-size:calc(var(--fs)*.8);letter-spacing:.08em;color:var(--acc)}
+#comms .ctext{font-size:calc(var(--fs)*1.05);line-height:1.25;min-height:2.5em}
+body.bigtext #comms .ctext{font-size:calc(var(--fs)*1.35)}
+#banner{position:absolute;left:0;right:0;top:30vh;text-align:center;font-family:"Russo One",sans-serif;font-size:calc(var(--fs)*2.2);letter-spacing:.12em;text-shadow:0 0 18px rgba(0,0,0,.8),0 3px 0 #000;opacity:0;transition:opacity .3s;pointer-events:none}
+#banner small{display:block;font-family:Rajdhani,sans-serif;font-size:.45em;letter-spacing:.2em;color:var(--acc)}
+#banner.show{opacity:1}
+#hint{position:absolute;left:50%;top:14vh;transform:translateX(-50%);padding:.8vh 2.2vh;background:var(--panel);border:2px solid var(--acc2);border-radius:99px;font-size:calc(var(--fs)*.95);opacity:0;transition:opacity .3s;pointer-events:none;white-space:nowrap}
+#hint.show{opacity:1}
+.glyph{display:inline-flex;align-items:center;justify-content:center;min-width:1.6em;height:1.6em;padding:0 .35em;margin:0 .15em;border-radius:.45em;background:#fff;color:#0b1020;font-family:"Russo One",sans-serif;font-size:.8em;vertical-align:.1em}
+.glyph.round{border-radius:50%;padding:0}
+.glyph.x{color:#5f7fff}.glyph.o{color:#ff4d6d}.glyph.sq{color:#e45cd0}.glyph.tri{color:#2fd3a0}
+#screens{position:absolute;inset:0;pointer-events:none}
+.screen{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:auto;padding:6vh 6vw}
+.screen.dim{background:radial-gradient(ellipse at center,rgba(5,8,20,.55),rgba(5,8,20,.92))}
+.logo{font-family:"Russo One",sans-serif;font-size:min(14vh,13vw);line-height:.9;letter-spacing:.04em;background:linear-gradient(#fff6c4,#ffd23f 45%,#ff7a1a 55%,#c2361b);-webkit-background-clip:text;background-clip:text;color:transparent;filter:drop-shadow(0 .6vh 0 #2a0d40) drop-shadow(0 0 3vh rgba(255,140,40,.45));text-align:center}
+.logo span{display:block;font-size:.42em;letter-spacing:.35em;background:linear-gradient(#bff4ff,#3fd0ff);-webkit-background-clip:text;background-clip:text}
+.subtitle{margin-top:1.5vh;font-size:calc(var(--fs)*.9);letter-spacing:.4em;color:#cfe6ff;text-transform:uppercase;text-align:center}
+.press{margin-top:7vh;font-size:calc(var(--fs)*1.2);letter-spacing:.2em;animation:pulse 1.6s infinite;text-align:center}
+@keyframes pulse{50%{opacity:.35}}
+.menu{margin-top:4vh;display:flex;flex-direction:column;gap:1vh;min-width:min(80vw,60vh);max-height:60vh;overflow:hidden;padding:.6vh 1.6vh}
+.menu .item{display:flex;justify-content:space-between;align-items:center;gap:3vh;padding:1.1vh 2.6vh;border-radius:1.2vh;font-size:calc(var(--fs)*1.1);background:rgba(255,255,255,.04);border:2px solid transparent;cursor:pointer;transition:background .12s,transform .12s}
+.menu .item .val{color:var(--acc2);font-size:.9em;display:flex;align-items:center;gap:1vh}
+.menu .item .bar{width:16vh;height:1vh;background:rgba(255,255,255,.15);border-radius:1vh;overflow:hidden}
+.menu .item .bar i{display:block;height:100%;background:var(--acc2)}
+.menu .item.sel{background:rgba(255,210,63,.16);border-color:var(--acc);transform:scale(1.03)}
+.menu .item.sel .label::before{content:"▶ ";color:var(--acc)}
+.menu .item.disabled{opacity:.4}
+.title2{font-family:"Russo One",sans-serif;font-size:calc(var(--fs)*2);letter-spacing:.1em;color:var(--acc);text-align:center}
+.desc{margin-top:1.4vh;max-width:min(90vw,110vh);text-align:center;font-size:calc(var(--fs)*.9);color:#cfe0ff;min-height:1.4em}
+.footer{position:absolute;bottom:4vh;left:0;right:0;display:flex;justify-content:center;gap:5vh;font-size:calc(var(--fs)*.9);color:#cfe0ff}
+.panel{background:var(--panel);border:2px solid var(--line);border-radius:2vh;padding:3vh 4vh}
+.controls{display:grid;grid-template-columns:auto auto auto;gap:1.1vh 4vh;margin-top:3vh;font-size:calc(var(--fs)*1);align-items:center}
+.controls .h{color:var(--acc);font-family:"Russo One";font-size:.8em;letter-spacing:.1em}
+.scroll{max-height:62vh;overflow:hidden;width:min(92vw,120vh);margin-top:2vh;position:relative}
+.scroll .inner{transition:transform .15s}
+.scroll h3{font-family:"Russo One";color:var(--acc);margin:2.2vh 0 .8vh;font-size:calc(var(--fs)*1)}
+.scroll p,.scroll li{font-size:calc(var(--fs)*.85);line-height:1.35;color:#dbe7ff;font-weight:500}
+.scroll ul{padding-left:2.5vh}
+.results{display:grid;grid-template-columns:1fr auto;gap:1.2vh 8vh;margin-top:3vh;font-size:calc(var(--fs)*1.2);min-width:min(80vw,70vh)}
+.results .v{color:var(--acc2);text-align:right}
+.medal{margin-top:3vh;font-family:"Russo One";font-size:calc(var(--fs)*1.6);color:var(--acc);text-align:center}
+.medal.none{color:#8aa}
+#fade{position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;transition:opacity .5s}
+#fade.on{opacity:1}
+#demoTag{position:absolute;top:5vh;left:50%;transform:translateX(-50%);font-family:"Russo One";font-size:calc(var(--fs)*1.2);letter-spacing:.3em;color:var(--acc);text-shadow:0 2px 0 #000;display:none;text-align:center}
+#demoTag small{display:block;font-family:Rajdhani;font-size:.6em;color:#fff;letter-spacing:.2em;animation:pulse 1.6s infinite}
+#error{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:2vh;text-align:center;padding:6vw;background:#05070f;font-size:calc(var(--fs)*1.1)}
+#error h1{font-family:"Russo One";color:var(--bad)}
+#touchGate{position:absolute;inset:0;display:none;align-items:center;justify-content:center;flex-direction:column;gap:4vh;text-align:center;padding:6vw;background:rgba(5,7,15,.94);pointer-events:auto;z-index:5}
+#touchGate .msg{font-family:"Russo One";font-size:calc(var(--fs)*1.4)}
+.btn{pointer-events:auto;padding:1.6vh 4vh;border-radius:1.4vh;border:2px solid var(--acc);background:rgba(255,210,63,.15);color:#fff;font:inherit;font-size:calc(var(--fs)*1.1);cursor:pointer}
+#loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:2vh;font-family:"Russo One";font-size:calc(var(--fs)*1.2);letter-spacing:.2em;background:#05070f}
+#loading .bar{width:40vh;height:.8vh;background:#223;border-radius:1vh;overflow:hidden}
+#loading .bar i{display:block;height:100%;width:0;background:var(--acc);transition:width .2s}
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="hud"></canvas>
+  <div id="demoTag">DEMO PLAY<small>PRESS ANY BUTTON</small></div>
+  <div id="banner"></div>
+  <div id="hint"></div>
+  <div id="comms"><canvas id="portrait" width="160" height="160"></canvas><div><div class="cname"></div><div class="ctext"></div></div></div>
+  <div id="screens"></div>
+  <div id="fade"></div>
+  <div id="touchGate"><div class="msg">Controller or keyboard required</div><div>Connect a controller (PS5 DualSense recommended) or a keyboard to play.</div><button class="btn" id="touchSettings">Settings</button></div>
+  <div id="loading"><div>SPARFOX 64</div><div class="bar"><i id="loadbar"></i></div><div id="loadtxt" style="font-family:Rajdhani;font-size:.7em;letter-spacing:.1em">Starting WebGPU…</div></div>
+  <div id="error"></div>
+</div>
+<script type="module">
+/*@@SCRIPT@@*/
+</script>
+</body>
+</html>

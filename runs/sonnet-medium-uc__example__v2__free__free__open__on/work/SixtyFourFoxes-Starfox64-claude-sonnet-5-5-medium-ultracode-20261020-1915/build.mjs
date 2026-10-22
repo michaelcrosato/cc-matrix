@@ -1,0 +1,10 @@
+import esbuild from 'esbuild';
+import fs from 'fs';
+const OUT = process.argv[2] || 'dist/game.html';
+const res = await esbuild.build({ entryPoints: ['src/main.js'], bundle: true, minify: !!process.env.MIN, format: 'iife', write: false, target: 'es2022', loader: { '.wasm': 'binary' }, legalComments: 'none' });
+const js = res.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
+const tpl = fs.readFileSync('src/template.html', 'utf8');
+const banner = fs.existsSync('src/banner.txt') ? fs.readFileSync('src/banner.txt', 'utf8') : '';
+fs.mkdirSync(OUT.replace(/\/[^/]*$/, ''), { recursive: true });
+fs.writeFileSync(OUT, tpl.replace('<!--BANNER-->', banner).replace('/*BUNDLE*/', () => js));
+console.log('built', OUT, (fs.statSync(OUT).size / 1e6).toFixed(2) + ' MB');

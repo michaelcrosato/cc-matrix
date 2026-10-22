@@ -1,0 +1,24 @@
+Source Information
+- Date: 2026-10-20 14:26
+- Game: Jet Kit — an original spiritual successor to Starfox 64 for N64
+- Tech: Single HTML file, vanilla JavaScript (no build framework), Three.js 0.160.0 (loaded from jsDelivr CDN), WebGL, Web Audio API, Gamepad API
+- Art Direction: Bright low-poly sci-fi arcade look: procedural primitive models, additive glow sprites, ACES tone mapping, dynamic shadows, fog-drenched sunset sea / lava canyon / nebula themes
+- Animation: Procedural code-driven animation (damped springs, easing, barrel-roll/somersault rotations, boss phase animation) and a custom additive particle system; no skeletal or baked assets
+- Testing: Prompt placed no restrictions on testing (FPS targets and optimisation are out of scope)
+- Environment: Claude Code CLI (headless); Linux; browser unknown
+- Model: Anthropic, claude-sonnet-5-5, reasoning effort low
+- Usage: unknown (no cost, token or session-time telemetry was available inside the session)
+
+Engine Feedback
+- Liked most: Three.js lets a full 3D rail shooter be built from primitives with zero asset pipeline; ExtrudeGeometry, sprites and fog gave a lot of look for little code.
+- Stuck / guessed wrong: Object3D.lookAt points +Z (not -Z) at the target for non-cameras, so models facing -Z needed a helper; the Gamepad API cannot be tested headlessly, so the controller path was reasoned out rather than exercised.
+- Most important thing built myself: the whole game layer — input abstraction (pad/keyboard/mouse), rail and all-range flight, lock-on/charge weapons, boss phase logic, wingman AI, mission scripting, UI navigation and procedural audio.
+- Hardest part: Tuning feel without hands-on play (camera, speeds, boss rhythm) and keeping rail-space and free-flight code paths consistent.
+- Overhaul: The lack of a built-in particle/UI/audio layer — each had to be hand-rolled.
+- Change one thing: A first-class scene-level post-processing stack (bloom) without extra add-on imports.
+
+Prompt Feedback
+- Liked most: Clear, ambitious vertical-slice target and the concrete 10-foot controller-first rules, attract mode and axis-inversion toggle requirements.
+- Confusing: "Silently brainstorm 50 titles" conflicts with needing to run real RNG code over the list; the date/time and file-name format placeholders; "Dependencies that can be downloaded" vs offline single-file.
+- Hardest: The breadth — a feature-complete, polished demo (3 missions, bosses, menus, attract mode, settings) with no way to playtest by hand.
+- One test wanted: A real DualSense playtest of full mission 1 to a boss kill, checking stick inversion toggles, lock-on feel and radio readability on a TV at 10 feet.

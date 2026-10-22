@@ -1,0 +1,1 @@
+The autonomous loop is stopped. Nothing was left to advance: the Starfoxy Sky build, tests and report were already complete, and there's no PR or open commitment. The desktop notification wasn't sent because Remote Control is inactive, so the summary above in the transcript is what you'll see.

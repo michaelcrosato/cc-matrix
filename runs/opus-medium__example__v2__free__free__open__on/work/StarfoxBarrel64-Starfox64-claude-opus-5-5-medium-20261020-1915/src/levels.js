@@ -1,0 +1,171 @@
+// Data-driven mission definitions. Everything a designer would tweak lives here:
+// rail control points, static placements, timed / distance events, radio scripts.
+
+export const CAST = {
+  kit: { name: 'Kit Barrel', species: 'redpanda', color: '#e8743a', voice: 330 },
+  hopper: { name: 'Hopper Lee', species: 'frog', color: '#5fcf5a', voice: 520, ship: { hull: 0xeaf6e4, accent: 0x55cc44, trim: 0xffe040 } },
+  brock: { name: 'Brock Greyvale', species: 'badger', color: '#9aa0ad', voice: 170, ship: { hull: 0xe6e6ea, accent: 0x707a90, trim: 0xd03030 } },
+  nova: { name: 'Nova Plume', species: 'owl', color: '#7c8cff', voice: 410, ship: { hull: 0xf0eef8, accent: 0x6a5cff, trim: 0x40d0ff } },
+  moss: { name: 'General Moss', species: 'tortoise', color: '#8fb06a', voice: 140 },
+  vex: { name: 'Vex', species: 'jackal', color: '#c23a4a', voice: 240 },
+  rizzo: { name: 'Rizzo', species: 'rat', color: '#a080c0', voice: 460 },
+  mort: { name: 'Mortimer', species: 'vulture', color: '#7a6a5a', voice: 190 },
+  strider: { name: 'Siege A.I.', species: 'robot', color: '#ff4455', voice: 110 },
+};
+export const WINGMEN = ['hopper', 'brock', 'nova'];
+
+const prefix = [
+  [0, 22, -300], [0, 22, 0], [30, 24, 400], [-20, 22, 800], [10, 26, 1200], [0, 24, 1600],
+  [-40, 26, 2000], [20, 24, 2400], [60, 24, 2800], [20, 26, 3200], [0, 24, 3600], [0, 24, 4000],
+];
+const suffix = [[0, 24, 6700], [0, 24, 7100], [0, 24, 7400]];
+
+export const MISSIONS = [
+  {
+    id: 'm1', name: 'CORVALIS', subtitle: 'Operation Coastline', mode: 'rail', music: 'stage',
+    theme: {
+      zenith: 0x2f7fe0, horizon: 0xc8ecff, ground: 0x7fa6c9, sunDir: [0.35, 0.55, 0.6], fog: 0xbfe2f5, fogNear: 400, fogFar: 2600,
+      land: true, ocean: true,
+    },
+    briefing: [
+      ['moss', 'Barrel Team, the Siege Legion has taken the Corvalis coast. Their walker is flattening the capital.'],
+      ['moss', 'Punch through the coastal defences, clear the city and take that walker down.'],
+      ['hopper', 'Word is there are gold arches over the city. Thread all five and we can use the canyon shortcut!'],
+      ['kit', 'Copy that, General. Barrel Team, let\'s roll out!'],
+    ],
+    routes: {
+      bay: [...prefix, [-120, 20, 4400], [-280, 18, 4800], [-320, 18, 5300], [-260, 20, 5800], [-110, 22, 6250], ...suffix],
+      canyon: [...prefix, [120, 30, 4400], [260, 34, 4800], [300, 34, 5300], [250, 30, 5800], [110, 26, 6250], ...suffix],
+    },
+    defaultRoute: 'bay',
+    branch: { at: 3480, need: 5, route: 'canyon' },
+    bossRadius: 520,
+    // ---- statics: placed when the mission loads (s is distance on the given route, 'both' = shared prefix) ----
+    statics: [
+      // tutorial rings over the ocean
+      { k: 'ring', s: 260, x: 0, y: 0 }, { k: 'ring', s: 320, x: 8, y: 4 }, { k: 'ring', s: 380, x: 16, y: 8 },
+      { k: 'seaTurret', s: 780, x: -26, y: 0 }, { k: 'seaTurret', s: 820, x: 24, y: 0 }, { k: 'seaTurret', s: 900, x: -10, y: 0 },
+      { k: 'seaTurret', s: 1080, x: 18, y: 0 }, { k: 'seaTurret', s: 1120, x: -20, y: 0 },
+      { k: 'goldRing', s: 1520, x: -12, y: 6 },
+      { k: 'tower', s: 1700, x: -22 }, { k: 'tower', s: 1760, x: 20 }, { k: 'tower', s: 1830, x: 0 },
+      { k: 'turret', s: 1690, x: 40 }, { k: 'turret', s: 1740, x: -45 },
+      // gold arches (5 = canyon route)
+      { k: 'arch', s: 1900, x: -12, y: 0, n: 1 }, { k: 'arch', s: 2200, x: 16, y: 0, n: 2 }, { k: 'arch', s: 2500, x: -8, y: 0, n: 3 },
+      { k: 'arch', s: 2800, x: 18, y: 0, n: 4 }, { k: 'arch', s: 3100, x: 0, y: 0, n: 5 },
+      // city obstacles + rooftop turrets
+      { k: 'building', s: 2050, x: 14, w: 14, h: 52, d: 14 }, { k: 'building', s: 2120, x: -18, w: 12, h: 60, d: 12 },
+      { k: 'building', s: 2350, x: -16, w: 16, h: 46, d: 16 }, { k: 'building', s: 2420, x: 10, w: 10, h: 70, d: 10 },
+      { k: 'building', s: 2650, x: 4, w: 12, h: 40, d: 30 }, { k: 'building', s: 2950, x: -20, w: 14, h: 64, d: 14 },
+      { k: 'building', s: 3000, x: 22, w: 14, h: 58, d: 14 }, { k: 'building', s: 3250, x: 12, w: 18, h: 44, d: 12 },
+      { k: 'roofTurret', s: 2350, x: -16, h: 46 }, { k: 'roofTurret', s: 2650, x: 4, h: 40 }, { k: 'roofTurret', s: 3250, x: 12, h: 44 },
+      { k: 'turret', s: 2240, x: -36 }, { k: 'turret', s: 2560, x: 34 }, { k: 'turret', s: 2880, x: -34 }, { k: 'turret', s: 3150, x: 30 },
+      { k: 'supply', s: 2300, x: 0, y: 6, item: 'bomb' },
+      { k: 'ring', s: 2440, x: -10, y: 2 }, { k: 'ring', s: 2470, x: -10, y: 2 },
+      { k: 'mine', s: 2580, x: -14, y: 4 }, { k: 'mine', s: 2600, x: 10, y: 10 }, { k: 'mine', s: 2620, x: 0, y: -2 }, { k: 'mine', s: 2640, x: 18, y: 2 },
+      { k: 'goldRing', s: 3330, x: 10, y: 4 },
+      { k: 'checkpoint', s: 3420, x: 0, y: 2 },
+      // canyon route
+      { k: 'rockArch', s: 4300, route: 'canyon', y: 30 }, { k: 'rockArch', s: 4650, route: 'canyon', y: 26 }, { k: 'rockArch', s: 5450, route: 'canyon', y: 28 },
+      { k: 'pillar', s: 4100, route: 'canyon', x: -12 }, { k: 'pillar', s: 4180, route: 'canyon', x: 14 }, { k: 'pillar', s: 4900, route: 'canyon', x: 0 },
+      { k: 'pillar', s: 5000, route: 'canyon', x: -18 }, { k: 'pillar', s: 5100, route: 'canyon', x: 16 },
+      { k: 'oneUp', s: 4480, route: 'canyon', x: 0, y: 14 },
+      { k: 'laser', s: 4760, route: 'canyon', x: -10, y: 2 },
+      { k: 'goldRing', s: 5250, route: 'canyon', x: 6, y: 4 },
+      { k: 'bombItem', s: 5600, route: 'canyon', x: 0, y: 0 },
+      { k: 'mine', s: 3850, route: 'canyon', x: -10, y: 2 }, { k: 'mine', s: 3880, route: 'canyon', x: 12, y: 8 }, { k: 'mine', s: 3910, route: 'canyon', x: 0, y: -4 },
+      { k: 'turret', s: 4400, route: 'canyon', x: 26 }, { k: 'turret', s: 5200, route: 'canyon', x: -26 }, { k: 'turret', s: 5700, route: 'canyon', x: 24 },
+      // bay route
+      { k: 'battleship', s: 3850, route: 'bay', x: 30 }, { k: 'battleship', s: 5000, route: 'bay', x: -32 },
+      { k: 'spire', s: 4250, route: 'bay', x: -10 }, { k: 'spire', s: 4320, route: 'bay', x: 14 }, { k: 'spire', s: 4400, route: 'bay', x: -2 },
+      { k: 'bombItem', s: 4700, route: 'bay', x: 0, y: 4 },
+      { k: 'goldRing', s: 5300, route: 'bay', x: -8, y: 6 },
+      { k: 'ring', s: 5500, route: 'bay', x: 0, y: 0 }, { k: 'ring', s: 5540, route: 'bay', x: -6, y: 4 },
+      { k: 'seaTurret', s: 5650, route: 'bay', x: -22 }, { k: 'seaTurret', s: 5700, route: 'bay', x: 22 },
+    ],
+    // ---- events: fired when the player reaches s on the active route ----
+    events: [
+      { s: 60, a: 'radio', who: 'moss', text: 'All wings, you are cleared for combat. Good hunting, Barrel Team.' },
+      { s: 160, a: 'hint', id: 'move', text: '{move} to fly' },
+      { s: 230, a: 'radio', who: 'nova', text: 'Rings ahead! Silver ones top up your shield.' },
+      { s: 360, a: 'spawn', e: 'dart', p: 'swoop', n: 5, f: 'v', y: 4, ahead: 320 },
+      { s: 380, a: 'hint', id: 'fire', text: '{fire} to shoot' },
+      { s: 520, a: 'spawn', e: 'dart', p: 'cross', n: 4, f: 'line', side: 1, y: 8, ahead: 220 },
+      { s: 640, a: 'spawn', e: 'dart', p: 'cross', n: 4, f: 'line', side: -1, y: 0, ahead: 220 },
+      { s: 720, a: 'radio', who: 'hopper', text: 'Sea turrets on the water! Watch the flak!' },
+      { s: 900, a: 'spawn', e: 'dart', p: 'behind', n: 4, f: 'line', y: 10 },
+      { s: 905, a: 'radio', who: 'nova', text: 'Bogeys coming from behind! Let them pass and light them up.' },
+      { s: 1030, a: 'radio', who: 'brock', text: 'Incoming fire! Do a barrel roll, kid! It deflects their shots.' },
+      { s: 1035, a: 'hint', id: 'roll', text: 'Double-tap {rollL} or {rollR} to barrel roll' },
+      { s: 1060, a: 'spawn', e: 'dart', p: 'hover', n: 3, f: 'line', y: 6, ahead: 140, fire: 2.5 },
+      { s: 1200, a: 'spawn', e: 'bomber', p: 'cross', n: 1, f: 'single', side: -1, y: 14, ahead: 260, item: 'laser' },
+      { s: 1210, a: 'radio', who: 'hopper', text: 'That bomber is hauling a laser upgrade! Shoot it down!' },
+      { s: 1340, a: 'spawn', e: 'dart', p: 'ring', n: 8, f: 'ring', y: 8, ahead: 300 },
+      { s: 1350, a: 'hint', id: 'charge', text: 'Hold {fire} to charge, lock on, release to fire a homing blast' },
+      { s: 1460, a: 'spawn', e: 'dart', p: 'swoop', n: 5, f: 'v', y: 12, ahead: 320 },
+      { s: 1620, a: 'radio', who: 'moss', text: 'You\'re over the coast. Corvalis City is dead ahead.' },
+      { s: 1800, a: 'radio', who: 'nova', text: 'Gold arches! Bet you can\'t thread all five, Kit.' },
+      { s: 1830, a: 'hint', id: 'arch', text: 'Fly through all 5 gold arches to unlock the canyon route' },
+      { s: 1980, a: 'hint', id: 'boost', text: 'Hold {boost} to boost, {brake} to brake' },
+      { s: 2000, a: 'spawn', e: 'bat', p: 'swoop', n: 4, f: 'line', y: 14, ahead: 300 },
+      { s: 2150, a: 'spawn', e: 'dart', p: 'cross', n: 5, f: 'line', side: 1, y: 4, ahead: 200 },
+      { s: 2260, a: 'radio', who: 'hopper', text: 'Supply crate! Blast it open for a smart bomb.' },
+      { s: 2320, a: 'hint', id: 'bomb', text: '{bomb} to launch a smart bomb, press again to detonate early' },
+      { s: 2400, a: 'spawn', e: 'dart', p: 'ring', n: 8, f: 'ring', y: 10, ahead: 280 },
+      { s: 2560, a: 'radio', who: 'brock', text: 'Space mines! Don\'t touch \'em.' },
+      { s: 2700, a: 'rescue', who: 'hopper' },
+      { s: 2900, a: 'spawn', e: 'dart', p: 'tail', n: 2, f: 'line', y: 4 },
+      { s: 2905, a: 'radio', who: 'brock', text: 'Enemy on your six! Loop behind it!' },
+      { s: 2910, a: 'hint', id: 'loop', text: '{loop} to somersault behind pursuers' },
+      { s: 3060, a: 'spawn', e: 'bat', p: 'behind', n: 4, f: 'line', y: 8 },
+      { s: 3200, a: 'spawn', e: 'dart', p: 'swoop', n: 6, f: 'v', y: 6, ahead: 320 },
+      { s: 3410, a: 'radio', who: 'moss', text: 'Checkpoint secured. Keep pushing!' },
+      // route-specific
+      { s: 3700, route: 'canyon', a: 'radio', who: 'hopper', text: 'Canyon walls are tight! Stay low and watch those rock bridges.' },
+      { s: 3980, route: 'canyon', a: 'spawn', e: 'bat', p: 'swoop', n: 5, f: 'v', y: 10, ahead: 300 },
+      { s: 4250, route: 'canyon', a: 'spawn', e: 'dart', p: 'behind', n: 5, f: 'line', y: 6 },
+      { s: 4560, route: 'canyon', a: 'rescue', who: 'nova' },
+      { s: 4950, route: 'canyon', a: 'spawn', e: 'dart', p: 'ring', n: 10, f: 'ring', y: 10, ahead: 300 },
+      { s: 5350, route: 'canyon', a: 'spawn', e: 'bomber', p: 'cross', n: 1, f: 'single', side: 1, y: 16, ahead: 260, item: 'oneUp' },
+      { s: 5800, route: 'canyon', a: 'spawn', e: 'bat', p: 'hover', n: 4, f: 'line', y: 8, ahead: 150, fire: 2.2 },
+      { s: 3700, route: 'bay', a: 'radio', who: 'brock', text: 'Legion battleships in the bay. Knock out their guns!' },
+      { s: 4050, route: 'bay', a: 'spawn', e: 'dart', p: 'swoop', n: 6, f: 'v', y: 4, ahead: 320 },
+      { s: 4500, route: 'bay', a: 'rescue', who: 'brock' },
+      { s: 4900, route: 'bay', a: 'spawn', e: 'dart', p: 'cross', n: 5, f: 'line', side: -1, y: 10, ahead: 220 },
+      { s: 5150, route: 'bay', a: 'spawn', e: 'bomber', p: 'cross', n: 1, f: 'single', side: 1, y: 16, ahead: 260, item: 'laser' },
+      { s: 5600, route: 'bay', a: 'spawn', e: 'dart', p: 'behind', n: 5, f: 'line', y: 8 },
+      // shared ending, relative to route end (negative s)
+      { s: -1000, a: 'radio', who: 'hopper', text: 'Huge energy reading ahead... It\'s the walker!' },
+      { s: -850, a: 'spawn', e: 'dart', p: 'swoop', n: 6, f: 'v', y: 8, ahead: 320 },
+      { s: -500, a: 'spawn', e: 'bat', p: 'ring', n: 6, f: 'ring', y: 10, ahead: 280 },
+      { s: -220, a: 'warning' },
+      { s: -10, a: 'boss', boss: 'strider' },
+    ],
+    medalPct: 0.6,
+  },
+  {
+    id: 'm2', name: 'ASTERIA BELT', subtitle: 'All-Range Mode', mode: 'allrange', music: 'space',
+    theme: { zenith: 0x0a0624, horizon: 0x3a1f5c, ground: 0x0b0820, sunDir: [-0.4, 0.3, 0.5], fog: 0x1a1236, fogNear: 600, fogFar: 3200, space: true },
+    arena: 900,
+    briefing: [
+      ['moss', 'The Legion fleet is regrouping in the Asteria Belt around their Dread Carrier.'],
+      ['moss', 'This is open space. All-range mode: you can fly anywhere, so use U-turns and loops to stay on their tails.'],
+      ['nova', 'Heads up. Jackal Squadron flies escort for that carrier.'],
+      ['kit', 'Then we go through them. Barrel Team, form up!'],
+    ],
+    // step-scripted: each step runs its actions, then waits for its 'until' condition
+    steps: [
+      { do: [{ a: 'radio', who: 'moss', text: 'All-range mode engaged. Free flight authorised.' }, { a: 'hint', id: 'uturn', text: '{uturn} for a U-turn  ·  {loop} to somersault' }], until: { time: 4 } },
+      { do: [{ a: 'wave', e: 'dart', n: 8 }, { a: 'wave', e: 'bat', n: 4 }, { a: 'radio', who: 'hopper', text: 'Fighters inbound from the carrier! Check your radar.' }], until: { clear: true, time: 75 } },
+      { do: [{ a: 'radio', who: 'brock', text: 'Nice shooting. More of them, from both sides!' }, { a: 'wave', e: 'dart', n: 10 }, { a: 'wave', e: 'bomber', n: 2, item: 'laser' }], until: { clear: true, time: 75 } },
+      { do: [{ a: 'music', m: 'boss' }, { a: 'aces' }, { a: 'radio', who: 'vex', text: 'Barrel Team! This sector belongs to the Jackals.' }], until: { acesDown: true, time: 150 } },
+      { do: [{ a: 'radio', who: 'nova', text: 'Jackals scattered! Now hit that carrier!' }, { a: 'warning' }], until: { time: 3 } },
+      { do: [{ a: 'boss', boss: 'carrier' }], until: { bossDead: true } },
+    ],
+    statics: [
+      { k: 'ring', at: [0, 30, 200] }, { k: 'ring', at: [40, 60, -260] }, { k: 'ring', at: [-300, -40, 120] }, { k: 'goldRing', at: [260, 20, 300] },
+      { k: 'goldRing', at: [-200, 80, -400] }, { k: 'goldRing', at: [100, -60, 520] }, { k: 'bombItem', at: [-420, 10, -100] }, { k: 'bombItem', at: [380, 40, -300] },
+      { k: 'laser', at: [0, 120, -520] }, { k: 'oneUp', at: [520, 120, 520] }, { k: 'supply', at: [-120, -20, 380], item: 'bomb' },
+    ],
+    medalPct: 0.7,
+  },
+];

@@ -1,0 +1,24 @@
+SOURCE INFORMATION
+- Date: 2026-10-20 19:15
+- Source: Starfox 64 for N64
+- Tech: Three.js r180 (WebGPURenderer, WebGPU only, no WebGL fallback); Rapier 0.19.3 (@dimforge/rapier3d-compat, physics); Web Audio (procedural SFX and music); Gamepad API (PS5 standard mapping); esbuild 0.28.2 (build-time bundling only)
+- Art Direction: Stylized cel-shading (MeshToonMaterial with a 3-band ramp, plus inverted-hull ink outlines)
+- Animation: Procedural (per-frame math: sine weave, banking and pitch springs, barrel-roll angle, bobbing pickups, scripted event timelines in stages.js)
+- Testing: No restriction on testing (per prompt)
+- Environment: Claude Code CLI (headless); Linux (WSL2); browser for testing: Chromium bundled with Playwright 1.63 (headless, SwiftShader WebGPU)
+- Model: Anthropic, claude-haiku-5-5, reasoning effort medium
+- Usage: unknown
+
+ENGINE FEEDBACK
+- What did you like most about the engine? Three.js r180 WebGPURenderer and its built-in MeshToonMaterial take a gradient map, so cel shading needed no custom shader code.
+- Did you get stuck or guess wrong? Yes. Boss health read 0 because I never set a max value. The pilot and missiles aimed at the shielded boss centre instead of the side pods. Both showed up only in an unattended playthrough, so I now run one.
+- What was the most important thing you had to build yourself? The mission timeline, lock-on, and the swept-collision layer. Rapier provides bodies and contacts only.
+- What was the hardest part about using the engine? Rapier's init prints a wasm-bindgen deprecation warning in console. The WebGPU adapter is only available with specific Chromium flags on headless Linux.
+- If you had to remove or overhaul one thing from the engine, what would that be? The positional init call that triggers the Rapier warning.
+- If you could change one thing about the engine, what would it be? A built-in swept-collision helper for fast projectiles.
+
+PROMPT FEEDBACK
+- What did you like most about this prompt? The 10-foot controller-first rules and the explicit Done criteria made scope checkable.
+- What was confusing? Whether the required test reports needed to be written into the game as well as the chat. I put them in both places.
+- What was the hardest thing to do? Fitting a feature-complete demo into one session while keeping every feature playable.
+- If there was one test you could have run, what would that test be? A real GPU and real controller run that plays the whole campaign by hand.

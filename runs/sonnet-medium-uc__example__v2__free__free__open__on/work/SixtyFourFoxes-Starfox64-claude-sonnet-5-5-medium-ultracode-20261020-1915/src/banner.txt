@@ -1,0 +1,37 @@
+<!--
+SOURCE INFORMATION
+- Date: 2026-10-20 19:15
+- Source: Starfox 64 for N64
+- Game: Sixty-Four Foxes
+- Tech: Three.js r180 (WebGPURenderer + TSL node materials, no fallback) · Rapier 3D 0.19.3 (rapier3d-compat, WASM inlined) · Web Audio API (procedural synth + sequencer) · Gamepad API · esbuild bundle (single HTML)
+- Art Direction: Stylised cel-shading: 4-band MeshToonMaterial ramp, inverted-hull ink outlines, flat-shaded low-poly terrain with stepped vertex colours, bloom post-process, PCF soft shadows
+- Animation: Custom keyframe clip Animator over procedural part hierarchies (barrel roll, somersault, U-turn, wing flutter, walker gait, turret scan) + spring/damped procedural motion and Rapier rigid-body debris
+- Testing: Prompt placed no restrictions on testing ("No restriction on testing"). Tested with headless Chromium + Playwright (software WebGPU, offscreen readback screenshots); real controller and real GPU not available in the test environment.
+- Environment: Claude Code CLI (headless); Linux (WSL2); browser unknown (tested in Chromium via Playwright)
+- Model: Anthropic, claude-sonnet-5-5, reasoning effort medium-ultracode
+- Usage: Estimated ~0.3M tokens total (context-counter based; no input/output or cost breakdown exposed), estimated API cost unknown, session time ~1h 15m (estimate)
+
+ENGINE FEEDBACK
+- What did you like most about the engine?
+  Three.js WebGPURenderer with TSL: toon materials, node-based outlines/sky/water and the PostProcessing + bloom nodes worked with very little code, and Rapier's kinematic-body + collision-event model fit an arcade shooter well.
+- Did you get stuck or guess wrong?
+  Yes: headless WebGPU could not present to the canvas (screenshots were blank), so I had to add an offscreen render-target readback hook for testing. I also first assumed sensor–sensor pairs raise events in Rapier (they do not), so all hit volumes are solid kinematic colliders with ActiveCollisionTypes.ALL.
+- What was the most important thing you had to build yourself?
+  The game framework: rail/all-range flight models, the data-driven stage timeline director, entity/AI system, lock-on weapons, boss logic, comms/HUD, controller-first menu system, procedural audio/music, and the attract-mode AI.
+- What was the hardest part about using the engine?
+  Verifying visuals without a real GPU presentation path, and the lack of a built-in game-object/scene/animation layer — outlines, toon ramps, particles and clips all had to be assembled by hand.
+- If you had to remove or overhaul one thing from engine, what would that be?
+  The split between three, three/webgpu and three/tsl entry points (plus addons paths) — one consistent import surface would remove a lot of bundling guesswork.
+- If you could change one thing about the engine, what would it be?
+  A first-class, documented headless/test path for WebGPU (deterministic screenshot/readback API) and built-in outline/cel-shading node material.
+
+PROMPT FEEDBACK
+- What did you like most about this prompt?
+  The clear "feature-complete vertical slice" bar with concrete reference demos, and the controller-first 10-foot UX requirements (including the inverted-axis toggles and attract mode) — they define a testable, polished target.
+- What was confusing?
+  Whether the filename's "GameTitle-SOURCE" should keep spaces/punctuation, how to estimate Usage when no counters are exposed, and "silently brainstorm 50 titles" vs. the need to prove an RNG pick.
+- What was the hardest thing to do?
+  Scope: delivering two distinct modes (rail + all-range), bosses, wingmen, full menus, procedural audio and attract mode in one pass while verifying WebGPU rendering in a headless environment.
+- If there was one test you could of run, what would that test be?
+  A real-hardware run on a PS5/DualSense pad with a WebGPU-capable GPU, playing both stages end-to-end (including the inverted-axis toggles and attract-mode exit) while profiling frame time.
+-->

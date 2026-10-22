@@ -1,0 +1,160 @@
+// Data-driven level scripts. Rail stages trigger on distance `d`; all-range stages run a step list.
+// Text tokens like {fire} {roll} {bomb} {boost} {brake} {loop} {stick} are replaced with the active device's glyphs.
+
+const group = (base, n, f) => Array.from({ length: n }, (_, i) => ({ ...base, ...f(i) }));
+
+// spawn helper: { do:'spawn', type, pattern, x, y, ahead, delay, drop }
+const S = (d, type, pattern, n, f, extra = {}) => ({ d, do: 'spawnGroup', route: extra.route, list: group({ type, pattern, ...extra }, n, f) });
+const C = (d, who, text, extra = {}) => ({ d, do: 'comm', who, text, ...extra });
+const P = (d, kind, x, y) => ({ d, do: 'pickup', kind, x, y });
+
+export const STAGE1 = {
+  id: 1, name: 'QUILTARA', subtitle: 'The Patchwork Planet', mode: 'rail', music: 'stage1', medal: 90,
+  briefing: [
+    ['woolsey', 'Stuffox team, Baron Ratchet\'s Clockwork Armada is winding up an invasion of Quiltara.'],
+    ['woolsey', 'Clear a path to the Spool Fortress and take down whatever he\'s built there. Unravel them!'],
+  ],
+  boss: { at: 6800, name: 'WINDUP COLOSSUS' },
+  events: [
+    C(20, 'tod', 'All plushies, check in!'),
+    C(90, 'bramble', 'Stitched and ready, kid.'),
+    C(160, 'pippa', 'Fluffed up and good to go!'),
+    C(230, 'gizmo', 'Springs tight, sensors bright!'),
+    { d: 150, do: 'hint', text: 'Steer with {stick} · Tap {fire} to fire lasers' },
+    S(300, 'drone', 'headon', 5, (i) => ({ x: -40 + i * 20, y: 22 + (i % 2) * 8, delay: i * 0.15 })),
+    S(500, 'drone', 'cross', 4, (i) => ({ x: -130, y: 18 + i * 7, delay: i * 0.35, dir: 1 })),
+    P(620, 'silver', 0, 22),
+    C(700, 'bramble', 'Bogeys coming up behind us! Let \'em pass, then light \'em up.'),
+    S(740, 'drone', 'behind', 5, (i) => ({ x: -20 + i * 10, y: 16 + (i % 3) * 6, delay: i * 0.25 })),
+    { d: 880, do: 'hint', text: 'Hold {fire} to charge · Release to fire a homing lock-on blast' },
+    S(950, 'drone', 'circle', 7, (i) => ({ x: 0, y: 26, idx: i, count: 7 })),
+    C(1080, 'gizmo', 'That supply crate is carrying a laser upgrade. Crack it open!'),
+    S(1120, 'carrier', 'ahead_hold', 1, () => ({ x: 14, y: 30, drop: 'laser' })),
+    S(1250, 'drone', 'dive', 4, (i) => ({ x: -30 + i * 20, y: 90, delay: i * 0.3 })),
+    S(1380, 'dart', 'headon', 4, (i) => ({ x: (i - 1.5) * 18, y: 30, delay: i * 0.2 })),
+    { d: 1420, do: 'trouble', who: 'pippa', type: 'dart', n: 2 },
+    // plains
+    S(1560, 'turret', 'ground', 4, (i) => ({ x: [-34, 30, -10, 40][i], ahead: 380 + i * 60 })),
+    C(1640, 'pippa', 'Incoming fire! Double-tap {bankL} or {bankR} to do a barrel roll and bounce it back!'),
+    { d: 1660, do: 'hint', text: 'Double-tap {bankL} / {bankR}: Barrel Roll deflects shots · Hold to bank-turn' },
+    S(1700, 'turret', 'ground', 3, (i) => ({ x: [-20, 0, 24][i], ahead: 420 + i * 50 })),
+    S(1760, 'tank', 'ground', 3, (i) => ({ x: [-50, 50, -60][i], ahead: 460 + i * 70, roam: 1 })),
+    P(1880, 'gold', -18, 26),
+    C(1980, 'bramble', 'Big tin bomber dead ahead. Drop a Plush Bomb on it with {bomb}!'),
+    S(2000, 'bomber', 'ahead_hold', 1, () => ({ x: 0, y: 40, life: 14 })),
+    S(2020, 'drone', 'ahead_hold', 4, (i) => ({ x: [-30, 30, -18, 18][i], y: [30, 30, 50, 50][i], life: 12 })),
+    P(2080, 'bomb', 20, 18),
+    { d: 2160, do: 'hint', text: 'Hold {boost} to boost · {brake} to brake · {loop}: Somersault (gets behind chasers)' },
+    S(2200, 'drone', 'behind', 5, (i) => ({ x: 20 - i * 10, y: 20 + (i % 2) * 10, delay: i * 0.2 })),
+    C(2290, 'gizmo', 'Flare gates up ahead! Fly through every one of them and see what happens...'),
+    { d: 2300, do: 'gates', list: [[-20, 18, 2420], [16, 30, 2540], [-6, 44, 2660], [28, 22, 2780], [0, 14, 2900]] },
+    S(2450, 'drone', 'headon', 4, (i) => ({ x: (i - 1.5) * 24, y: 36, delay: i * 0.2 })),
+    S(2620, 'drone', 'cross', 4, (i) => ({ x: 130, y: 20 + i * 8, delay: i * 0.3, dir: -1 })),
+    S(2760, 'turret', 'ground', 4, (i) => ({ x: [-40, 40, -24, 24][i], ahead: 420 + i * 40 })),
+    P(2980, 'silver', -10, 28),
+    S(3040, 'carrier', 'ahead_hold', 1, () => ({ x: -16, y: 32, drop: 'wing' })),
+    { d: 3200, do: 'trouble', who: 'bramble', type: 'dart', n: 2 },
+    { d: 3420, do: 'checkpoint', x: 0, y: 26 },
+    // ---- Route A: Thimble City ----
+    { d: 3450, do: 'music', track: 'stage1', route: 'A' },
+    C(3480, 'gizmo', 'Thimble City. Watch those towers!', { route: 'A' }),
+    S(3560, 'drone', 'ahead_hold', 4, (i) => ({ x: [-30, 30, -12, 12][i], y: [24, 24, 40, 40][i] }), { route: 'A' }),
+    { d: 3700, do: 'pillar', x: -44, route: 'A' },
+    C(3720, 'bramble', 'See that glowing gear at the base of the tower? Shoot it and topple it on those tanks!', { route: 'A' }),
+    S(3720, 'tank', 'ground', 4, (i) => ({ x: [-16, 4, 20, -6][i], ahead: 470 + i * 25 }), { route: 'A' }),
+    S(3880, 'drone', 'behind', 5, (i) => ({ x: -24 + i * 12, y: 22, delay: i * 0.2 }), { route: 'A' }),
+    S(4020, 'carrier', 'ahead_hold', 1, () => ({ x: 0, y: 34, drop: 'bomb' }), { route: 'A' }),
+    { d: 4120, do: 'pillar', x: 44, route: 'A' },
+    S(4140, 'tank', 'ground', 3, (i) => ({ x: [10, 24, -4][i], ahead: 470 + i * 30 }), { route: 'A' }),
+    S(4280, 'turret', 'ground', 4, (i) => ({ x: [-30, 30, -10, 10][i], ahead: 400 + i * 50 }), { route: 'A' }),
+    S(4420, 'drone', 'dive', 5, (i) => ({ x: -40 + i * 20, y: 95, delay: i * 0.25 }), { route: 'A' }),
+    S(4560, 'drone', 'circle', 8, (i) => ({ x: 0, y: 30, idx: i, count: 8 }), { route: 'A' }),
+    P(4720, 'gold', 20, 34, ),
+    S(4850, 'bomber', 'ahead_hold', 1, () => ({ x: 0, y: 44, life: 14 }), { route: 'A' }),
+    S(4870, 'dart', 'ahead_hold', 4, (i) => ({ x: [-34, 34, -20, 20][i], y: [28, 28, 54, 54][i], life: 12 }), { route: 'A' }),
+    S(5050, 'drone', 'headon', 6, (i) => ({ x: (i - 2.5) * 16, y: 20 + (i % 2) * 14, delay: i * 0.15 }), { route: 'A' }),
+    { d: 5200, do: 'pillar', x: -44, route: 'A' },
+    S(5220, 'tank', 'ground', 3, (i) => ({ x: [-20, -4, 12][i], ahead: 470 + i * 30 }), { route: 'A' }),
+    S(5360, 'drone', 'behind', 5, (i) => ({ x: 24 - i * 12, y: 30, delay: i * 0.2 }), { route: 'A' }),
+    S(5500, 'carrier', 'ahead_hold', 1, () => ({ x: 10, y: 28, drop: 'laser' }), { route: 'A' }),
+    S(5660, 'drone', 'cross', 6, (i) => ({ x: -130, y: 16 + i * 6, delay: i * 0.25, dir: 1 }), { route: 'A' }),
+    P(5800, 'gold', -16, 22),
+    { d: 5950, do: 'trouble', who: 'gizmo', type: 'dart', n: 2, route: 'A' },
+    S(6150, 'drone', 'ahead_hold', 6, (i) => ({ x: (i - 2.5) * 16, y: 24 + (i % 2) * 18 }), { route: 'A' }),
+    P(6350, 'silver', 0, 26),
+    // ---- Route B: Hem Canyon ----
+    { d: 3450, do: 'music', track: 'canyon', route: 'B' },
+    C(3470, 'gizmo', 'The gates opened a shortcut into Hem Canyon! Tight squeeze, more targets!', { route: 'B' }),
+    C(3560, 'bramble', 'Keep it low and steady. These walls don\'t give.', { route: 'B' }),
+    S(3580, 'dart', 'headon', 6, (i) => ({ x: (i - 2.5) * 12, y: 18 + (i % 3) * 10, delay: i * 0.12 }), { route: 'B' }),
+    S(3760, 'mine', 'float', 8, (i) => ({ x: -35 + (i % 4) * 23, y: 14 + Math.floor(i / 4) * 22, ahead: 420 + i * 12 }), { route: 'B' }),
+    S(3900, 'drone', 'dive', 6, (i) => ({ x: -30 + i * 12, y: 100, delay: i * 0.2 }), { route: 'B' }),
+    S(4050, 'turret', 'ground', 5, (i) => ({ x: [-30, 30, 0, -20, 20][i], ahead: 420 + i * 40 }), { route: 'B' }),
+    P(4150, 'gold', 0, 18),
+    S(4250, 'drone', 'behind', 6, (i) => ({ x: -25 + i * 10, y: 20 + (i % 2) * 12, delay: i * 0.18 }), { route: 'B' }),
+    S(4400, 'carrier', 'ahead_hold', 1, () => ({ x: 0, y: 26, drop: 'laser' }), { route: 'B' }),
+    S(4550, 'drone', 'circle', 8, (i) => ({ x: 0, y: 34, idx: i, count: 8 }), { route: 'B' }),
+    S(4700, 'mine', 'float', 10, (i) => ({ x: -36 + (i % 5) * 18, y: 12 + Math.floor(i / 5) * 26, ahead: 440 + i * 14 }), { route: 'B' }),
+    P(4800, 'gold', 14, 36),
+    S(4900, 'bomber', 'ahead_hold', 1, () => ({ x: 0, y: 40, life: 14 }), { route: 'B' }),
+    S(4920, 'dart', 'ahead_hold', 4, (i) => ({ x: [-30, 30, -15, 15][i], y: [26, 26, 52, 52][i], life: 12 }), { route: 'B' }),
+    S(5100, 'dart', 'headon', 6, (i) => ({ x: (i - 2.5) * 12, y: 24 + (i % 2) * 10, delay: i * 0.12 }), { route: 'B' }),
+    S(5260, 'tank', 'ground', 4, (i) => ({ x: [-20, 20, -8, 8][i], ahead: 440 + i * 40 }), { route: 'B' }),
+    { d: 5400, do: 'trouble', who: 'pippa', type: 'dart', n: 3, route: 'B' },
+    S(5600, 'drone', 'dive', 6, (i) => ({ x: -30 + i * 12, y: 100, delay: i * 0.2 }), { route: 'B' }),
+    P(5750, 'gold', -14, 22),
+    S(5850, 'carrier', 'ahead_hold', 1, () => ({ x: 0, y: 30, drop: 'bomb' }), { route: 'B' }),
+    S(6000, 'drone', 'behind', 6, (i) => ({ x: 25 - i * 10, y: 26, delay: i * 0.18 }), { route: 'B' }),
+    S(6200, 'mine', 'float', 8, (i) => ({ x: -35 + (i % 4) * 23, y: 14 + Math.floor(i / 4) * 22, ahead: 420 + i * 12 }), { route: 'B' }),
+    P(6350, 'silver', 0, 22),
+    // ---- converge: fortress + boss ----
+    C(6560, 'woolsey', 'Massive tin signature at the Spool Fortress. Something big is winding up!'),
+    S(6600, 'turret', 'ground', 4, (i) => ({ x: [-40, 40, -20, 20][i], ahead: 380 + i * 40 })),
+    { d: 6700, do: 'warning' },
+    { d: 6800, do: 'boss', boss: 'colossus' },
+  ],
+};
+
+export const STAGE2 = {
+  id: 2, name: 'BUTTON BELT', subtitle: 'All-Range Mode', mode: 'allrange', music: 'space', medal: 60,
+  briefing: [
+    ['woolsey', 'Ratchet\'s flagship is hiding in the Button Belt. His mercenaries, the Tin Jackals, are guarding it.'],
+    ['woolsey', 'This is an open sector. Fly free, cover each other and take down the Music Box!'],
+  ],
+  boss: { name: 'THE MUSIC BOX' },
+  steps: [
+    { do: 'comm', who: 'tod', text: 'All-Range Mode! Spread out, team!' },
+    { do: 'hint', text: 'ALL-RANGE: Fly freely · {loop}: Somersault · Hold {brake} + {loop}: U-Turn' },
+    { do: 'spawnAR', type: 'drone', n: 10, radius: 420 },
+    { do: 'spawnAR', type: 'dart', n: 4, radius: 520 },
+    { do: 'pickupAR', kind: 'silver', n: 4 }, { do: 'pickupAR', kind: 'bomb', n: 2 }, { do: 'pickupAR', kind: 'gold', n: 3 },
+    { do: 'wait', t: 6 },
+    { do: 'comm', who: 'gizmo', text: 'Radar\'s in the bottom right. Red dots are tin, colored dots are us!' },
+    { do: 'waitClear', frac: 0.75, max: 70 },
+    { do: 'spawnAR', type: 'satellite', n: 4, radius: 380 },
+    { do: 'spawnAR', type: 'mine', n: 12, radius: 600 },
+    { do: 'spawnAR', type: 'carrier', n: 1, radius: 300, drop: 'laser' },
+    { do: 'comm', who: 'bramble', text: 'Laser buoys! Clear them out before they box us in.' },
+    { do: 'waitClear', frac: 0.6, max: 50 },
+    { do: 'jackals' },
+    { do: 'wait', t: 14 },
+    { do: 'trouble', who: 'pippa', ace: 'snarl' },
+    { do: 'spawnAR', type: 'drone', n: 6, radius: 500 },
+    { do: 'waitAces' },
+    { do: 'comm', who: 'gizmo', text: 'The Jackals are scrap! But I\'m reading a huge warp signature...' },
+    { do: 'wait', t: 3 },
+    { do: 'boss', boss: 'musicbox' },
+  ],
+};
+
+export const STAGES = [STAGE1, STAGE2];
+
+export const ACES = {
+  vex: { name: 'Vex', hp: 46, color: 0x6b2cbd, taunts: ['Stuffox! You\'re nothing but lint in my gears!', 'Hold still, fluffball!', 'Grr... not bad for a toy.'] },
+  snarl: { name: 'Snarl', hp: 34, color: 0xc0472f, taunts: ['Hehehe! Gonna pull out your stuffing!', 'Can\'t shake me, bunny!', 'Ow! My springs!'] },
+  quill: { name: 'Quill', hp: 34, color: 0x2a8f6a, taunts: ['The Baron pays by the plushie.', 'Too slow, Patchwell.', 'Tch. Retreating!'] },
+};
+
+export const SPEAKERS = {
+  tod: 'Tod', bramble: 'Bramble', pippa: 'Pippa', gizmo: 'Gizmo', woolsey: 'Gen. Woolsey', ratchet: 'Baron Ratchet', vex: 'Vex', snarl: 'Snarl', quill: 'Quill',
+};

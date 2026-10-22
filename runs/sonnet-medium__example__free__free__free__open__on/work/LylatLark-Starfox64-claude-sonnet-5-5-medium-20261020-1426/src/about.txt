@@ -1,0 +1,39 @@
+LYLAT LARK - About / Credits
+============================
+An original spiritual successor to Starfox 64 for N64: a 3D on-rails shooter with
+lock-on charge shots, barrel-roll deflects, wingmates who need rescuing, bosses and
+an attract mode. All art, audio and code are procedural and generated at runtime.
+
+SOURCE INFORMATION
+- Date: 2026-10-20 14:26
+- Source: Starfox 64 for N64
+- Game title: Lylat Lark (picked with a real RNG from 50 brainstormed titles)
+- Tech: single-file HTML; plain JavaScript (no build step beyond concatenation); three.js r149 (WebGL, bundled inline); WebAudio API for all sound and music; Canvas 2D for HUD overlay and portraits; DOM/CSS for menus; Gamepad API (PS5 DualSense standard mapping, rumble) plus keyboard/mouse.
+- Art Direction: faceted low-poly "toy model" look, warm canyon daylight (Sunreach) and a violet nebula asteroid belt (Veil), soft shadows, additive glows, drawn animal-pilot comm portraits.
+- Animation: procedural, code-driven: hierarchical mesh rigs (steer / barrel-roll / engine groups), damped springs, a tiny tween and timeline system for cinematic camera and UI, particle and debris pools, scripted boss state machines.
+- Testing: The prompt placed no restriction on testing. Tested with headless Chromium and WebKit via Playwright (simulated keyboard and fake DualSense gamepad, touch-device emulation, full-level AI playthroughs, multi-viewport screenshots). Real iOS Safari and a physical DualSense were not available.
+- Environment: Claude Code CLI (headless); Linux; browser unknown
+- Model: Anthropic, claude-sonnet-5-5, reasoning effort medium
+- Usage: unknown (cost not reported); roughly 0.3M tokens consumed by the session counter, session about 1 hour (estimates)
+
+HOW TO PLAY
+Left stick steer, X tap fire, hold X to charge and lock on up to 8 targets, release to fire homing shots,
+O nova bomb, L1/R1 barrel roll (reflects enemy shots), R2 boost, L2 brake, triangle squad call when its meter is full,
+Options pause. Keyboard mirrors it (see Controls). Settings has Invert Horizontal and Invert Vertical toggles for
+controllers whose axes come through reversed, with a live stick test.
+Idle on the title for 10 seconds to watch the attract-mode demo; any input exits it.
+Developer: F1 shows a debug line; with it on, ] skips ahead, G toggles god mode, B refills bombs.
+
+ENGINE FEEDBACK
+- What did you like most about the engine? three.js got flat-shaded models, shadows, fog and instancing on screen within minutes, and the UMD build made a true single-file deliverable easy.
+- Did you get stuck or guess wrong? Yes: I assumed menu items had an explicit type (they defaulted), which silently disabled every button; a gamepad cannot unlock WebAudio in Chrome; and an invisible boss core was excluded from hit tests by a flag I reused.
+- What was the most important thing you had to build yourself? Everything gameplay: the rail and event timeline, entity registry, collisions, lock-on, wingmen AI, boss state machines, UI navigation, input abstraction, audio synth, attract-mode pilot.
+- What was the hardest part about using the engine? Visual readability: additive glows and fog wash out against a bright sky, so tuning blending, exposure and fog took several iterations; also no built-in post-processing in the UMD build.
+- If you had to remove or overhaul one thing from engine, what would that be? The removal of UMD builds in newer three.js releases; a no-module single-file path should be first-class.
+- If you could change one thing about the engine, what would it be? Built-in headless-friendly frame stepping so full simulations can run deterministically without rendering.
+
+PROMPT FEEDBACK
+- What did you like most about this prompt? The concrete, testable requirements (10-second attract mode, inversion toggles, touch-only message) and the clear definition of done.
+- What was confusing? "Engine" feedback when the stack is free choice; and the filename placeholder format for the folder versus the html file.
+- What was the hardest thing to do? Making a vertical slice feel complete (two stages, bosses, tutorial, menus, audio) without real-hardware playtesting.
+- If there was one test you could have run, what would that test be? A real DualSense session on a TV at 10 feet, checking axis directions, rumble and text legibility.

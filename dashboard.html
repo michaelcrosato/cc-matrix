@@ -1,0 +1,696 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matrix Dashboard</title>
+<style>
+:root {
+  --bg: #f6f6f4; --panel: #ffffff; --ink: #1b1b1a; --muted: #6b6a66; --line: #e2e1dc;
+  --accent: #2f5bd3; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #1f7a46; --bad: #b3261e; --warn: #9a6200;
+  --chip: #f0efeb; --chip-on: #dfe7fd; --code: #f3f2ee;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #151515; --panel: #1e1e1d; --ink: #ecebe7; --muted: #9a9993; --line: #33332f;
+    --accent: #7f9cff; --accent-ink: #0d1330; --soft: #232a40; --ok: #6fcf97; --bad: #ff8a80; --warn: #f2c063;
+    --chip: #2a2a28; --chip-on: #2c3657; --code: #232321;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #151515; --panel: #1e1e1d; --ink: #ecebe7; --muted: #9a9993; --line: #33332f;
+  --accent: #7f9cff; --accent-ink: #0d1330; --soft: #232a40; --ok: #6fcf97; --bad: #ff8a80; --warn: #f2c063;
+  --chip: #2a2a28; --chip-on: #2c3657; --code: #232321;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; }
+header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
+  display: flex; align-items: center; gap: 16px; padding: 10px 16px; flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
+nav { display: flex; gap: 4px; }
+nav button { background: none; border: 0; padding: 7px 12px; border-radius: 8px; color: var(--muted); font: inherit; cursor: pointer; }
+nav button.on { background: var(--soft); color: var(--ink); font-weight: 600; }
+.pill { margin-left: auto; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 13px; }
+.pill.live { background: var(--soft); color: var(--accent); font-weight: 600; }
+main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+section.tab { display: none; } section.tab.on { display: block; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.card h2 { font-size: 15px; margin: 0 0 4px; } .card .sub { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.grow { flex: 1; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+textarea { width: 100%; resize: vertical; }
+input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.invalid { border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 8%, var(--bg)); }
+.mono, textarea.mono { font-family: ui-monospace, "Cascadia Mono", "Ubuntu Mono", Menlo, monospace; font-size: 13px; }
+button.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
+button.btn:hover { background: var(--chip); }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+button.primary:hover { filter: brightness(1.05); background: var(--accent); }
+button.danger { color: var(--bad); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.icon { font: inherit; border: 0; background: none; color: var(--muted); padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+button.icon:hover { background: var(--chip); color: var(--ink); }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
+th.sort { cursor: pointer; } th.sort:hover { color: var(--ink); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.scroll { overflow-x: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--chip); cursor: pointer; user-select: none; border: 1px solid transparent; }
+.chip input { margin: 0; }
+.chip.on { background: var(--chip-on); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
+.tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--chip); color: var(--muted); }
+.tag.ok { color: var(--ok); } .tag.bad { color: var(--bad); } .tag.warn { color: var(--warn); }
+.ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--muted); }
+.variant { display: grid; grid-template-columns: 140px 1fr auto; gap: 8px; align-items: start; margin-bottom: 8px; }
+@media (max-width: 640px) { .variant { grid-template-columns: 1fr; } }
+.dim-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.savebar { position: sticky; bottom: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; box-shadow: 0 -6px 20px rgb(0 0 0 / .06); }
+.big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
+.stat { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
+.stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+pre.log { background: var(--code); border-radius: 8px; padding: 10px; height: 260px; overflow: auto; margin: 0; font-size: 12.5px; white-space: pre-wrap; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); width: min(900px, 94vw); max-height: 86vh; padding: 0; }
+dialog::backdrop { background: rgb(0 0 0 / .45); }
+dialog .dhead { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+dialog .dbody { padding: 16px; overflow: auto; max-height: calc(86vh - 56px); }
+dialog pre { white-space: pre-wrap; margin: 0; font-size: 13px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
+.hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
+.errs { color: var(--bad); font-size: 13px; } .errs div::before { content: "• "; }
+.warns { color: var(--warn); font-size: 13px; } .warns div::before { content: "• "; }
+td input.score { width: 64px; } td input.notes { width: 180px; }
+tr.failed td { color: var(--bad); }
+.bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; min-width: 60px; }
+.bar > span { display: block; height: 100%; background: var(--accent); }
+a { color: var(--accent); }
+</style>
+</head>
+<body>
+<header>
+  <h1>Matrix Dashboard</h1>
+  <nav>
+    <button data-tab="setup">Setup</button>
+    <button data-tab="run">Run</button>
+    <button data-tab="results">Results</button>
+  </nav>
+  <span id="pill" class="pill">Idle</span>
+  <button class="icon" id="theme" title="Toggle light/dark">Theme</button>
+</header>
+<main>
+  <section class="tab" id="tab-setup"></section>
+  <section class="tab" id="tab-run"></section>
+  <section class="tab" id="tab-results"></section>
+</main>
+<dialog id="modal"><div class="dhead"><strong id="mtitle" class="grow"></strong><button class="icon" onclick="modal.close()">✕</button></div><div class="dbody" id="mbody"></div></dialog>
+
+<script>
+// ------------------------------------------------------------------ basics
+const $ = (s, el = document) => el.querySelector(s);
+function h(tag, props, ...kids) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(props || {})) {
+    if (v == null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k === 'style') el.style.cssText = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'dataset') Object.assign(el.dataset, v);
+    else if (k in el && !['list', 'type'].includes(k)) el[k] = v;
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
+  return el;
+}
+const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
+  set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
+async function api(path, method = 'GET', data) {
+  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || r.statusText);
+  return j;
+}
+const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : (+v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
+const fmtTok = (v) => v == null ? '—' : v >= 1e6 ? fmt(v / 1e6, 2) + 'M' : v >= 1e3 ? fmt(v / 1e3, 0) + 'K' : String(v);
+const fmtUsd = (v) => v == null ? '—' : '$' + fmt(v, 2);
+const fmtMin = (v) => v == null ? '—' : v >= 60 ? fmt(v / 60, 1) + 'h' : fmt(v, 0) + 'm';
+// Mirrors run-matrix.mjs: 'high-uc' = high effort with Ultracode on (Claude Code only).
+function parseEffort(e) {
+  let s = String(e ?? '').trim().toLowerCase(), uc = false;
+  const m = s.match(/^(.*?)[\s+-]*(uc|ultracode)$/);
+  if (m) { uc = true; s = m[1]; }
+  const base = !s || s === 'default' ? null : s;
+  return { base, ultracode: uc, label: `${base ?? 'default'}${uc ? '-uc' : ''}` };
+}
+const effName = (e) => parseEffort(e).label;
+const GOAL_DIM = 'goal';
+// Efforts that actually run for this model (Ultracode is skipped outside Claude Code).
+const effortsOf = (a) => (a.efforts?.length ? a.efforts : ['default']).map(effName)
+  .filter((e) => a.provider === 'claude' || !e.endsWith('-uc'));
+const RESERVED = ['model', 'effort', 'lab', 'environment', 'stamp', 'date'];
+const PROVIDERS = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok' };
+
+// theme
+const applyTheme = (t) => { if (t) document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme; };
+applyTheme(store.get('matrix.theme', null));
+$('#theme').onclick = () => {
+  const dark = matchMedia('(prefers-color-scheme: dark)').matches;
+  const cur = document.documentElement.dataset.theme || (dark ? 'dark' : 'light');
+  const next = cur === 'dark' ? 'light' : 'dark'; applyTheme(next); store.set('matrix.theme', next);
+};
+
+// ------------------------------------------------------------------ state
+const logPre = h('pre', { class: 'log mono', id: 'logpre' });
+let cfg = null, savedCfg = '', tmpl = '', savedTmpl = '', meta = {}, results = [], status = {}, logSince = 0;
+let sel = store.get('matrix.sel', { offPick: [], offOnly: {}, opts: { repeat: 1, concurrency: 2, budget: '', timeout: '', rerunFailed: false } });
+let rv = store.get('matrix.results', { group: 'testing', filters: {}, q: '', sort: { k: 'finishedAt', d: -1 } });
+const saveSel = () => store.set('matrix.sel', sel);
+const saveRv = () => store.set('matrix.results', rv);
+const dirty = () => JSON.stringify(cfg) !== savedCfg || tmpl !== savedTmpl;
+
+// tabs
+let tab = location.hash.slice(1) || store.get('matrix.tab', 'run');
+function showTab(t) {
+  tab = t; store.set('matrix.tab', t); history.replaceState(null, '', '#' + t);
+  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('section.tab').forEach((s) => s.classList.toggle('on', s.id === 'tab-' + t));
+  if (t === 'results') renderResults();
+  if (t === 'run') renderRun();
+}
+document.querySelectorAll('nav button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
+addEventListener('hashchange', () => { const t = location.hash.slice(1); if (cfg && ['setup', 'run', 'results'].includes(t) && t !== tab) showTab(t); });
+
+// ------------------------------------------------------------- validation
+function validate() {
+  const errors = [], warnings = [];
+  const ids = new Set();
+  cfg.agents.forEach((a, i) => {
+    if (!/^[\w.-]+$/.test(a.id || '')) errors.push(`Model row ${i + 1}: name must be letters, numbers, - _ or .`);
+    else if (ids.has(a.id)) errors.push(`Model name "${a.id}" is used twice`);
+    ids.add(a.id);
+    if (!a.model) errors.push(`Model row ${i + 1}: model ID is empty`);
+  });
+  const dimNames = Object.keys(cfg.dimensions);
+  for (const d of dimNames) {
+    const vs = cfg.dimensions[d], vids = new Set();
+    if (!vs.length) errors.push(`Dimension "${d}" has no variants`);
+    vs.forEach((v, i) => {
+      if (!/^[\w.-]+$/.test(v.id || '')) errors.push(`${d} variant ${i + 1}: short name must be letters, numbers, - _ or .`);
+      else if (vids.has(v.id)) errors.push(`${d}: short name "${v.id}" is used twice`);
+      vids.add(v.id);
+    });
+  }
+  const used = new Set([...tmpl.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
+  for (const u of used) if (u === GOAL_DIM) errors.push('Remove {{goal}} from the prompt: the goal dimension is sent as a /goal command, not inserted as text');
+    else if (!dimNames.includes(u) && !RESERVED.includes(u)) errors.push(`Prompt uses {{${u}}}, which isn't a dimension`);
+  for (const d of dimNames) if (d !== GOAL_DIM && !used.has(d)) warnings.push(`Dimension "${d}" isn't used in the prompt (add {{${d}}})`);
+  for (const v of cfg.dimensions[GOAL_DIM] ?? []) if ((v.text || '').length > 3850) errors.push(`goal "${v.id}" is too long (${v.text.length} characters; /goal allows about 3,850 here)`);
+  cfg.agents.forEach((a) => { if (a.provider !== 'claude' && (a.efforts || []).some((e) => parseEffort(e).ultracode)) warnings.push(`${a.id}: Ultracode (-uc) only applies to Claude Code, so those efforts are skipped`); });
+  return { errors, warnings, used };
+}
+
+async function save() {
+  const v = validate();
+  if (v.errors.length) { alert('Fix these first:\n\n' + v.errors.join('\n')); return false; }
+  await api('/api/config', 'PUT', cfg);
+  await api('/api/template', 'PUT', { text: tmpl });
+  savedCfg = JSON.stringify(cfg); savedTmpl = tmpl;
+  updateSavebar(); renderRun();
+  return true;
+}
+addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirty()) save(); } });
+addEventListener('beforeunload', (e) => { if (cfg && dirty()) { e.preventDefault(); e.returnValue = ''; } });
+
+// ------------------------------------------------------------------ SETUP
+function changed(rerender) {
+  if (rerender) renderSetup(); else updateSavebar();
+}
+const moveIn = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
+
+function renderSetup() {
+  const root = $('#tab-setup'); root.replaceChildren();
+
+  // Models
+  const agentRows = cfg.agents.map((a, i) => h('tr', {},
+    h('td', {}, h('input', { value: a.id, style: 'width:110px', oninput: (e) => { a.id = e.target.value.trim(); changed(); } })),
+    h('td', {}, h('select', { onchange: (e) => { a.provider = e.target.value; changed(); } },
+      Object.entries(PROVIDERS).map(([p, n]) => h('option', { value: p, selected: a.provider === p }, n)))),
+    h('td', {}, h('input', { value: a.model, class: 'mono', style: 'width:100%', oninput: (e) => { a.model = e.target.value.trim(); changed(); } })),
+    h('td', {}, h('input', { value: (a.efforts || []).join(', '), placeholder: 'default', style: 'width:100%',
+      oninput: (e) => { a.efforts = e.target.value.split(',').map((s) => s.trim()).filter(Boolean); changed(); } })),
+    h('td', {}, h('input', { type: 'number', min: 0, value: a.timeout ?? '', placeholder: 'none', style: 'width:80px',
+      oninput: (e) => { if (e.target.value === '') delete a.timeout; else a.timeout = +e.target.value; changed(); } })),
+    h('td', { style: 'white-space:nowrap' },
+      a.provider === 'claude' ? h('button', { class: 'icon', title: 'Add or remove an Ultracode version of every effort level', onclick: () => {
+        const effs = a.efforts?.length ? a.efforts : ['default'];
+        const has = effs.some((e) => parseEffort(e).ultracode);
+        const bases = [...new Set(effs.map((e) => parseEffort(e).base ?? 'default'))];
+        a.efforts = has ? effs.filter((e) => !parseEffort(e).ultracode) : bases.flatMap((b) => [b, `${b}-uc`]);
+        changed(true);
+      } }, (a.efforts || []).some((e) => parseEffort(e).ultracode) ? '− UC' : '+ UC') : null,
+      h('button', { class: 'icon', title: 'Move up', onclick: () => { moveIn(cfg.agents, i, -1); changed(true); } }, '↑'),
+      h('button', { class: 'icon', title: 'Move down', onclick: () => { moveIn(cfg.agents, i, 1); changed(true); } }, '↓'),
+      h('button', { class: 'icon', title: 'Duplicate', onclick: () => { cfg.agents.splice(i + 1, 0, { ...structuredClone(a), id: a.id + '2' }); changed(true); } }, '⧉'),
+      h('button', { class: 'icon', title: 'Remove', onclick: () => { cfg.agents.splice(i, 1); changed(true); } }, '✕'))));
+  root.append(h('div', { class: 'card' },
+    h('h2', {}, 'Models'),
+    h('p', { class: 'sub' }, 'Each model and its effort levels to sweep. On the Run tab you tick which ones to run.'),
+    h('div', { class: 'scroll' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['Name', 'CLI', 'Model ID', 'Effort levels (comma separated)', 'Time limit (min)', ''].map((t) => h('th', {}, t)))),
+      h('tbody', {}, agentRows))),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      h('button', { class: 'btn', onclick: () => { cfg.agents.push({ id: 'new', provider: 'claude', model: '', efforts: ['high'] }); changed(true); } }, '+ Add model')),
+    h('p', { class: 'hint' }, 'Effort names as each CLI accepts them. Claude Code: low, medium, high, xhigh, max; add -uc for the same level with Ultracode on (e.g. high-uc), or press + UC to add one for every level. Codex: minimal, low, medium, high, xhigh. Leave empty to use the CLI default. Time limit is optional, per run.')));
+
+  // Dimensions
+  const dimNames = Object.keys(cfg.dimensions);
+  const renameDim = (oldName, newName) => {
+    const next = {};
+    for (const k of Object.keys(cfg.dimensions)) next[k === oldName ? newName : k] = cfg.dimensions[k];
+    cfg.dimensions = next;
+    if (sel.offOnly[oldName]) { sel.offOnly[newName] = sel.offOnly[oldName]; delete sel.offOnly[oldName]; saveSel(); }
+  };
+  const dimCards = dimNames.map((d, di) => {
+    const vs = cfg.dimensions[d];
+    return h('div', { class: 'card' },
+      h('div', { class: 'dim-head' },
+        h('input', { value: d, class: 'mono', style: 'width:170px; font-weight:600', title: 'Dimension name = the {{placeholder}} in your prompt',
+          onchange: (e) => {
+            const n = e.target.value.trim();
+            if (!/^\w+$/.test(n) || RESERVED.includes(n) || (n !== d && cfg.dimensions[n])) { alert('Use letters, numbers or _ only, not a name already in use, and not: ' + RESERVED.join(', ')); e.target.value = d; return; }
+            if (confirm(`Rename {{${d}}} to {{${n}}} in the prompt too?`)) tmpl = tmpl.replaceAll(`{{${d}}}`, `{{${n}}}`);
+            renameDim(d, n); changed(true);
+          } }),
+        d === GOAL_DIM ? h('span', { class: 'tag' }, 'sent as /goal · Claude Code only') : h('span', { class: 'tag mono' }, `{{${d}}}`),
+        h('span', { class: 'muted' }, `${vs.length} variant${vs.length === 1 ? '' : 's'}`),
+        h('span', { class: 'grow' }),
+        h('button', { class: 'icon', title: 'Move up', onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, -1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↑'),
+        h('button', { class: 'icon', title: 'Move down', onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, 1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↓'),
+        h('button', { class: 'icon', title: 'Remove dimension', onclick: () => { if (confirm(`Remove "${d}" and its ${vs.length} variants?`)) { delete cfg.dimensions[d]; changed(true); } } }, '✕')),
+      d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and Claude gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until a checker model agrees the condition is met. Add "or stop after N turns" to cap it. Codex and Grok only run the empty variant.') : null,
+      vs.map((v, i) => h('div', { class: 'variant' },
+        h('input', { value: v.id, placeholder: 'short name', title: 'Short name used in folder names and filters',
+          oninput: (e) => { v.id = e.target.value.trim(); changed(); } }),
+        h('textarea', { rows: Math.min(8, Math.max(1, Math.ceil((v.text || '').length / 110))), value: v.text ?? '', placeholder: d === GOAL_DIM ? 'Empty = no goal' : 'Text inserted into the prompt',
+          oninput: (e) => { v.text = e.target.value; changed(); } }),
+        h('div', { style: 'white-space:nowrap' },
+          h('button', { class: 'icon', title: 'Move up', onclick: () => { moveIn(vs, i, -1); changed(true); } }, '↑'),
+          h('button', { class: 'icon', title: 'Move down', onclick: () => { moveIn(vs, i, 1); changed(true); } }, '↓'),
+          h('button', { class: 'icon', title: 'Remove', onclick: () => { vs.splice(i, 1); changed(true); } }, '✕')))),
+      h('button', { class: 'btn', onclick: () => { vs.push({ id: 'v' + (vs.length + 1), text: '' }); changed(true); } }, '+ Add variant'));
+  });
+  root.append(h('div', { class: 'card', style: 'margin-bottom:8px' },
+    h('h2', {}, 'Dimensions'),
+    h('p', { class: 'sub', style: 'margin:0' }, 'Each dimension fills its {{placeholder}} in the prompt with one variant per run. Every combination gets run. Order variants however you like; Results follow this order.')));
+  root.append(...dimCards);
+  root.append(h('div', { class: 'row', style: 'margin:-4px 0 16px' },
+    !cfg.dimensions[GOAL_DIM] ? h('button', { class: 'btn', onclick: () => { cfg.dimensions[GOAL_DIM] = [{ id: 'off', text: '' }, { id: 'on', text: '' }]; changed(true); } }, '+ Add goal dimension') : null,
+    h('button', { class: 'btn', onclick: () => {
+      const n = prompt('Name for the new dimension (becomes {{name}} in the prompt):');
+      if (!n) return;
+      if (!/^\w+$/.test(n) || RESERVED.includes(n) || cfg.dimensions[n]) return alert('Use letters, numbers or _ only, and a name not already in use.');
+      cfg.dimensions[n] = [{ id: 'v1', text: '' }]; changed(true);
+    } }, '+ Add dimension')));
+
+  // Prompt template
+  const chips = h('div', { class: 'chips', id: 'tchips' });
+  const tarea = h('textarea', { class: 'mono', rows: 24, value: tmpl, spellcheck: false, oninput: (e) => { tmpl = e.target.value; updateChips(); changed(); } });
+  root.append(h('div', { class: 'card' },
+    h('h2', {}, 'Prompt'),
+    h('p', { class: 'sub' }, h('span', {}, 'Saved to '), h('span', { class: 'mono' }, meta.templatePath || cfg.templateFile)),
+    tarea,
+    h('div', { style: 'margin-top:10px' }, chips),
+    h('p', { class: 'hint' }, 'Filled automatically for every run: {{model}} {{effort}} {{lab}} {{environment}} {{stamp}} (YYYYMMDD-HHMM) {{date}} (YYYY-MM-DD HH:MM). Click a chip to insert it at the cursor.')));
+  function updateChips() {
+    const { used } = validate();
+    chips.replaceChildren(...[...Object.keys(cfg.dimensions).filter((n) => n !== GOAL_DIM), ...RESERVED].map((n) => {
+      const isDim = !!cfg.dimensions[n];
+      const cls = used.has(n) ? 'tag ok' : isDim ? 'tag warn' : 'tag';
+      return h('button', { class: cls + ' mono', style: 'border:0;cursor:pointer', title: used.has(n) ? 'Used in prompt' : isDim ? 'Not used yet' : 'Optional',
+        onclick: () => { const s = tarea.selectionStart, e2 = tarea.selectionEnd; tarea.setRangeText(`{{${n}}}`, s, e2, 'end'); tarea.focus(); tmpl = tarea.value; updateChips(); changed(); } },
+        (used.has(n) ? '✓ ' : '') + `{{${n}}}`);
+    }));
+  }
+  updateChips();
+
+  // Advanced
+  cfg.bins ??= {}; cfg.extraArgs ??= {};
+  root.append(h('div', { class: 'card' },
+    h('h2', {}, 'Advanced'),
+    h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
+    h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', {},
+      h('strong', {}, n),
+      h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Command'),
+        h('input', { class: 'mono grow', value: cfg.bins[p] ?? p, oninput: (e) => { cfg.bins[p] = e.target.value.trim(); changed(); } })),
+      h('div', { class: 'muted', style: 'margin-bottom:4px' }, 'Extra flags (one per line)'),
+      h('textarea', { class: 'mono', rows: 3, value: (cfg.extraArgs[p] ?? []).join('\n'),
+        oninput: (e) => { cfg.extraArgs[p] = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); changed(); } })))),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('span', { class: 'muted' }, 'Prompt file'),
+      h('input', { class: 'mono', value: cfg.templateFile || 'prompt-template.md', onchange: (e) => { cfg.templateFile = e.target.value.trim(); changed(); } }),
+      h('span', { class: 'hint', style: 'margin:0' }, 'Change to keep several prompts side by side; the current text is saved to the new file.'))));
+
+  root.append(h('div', { class: 'savebar', id: 'savebar' }));
+  updateSavebar();
+}
+
+function updateSavebar() {
+  const bar = $('#savebar'); if (!bar) return;
+  const v = validate(), d = dirty();
+  bar.replaceChildren(
+    h('div', { class: 'grow' },
+      v.errors.length ? h('div', { class: 'errs' }, v.errors.slice(0, 6).map((e) => h('div', {}, e))) : null,
+      v.warnings.length ? h('div', { class: 'warns' }, v.warnings.map((e) => h('div', {}, e))) : null,
+      !v.errors.length && !v.warnings.length ? h('span', { class: d ? '' : 'muted' }, d ? 'Unsaved changes' : 'All changes saved') : null),
+    h('button', { class: 'btn', disabled: !d, onclick: async () => { if (confirm('Discard unsaved changes?')) { await loadSetup(); renderSetup(); renderRun(); } } }, 'Discard'),
+    h('button', { class: 'btn primary', disabled: !d || v.errors.length > 0, onclick: save }, 'Save (Ctrl+S)'));
+}
+
+// -------------------------------------------------------------------- RUN
+function selection() {
+  const offP = new Set(sel.offPick), pick = [], only = {};
+  for (const a of cfg.agents) for (const e of effortsOf(a)) {
+    const k = `${a.id}:${e}`; if (!offP.has(k)) pick.push(k);
+  }
+  for (const [d, vs] of Object.entries(cfg.dimensions)) {
+    const off = new Set(sel.offOnly[d] || []); only[d] = vs.filter((v) => !off.has(v.id)).map((v) => v.id);
+  }
+  const repeat = Math.max(1, +sel.opts.repeat || 1);
+  const goalOn = new Set((cfg.dimensions[GOAL_DIM] || []).filter((v) => (v.text || '').trim()).map((v) => v.id));
+  const provOf = Object.fromEntries(cfg.agents.map((a) => [a.id, a.provider]));
+  // Variant ids per dimension for one agent (goal variants only run on Claude Code).
+  const listsFor = (agentId) => Object.entries(only).map(([d, l]) => d === GOAL_DIM && provOf[agentId] !== 'claude' ? l.filter((v) => !goalOn.has(v)) : l);
+  const combosFor = (agentId) => listsFor(agentId).reduce((n, l) => n * l.length, 1);
+  const combos = Object.values(only).reduce((n, l) => n * l.length, 1);
+  const count = pick.reduce((n, k) => n + combosFor(k.split(':')[0]), 0) * repeat;
+  let done = 0;
+  if (count <= 50000) {
+    const doneIds = new Set(results.filter((r) => r.status === 'ok' || !sel.opts.rerunFailed).map((r) => r.id));
+    let lists;
+    const walk = (i, acc, base) => {
+      if (i === lists.length) { for (let r = 1; r <= repeat; r++) if (doneIds.has([base, ...acc, repeat > 1 ? `r${r}` : null].filter(Boolean).join('__'))) done++; return; }
+      for (const v of lists[i]) walk(i + 1, [...acc, v], base);
+    };
+    for (const k of pick) { const [a, e] = k.split(':'); lists = listsFor(a); walk(0, [], `${a}-${e}`); }
+  }
+  return { pick, only, repeat, count, done, combos };
+}
+
+function chip(label, on, toggle, title) {
+  return h('label', { class: 'chip' + (on ? ' on' : ''), title },
+    h('input', { type: 'checkbox', checked: on, onchange: (e) => toggle(e.target.checked) }), label);
+}
+const setOff = (arr, key, off) => { const i = arr.indexOf(key); if (off && i < 0) arr.push(key); if (!off && i >= 0) arr.splice(i, 1); };
+
+function renderRun() {
+  if (!cfg) return;
+  const root = $('#tab-run'); root.replaceChildren();
+  const s = selection();
+  const rerender = () => { saveSel(); renderRun(); };
+
+  // Summary + launch
+  const running = !!status.running;
+  root.append(h('div', { class: 'card' },
+    h('div', { class: 'row', style: 'gap:28px; align-items:flex-end' },
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Will run'), h('span', { class: 'big' }, (s.count - s.done).toLocaleString())),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Selected'), h('span', {}, `${s.count.toLocaleString()} combinations`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Already done'), h('span', {}, `${s.done.toLocaleString()} (skipped)`)),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per model+effort'), h('span', {}, `up to ${s.combos * s.repeat} runs`)),
+      h('span', { class: 'grow' }),
+      h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
+      running
+        ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
+        : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) }, '▶ Start')),
+    dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, 'Setup has unsaved changes; they will be saved when you start.') : null));
+
+  // Models & efforts
+  const allKeys = cfg.agents.flatMap((a) => effortsOf(a).map((e) => `${a.id}:${e}`));
+  root.append(h('div', { class: 'grid2' },
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Models & effort'),
+        h('button', { class: 'icon', onclick: () => { sel.offPick = []; rerender(); } }, 'all'),
+        h('button', { class: 'icon', onclick: () => { sel.offPick = [...allKeys]; rerender(); } }, 'none')),
+      h('table', {}, h('tbody', {}, cfg.agents.map((a) => {
+        const effs = effortsOf(a);
+        const keys = effs.map((e) => `${a.id}:${e}`);
+        return h('tr', {},
+          h('td', { style: 'width:1%; white-space:nowrap' }, h('strong', {}, a.id), h('div', { class: 'muted mono', style: 'font-size:12px' }, a.model)),
+          h('td', {}, h('div', { class: 'chips' }, effs.map((e, i) => chip(e.endsWith('-uc') ? e.slice(0, -3) + ' + ultracode' : e,
+            !sel.offPick.includes(keys[i]), (on) => { setOff(sel.offPick, keys[i], !on); rerender(); }, e.endsWith('-uc') ? 'Ultracode on: dynamic workflows on every task' : null)))),
+          h('td', { style: 'width:1%; white-space:nowrap' },
+            h('button', { class: 'icon', onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, false)); rerender(); } }, 'all'),
+            h('button', { class: 'icon', onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, true)); rerender(); } }, 'none')));
+      })))),
+    h('div', { class: 'card' },
+      h('h2', {}, 'Options'),
+      h('table', {}, h('tbody', {},
+        optRow('Parallel runs', 'concurrency', 'number', 'How many agents run at once'),
+        optRow('Repeat each', 'repeat', 'number', 'Run each combination this many times (to see variance)'),
+        optRow('Budget ($)', 'budget', 'number', 'Stop starting new runs after this much reported spend. Codex runs don\'t report cost and don\'t count.'),
+        optRow('Time limit (min)', 'timeout', 'number', 'Per run, unless the model has its own. Empty = no limit.'),
+        h('tr', {}, h('td', {}, 'Retry failed'), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: !!sel.opts.rerunFailed,
+          onchange: (e) => { sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before')))))))));
+  function optRow(label, key, type, hint) {
+    return h('tr', {}, h('td', { style: 'white-space:nowrap' }, label),
+      h('td', {}, h('input', { type, min: key === 'concurrency' || key === 'repeat' ? 1 : 0, value: sel.opts[key] ?? '', style: 'width:100px', placeholder: key === 'budget' ? 'none' : key === 'timeout' ? 'none' : '',
+        onchange: (e) => { sel.opts[key] = e.target.value; rerender(); } }), h('div', { class: 'hint' }, hint)));
+  }
+
+  // Dimensions
+  root.append(h('div', { class: 'grid2' }, Object.entries(cfg.dimensions).map(([d, vs]) => {
+    sel.offOnly[d] ??= [];
+    return h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, d),
+        h('button', { class: 'icon', onclick: () => { sel.offOnly[d] = []; rerender(); } }, 'all'),
+        h('button', { class: 'icon', onclick: () => { sel.offOnly[d] = vs.map((v) => v.id); rerender(); } }, 'none')),
+      h('div', { class: 'chips' }, vs.map((v) => chip(v.id, !sel.offOnly[d].includes(v.id), (on) => { setOff(sel.offOnly[d], v.id, !on); rerender(); }, v.text))));
+  })));
+
+  // Live
+  root.append(h('div', { class: 'card', id: 'live' }));
+  renderLive();
+}
+
+function renderLive() {
+  const el = $('#live'); if (!el) return;
+  const st = status;
+  const head = st.running
+    ? `Running · ${st.finished} finished · ${st.active.length} in progress · started ${new Date(st.startedAt).toLocaleTimeString()}`
+    : st.finishedAt ? `Last batch ended ${new Date(st.finishedAt).toLocaleString()} (${st.finished} finished)` : 'No batch started since the dashboard opened.';
+  const pre = logPre;
+  el.replaceChildren(h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
+    st.active?.length ? h('div', { class: 'chips', style: 'margin-bottom:10px' }, st.active.map((id) => h('span', { class: 'tag' }, '▶ ' + id))) : null,
+    pre);
+}
+
+async function preview() {
+  try {
+    const s = selection();
+    const r = await api('/api/preview', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed });
+    if (dirty()) r.note = 'Preview uses the saved setup. Save to include your latest edits.';
+    openModal(`Preview · ${r.count} runs`, h('div', {},
+      r.note ? h('p', { class: 'warns' }, r.note) : null,
+      r.error ? h('p', { class: 'errs' }, r.error) : null,
+      h('p', { class: 'muted' }, 'Sample prompt for ', h('span', { class: 'mono' }, r.sampleId || '—')),
+      h('pre', { class: 'mono', style: 'background:var(--code);padding:12px;border-radius:8px' }, r.sample || ''),
+      h('details', { style: 'margin-top:12px' }, h('summary', {}, `All ${r.ids.length} run names`),
+        h('pre', { class: 'mono' }, r.ids.slice(0, 3000).join('\n')))));
+  } catch (e) { alert(e.message); }
+}
+
+async function start() {
+  if (dirty() && !(await save())) return;
+  const s = selection();
+  const n = s.count - s.done;
+  const budget = +sel.opts.budget > 0 ? ` with a $${sel.opts.budget} budget` : ' with no budget limit';
+  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}, ${sel.opts.concurrency || 1} at a time${budget}?\n\nAgents run with permission prompts off.`)) return;
+  try {
+    await api('/api/run', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed,
+      concurrency: sel.opts.concurrency, budget: sel.opts.budget, timeout: sel.opts.timeout });
+    logSince = 0; logPre.textContent = '';
+    await poll();
+  } catch (e) { alert(e.message); }
+}
+async function stop() {
+  if (!confirm('Stop the batch? Running agents are ended and their unfinished runs discarded (they run fresh next time). Finished runs are kept.')) return;
+  await api('/api/stop', 'POST', {}); await poll();
+}
+
+// ---------------------------------------------------------------- RESULTS
+function renderResults() {
+  if (!cfg) return;
+  const root = $('#tab-results'); root.replaceChildren();
+  const dims = Object.keys(cfg.dimensions);
+  const order = { agent: cfg.agents.map((a) => a.id), ...Object.fromEntries(dims.map((d) => [d, cfg.dimensions[d].map((v) => v.id)])) };
+  const effOrder = [...new Set(cfg.agents.flatMap((a) => (a.efforts || []).map(effName))), 'default'];
+  for (const r of results) r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
+  const fields = ['agent', 'effort', 'ultracode', ...dims, 'status'];
+  const valuesOf = (f) => {
+    const vals = [...new Set(results.map((r) => String(r[f] ?? '')))];
+    const ord = f === 'effort' ? effOrder : order[f] || [];
+    return vals.sort((a, b) => ((ord.indexOf(a) + 1 || 999) - (ord.indexOf(b) + 1 || 999)) || a.localeCompare(b));
+  };
+
+  const filtered = results.filter((r) =>
+    fields.every((f) => !rv.filters[f] || String(r[f] ?? '') === rv.filters[f]) &&
+    (!rv.q || [r.id, r.notes].join(' ').toLowerCase().includes(rv.q.toLowerCase())));
+
+  // toolbar
+  root.append(h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('input', { placeholder: 'Search run names and notes', value: rv.q, class: 'grow', style: 'min-width:200px',
+        oninput: (e) => { rv.q = e.target.value; saveRv(); clearTimeout(window.__qt); window.__qt = setTimeout(renderResults, 250); } }),
+      fields.map((f) => h('select', { title: f, onchange: (e) => { rv.filters[f] = e.target.value; saveRv(); renderResults(); } },
+        h('option', { value: '' }, `${f}: all`), valuesOf(f).map((v) => h('option', { value: v, selected: rv.filters[f] === v }, `${f}: ${v || '—'}`)))),
+      h('button', { class: 'btn', onclick: () => { rv.filters = {}; rv.q = ''; saveRv(); renderResults(); } }, 'Clear'),
+      h('button', { class: 'btn', onclick: async () => { await loadResults(); renderResults(); } }, 'Refresh')),
+    h('p', { class: 'hint' }, `${filtered.length} of ${results.length} runs shown. Score out of 10 as you play; scores and notes save instantly.`)));
+
+  // compare by
+  const groupFields = ['agent', 'effort', 'agent+effort', 'ultracode', ...dims, 'model'];
+  if (!groupFields.includes(rv.group)) rv.group = 'agent';
+  const keyOf = (r) => rv.group === 'agent+effort' ? `${r.agent} · ${r.effort}` : String(r[rv.group] ?? '');
+  const groups = new Map();
+  for (const r of filtered) { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  const gOrd = rv.group === 'effort' ? effOrder : order[rv.group] || [];
+  const avg = (rows, f) => { const v = rows.map((r) => r[f]).filter((x) => x != null && !Number.isNaN(+x)); return v.length ? { v: v.reduce((a, b) => a + +b, 0) / v.length, n: v.length } : { v: null, n: 0 }; };
+  const sum = (rows, f) => rows.reduce((a, r) => a + (+r[f] || 0), 0);
+  const gRows = [...groups.entries()].sort(([a], [b]) => ((gOrd.indexOf(a) + 1 || 999) - (gOrd.indexOf(b) + 1 || 999)) || a.localeCompare(b, undefined, { numeric: true }));
+  const maxCost = Math.max(0, ...gRows.map(([, rs]) => avg(rs, 'costUsd').v || 0));
+  root.append(h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Compare'),
+      h('span', { class: 'muted' }, 'Group by'),
+      h('select', { onchange: (e) => { rv.group = e.target.value; saveRv(); renderResults(); } },
+        groupFields.map((g) => h('option', { value: g, selected: rv.group === g }, g)))),
+    h('p', { class: 'sub' }, 'Averages per group. Cost averages only runs whose CLI reported a cost (n shown). Score averages only scored runs.'),
+    h('div', { class: 'scroll' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, rv.group), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
+      h('tbody', {}, gRows.map(([k, rs]) => {
+        const c = avg(rs, 'costUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
+        return h('tr', {},
+          h('td', {}, h('strong', {}, k || '—')),
+          h('td', { class: 'num' }, rs.length),
+          h('td', { class: 'num' }, `${Math.round(100 * del / rs.length)}%`),
+          h('td', { class: 'num' }, fmtMin(avg(rs, 'wallMinutes').v)),
+          h('td', { class: 'num' }, c.n ? `${fmtUsd(c.v)}` : '—', c.n && c.n < rs.length ? h('span', { class: 'muted' }, ` (n=${c.n})`) : null),
+          h('td', {}, c.v ? h('div', { class: 'bar', title: 'Relative avg cost' }, h('span', { style: `width:${Math.round(100 * c.v / maxCost)}%` })) : null),
+          h('td', { class: 'num' }, c.n ? fmtUsd(sum(rs, 'costUsd')) : '—'),
+          h('td', { class: 'num' }, fmtTok(avg(rs, 'outputTokens').v)),
+          h('td', { class: 'num' }, sc.n ? fmt(sc.v, 1) : '—', sc.n ? h('span', { class: 'muted' }, ` (${sc.n})`) : null));
+      }))))));
+
+  // runs table
+  const cols = [
+    ['', null], ['agent', 'agent'], ['effort', 'effort'], ...dims.map((d) => [d, d]), ['status', 'status'],
+    ['time', 'wallMinutes', 1], ['cost', 'costUsd', 1], ['out tok', 'outputTokens', 1], ['KB', 'kb', 1],
+    ['score', 'score', 1], ['notes', 'notes'], ['finished', 'finishedAt'], ['', null]];
+  const sk = rv.sort.k, sd = rv.sort.d;
+  const sorted = [...filtered].sort((a, b) => {
+    const x = a[sk], y = b[sk];
+    if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
+    return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * sd;
+  });
+  const LIMIT = 500;
+  root.append(h('div', { class: 'card' },
+    h('h2', {}, 'Runs'),
+    h('div', { class: 'scroll' }, h('table', {},
+      h('thead', {}, h('tr', {}, cols.map(([label, key, num]) => h('th', {
+        class: (key ? 'sort ' : '') + (num ? 'num' : ''),
+        onclick: key ? () => { rv.sort = { k: key, d: rv.sort.k === key ? -rv.sort.d : (num ? -1 : 1) }; saveRv(); renderResults(); } : null },
+        label, key === sk ? (sd > 0 ? ' ▲' : ' ▼') : '')))),
+      h('tbody', {}, sorted.slice(0, LIMIT).map(runRow)))),
+    sorted.length > LIMIT ? h('p', { class: 'hint' }, `Showing the first ${LIMIT}. Use filters to narrow down.`) : null));
+
+  function runRow(r) {
+    const saveScore = async (patch) => {
+      Object.assign(r, patch);
+      try { await api('/api/score', 'PUT', { id: r.id, score: r.score ?? '', notes: r.notes ?? '' }); } catch (e) { alert(e.message); }
+    };
+    return h('tr', { class: r.status === 'failed' ? 'failed' : '' },
+      h('td', {}, r.entry ? h('a', { href: '/runs/' + r.entry, target: '_blank', title: 'Play', style: 'text-decoration:none' }, '▶') : h('span', { class: 'muted', title: 'No game file' }, '—')),
+      h('td', {}, r.agent), h('td', {}, r.effort), dims.map((d) => h('td', {}, r[d] ?? '—')),
+      h('td', {}, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad') }, r.status), r.delivered === false && r.status === 'ok' ? h('span', { class: 'tag warn', title: 'No bundled .html in the root' }, 'no html') : null),
+      h('td', { class: 'num' }, fmtMin(r.wallMinutes)),
+      h('td', { class: 'num' }, r.costUsd != null ? fmtUsd(r.costUsd) : h('span', { class: 'muted', title: 'This CLI does not report cost' }, 'n/a')),
+      h('td', { class: 'num' }, fmtTok(r.outputTokens)),
+      h('td', { class: 'num' }, r.kb ?? '—'),
+      h('td', { class: 'num' }, h('input', { type: 'number', min: 0, max: 10, step: 0.5, class: 'score', value: r.score ?? '',
+        onchange: (e) => saveScore({ score: e.target.value === '' ? null : +e.target.value }) })),
+      h('td', {}, h('input', { class: 'notes', value: r.notes ?? '', placeholder: 'notes', onchange: (e) => saveScore({ notes: e.target.value }) })),
+      h('td', { class: 'muted', style: 'white-space:nowrap' }, r.finishedAt ? new Date(r.finishedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''),
+      h('td', { style: 'white-space:nowrap' },
+        h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
+        h('button', { class: 'icon', title: 'Prompt sent', onclick: () => showFile(r.id, 'prompt.md', 'Prompt') }, 'prompt'),
+        r.goal && r.goal !== 'off' ? h('button', { class: 'icon', title: 'The /goal message sent', onclick: () => showFile(r.id, 'goal.md', 'Goal') }, 'goal') : null,
+        h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, 'agent.err', 'Errors') }, 'log'),
+        h('button', { class: 'icon', title: 'Delete this run so it runs again next time', onclick: async () => {
+          if (!confirm(`Delete ${r.id}? Its folder and game are removed and it will run again in the next batch.`)) return;
+          try { await api('/api/delete-run', 'POST', { id: r.id }); await loadResults(); renderResults(); } catch (e) { alert(e.message); }
+        } }, '✕')));
+  }
+}
+
+async function showFile(id, name, title) {
+  const r = await fetch(`/runs/${encodeURIComponent(id)}/${name}`);
+  const text = r.ok ? await r.text() : '(not found)';
+  openModal(`${title} · ${id}`, h('pre', { class: name.endsWith('.md') ? '' : 'mono' }, text.length > 400000 ? text.slice(-400000) : text || '(empty)'));
+}
+function openModal(title, content) { $('#mtitle').textContent = title; $('#mbody').replaceChildren(content); modal.showModal(); }
+
+// ------------------------------------------------------------------- data
+async function loadSetup() {
+  const c = await api('/api/config');
+  meta = { path: c.path, outDir: c.outDir, platform: c.platform };
+  cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
+  cfg.agents ??= []; cfg.dimensions ??= {};
+  savedCfg = JSON.stringify(cfg);
+  const t = await api('/api/template'); tmpl = t.text; savedTmpl = tmpl; meta.templatePath = t.path;
+}
+async function loadResults() { results = await api('/api/results'); }
+
+let wasRunning = false;
+async function poll() {
+  try {
+    const st = await api('/api/status?since=' + logSince);
+    if (st.logTotal < logSince) { logSince = 0; logPre.textContent = ''; return poll(); } // a new batch reset the log
+    status = st;
+    const pre = logPre;
+    if (st.log.length) {
+      const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+      pre.textContent += st.log.join('\n') + '\n';
+      if (atBottom) pre.scrollTop = pre.scrollHeight;
+    }
+    logSince = st.logTotal;
+    const pill = $('#pill');
+    pill.textContent = st.running ? (st.stopping ? 'Stopping…' : `Running · ${st.active.length} active · ${st.finished} done`) : 'Idle';
+    pill.classList.toggle('live', !!st.running);
+    const finishedOne = st.log.some((l) => /^[✔✘]/.test(l));
+    if (finishedOne || (wasRunning && !st.running)) { await loadResults(); if (tab === 'results') renderResults(); }
+    if (tab === 'run') { if (wasRunning !== !!st.running || finishedOne) renderRun(); else renderLive(); }
+    wasRunning = !!st.running;
+  } catch {
+    $('#pill').textContent = 'Dashboard server not reachable'; $('#pill').classList.remove('live');
+  }
+}
+
+(async () => {
+  // Opened by double-clicking the file: there's no server to talk to.
+  if (location.protocol === 'file:') {
+    $('main').replaceChildren(h('div', { class: 'card', style: 'max-width:720px;margin:40px auto' },
+      h('h2', {}, 'Start the dashboard server first'),
+      h('p', {}, 'This page needs its small local server, so it can\'t be opened as a file. In your Ubuntu (WSL) terminal:'),
+      h('pre', { class: 'mono', style: 'background:var(--code);padding:12px;border-radius:8px' }, 'cd ~/dev/cc-matrix\nnode dashboard.mjs'),
+      h('p', {}, 'Then open ', h('a', { href: 'http://localhost:4173' }, 'http://localhost:4173'), ' in your browser.')));
+    $('#pill').textContent = 'Not started';
+    return;
+  }
+  await loadSetup();
+  await loadResults();
+  renderSetup();
+  showTab(['setup', 'run', 'results'].includes(tab) ? tab : 'run');
+  await poll();
+  setInterval(poll, 2000);
+})();
+</script>
+</body>
+</html>
