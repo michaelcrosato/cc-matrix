@@ -26,6 +26,8 @@ Art Direction: {{artDirection}}
 
 Animation: {{animation}}
 
+Audio: {{audio}}
+
 Performance: Treat it as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.
 
 ## UI & UX: 10-Foot Controller-First Philosophy
@@ -56,6 +58,7 @@ CRTICAL: Put Source Information, Engine Feedback and Prompt Feedback in your cha
 - Tech: stack, libraries/engines, with versions if applicable
 - Art Direction: style used
 - Animation: system used
+- Audio: system used
 - Testing: testing parameters allowed
 - Environment: {{environment}}
 - Model: {{lab}}, {{model}}, reasoning effort {{effort}}
