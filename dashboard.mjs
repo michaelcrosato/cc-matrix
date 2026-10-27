@@ -7,6 +7,7 @@
 
 import http from 'node:http';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -39,6 +40,110 @@ const body = (req) => new Promise((resolve, reject) => {
   req.on('end', () => resolve(s)); req.on('error', reject);
 });
 
+// ------------------------------------------------------------------- CLIs
+// What the Setup tab shows per CLI: version, the models it offers (with the effort levels
+// each takes) and the global instruction files it loads into every run. Checked in the
+// background at start and cached until Re-check.
+const HOME = os.homedir();
+const EFFORT_ORDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const byEffort = (a, b) => EFFORT_ORDER.indexOf(a) - EFFORT_ORDER.indexOf(b);
+
+function runCmd(bin, args, ms = 30000) {
+  return new Promise((resolve) => {
+    let out = '', err = '', done = false;
+    const finish = (code) => { if (!done) { done = true; clearTimeout(timer); resolve({ code, out, err }); } };
+    const child = spawn(bin, args, { cwd: os.tmpdir(), shell: process.platform === 'win32', stdio: ['ignore', 'pipe', 'pipe'] });
+    const timer = setTimeout(() => { child.kill(); err += `\ntimed out after ${ms / 1000}s`; }, ms);
+    child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
+    child.on('error', (e) => { err += e.message; finish(null); });
+    child.on('close', finish);
+  });
+}
+
+const CLI_INFO = {
+  claude: { instructions: ['.claude/CLAUDE.md'], suggested: true,
+    models: async () => ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'].map((id) => ({ id })) },
+  // JSON: { models: [{ slug, display_name, visibility, supported_reasoning_levels: [{ effort }] }] }
+  codex: { instructions: ['.codex/AGENTS.md'],
+    models: async (bin) => {
+      const r = await runCmd(bin, ['debug', 'models']);
+      if (r.code !== 0) throw new Error((r.err || r.out).trim().split('\n').pop() || 'codex debug models failed');
+      return (JSON.parse(r.out).models ?? []).filter((m) => m.visibility === 'list').map((m) => ({ id: m.slug, label: m.display_name,
+        efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort).sort(byEffort) }));
+    } },
+  // "  * grok-4.7 (default)" / "  - grok-4.6"
+  grok: { instructions: ['.grok/AGENTS.md', '.claude/CLAUDE.md'],
+    models: async (bin) => {
+      const r = await runCmd(bin, ['models']);
+      if (r.code !== 0) throw new Error((r.err || r.out).trim().split('\n').pop() || 'grok models failed');
+      return [...r.out.matchAll(/^\s*([*-])\s+([\w.:-]+)(.*)$/gm)].map(([, mark, id, rest]) => ({ id, default: mark === '*' || /default/.test(rest) }));
+    } },
+  // "gemini-4-argon-high\tGemini 4 Argon (High)": the effort is part of the listed ID.
+  agy: { instructions: ['.gemini/GEMINI.md', '.gemini/AGENTS.md'],
+    models: async (bin) => {
+      const r = await runCmd(bin, ['models']);
+      if (r.code !== 0) throw new Error((r.err || r.out).trim().split('\n').pop() || 'agy models failed');
+      const base = new Map();
+      for (const [, id, label] of r.out.matchAll(/^(\S+)\t(.*)$/gm)) {
+        const m = id.match(new RegExp(`^(.+)-(${EFFORT_ORDER.join('|')})$`));
+        const key = m ? m[1] : id;
+        if (!base.has(key)) base.set(key, { id: key, label: label.replace(/\s*\(.*\)$/, ''), efforts: [] });
+        if (m) base.get(key).efforts.push(m[2]);
+      }
+      return [...base.values()].map((m) => ({ ...m, efforts: m.efforts.sort(byEffort) }));
+    } },
+  // Muse has no list command; it caches the provider's catalog here.
+  muse: { instructions: ['.claude/CLAUDE.md', '.codex/AGENTS.md'],
+    models: async () => {
+      const dir = path.join(process.env.XDG_DATA_HOME || path.join(HOME, '.local/share'), 'muse/model-catalog');
+      const rows = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).flatMap((f) => readJSON(path.join(dir, f), {}).rows ?? []);
+      return rows.filter((r) => r.visibility === 'visible').map((r) => ({ id: r.model_id, default: !!r.is_default,
+        efforts: (r.reasoning_effort_variants ?? []).map((v) => v.tier).sort(byEffort) }));
+    } },
+};
+
+async function detectCli(p, bins) {
+  const info = CLI_INFO[p] ?? {}, bin = bins[p] || p;
+  const v = await runCmd(bin, ['--version']);
+  const r = { id: p, bin, installed: v.code === 0, suggested: !!info.suggested,
+    version: v.code === 0 ? (v.out.trim() || v.err.trim()).split('\n')[0] : null,
+    error: v.code === 0 ? null : (v.err.trim() || `"${bin} --version" failed`).split('\n').pop(),
+    instructions: (info.instructions ?? []).filter((f) => fs.existsSync(path.join(HOME, f))).map((f) => '~/' + f), models: [] };
+  if (r.installed && info.models) {
+    try { r.models = await info.models(bin); } catch (e) { r.modelsError = e.message; }
+  }
+  return r;
+}
+
+let cliCheck = null;
+function checkClis(refresh) {
+  if (refresh || !cliCheck) {
+    const bins = readJSON(CONFIG, {}).bins ?? {};
+    cliCheck = Promise.all(Object.keys(CLI_INFO).map((p) => detectCli(p, bins)))
+      .then((list) => ({ checkedAt: new Date().toISOString(), clis: Object.fromEntries(list.map((c) => [c.id, c])) }));
+  }
+  return cliCheck;
+}
+
+// ------------------------------------------------------------ smoke tests
+// One tiny task per model+effort through the real runner (run-matrix.mjs --smoke).
+// Finished results are kept in runs/.smoke.json so they survive a restart.
+const SMOKE_FILE = path.join(OUT, '.smoke.json');
+const smokes = readJSON(SMOKE_FILE, {});
+function startSmoke(key, goal) {
+  smokes[key] = { running: true, goal: !!goal, startedAt: new Date().toISOString() };
+  const a = [RUNNER, '--config', CONFIG, '--out', OUT, '--smoke', key];
+  if (goal) a.push('--smoke-goal');
+  const child = spawn(process.execPath, a, { cwd: HERE });
+  let out = '', err = '';
+  child.stdout.on('data', (d) => { out += d; }); child.stderr.on('data', (d) => { err += d; });
+  child.on('close', () => {
+    try { smokes[key] = JSON.parse(out.trim().split('\n').pop()); }
+    catch { smokes[key] = { key, ok: false, goal: !!goal, at: new Date().toISOString(), error: (err || out || 'The test crashed').trim().slice(-2000) }; }
+    fs.writeFileSync(SMOKE_FILE, JSON.stringify(Object.fromEntries(Object.entries(smokes).filter(([, v]) => !v.running)), null, 2));
+  });
+}
+
 // Turn the dashboard's selection into runner flags.
 function selectionArgs(sel = {}) {
   const a = ['--config', CONFIG, '--out', OUT];
@@ -52,21 +157,23 @@ function selectionArgs(sel = {}) {
 
 // ------------------------------------------------------------- run state
 let runner = null;
-const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Set(), finished: 0, settings: null };
+// active: run id -> start time
+const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Map(), finished: 0, settings: null };
 function logLine(line) {
   if (!line) return;
   run.log.push(line);
   if (run.log.length > 3000) run.log.splice(0, run.log.length - 3000);
   const m = line.match(/^(▶|✔|✘|■) (\S+)/);
-  if (m) { if (m[1] === '▶') run.active.add(m[2]); else { run.active.delete(m[2]); if (m[1] !== '■') run.finished++; } }
+  if (m) { if (m[1] === '▶') run.active.set(m[2], new Date().toISOString()); else { run.active.delete(m[2]); if (m[1] !== '■') run.finished++; } }
 }
 
 function startRun(s) {
   const a = [RUNNER, ...selectionArgs(s), '-j', String(Math.max(1, +s.concurrency || 1))];
+  if (+s.perCli > 0) a.push('--per-cli', String(+s.perCli));
   if (+s.budget > 0) a.push('--budget', String(+s.budget));
   if (+s.timeout > 0) a.push('--timeout', String(+s.timeout));
   Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null,
-    active: new Set(), finished: 0, settings: s });
+    active: new Map(), finished: 0, settings: s });
   runner = spawn(process.execPath, a, { cwd: HERE });
   let buf = '';
   const onData = (d) => { buf += d; const lines = buf.split(/\r?\n/); buf = lines.pop(); lines.forEach(logLine); };
@@ -143,9 +250,16 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/status' && m === 'GET') {
       const since = +(url.searchParams.get('since') ?? 0);
       return send(res, 200, { running: !!runner, stopping: fs.existsSync(path.join(OUT, '.stop')),
-        startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...run.active],
-        finished: run.finished, settings: run.settings, logTotal: run.log.length,
-        log: run.log.slice(Math.max(0, Math.min(since, run.log.length))) });
+        startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...run.active.keys()],
+        activeSince: Object.fromEntries(run.active), finished: run.finished, settings: run.settings, logTotal: run.log.length,
+        log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), smokes });
+    }
+
+    if (p === '/api/clis' && m === 'GET') return send(res, 200, await checkClis(url.searchParams.has('refresh')));
+    if (p === '/api/smoke' && m === 'POST') {
+      const { tests = [] } = JSON.parse(await body(req)); // [{ key: 'agent:effort', goal }]
+      for (const t of tests) if (!smokes[t.key]?.running) startSmoke(t.key, t.goal);
+      return send(res, 200, { ok: true });
     }
 
     if (p === '/api/results' && m === 'GET') return send(res, 200, results());
@@ -169,6 +283,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(opts.port, '127.0.0.1', () => {
+  checkClis(); // warm the cache so the Setup tab has it on first load
   const link = `http://localhost:${opts.port}`;
   console.log(`Matrix dashboard: ${link}\nConfig: ${CONFIG}\nRuns:   ${OUT}\nCtrl-C to quit (a running batch keeps its finished results).`);
   if (opts.open) {
