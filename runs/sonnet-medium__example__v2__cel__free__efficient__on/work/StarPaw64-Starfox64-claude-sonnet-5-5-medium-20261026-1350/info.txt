@@ -1,0 +1,34 @@
+Source Information
+- Date: 2026-10-26 14:30
+- Source: Starfox 64 for N64
+- Game: Star Paw 64 (title picked by a real RNG from 50 brainstormed riffs)
+- Tech: Three.js r180 (WebGPURenderer, TSL node materials, WebGPU only, no fallback); Rapier 0.19.3 (rapier3d-compat) physics; Web Audio API (procedural SFX + step-sequenced music); Gamepad API; vanilla ES modules; Canvas 2D HUD; DOM menus. Loaded from the jsDelivr CDN.
+- Art Direction: Stylized cel-shading: 3-band toon gradients, inverted-hull ink outlines with welded normals, stepped sky gradient, flat-colour explosions.
+- Animation: Procedural, code-driven (damped follow rigs, sine-based part rigs for the boss and walkers, tween timelines, data-driven flight patterns). No skeletal clips.
+- Testing: Lightweight only: syntax check, headless Chromium WebGPU (SwiftShader) smoke tests with console-error capture, stepped simulations of both stages (1 and 4 players), scripted keyboard/mock-gamepad menu flows, touch-only emulation. No screenshots, visual review, judge/adversarial reviews or subagents.
+- Environment: Claude Code CLI (headless); Linux; browser unknown (tested in headless Chromium)
+- Model: Anthropic, claude-sonnet-5-5, reasoning effort medium
+- Usage: Cost unknown (no billing data available). Tokens: about 0.32M by the session token counter (no input/output/cache breakdown available). Session time: about 40 minutes (13:50 to 14:30).
+
+Testing Feedback
+- Issues caught by testing: 8 (5 by the headless runs, 3 by reading code while writing tests).
+- Critical / game-breaking: 3 (boss part named "body" clobbered the Rapier body and crashed the frame loop; opening Settings threw a use-before-init error; Game Over and Results screens never received input).
+- Most helpful test: a stepped headless simulation that calls Game.update with AI-driven pilots through both full stages (boss and rival included), at 1 and 4 players, while capturing console errors.
+- Least helpful test: the first keyboard-driven menu test with fixed waits. Software rendering made frames slow, so it produced false failures until it waited on animation frames.
+
+Engine Feedback
+- Liked most: TSL node materials made the cel look cheap to build (toon gradient map, stepped sky, patterned ground, outline hull). Rapier's scene queries with collision groups gave reliable hit detection with little code, and viewport/scissor made split-screen easy.
+- Stuck or guessed wrong: viewport Y origin (checked the source: top-left on WebGPU); Rapier hit property names (used a fallback); outline gaps on hard-edged meshes until the hull normals were welded; my own boss.body name clash with the physics body.
+- Most important thing built myself: the whole game layer: rail frame and stage scripting, camera rigs, input mapping with focus-based menus, HUD, procedural audio sequencer.
+- Hardest part: verifying a GPU-rendered game with no visual review; errors are asynchronous and headless WebGPU needs SwiftShader flags.
+- Overhaul one thing: the implicit WebGL2 fallback in WebGPURenderer. It has to be actively disabled and the backend checked.
+- Change one thing: a built-in hard-edge-safe outline pass or node, and a first-class headless test mode with clear shader and pipeline errors.
+
+Prompt Feedback
+- Liked most: a clear scope with a strong feel target (10-foot, controller-first), the attract mode and 4-player requirements, and the axis-inversion twist that tests real-world input handling.
+- Confusing: the filename placeholders (GameTitle-SOURCE), Testing Feedback sitting under the Source Information heading, and asking for a cel-shaded look while banning visual review.
+- Hardest thing: delivering a full, polished vertical slice (two stage types, boss, rival, multiplayer, attract mode, menus) blind to the rendered result.
+- One test I would add: a single automated frame capture per scene for black-screen and HUD-overlap checks (explicitly out of scope here), plus a run on a real DualSense.
+
+Credits
+Design, code, music and art: generated procedurally in code. Characters: Marm (you), Hop, Pip, Rook, General Biscuit, General Gnarl and Night Claw. Any resemblance to a certain fox is purely a playful riff.

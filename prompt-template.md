@@ -23,9 +23,13 @@ Build an original spiritual successor to {{source}}.
 
 Scope
 
-Create a feature-complete demo inspired by {{source}}. Capture what makes the source distinctive while modernizing and improving its mechanics, pacing, and UX wherever it benefits the game. The demo must be long enough to show all features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice / game engine. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools. Reference examples (these are the standard of “feature-complete demo" this prompt wants): Metal Gear Solid 2 Tanker Demo, Metal Gear Solid V: Ground Zeroes, Doom (1993) Shareware – Episode 1, Half-Life: Uplink, Resident Evil 7: Beginning Hour, Tony Hawk’s Pro Skater (1999) Warehouse, Skate community skatepark demo.
+Create a feature-complete demo inspired by {{source}}. Capture what makes the source distinctive while modernizing and improving its mechanics, pacing, and UX wherever it benefits the game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice / game engine. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.
 
 Attract Mode: After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game. 
+
+Multiplayer: Include the option to be able to play the game demo up to 4-player multiplayer.
+
+Narrative tone: Use a writing style similar to the {{source}}.
 
 ## UI & UX: 10-Foot Controller-First Philosophy
 Design all interfaces and interactions for a "10-foot experience" with a PS5-compatible controller as the primary input. Keyboard and mouse are secondary inputs that map to the controller's interaction model, not a separate desktop paradigm. Apply modern UX principles. Use your judgment to balance deep systemic information with clean, uncluttered presentation.
@@ -46,10 +50,17 @@ CRTICAL: Put Source Information, Engine Feedback and Prompt Feedback in your cha
 - Tech: stack, libraries/engines, with versions if applicable
 - Art Direction: style used
 - Animation: system used
-- Testing: List any constraints or direction placed by the prompt on testing.
+- Testing: testing parameters allowed
 - Environment: {{environment}}
 - Model: {{lab}}, {{model}}, reasoning effort {{effort}}
 - Usage: the estimated API cost in USD, total number of tokens in K or M  (provide break down if available) and session time, only if estimates are available.
+
+Testing Feedback
+
+- How many issues did testing catch?
+- How many would be considered critical issues / game breaking?
+- What was the most helpful test you ran?
+- What was the least helpful test you ran? 
 
 Engine Feedback
 
@@ -61,8 +72,6 @@ Engine Feedback
 - If you could change one thing about the engine, what would it be?
 
 Prompt Feedback 
-
-[PROMPT]
 
 - What did you like most about this prompt?
 - What was confusing? 
