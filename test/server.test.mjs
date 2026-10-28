@@ -148,3 +148,31 @@ test('a second dashboard on a port in use says so and exits', async () => {
   assert.equal(code, 1);
   assert.match(err, new RegExp(`Port ${d.port} is already in use`));
 });
+
+test('prompt history: saving edits numbers nothing, a batch does (and the page hears of it); runs from before a dimension count as its olderRuns variant', async (t) => {
+  const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'variant A' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const t0 = (await dd.api('/api/template')).json;
+  assert.deepEqual(t0.history, []);
+  assert.ok(t0.savedAt);
+  const text = t0.text + 'More.\n';
+  for (const x of ['One.\n', 'Two.\n', '']) assert.equal((await dd.api('/api/template', 'PUT', { text: text + x })).status, 200);
+  const put = (await dd.api('/api/template')).json;
+  assert.deepEqual([put.history, put.version], [[], (await dd.api('/api/template', 'PUT', { text })).json.version]);
+  assert.ok(put.savedAt >= t0.savedAt);
+
+  const rev0 = (await dd.api('/api/status')).json.rev.history;
+  assert.equal(runner(s, []).status, 0); // a batch from a terminal
+  await new Promise((r) => setTimeout(r, 1000)); // past the signature cache
+  assert.notEqual((await dd.api('/api/status')).json.rev.history, rev0);
+  const hist = (await dd.api('/api/template')).json.history;
+  assert.deepEqual(hist.map((e) => [e.v, e.hash, e.text]), [[1, put.version, text]]);
+
+  // a dimension added since: the run shows as its olderRuns variant
+  const cfg = (await dd.api('/api/config')).json.config;
+  cfg.dimensions.audio = [{ id: 'loud', text: 'loud' }, { id: 'free', text: 'your choice', olderRuns: true }];
+  assert.equal((await dd.api('/api/config', 'PUT', cfg)).status, 200);
+  const old = (await dd.api('/api/results')).json[0];
+  assert.deepEqual([old.id, old.audio, old.predates], ['opus-low__a', 'free', ['audio']]);
+});

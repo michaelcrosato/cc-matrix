@@ -148,6 +148,77 @@ test('an unreadable result.json counts as not done and is redone; reports skip i
   assert.equal(result(sb, 'opus-low__a').status, 'ok');
 });
 
+test('adding a dimension keeps finished runs done: they count as its olderRuns variant, else its first', (t) => {
+  const sb = sandbox({ dimensions: one, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  const cfg = JSON.parse(fs.readFileSync(sb.config, 'utf8'));
+  const setup = (dimensions, template) => { fs.writeFileSync(sb.config, JSON.stringify({ ...cfg, dimensions }));
+    fs.writeFileSync(path.join(sb.dir, 'prompt.md'), template); };
+  const dry = () => { const j = JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()); return [j.count, j.alreadyDone]; };
+  // the variant older runs count as can sit anywhere in the list
+  setup({ ...one, audio: [{ id: 'loud', text: 'loud' }, { id: 'free', text: 'your choice', olderRuns: true }] }, 'Testing: {{testing}}\nAudio: {{audio}}\n');
+  assert.deepEqual(dry(), [2, 1]);
+  const r = runner(sb, []);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /· skip opus-low__a__free \(already ok as opus-low__a\)/);
+  assert.match(r.all, /▶ opus-low__a__loud/);
+  assert.doesNotMatch(r.all, /▶ opus-low__a__free/);
+  // unmarked, they count as the first variant: loud (done twice over) and not free
+  setup({ ...one, audio: [{ id: 'loud', text: 'loud' }, { id: 'free', text: 'your choice' }] }, 'Testing: {{testing}}\nAudio: {{audio}}\n');
+  assert.deepEqual(dry(), [2, 1]);
+  assert.match(runner(sb, ['--dry-run']).stdout, /opus-low__a__free/);
+  // a dimension removed since is left out: what's left still counts as done
+  setup({ audio: [{ id: 'loud', text: 'loud' }] }, 'Audio: {{audio}}\n');
+  assert.deepEqual(dry(), [1, 1]);
+});
+
+test('retrying a failed run from before a dimension was added replaces it', (t) => {
+  const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:fail=boom' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  assert.equal(result(sb, 'opus-low__a').status, 'failed');
+  const cfg = JSON.parse(fs.readFileSync(sb.config, 'utf8'));
+  fs.writeFileSync(sb.config, JSON.stringify({ ...cfg, dimensions: { testing: [{ id: 'a', text: 'fine' }], audio: [{ id: 'free', text: 'your choice' }] } }));
+  fs.writeFileSync(path.join(sb.dir, 'prompt.md'), 'Testing: {{testing}}\nAudio: {{audio}}\n');
+  assert.match(runner(sb, []).all, /· skip opus-low__a__free \(already failed as opus-low__a\)/);
+  const r = runner(sb, ['--rerun-failed']);
+  assert.equal(r.status, 0, r.all);
+  assert.equal(result(sb, 'opus-low__a__free').status, 'ok');
+  assert.ok(!fs.existsSync(path.join(sb.out, 'opus-low__a')));
+});
+
+test('the prompt gets its version number when a batch first runs it: edits between batches make one version', (t) => {
+  const sb = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: id })) }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  t.after(() => cleanup(sb));
+  const tmplFile = path.join(sb.dir, 'prompt.md'), v1 = fs.readFileSync(tmplFile, 'utf8');
+  const hist = () => JSON.parse(fs.readFileSync(path.join(sb.out, 'prompt-history.json'), 'utf8'));
+  assert.equal(runner(sb, ['--only', 'testing=a']).status, 0);
+  let h = hist();
+  assert.deepEqual(h.map((e) => [e.v, e.hash, e.text]), [[1, result(sb, 'opus-low__a').promptVersion, v1]]);
+  assert.ok(h[0].at <= h[0].ranAt);
+  // three edits, a dry run and a batch with nothing to do: still one version
+  for (const n of [1, 2, 3]) fs.writeFileSync(tmplFile, `${v1}Edit ${n}.\n`);
+  runner(sb, ['--dry-run']); runner(sb, ['--only', 'testing=a']);
+  assert.equal(hist().length, 1);
+  // the next batch that runs something numbers the prompt as it stands then
+  assert.equal(runner(sb, ['--only', 'testing=b']).status, 0);
+  h = hist();
+  assert.deepEqual(h.map((e) => [e.v, e.text]), [[1, v1], [2, `${v1}Edit 3.\n`]]);
+  assert.equal(h[1].hash, result(sb, 'opus-low__b').promptVersion);
+  // back to v1's text: it runs as v1
+  fs.writeFileSync(tmplFile, v1);
+  assert.equal(runner(sb, ['--only', 'testing=c']).status, 0);
+  assert.deepEqual([hist().length, result(sb, 'opus-low__c').promptVersion], [2, h[0].hash]);
+  // versions only known from runs (the history was lost) are numbered first, by when they ran, without their text
+  fs.rmSync(path.join(sb.out, 'prompt-history.json'));
+  fs.writeFileSync(tmplFile, `${v1}New.\n`);
+  assert.equal(runner(sb, ['--only', 'testing=a', '--repeat', '2']).status, 0);
+  h = hist();
+  assert.deepEqual(h.map((e) => [e.v, e.text]), [[1, null], [2, null], [3, `${v1}New.\n`]]);
+  assert.equal(h[0].ranAt, result(sb, 'opus-low__a').startedAt);
+});
+
 test('the budget stops new runs but lets running ones finish', (t) => {
   const sb = sandbox({ dimensions: { testing: [1, 2, 3, 4].map((i) => ({ id: 'v' + i, text: `FAKE:sleep=${i === 1 ? 200 : 1500} v${i}` })) },
     agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });

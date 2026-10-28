@@ -178,7 +178,34 @@ const missingClis = () => [...new Set(queue.map((r) => r.agent.provider))].filte
 // ------------------------------------------------------------- dry run
 // A declaration, so --report (which runs before this point) can use it.
 function readResult(id) { try { return JSON.parse(fs.readFileSync(path.join(outDir, id, 'result.json'), 'utf8')); } catch { return null; } }
-const isDone = (id) => { const r = readResult(id); return !!r && (r.status === 'ok' || !args.rerunFailed); };
+
+// A finished run counts for the combination it ran, by the id it would get now. A run made before a
+// dimension was added doesn't have it (in its folder name or result.json), so it counts as that
+// dimension's variant marked olderRuns, else its first: adding a field to the prompt doesn't redo
+// every finished run. A dimension removed since is left out, so its runs count for what's left.
+const olderVariant = (d) => (cfg.dimensions[d].find((v) => v.olderRuns) ?? cfg.dimensions[d][0])?.id;
+function runKey(r) {
+  const parts = r.id.split('__'), last = parts.at(-1);
+  const rep = parts.length > 1 && /^r\d+$/.test(last) && !dimNames.some((d) => r[d] === last) ? last : null;
+  return [parts[0], ...dimNames.map((d) => r[d] ?? olderVariant(d)), rep].filter(Boolean).join('__');
+}
+// Finished runs by key, read once. Two with the same key (a dimension was removed) count as one:
+// an OK one if there is one, else the latest. An unreadable result.json counts as not done.
+let finishedRuns = null;
+function prevRun(run) {
+  if (!finishedRuns) {
+    finishedRuns = new Map();
+    const better = (a, b) => (a.status === 'ok') !== (b.status === 'ok') ? a.status === 'ok' : (a.startedAt ?? '') > (b.startedAt ?? '');
+    for (const dir of fs.existsSync(outDir) ? fs.readdirSync(outDir) : []) {
+      const r = readResult(dir);
+      if (!r?.id) continue;
+      const k = runKey(r), cur = finishedRuns.get(k);
+      if (!cur || better(r, cur.r)) finishedRuns.set(k, { r, dir });
+    }
+  }
+  return finishedRuns.get(run.id) ?? null;
+}
+const isDone = (run) => { const p = prevRun(run); return !!p && (p.r.status === 'ok' || !args.rerunFailed); };
 
 if (args.dryRun) {
   const byAgent = {};
@@ -187,7 +214,7 @@ if (args.dryRun) {
   try { if (queue[0]) { sample = buildPrompt(queue[0]); const g = goalMessage(queue[0]);
     if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; } } catch (e) { error = e.message; }
   if (args.json) {
-    console.log(JSON.stringify({ count: queue.length, byAgent, alreadyDone: queue.filter((r) => isDone(r.id)).length,
+    console.log(JSON.stringify({ count: queue.length, byAgent, alreadyDone: queue.filter(isDone).length,
       ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf) }));
   } else {
     console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
@@ -431,9 +458,13 @@ async function spawnAgent(run, dir, prompt, limit) {
 
 async function runOne(run) {
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
-  const prev = readResult(run.id); // an unreadable result.json counts as not done
-  if (prev && (prev.status === 'ok' || !args.rerunFailed)) { skipped++; console.log(`· skip ${run.id} (already ${prev.status})`); return; }
+  const prev = prevRun(run);
+  if (prev && (prev.r.status === 'ok' || !args.rerunFailed)) {
+    skipped++; console.log(`· skip ${run.id} (already ${prev.r.status}${prev.dir !== run.id ? ` as ${prev.dir}` : ''})`); return;
+  }
   fs.rmSync(dir, { recursive: true, force: true });
+  // A failed run being retried that was made before a dimension was added: the new attempt replaces it.
+  if (prev && prev.dir !== run.id) fs.rmSync(path.join(outDir, prev.dir), { recursive: true, force: true });
   const work = path.join(dir, 'work');
   let prompt;
   try {
@@ -608,18 +639,43 @@ const noCost = [...new Set(queue.filter((r) => !['claude', 'grok'].includes(r.ag
 if (noCost.length && args.budget !== Infinity)
   console.log(`Note: ${noCost.join(', ')} don't report cost, so the budget only counts Claude/Grok spend.`);
 // Each CLI's version, saved with every run: an update can change results as much as the model.
-for (const p of new Set(queue.filter((r) => !isDone(r.id)).map((r) => r.agent.provider))) {
+for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provider))) {
   const v = spawnSync(binOf(p), ['--version'], { encoding: 'utf8', shell: isWin, timeout: 30000 });
   cliVersions[p] = `${v.stdout ?? ''}${v.stderr ?? ''}`.match(/\d+\.\d+[\w.-]*/)?.[0];
 }
 // The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
-const already = queue.filter((r) => isDone(r.id)).length;
+const already = queue.filter(isDone).length;
 console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
+if (queue.length > already) try { recordPromptVersion(); } catch (e) { console.log(`⚠ Prompt history not updated: ${e.message}`); }
 await pool();
 clearInterval(stopPoll);
 fs.rmSync(stopFile, { force: true });
 writeReport();
 console.log(`Done. ${done} ran, ${skipped} skipped. Spent ${fmtUsd(spent)} this session.`);
+
+// ------------------------------------------------------- prompt history
+// runs/prompt-history.json numbers the prompt's versions v1, v2 … for the dashboard. A version gets its
+// number when a batch first runs it, so any number of edits between batches make one new version.
+// at: when its text was last saved; ranAt: when it first ran. A version only found in runs from before
+// the history existed is numbered too, by when it first ran, without its text.
+function recordPromptVersion() {
+  const file = path.join(outDir, 'prompt-history.json');
+  let list = []; try { list = JSON.parse(fs.readFileSync(file, 'utf8')); } catch {}
+  const known = new Set(list.map((e) => e.hash)), first = new Map();
+  for (const d of fs.readdirSync(outDir)) {
+    const r = readResult(d), h = r?.promptVersion;
+    if (!h || known.has(h)) continue;
+    const t = r.startedAt ?? '';
+    if (!first.has(h) || t < first.get(h)) first.set(h, t);
+  }
+  if (!known.has(promptVersion) && !first.has(promptVersion)) first.set(promptVersion, new Date().toISOString());
+  if (!first.size) return;
+  let saved = null; try { if (cfg.templateFile) saved = fs.statSync(path.resolve(configDir, cfg.templateFile)).mtime.toISOString(); } catch {}
+  let v = list.reduce((m, e) => Math.max(m, e.v), 0);
+  for (const [hash, ranAt] of [...first].sort((a, b) => a[1].localeCompare(b[1])))
+    list.push(hash === promptVersion ? { v: ++v, hash, at: saved, ranAt, text: template } : { v: ++v, hash, at: null, ranAt: ranAt || null, text: null });
+  fs.writeFileSync(file, JSON.stringify(list, null, 2) + '\n');
+}
 
 // -------------------------------------------------------------- report
 function fmtUsd(v) { return v == null ? '$?' : `$${v.toFixed(2)}`; }

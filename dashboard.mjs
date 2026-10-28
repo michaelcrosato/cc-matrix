@@ -275,6 +275,12 @@ function results() {
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;
+    // A run from before a dimension was added counts as its olderRuns variant (else its first), as in
+    // run-matrix.mjs, so it shows, filters and compares as that. predates lists those dimensions.
+    for (const [dim, vs] of Object.entries(dims)) {
+      const v = vs.find((x) => x.olderRuns) ?? vs[0];
+      if (r[dim] == null && v) { r[dim] = v.id; (r.predates ??= []).push(dim); }
+    }
     rows.push({ ...r, ...reviewOf(scores, r) });
   }
   return rows;
@@ -293,10 +299,15 @@ function revs(fresh) {
       h.update(`${d.name}|${stamp(path.join(OUT, d.name, 'result.json'))}|${stamp(path.join(OUT, d.name, 'reply.md'))}\n`);
   } catch {}
   h.update(stamp(SCORES));
-  const value = { results: h.digest('hex').slice(0, 12), config: stamp(CONFIG), template: stamp(templatePath()), smokes: smokesRev };
+  const value = { results: h.digest('hex').slice(0, 12), config: stamp(CONFIG), template: stamp(templatePath()), history: stamp(HISTORY), smokes: smokesRev };
   revCache = { at: Date.now(), value };
   return value;
 }
+
+// The prompt's numbered versions (v1, v2 …), written by run-matrix.mjs when a batch first runs one, so
+// edits between batches make one version. Until then the prompt as saved is the next one (savedAt).
+const HISTORY = path.join(OUT, 'prompt-history.json');
+const savedAt = () => { try { return fs.statSync(templatePath()).mtime.toISOString(); } catch { return null; } };
 
 let reportTimer = null;
 const refreshReport = () => { clearTimeout(reportTimer); reportTimer = setTimeout(() =>
@@ -352,12 +363,13 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/template' && m === 'GET') {
       const text = fs.existsSync(templatePath()) ? fs.readFileSync(templatePath(), 'utf8') : '';
-      return send(res, 200, { text, path: templatePath(), version: promptVersion(text) });
+      return send(res, 200, { text, path: templatePath(), version: promptVersion(text), savedAt: savedAt(), history: readJSON(HISTORY, []) });
     }
     if (p === '/api/template' && m === 'PUT') {
       const { text } = await body(req);
       if (typeof text !== 'string') return send(res, 400, { error: 'Expected { text }.' });
-      fs.writeFileSync(templatePath(), text); return send(res, 200, { ok: true, version: promptVersion(text), rev: revs(true) });
+      fs.writeFileSync(templatePath(), text);
+      return send(res, 200, { ok: true, version: promptVersion(text), savedAt: savedAt(), rev: revs(true) });
     }
 
     if (p === '/api/preview' && m === 'POST') {
