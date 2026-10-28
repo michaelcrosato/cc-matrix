@@ -122,7 +122,11 @@ const template = cfg.templateFile ? fs.readFileSync(path.resolve(configDir, cfg.
 // Saved with each run so results made with an edited prompt can be told apart (the dashboard
 // computes the same hash for the current template).
 const cliVersions = {}; // provider -> version, filled in when a batch starts
-const promptVersion = crypto.createHash('sha1').update(template ?? '').digest('hex').slice(0, 8);
+const textHash = (t) => crypto.createHash('sha1').update(t).digest('hex').slice(0, 8);
+const promptVersion = textHash(template ?? '');
+// Saved with each run too (variantHashes), so the dashboard can tell exactly which runs used a
+// variant's text from before an edit.
+const variantHashes = (combo) => Object.fromEntries(dimNames.map((d) => [d, textHash(variantText(combo[d]).trim())]));
 const LABS = { claude: 'Anthropic', codex: 'OpenAI', grok: 'xAI', agy: 'Google', muse: 'Meta' };
 const CLIS = { claude: 'Claude Code CLI', codex: 'Codex CLI', grok: 'Grok CLI', agy: 'Antigravity CLI', muse: 'Muse Code CLI' };
 // agy also serves other labs' models (Claude, GPT-OSS), so the model name decides the lab first.
@@ -150,10 +154,12 @@ function goalMessage(run) {
   return msg;
 }
 
+// A function, not a string, as the replacement: in a string, $& $' $` and $$ are patterns, so a
+// variant text like "$$" or "$'" would be sent changed.
 function buildPrompt(run, when) {
   let p = template;
-  for (const d of dimNames) if (d !== GOAL_DIM) p = p.replaceAll(`{{${d}}}`, variantText(run.combo[d]).trim());
-  for (const [k, v] of Object.entries(runVars(run, when))) p = p.replaceAll(`{{${k}}}`, v);
+  for (const d of dimNames) if (d !== GOAL_DIM) p = p.replaceAll(`{{${d}}}`, () => variantText(run.combo[d]).trim());
+  for (const [k, v] of Object.entries(runVars(run, when))) p = p.replaceAll(`{{${k}}}`, () => v);
   const left = [...new Set(p.match(/\{\{\w+\}\}/g) ?? [])];
   if (left.length) throw new Error(`Unfilled placeholders in prompt: ${left.join(' ')}`);
   return p.replace(/\n{3,}/g, '\n\n').trim() + '\n';
@@ -170,10 +176,9 @@ function findBin(bin) {
 const missingClis = () => [...new Set(queue.map((r) => r.agent.provider))].filter((p) => !findBin(binOf(p)));
 
 // ------------------------------------------------------------- dry run
-const isDone = (id) => {
-  try { const r = JSON.parse(fs.readFileSync(path.join(outDir, id, 'result.json'), 'utf8'));
-    return r.status === 'ok' || !args.rerunFailed; } catch { return false; }
-};
+// A declaration, so --report (which runs before this point) can use it.
+function readResult(id) { try { return JSON.parse(fs.readFileSync(path.join(outDir, id, 'result.json'), 'utf8')); } catch { return null; } }
+const isDone = (id) => { const r = readResult(id); return !!r && (r.status === 'ok' || !args.rerunFailed); };
 
 if (args.dryRun) {
   const byAgent = {};
@@ -363,7 +368,7 @@ function parseCodex(text) {
 
 // ------------------------------------------------------------------ run
 const children = new Set();
-let spent = 0, stopping = false, done = 0, skipped = 0;
+let spent = 0, stopping = false, overBudget = false, done = 0, skipped = 0;
 
 // Kill the agent and everything it started (servers, browsers, subagents).
 function killTree(child) {
@@ -426,13 +431,23 @@ async function spawnAgent(run, dir, prompt, limit) {
 
 async function runOne(run) {
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
-  if (fs.existsSync(resFile)) {
-    const prev = JSON.parse(fs.readFileSync(resFile, 'utf8'));
-    if (prev.status === 'ok' || !args.rerunFailed) { skipped++; console.log(`· skip ${run.id} (already ${prev.status})`); return; }
-  }
+  const prev = readResult(run.id); // an unreadable result.json counts as not done
+  if (prev && (prev.status === 'ok' || !args.rerunFailed)) { skipped++; console.log(`· skip ${run.id} (already ${prev.status})`); return; }
   fs.rmSync(dir, { recursive: true, force: true });
-  const prompt = buildPrompt(run), work = path.join(dir, 'work');
-  prepare(run, dir, prompt);
+  const work = path.join(dir, 'work');
+  let prompt;
+  try {
+    prompt = buildPrompt(run);
+    prepare(run, dir, prompt);
+  } catch (e) { // e.g. a placeholder this variant's text leaves unfilled, or a /goal over the limit: fail this run, keep the batch going
+    fs.mkdirSync(dir, { recursive: true });
+    const now = new Date().toISOString();
+    let hashes; try { hashes = variantHashes(run.combo); } catch {} // a variant whose file can't be read is why we're here
+    fs.writeFileSync(resFile, JSON.stringify({ id: run.id, ...run.fields, model: run.agent.model, promptVersion, variantHashes: hashes,
+      status: 'failed', exitCode: null, error: `Not started: ${e.message}`, wallMinutes: 0, startedAt: now, finishedAt: now }, null, 2));
+    done++; console.log(`✘ ${run.id}  not started: ${e.message}`);
+    return;
+  }
 
   for (const d of dimNames) {
     const setup = run.combo[d].setup;
@@ -453,7 +468,8 @@ async function runOne(run) {
   const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed';
   // goalSkipped: a goal variant on a CLI without headless /goal, so it got the plain prompt.
   const goalSkipped = !!goalText(run.combo) && !goalMessage(run);
-  const result = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion, ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
+  const result = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
+    variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
     wallMinutes: (Date.now() - start) / 60000, ...metrics, ...measureOutput(work),
     startedAt: new Date(start).toISOString(), finishedAt: new Date().toISOString() };
   fs.writeFileSync(resFile, JSON.stringify(result, null, 2));
@@ -524,12 +540,18 @@ function interleave(list) {
   return out;
 }
 
+// Once the budget is spent, no new run starts; the ones already going finish, since what they've
+// spent so far would be thrown away otherwise.
 async function pool() {
   const pending = interleave(queue), busy = {}, waiting = [];
   const wakeAll = () => waiting.splice(0).forEach((w) => w());
   const worker = async () => {
-    while (pending.length && !stopping) {
-      if (spent >= args.budget) { stopAll(`budget of $${args.budget} reached`); break; }
+    while (pending.length && !stopping && !overBudget) {
+      if (spent >= args.budget) {
+        overBudget = true;
+        console.log(`■ Budget of $${args.budget} reached (spent ${fmtUsd(spent)}): no new runs start; ${children.size} still running will finish.`);
+        break;
+      }
       const i = pending.findIndex((r) => (busy[r.agent.provider] ?? 0) < args.perCli);
       if (i < 0) { await new Promise((w) => waiting.push(w)); continue; } // every CLI left is at its limit
       const [run] = pending.splice(i, 1), p = run.agent.provider;
@@ -609,12 +631,11 @@ function readScores() {
 // results.csv for spreadsheets, plus a static gallery for when the dashboard isn't running.
 function writeReport() {
   if (!fs.existsSync(outDir)) return;
-  const rows = fs.readdirSync(outDir)
-    .map((d) => path.join(outDir, d, 'result.json')).filter((f) => fs.existsSync(f))
-    .map((f) => JSON.parse(fs.readFileSync(f, 'utf8')));
+  const rows = fs.readdirSync(outDir).map(readResult).filter((r) => r?.id); // skips a result.json being written
   const dims = cfg.dimensions ? Object.keys(cfg.dimensions) : [];
   const scores = readScores();
-  for (const r of rows) Object.assign(r, scores[r.id] ?? {});
+  // A review saved with a startedAt belongs to that attempt only (the dashboard does the same).
+  for (const r of rows) { const s = scores[r.id]; if (s && (!s.startedAt || s.startedAt === r.startedAt)) { const { startedAt, ...rest } = s; Object.assign(r, rest); } }
   const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
     'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt'];
@@ -624,6 +645,7 @@ function writeReport() {
     [cols.join(','), ...rows.map((r) => cols.map((c) => cell(r[c])).join(','))].join('\n') + '\n');
 
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+  const href = (p) => esc(String(p).split('/').map(encodeURIComponent).join('/')); // a # ? or % in a game's title would break the link
   const show = ['agent', 'effort', ...dims, 'status', 'delivered', 'wallMinutes', 'costUsd', 'outputTokens', 'kb', 'score'];
   const html = `<!doctype html><meta charset="utf-8"><title>Matrix runs</title>
 <style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}table{border-collapse:collapse;width:100%}
@@ -631,8 +653,8 @@ th,td{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left;white-space:n
 .failed{color:#b00}@media(prefers-color-scheme:dark){body{background:#111;color:#eee}th{background:#222}td,th{border-color:#333}a{color:#8bf}}</style>
 <h1>Matrix runs (${rows.length})</h1><p>Static copy. For scoring and comparisons, run <code>node dashboard.mjs</code>.</p>
 <table><thead><tr><th>play</th>${show.map((c) => `<th>${c}</th>`).join('')}<th>files</th></tr></thead><tbody>
-${rows.map((r) => `<tr class="${r.status}"><td>${r.entry ? `<a href="${esc(r.entry)}">▶</a>` : '—'}</td>${show.map((c) =>
-  `<td>${esc(typeof r[c] === 'number' ? +r[c].toFixed(c === 'costUsd' ? 2 : 1) : r[c])}</td>`).join('')}<td><a href="${esc(r.id)}/prompt.md">prompt</a> · <a href="${esc(r.id)}/reply.md">reply</a></td></tr>`).join('\n')}
+${rows.map((r) => `<tr class="${esc(r.status)}"><td>${r.entry ? `<a href="${href(r.entry)}">▶</a>` : '—'}</td>${show.map((c) =>
+  `<td>${esc(typeof r[c] === 'number' ? +r[c].toFixed(c === 'costUsd' ? 2 : 1) : r[c])}</td>`).join('')}<td><a href="${href(r.id)}/prompt.md">prompt</a> · <a href="${href(r.id)}/reply.md">reply</a></td></tr>`).join('\n')}
 </tbody></table><script>
 document.querySelectorAll('th').forEach((th,i)=>th.onclick=()=>{const tb=th.closest('table').tBodies[0],rs=[...tb.rows],d=th.dataset.d=th.dataset.d==='a'?'d':'a';
 rs.sort((x,y)=>{const a=x.cells[i].innerText,b=y.cells[i].innerText,n=parseFloat(a)-parseFloat(b);return (isNaN(n)?a.localeCompare(b):n)*(d==='a'?1:-1)});rs.forEach(r=>tb.append(r))})

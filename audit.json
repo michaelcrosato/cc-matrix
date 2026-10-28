@@ -1,0 +1,704 @@
+{
+ "title": "Audit and overhaul",
+ "date": "2026-10-27",
+ "summary": "I read all of `dashboard.mjs`, `run-matrix.mjs` and `dashboard.html`, then ran everything against a sandbox: a copy of your runs and config, with fake CLIs standing in for claude, codex, grok, agy and muse, so nothing real ran and nothing was spent. The serious bugs were reproduced on the original code before I fixed them, and are now covered by tests. A few small ones came from reading the code; their \"How I checked\" says so.\n\nI took \"fully reactive\" two ways and did both. The page fits every screen from a 375 px phone to a 21:9 ultrawide, checked in WebKit, Chromium and Firefox. It also reacts live: whatever changes, wherever it changes (a run finishing in a terminal, a score in another tab, a hand edit to the config), the open tab updates within 2–3 seconds and keeps what you're typing, your scroll position and open sections.\n\nStart with Your call, then the high findings. Tick Read as you go: the badge on this tab counts what's left.",
+ "decisions": [
+  {
+   "title": "Give the Mario Kart text its own short name (DATA-1)",
+   "detail": "Setup → source → rename `example` to something like `mk64`, then Save. No runs are touched. The Star Fox runs keep `example`, the opus and sonnet Mario Kart runs become runnable, and Insights stops pooling the two games."
+  },
+  {
+   "title": "Merging draft PR #2 re-runs everything",
+   "detail": "Its new `audio` dimension changes every run name, so all 25 existing runs stop counting as done. That's fine if a fresh baseline with audio is what you want; otherwise drop that part."
+  },
+  {
+   "title": "Test gpt-6.1-terra before the next batch (DATA-3)",
+   "detail": "The installed Codex doesn't list it. One press of Test on that row in Setup (about a minute) shows whether it runs. If not, pick a listed model for that row."
+  },
+  {
+   "title": "Opening the dashboard on your phone",
+   "detail": "The layout works on phones now, but the server deliberately refuses unknown hosts (SEC-1). To use `phone-preview`, start the dashboard with `--allow-host <the tunnel host>`. Anyone with that URL can then start agents, so only do it while you're watching and stop the tunnel afterwards."
+  },
+  {
+   "title": "Check it on a real iPhone once",
+   "detail": "iOS behaviour was checked in WebKit with iPhone profiles, which is the closest automated check on this machine. A minute on your phone would confirm the 16 px fields (no zoom on focus) and the tab bar."
+  }
+ ],
+ "findings": [
+  {
+   "id": "DATA-1",
+   "severity": "high",
+   "area": "Data",
+   "status": "yours",
+   "title": "22 of your 25 runs are Star Fox 64 games labeled the same as the Mario Kart 64 runs",
+   "found": "The `source` variant `example` used to be Star Fox 64 and was edited in place to \"Mario Kart 64 for N64\", so the 22 older Star Fox runs and the 3 Mario Kart runs from today share `source=example`. Effects:\n\n1. The Mario Kart versions of `opus · medium` and `sonnet · medium` (cel, efficient) will never run: Star Fox runs with the same name already count as done. The Run tab says \"2 of the runs already done were made with a different prompt\".\n\n2. Insights learns what's \"usual\" from both games pooled together, so Needs a look judges Mario Kart runs against Star Fox baselines. Compare and Averages mix the two games.",
+   "did": "Not changed: it's your data. The fix is one edit and touches no runs. In Setup, give the Mario Kart text its own short name (say `mk64`) and save. The Star Fox runs keep `example`, every Mario Kart run gets its own name, and Insights treats them as two sources.",
+   "check": "Found by the dashboard's own old-text check, which I confirmed by reading the saved prompts. All 22 flagged runs' `prompt.md` say Starfox64.",
+   "where": [
+    "matrix.config.json"
+   ]
+  },
+  {
+   "id": "SEC-1",
+   "severity": "high",
+   "area": "Security",
+   "status": "fixed",
+   "title": "Any website open in your browser could drive the dashboard",
+   "found": "The server only listens on 127.0.0.1, but it answered anyone who could reach that address, and your browser can. A page on any site can send a `text/plain` POST without a CORS preflight, and the server parsed every body as JSON regardless. It also never checked the `Host` header, so a domain that resolves to 127.0.0.1 (DNS rebinding) could read and write exactly like the dashboard page.\n\nIn a sandbox copy I deleted `runs/results.csv` and started a batch from a foreign origin with plain curl. `/api/delete-run` with `{\"id\":\"scores.json\"}` would have wiped every score. With rebinding, a page could set a CLI's command in the config to anything and press Start for you, which means running any command on this machine.",
+   "did": "The server now answers only `Host: localhost`, `127.0.0.1` or `[::1]` (plus hosts you name with the new `--allow-host`). It refuses a write whose `Origin` or `Sec-Fetch-Site` isn't the dashboard's own page, and requires `Content-Type: application/json`, which no other site can send without a preflight this server never approves. The page already sent JSON, so nothing changes for you.",
+   "check": "`test/server.test.mjs`: a foreign Host, text/plain, a cross-origin Origin, `Origin: null` and `Sec-Fetch-Site: cross-site` all get 403, and the page itself gets 200. The same suite fails against the old server.",
+   "where": [
+    "dashboard.mjs: refused()"
+   ]
+  },
+  {
+   "id": "RUN-1",
+   "severity": "high",
+   "area": "Runner",
+   "status": "fixed",
+   "title": "One run that couldn't start crashed the whole batch and orphaned the agents already running",
+   "found": "Any error while preparing a run escaped and ended the runner with an unhandled exception: an unfilled `{{placeholder}}` in one variant's text, a /goal over 4,000 characters, or a half-written `result.json`. Agents are started detached (so Stop can end their whole process tree), so the ones already running kept going with no runner left to record them. Reproduced with the old runner, a bad variant and a good one: the good one's agent starts, the runner exits 1 with \"Unfilled placeholders in prompt\", and the orphaned agent finishes its game anyway. No `result.json` is ever written for it.",
+   "did": "That run is recorded as failed (\"Not started: ...\", so Insights files it under its cause) and the batch carries on. An unreadable `result.json` counts as not done and is redone, and the reports skip it.",
+   "check": "`test/runner.test.mjs`: \"one run that can't start fails on its own\" and \"an unreadable result.json counts as not done\". Both fail on the old runner.",
+   "where": [
+    "run-matrix.mjs: runOne(), readResult()"
+   ]
+  },
+  {
+   "id": "UI-1",
+   "severity": "high",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "What you typed in a score or note was lost when a run finished",
+   "found": "Every time a run finished, the open tab was rebuilt from scratch. A score or note only saves when you leave the box, so anything typed but not yet saved was simply gone, and so was the focus. Reproduced on the original page in a sandbox: typing a note while a batch ran, 0 note boxes held the text afterwards.",
+   "did": "Tabs are no longer rebuilt. Each redraw is merged into the page (see \"What's new\"), so the box you're typing in keeps its text, cursor and focus, and rows are keyed by run so a new run arriving can't shift your note onto another one.",
+   "check": "`test/ui_check.py`: \"a note being typed survives the live redraw\", while a terminal batch adds 4 runs underneath.",
+   "where": [
+    "dashboard.html: patch(), patchChildren()"
+   ]
+  },
+  {
+   "id": "RES-1",
+   "severity": "high",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "On a phone, the header and save bar left a third of the screen for content",
+   "found": "On an iPhone SE (375×667) the header wrapped to three rows (about 140 px). In Setup, the sticky save bar listed every warning (about 240 px), leaving about 290 px of the 667 for the page.",
+   "did": "On phones the header is two rows (about 96 px): name, status and theme, then the tabs, which scroll sideways if needed. The save bar is one line, \"⚠ 1 warning · Show\". Errors always show, because they block saving.",
+   "check": "Screenshots before and after on WebKit iPhone SE. `test/ui_check.py` checks every tab at 375 px in WebKit, Chromium and Firefox.",
+   "where": [
+    "dashboard.html: CSS, savebar()"
+   ]
+  },
+  {
+   "id": "RES-2",
+   "severity": "high",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "On phones and tablets the runs table hid status, time, cost, score and notes off to the right",
+   "found": "The runs table has around 16 columns. Below laptop width, the first screen showed ▶, model, effort and two variants; everything you actually score with was in a sideways scroll.",
+   "did": "Below 900 px each run is a card: model · effort and status on top, then the variants, error, time · cost · output · size · finished, score and notes, then the file buttons. A Sort menu replaces the column headers.",
+   "check": "Screenshots at 375 and 768 px. `test/ui_check.py` checks for no sideways scroll at 375, 768, 1366 and 2560 px in three engines.",
+   "where": [
+    "dashboard.html: renderResults(), table.runs CSS"
+   ]
+  },
+  {
+   "id": "DATA-3",
+   "severity": "medium",
+   "area": "Data",
+   "status": "yours",
+   "title": "Your config has gpt-6.1-terra, which the installed Codex doesn't offer",
+   "found": "The installed Codex (codex-cli 0.165.0) lists `gpt-6.1-sol`, `gpt-6-astra`, `gpt-6-sol`, `gpt-6-luna` and some 5.x models, but no `gpt-6.1-terra`. Your config has a `gpt-6.1-terra` row, and the dashboard's model list offers it. No Codex run has happened yet, so nothing has failed so far. Setup already shows a \"not listed\" warning for it.",
+   "did": "Not changed: I didn't want to spend real quota finding out. Press Test on that row before the next batch. If it fails with a model error, switch the row to a model Codex lists (`gpt-5.6-terra` is the newest Terra it offers), or remove it.",
+   "check": "Read-only: ran `codex debug models` and opened the dashboard on your real config without clicking anything.",
+   "where": [
+    "matrix.config.json",
+    "dashboard.html: CATALOG"
+   ]
+  },
+  {
+   "id": "SEC-2",
+   "severity": "medium",
+   "area": "Security",
+   "status": "fixed",
+   "title": "Delete could remove any file in runs/, not just a run",
+   "found": "`/api/delete-run` resolved the id inside `runs/` and deleted whatever was there, folder or file: `scores.json`, `results.csv`, `.smoke.json`. Combined with SEC-1, any site could do it.",
+   "did": "Only a folder directly inside `runs/` that holds a `result.json`. Anything else gets 400.",
+   "check": "`test/server.test.mjs` tries `scores.json`, `results.csv`, `.smoke.json`, `..`, `../x` and an empty id; all are refused and `scores.json` survives.",
+   "where": [
+    "dashboard.mjs: runDir()"
+   ]
+  },
+  {
+   "id": "RUN-2",
+   "severity": "medium",
+   "area": "Runner",
+   "status": "fixed",
+   "title": "Hitting the budget killed the runs in progress and threw their spend away",
+   "found": "The Run tab says \"Stop starting new runs after this much reported spend\", but the runner called its stop-everything path: the agents already running were killed and their half-finished runs discarded. The money they had spent bought nothing. Reproduced with a $0.01 budget: \"■ opus-low__v2 stopped (discarded)\".",
+   "did": "Reaching the budget now only stops new runs. The ones already going finish and are kept, and the log says how many are still running.",
+   "check": "`test/runner.test.mjs`: \"the budget stops new runs but lets running ones finish\". It fails on the old runner.",
+   "where": [
+    "run-matrix.mjs: pool()"
+   ]
+  },
+  {
+   "id": "RUN-3",
+   "severity": "medium",
+   "area": "Runner",
+   "status": "fixed",
+   "title": "A $ in a variant's text could change the prompt that was sent",
+   "found": "Placeholders were filled with `String.replaceAll(placeholder, text)`, and in a replacement string `$$`, `$&`, `` $` `` and `$'` are patterns. \"Costs $$5\" was sent as \"Costs $5\", and `$'` would paste the rest of the prompt into the middle of it.",
+   "did": "Placeholders are now filled with a function, which inserts the text exactly as written.",
+   "check": "`test/runner.test.mjs`: \"variant text is sent exactly, $ patterns included\". It fails on the old runner.",
+   "where": [
+    "run-matrix.mjs: buildPrompt()"
+   ]
+  },
+  {
+   "id": "SRV-1",
+   "severity": "medium",
+   "area": "Server",
+   "status": "fixed",
+   "title": "A redone run inherited the old run's score and notes",
+   "found": "Reviews in `scores.json` are keyed by run name only. After ✕ deleted a run, its score stayed, and the run that replaced it got that score for a game nobody had played. \"Retry failed\" did the same with notes left on the failed attempt. The new run then counted as reviewed, so Needs a look hid it.",
+   "did": "Deleting a run deletes its review. A review is now saved with the run's `startedAt` and applies only to that attempt (older reviews without it still apply). `results.csv` follows the same rule.",
+   "check": "`test/server.test.mjs`: \"reviews ... tied to the run attempt\" and \"delete-run ... the review goes with it\". In the browser, `test/ui_check.py` checks a note is saved with its `startedAt`.",
+   "where": [
+    "dashboard.mjs: reviewOf(), /api/score, /api/delete-run",
+    "run-matrix.mjs: writeReport()"
+   ]
+  },
+  {
+   "id": "UI-2",
+   "severity": "medium",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "The search box dropped your typing after a short pause",
+   "found": "The Results search rebuilt the whole tab 250 ms after each keystroke, including the search box itself, which lost focus. Keystrokes after a pause went nowhere: typing \"opus\", pausing, then \"-medium\" left \"opus\" in the box.",
+   "did": "Fixed by the same merge: the box is kept, and the list under it updates.",
+   "check": "`test/ui_check.py`: \"search keeps focus and every keystroke across redraws\". It reproduced on the original page.",
+   "where": [
+    "dashboard.html: renderResults()"
+   ]
+  },
+  {
+   "id": "UI-3",
+   "severity": "medium",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "The batch log never scrolled to new lines",
+   "found": "Every 2-second refresh took the log box out of the page and put it back, which resets its scroll to the top. Measured on the original page during a 40-run batch: scroll position 0 while 1,246 px of log piled up below.",
+   "did": "The log is now appended in place and kept across redraws. It follows the end unless you've scrolled up to read, and it's a live region for screen readers.",
+   "check": "`test/ui_check.py`: \"the batch log follows its end\", during a 120-run fake batch.",
+   "where": [
+    "dashboard.html: liveCard(), pollOnce()"
+   ]
+  },
+  {
+   "id": "UI-4",
+   "severity": "medium",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Changes made anywhere but this page never showed up",
+   "found": "The page only reloaded results when a batch it had started printed a line. Runs from `node run-matrix.mjs` in a terminal, a score saved in another tab, a hand edit to `matrix.config.json` or the prompt: none appeared until you reloaded the page or pressed Refresh. Insights and Setup had no refresh at all.",
+   "did": "The server now reports a cheap signature of the results, config, prompt and tests with every poll. The page reloads whatever changed and redraws the open tab, so the Refresh button is gone. If the config changes on disk while Setup has unsaved edits, a banner offers to load it instead of silently overwriting either side. An open run dialog follows its run too: a review saved elsewhere shows up, and a deleted run says so.",
+   "check": "`test/ui_check.py` and a sandbox walkthrough: a terminal batch, a run folder added and removed by hand, a score saved through the API, and two hand edits to the config (with and without unsaved edits in Setup) all showed up by themselves within a few seconds.",
+   "where": [
+    "dashboard.mjs: revs()",
+    "dashboard.html: pollOnce()"
+   ]
+  },
+  {
+   "id": "RES-3",
+   "severity": "medium",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "On phones the filters filled the whole first screen",
+   "found": "Results and Insights showed twelve filter dropdowns stacked before any content.",
+   "did": "On phones they fold behind one \"Filters · n on\" button. On wider screens they stay inline as before.",
+   "check": "Screenshots.",
+   "where": [
+    "dashboard.html: filterBar()"
+   ]
+  },
+  {
+   "id": "RES-4",
+   "severity": "medium",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Setup's CLIs and Models tables scrolled sideways on phones and tablets",
+   "found": "At 375 and 768 px, the reorder and remove buttons and the global instructions column were off-screen.",
+   "did": "Below 900 px both tables become cards. Each model's time limit, test status and buttons share one line where there's room.",
+   "check": "Screenshots at 375 and 768 px.",
+   "where": [
+    "dashboard.html: clisCard(), modelsCard()"
+   ]
+  },
+  {
+   "id": "RES-5",
+   "severity": "medium",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "iPhones zoomed into every text box, and buttons were too small to tap",
+   "found": "iOS Safari zooms the page in when you focus a field with text under 16 px, and all fields were 14 px. Icon buttons were about 22 px tall.",
+   "did": "On touch screens, fields use 16 px text and buttons are at least 40 px. With a mouse, buttons are at least 26 px, which meets WCAG 2.2's target size.",
+   "check": "WebKit with iPhone profiles is the closest automated check here. Real iOS Safari isn't available on this machine, so it's worth a look on your phone.",
+   "where": [
+    "dashboard.html: CSS (pointer: coarse)"
+   ]
+  },
+  {
+   "id": "RUN-4",
+   "severity": "low",
+   "area": "Runner",
+   "status": "fixed",
+   "title": "Game links broke on #, ? or % in a game's file name",
+   "found": "The agents pick the game's title, and it ends up in the file name. Neither `runs/index.html` nor the dashboard's ▶ encoded the path, so a title like \"Kart #1\" or \"100% Speed\" gave a broken link.",
+   "did": "Each path segment is URL-encoded in both places.",
+   "check": "`test/runner.test.mjs` checks the gallery link for \"Kart #1? 100%.html\".",
+   "where": [
+    "run-matrix.mjs: writeReport()",
+    "dashboard.html: runUrl()"
+   ]
+  },
+  {
+   "id": "RUN-5",
+   "severity": "low",
+   "area": "Runner",
+   "status": "fixed",
+   "title": "Which runs used an old variant text was guessed, not known",
+   "found": "To flag runs made with a variant's earlier text, the dashboard checked whether the saved prompt still contains the current text. That can't see a variant whose text was cleared, and a substring match can fool it.",
+   "did": "New runs record `variantHashes` in `result.json`: a short hash of each variant's text when it ran. The dashboard compares those exactly and keeps the old check for runs made before this change.",
+   "check": "`test/runner.test.mjs` checks the hash. The sandbox copy of your runs still flags the same 22 runs as before (they predate the hashes).",
+   "where": [
+    "run-matrix.mjs: variantHashes()",
+    "dashboard.mjs: changedVariants()"
+   ]
+  },
+  {
+   "id": "SRV-2",
+   "severity": "low",
+   "area": "Server",
+   "status": "fixed",
+   "title": "Bad input got in: scores over 10, a config that isn't an object, broken JSON",
+   "found": "Typing 15 in a score box saved 15. `PUT /api/config` accepted any JSON, an array included, and wrote it. A body that wasn't JSON gave a 500 with a parser message.",
+   "did": "Scores are checked to be 0 to 10, and the page clamps what you type. The config must be an object, the template must be text, and unreadable bodies get 400.",
+   "check": "`test/server.test.mjs`: \"config and prompt: ... bad input refused\" and \"reviews: 0-10 only\".",
+   "where": [
+    "dashboard.mjs",
+    "dashboard.html: saveScore()"
+   ]
+  },
+  {
+   "id": "SRV-3",
+   "severity": "low",
+   "area": "Server",
+   "status": "fixed",
+   "title": "A second dashboard on the same port crashed with a stack trace",
+   "found": "Starting the dashboard while one was already running threw an unhandled EADDRINUSE error.",
+   "did": "It now says the port is in use, that the dashboard may already be open there, and which `--port` to try instead. Then it exits.",
+   "check": "`test/server.test.mjs`: \"a second dashboard on a port in use says so and exits\".",
+   "where": [
+    "dashboard.mjs"
+   ]
+  },
+  {
+   "id": "SRV-4",
+   "severity": "low",
+   "area": "Server",
+   "status": "fixed",
+   "title": "Run files were loaded whole into memory, and some game assets got the wrong type",
+   "found": "Every `/runs/...` request read the whole file into memory first, and `agent.out` can be tens of MB. Fonts, GIF/WebP images, video, `.ktx2` and `.hdr` textures were all served as `application/octet-stream`. A malformed `%` escape in a URL gave a 500.",
+   "did": "Files are streamed, HEAD works, and common game asset types have their real Content-Type. Bad escapes get 400.",
+   "check": "`test/server.test.mjs`: \"run files: served and streamed, nothing outside the runs folder\".",
+   "where": [
+    "dashboard.mjs: serveRunFile()"
+   ]
+  },
+  {
+   "id": "SRV-5",
+   "severity": "low",
+   "area": "Server",
+   "status": "fixed",
+   "title": "Every status poll resent all test results",
+   "found": "The page polls every 2 seconds, and every answer carried all the Test results, each with up to about 7 KB of command output.",
+   "did": "Test results are versioned: the page says which version it has, and gets them only when they change.",
+   "check": "`test/server.test.mjs`: \"... tests only sent when they changed\".",
+   "where": [
+    "dashboard.mjs: /api/status"
+   ]
+  },
+  {
+   "id": "UI-5",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Polls could overlap and print the same log lines twice",
+   "found": "Polling used `setInterval` on an async function. When the server was slow (for example during Preview, which runs a dry run synchronously), polls stacked up and each one appended the same new log lines.",
+   "did": "Polls now run one at a time with a timeout: every 2 s while the page is visible, every 10 s while it's hidden, and right away when you come back to it. After a server restart the page reconnects by itself and says so in the status pill. If the server isn't up yet when you open the page, it waits for it instead of staying blank.",
+   "check": "Code review, plus a server restart during the sandbox walkthrough.",
+   "where": [
+    "dashboard.html: poll()"
+   ]
+  },
+  {
+   "id": "UI-6",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Save could mark edits made while saving as already saved",
+   "found": "Save recorded \"what's saved\" only after its requests finished. Anything typed in Setup during those few hundred milliseconds counted as saved but wasn't written, and was lost on the next reload. A network error during Save threw an uncaught error.",
+   "did": "Save now writes a snapshot taken when you press it, and marks only that snapshot as saved. A failed save says so and leaves your edits marked unsaved.",
+   "check": "Code review.",
+   "where": [
+    "dashboard.html: save()"
+   ]
+  },
+  {
+   "id": "UI-7",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "A filter could hide every run while its dropdown said \"all\"",
+   "found": "Filters are remembered per browser. After the runs with a filtered value were deleted, the dropdown had no option for that value and showed \"all\", but the filter still applied and the list stayed empty with no visible reason.",
+   "did": "A filter value no run has any more now shows as \"… (no runs)\", and active filters are highlighted. On phones the Filters button also says how many are on.",
+   "check": "Code review.",
+   "where": [
+    "dashboard.html: filterSelects()"
+   ]
+  },
+  {
+   "id": "UI-8",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "A review that failed to save still looked saved",
+   "found": "The new score or note was applied on screen before the request, and stayed there when the request failed.",
+   "did": "It now goes back to the old value and says the save failed.",
+   "check": "Code review.",
+   "where": [
+    "dashboard.html: saveReview()"
+   ]
+  },
+  {
+   "id": "UI-9",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Clearing a CLI's extra flags would silently stall its runs",
+   "found": "The default extra flags are what turn permission prompts off (for example `--dangerously-skip-permissions`). If that box was emptied, every run of that CLI would wait for an answer no one can give, until its time limit.",
+   "did": "Setup now warns when a CLI that has models has no extra flags at all.",
+   "check": "Code review.",
+   "where": [
+    "dashboard.html: validate()"
+   ]
+  },
+  {
+   "id": "RES-6",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Wide screens wasted space or stretched content",
+   "found": "On ultrawide screens, Compare's single \"All\" column put each label about 900 px from its value, and content stayed capped at 1280 px. In your data, three of the runs table's variant columns (source, animation, goal) hold the same value on every row.",
+   "did": "Compare's table is only as wide as it needs to be. Content uses up to 1640 px on screens 1800 px and wider. Variant columns that are the same for every run shown are named once above the table instead of repeated on every row. Wide number tables keep their first column pinned when they scroll.",
+   "check": "Screenshots at 1440 px and 2560 px.",
+   "where": [
+    "dashboard.html"
+   ]
+  },
+  {
+   "id": "RES-7",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Dialogs were cramped on phones",
+   "found": "The run details dialog was 94% of the width with a short scroll area. Its two tables and its score row squeezed together.",
+   "did": "On phones it opens full screen, with the content scrolling under a fixed title bar.",
+   "check": "Screenshots.",
+   "where": [
+    "dashboard.html: dialog CSS"
+   ]
+  },
+  {
+   "id": "A11Y-1",
+   "severity": "low",
+   "area": "Dashboard",
+   "status": "fixed",
+   "title": "Accessibility: Lighthouse 68–89 before, 96–100 now",
+   "found": "Lighthouse on the original page: accessibility 72 (Setup), 89 (Run), 68 (Results), 79 (Insights); best practices 96. It found fields and dropdowns without labels, table columns without headers (and layout-only cells that shifted columns away from their headers), a scrollable log without a role, amber tags at 4.4:1 contrast (4.5 is the minimum for small text), small targets, and a 404 in the console (no favicon).",
+   "did": "Every field now has a label and every table column a header, with layout-only cells moved out of the column order. The batch log is a live `role=log`. Amber is darker (5.3:1). Tabs carry `aria-current`, and focus outlines show on buttons and links. There's a favicon, and the browser chrome follows the light or dark theme.",
+   "check": "Lighthouse after the fixes: Setup, Run and Results 100 accessibility and 100 best practices. Insights is 96: the Spread chart's dots overlap by design, and its \"As a table\" view has the same values.",
+   "where": [
+    "dashboard.html"
+   ]
+  },
+  {
+   "id": "DATA-2",
+   "severity": "info",
+   "area": "Data",
+   "status": "note",
+   "title": "Older runs have no CLI version and mostly no prompt version",
+   "found": "No run has `cliVersion` yet, and only the 3 newest have `promptVersion`: both started being recorded recently. \"Each CLI stayed on one version\" and the prompt checks in Insights therefore only cover new runs.",
+   "did": "Nothing to do. `--reparse` can't recover them, since they weren't saved at the time.",
+   "check": "",
+   "where": []
+  },
+  {
+   "id": "SEC-3",
+   "severity": "info",
+   "area": "Security",
+   "status": "note",
+   "title": "Games run on the dashboard's own origin",
+   "found": "Games are served from `/runs/` on the same origin as the dashboard, so a game's script could call the dashboard's API just like the page does, and SEC-1's checks would let it through.",
+   "did": "Left as is. The agent that wrote the game already ran with permission prompts off on this machine, so its game is no more dangerous than the agent was. Fully isolating games would mean serving them on a second port, which would also change how games are opened. Your call if you ever run untrusted models.",
+   "check": "",
+   "where": [
+    "dashboard.mjs"
+   ]
+  },
+  {
+   "id": "PR-2",
+   "severity": "info",
+   "area": "Process",
+   "status": "note",
+   "title": "Draft PR #2 would make every existing run count as not done",
+   "found": "PR #2 (still a draft) adds an `audio` dimension and reorganizes the prompt. A new dimension adds a segment to every run name, so none of the 25 existing runs would match and the next batch would run everything again. The reorganized prompt also starts a new prompt version.",
+   "did": "Left untouched; it's a draft. That's expected when you add a dimension, just worth knowing before merging it. It was branched before PR #3, so it may need a rebase.",
+   "check": "",
+   "where": [
+    "PR #2"
+   ]
+  }
+ ],
+ "changes": [
+  {
+   "title": "Audit tab",
+   "detail": "This page, read from `audit.json` next to `dashboard.mjs`. Read marks are kept in this browser. It doesn't show when the file isn't there."
+  },
+  {
+   "title": "A dashboard that updates itself",
+   "detail": "The server publishes signatures of the results, config, prompt and tests, and the page reloads whatever changed. Runs started from a terminal, scores from another tab and hand edits all show up by themselves, so the Refresh button is gone."
+  },
+  {
+   "title": "Redraws that keep your place",
+   "detail": "Views are rebuilt and merged into the page rather than replacing it, using a small keyed DOM merge with no dependencies. Focus, the text you're typing, the cursor, scroll positions and open sections all survive every redraw, including live ones while a batch runs."
+  },
+  {
+   "title": "Phones, tablets, ultrawide",
+   "detail": "Card layouts below 900 px for runs, CLIs and models; foldable filters; a compact header and save bar; a full-screen dialog; 16 px fields and 40 px targets on touch screens; pinned first columns in wide tables; up to 1640 px of content on very wide screens."
+  },
+  {
+   "title": "Run tab follows the batch",
+   "detail": "While a batch runs, the Live card moves to the top. The log follows new lines unless you've scrolled up. The status pill shortens on phones and turns red if the server goes away. Per-model all/none only shows when a model has several efforts."
+  },
+  {
+   "title": "Results",
+   "detail": "Variant columns that never change are named once above the table. Score boxes are clamped to 0 to 10. Deleting a run also deletes its review. ▶ links survive any file name."
+  },
+  {
+   "title": "Setup",
+   "detail": "Warnings fold into a count you can open (errors always show). A banner appears if the config changes on disk while you have unsaved edits. New warning when a CLI's extra flags are emptied."
+  },
+  {
+   "title": "Safer server",
+   "detail": "It only answers its own page (SEC-1), deletes only run folders, validates input, streams files, and explains a busy port. New `--allow-host` option."
+  },
+  {
+   "title": "Runner",
+   "detail": "A bad run fails on its own instead of taking the batch down. The budget lets running runs finish. Prompts keep `$` text exactly. Each run records `variantHashes`."
+  },
+  {
+   "title": "Tests",
+   "detail": "`node --test test/*.test.mjs` runs 25 tests of the runner and server against fake CLIs in a few seconds. `python3 test/ui_check.py` drives the dashboard in Chromium, WebKit and Firefox at four sizes and checks the live behaviour. Nothing real runs."
+  }
+ ],
+ "tests": {
+  "passed": 120,
+  "failed": 0,
+  "summary": "120 automated checks pass: 25 Node tests and 95 browser checks. All of them run against fake CLIs in throwaway folders, so they never start a real agent or touch `runs/`. To check the tests themselves, I ran them against the original code: 7 of the 13 runner tests and 10 of the 12 server tests fail there (some only because they test new features).",
+  "suites": [
+   {
+    "name": "`node --test test/*.test.mjs`: runner",
+    "result": "pass",
+    "count": 13,
+    "detail": "Every CLI end to end: its command line, how it gets the prompt (stdin, file or argument), and the parsed tokens, cost, turns and subagents. Also /goal and Codex's plain-prompt fallback, error messages, `$` in variant text, a run that can't start, a missing variant file, an unreadable result.json, the budget, Stop, a CLI that isn't installed, `--per-cli`, `--dry-run`, `--reparse`, `--smoke`, and the gallery's links."
+   },
+   {
+    "name": "`node --test test/*.test.mjs`: server",
+    "result": "pass",
+    "count": 12,
+    "detail": "Foreign Host, cross-origin, cross-site and non-JSON writes are refused; `--allow-host`; file serving and path traversal; config and prompt writes and validation; change signatures; reviews tied to a run attempt; delete limited to run folders; a batch and a Test through the fake CLIs; a busy port."
+   },
+   {
+    "name": "`python3 test/ui_check.py`",
+    "result": "pass",
+    "count": 95,
+    "detail": "Every tab at 375, 768, 1024, 1366 and 2560 px in Chromium, WebKit and Firefox: no sideways scroll and no console errors. Live behaviour: the search keeps every keystroke; a half-typed note survives runs arriving from a terminal; the note saves with its run attempt; the batch log follows a 120-run batch."
+   },
+   {
+    "name": "Sandbox walkthrough",
+    "result": "pass",
+    "count": 28,
+    "detail": "Driven by hand-written scripts against a copy of your runs: prompt chips, Discard, Ctrl+S, + effort, Test, theme, \"looked at\", Compare, score clamping, Start and Stop, delete, a hand-edited config with and without unsaved edits, and a score saved from another tab reaching an open dialog."
+   },
+   {
+    "name": "Lighthouse",
+    "result": "pass",
+    "count": 4,
+    "detail": "Accessibility 100 on Setup, Run and Results and 96 on Insights (the original page: 72, 89, 68 and 79). The one item left is the Spread chart's dots overlapping, by design. Best practices 100 on all four (96 before, from a console 404)."
+   }
+  ]
+ },
+ "screens": {
+  "summary": "`viewport-matrix` on all five tabs of the final build: 24 screenshots per tab (iPhones and iPads in WebKit, Android in Chromium, desktop sizes in all three engines), 120 in all. None scroll sideways or log a console error. `test/ui_check.py` adds 375, 768, 1024, 1366 and 2560 px in every engine.",
+  "note": "120 screenshots, 0 issues",
+  "rows": [
+   {
+    "device": "Pixel 10",
+    "engine": "Chromium",
+    "size": "360×732",
+    "result": "ok"
+   },
+   {
+    "device": "iPhone SE",
+    "engine": "WebKit",
+    "size": "375×667",
+    "result": "ok"
+   },
+   {
+    "device": "iPhone 17 Pro",
+    "engine": "WebKit",
+    "size": "402×681",
+    "result": "ok"
+   },
+   {
+    "device": "iPhone 17 Pro Max",
+    "engine": "WebKit",
+    "size": "440×763",
+    "result": "ok"
+   },
+   {
+    "device": "Galaxy Tab S9",
+    "engine": "Chromium",
+    "size": "640×1024",
+    "result": "ok"
+   },
+   {
+    "device": "iPhone 17 Pro landscape",
+    "engine": "WebKit",
+    "size": "756×352",
+    "result": "ok"
+   },
+   {
+    "device": "iPad Mini",
+    "engine": "WebKit",
+    "size": "768×1024",
+    "result": "ok"
+   },
+   {
+    "device": "Galaxy Z Fold 7 (open)",
+    "engine": "Chromium",
+    "size": "984×1016",
+    "result": "ok"
+   },
+   {
+    "device": "4:3 1024x768",
+    "engine": "Chromium",
+    "size": "1024×768",
+    "result": "ok"
+   },
+   {
+    "device": "4:3 1024x768",
+    "engine": "Firefox",
+    "size": "1024×768",
+    "result": "ok"
+   },
+   {
+    "device": "4:3 1024x768",
+    "engine": "WebKit",
+    "size": "1024×768",
+    "result": "ok"
+   },
+   {
+    "device": "iPad Pro 11 landscape",
+    "engine": "WebKit",
+    "size": "1194×834",
+    "result": "ok"
+   },
+   {
+    "device": "Laptop 1366x768",
+    "engine": "Chromium",
+    "size": "1366×768",
+    "result": "ok"
+   },
+   {
+    "device": "Laptop 1366x768",
+    "engine": "Firefox",
+    "size": "1366×768",
+    "result": "ok"
+   },
+   {
+    "device": "Laptop 1366x768",
+    "engine": "WebKit",
+    "size": "1366×768",
+    "result": "ok"
+   },
+   {
+    "device": "16:10 1440x900",
+    "engine": "Chromium",
+    "size": "1440×900",
+    "result": "ok"
+   },
+   {
+    "device": "16:10 1440x900",
+    "engine": "Firefox",
+    "size": "1440×900",
+    "result": "ok"
+   },
+   {
+    "device": "16:10 1440x900",
+    "engine": "WebKit",
+    "size": "1440×900",
+    "result": "ok"
+   },
+   {
+    "device": "16:9 1920x1080",
+    "engine": "Chromium",
+    "size": "1920×1080",
+    "result": "ok"
+   },
+   {
+    "device": "16:9 1920x1080",
+    "engine": "Firefox",
+    "size": "1920×1080",
+    "result": "ok"
+   },
+   {
+    "device": "16:9 1920x1080",
+    "engine": "WebKit",
+    "size": "1920×1080",
+    "result": "ok"
+   },
+   {
+    "device": "21:9 2560x1080",
+    "engine": "Chromium",
+    "size": "2560×1080",
+    "result": "ok"
+   },
+   {
+    "device": "21:9 2560x1080",
+    "engine": "Firefox",
+    "size": "2560×1080",
+    "result": "ok"
+   },
+   {
+    "device": "21:9 2560x1080",
+    "engine": "WebKit",
+    "size": "2560×1080",
+    "result": "ok"
+   }
+  ]
+ }
+}
