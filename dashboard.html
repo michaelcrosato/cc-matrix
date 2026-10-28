@@ -4,13 +4,17 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Matrix Dashboard</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%232f5bd3'/%3E%3Cg fill='%23fff'%3E%3Crect x='7' y='7' width='7' height='7' rx='1.5'/%3E%3Crect x='18' y='7' width='7' height='7' rx='1.5'/%3E%3Crect x='7' y='18' width='7' height='7' rx='1.5'/%3E%3Crect x='18' y='18' width='7' height='7' rx='1.5' opacity='.55'/%3E%3C/g%3E%3C/svg%3E">
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#1e1e1d" media="(prefers-color-scheme: dark)">
 <style>
 :root {
   --bg: #f6f6f4; --panel: #ffffff; --ink: #1b1b1a; --muted: #6b6a66; --line: #e2e1dc;
-  --accent: #2f5bd3; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #1f7a46; --bad: #b3261e; --warn: #9a6200;
+  --accent: #2f5bd3; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #1f7a46; --bad: #b3261e; --warn: #8a5700;
   --chip: #f0efeb; --chip-on: #dfe7fd; --code: #f3f2ee;
   /* chart marks, checked with the dataviz palette validator: finished vs failed, more vs less than a baseline */
   --mark: #2a78d6; --mark-bad: #d03b3b; --more: #eb6834; --less: #2a78d6;
+  --gutter: 16px; --tap: 30px;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -26,70 +30,94 @@
   --chip: #2a2a28; --chip-on: #2c3657; --code: #232321;
   --mark: #3987e5; --mark-bad: #e66767; --more: #d95926; --less: #3987e5;
 }
+:root { color-scheme: light; } :root[data-theme="dark"] { color-scheme: dark; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { color-scheme: dark; } }
 * { box-sizing: border-box; }
-body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; overflow-wrap: break-word; }
 header { position: sticky; top: 0; z-index: 5; background: var(--panel); border-bottom: 1px solid var(--line);
-  display: flex; align-items: center; gap: 16px; padding: 10px 16px; flex-wrap: wrap; }
-header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; }
-nav { display: flex; gap: 4px; }
-nav button { background: none; border: 0; padding: 7px 12px; border-radius: 8px; color: var(--muted); font: inherit; cursor: pointer; }
+  display: flex; align-items: center; gap: 6px 16px; padding: 8px var(--gutter); padding-left: max(var(--gutter), env(safe-area-inset-left)); padding-right: max(var(--gutter), env(safe-area-inset-right)); flex-wrap: wrap; }
+header h1 { font-size: 16px; margin: 0; letter-spacing: .2px; white-space: nowrap; }
+nav { display: flex; gap: 4px; min-width: 0; }
+nav button { background: none; border: 0; padding: 7px 12px; border-radius: 8px; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
+nav button:hover { color: var(--ink); }
 nav button.on { background: var(--soft); color: var(--ink); font-weight: 600; }
-.pill { margin-left: auto; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 13px; }
+.pill { margin-left: auto; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 13px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pill.live { background: var(--soft); color: var(--accent); font-weight: 600; }
-main { max-width: 1280px; margin: 0 auto; padding: 16px; }
+.pill.off { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); color: var(--bad); }
+.pill .short { display: none; }
+#theme { font-size: 17px; line-height: 1; min-width: var(--tap); min-height: var(--tap); }
+main { max-width: 1280px; margin: 0 auto; padding: var(--gutter); padding-left: max(var(--gutter), env(safe-area-inset-left)); padding-right: max(var(--gutter), env(safe-area-inset-right)); }
+@media (min-width: 1800px) { main { max-width: 1640px; } }
 section.tab { display: none; } section.tab.on { display: block; }
-.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; min-width: 0; }
 .card h2 { font-size: 15px; margin: 0 0 4px; } .card .sub { color: var(--muted); margin: 0 0 12px; font-size: 13px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .grow { flex: 1; }
-input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; max-width: 100%; }
+select { text-overflow: ellipsis; }
 textarea { width: 100%; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+button:focus-visible, a:focus-visible, summary:focus-visible, .chip:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .invalid { border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 8%, var(--bg)); }
 .mono, textarea.mono { font-family: ui-monospace, "Cascadia Mono", "Ubuntu Mono", Menlo, monospace; font-size: 13px; }
 .sub .mono { overflow-wrap: anywhere; } /* long file paths wrap on small phones */
-button.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
-button.btn:hover { background: var(--chip); }
-button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
-button.primary:hover { filter: brightness(1.05); background: var(--accent); }
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: .3em; font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 12px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+.btn:hover { background: var(--chip); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+.btn.primary:hover { filter: brightness(1.05); background: var(--accent); }
 button.danger { color: var(--bad); }
 button:disabled { opacity: .45; cursor: not-allowed; }
-button.icon { font: inherit; border: 0; background: none; color: var(--muted); padding: 4px 6px; border-radius: 6px; cursor: pointer; }
+button.icon { font: inherit; border: 0; background: none; color: var(--muted); padding: 4px 6px; border-radius: 6px; cursor: pointer; min-width: 26px; min-height: 26px; }
+thead.srhead th { padding: 0; border: 0; height: 0; line-height: 0; }
+thead.srhead { display: table-header-group; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 button.icon:hover { background: var(--chip); color: var(--ink); }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
 th.sort { cursor: pointer; } th.sort:hover { color: var(--ink); }
 td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
-.scroll { overflow-x: auto; }
+.scroll { overflow-x: auto; overscroll-behavior-x: contain; position: relative; } /* relative: keeps .sr-only text inside it from widening the page */
+/* Wide number tables scroll sideways on small screens with their first column pinned. */
+table.pin th:first-child, table.pin td:first-child { position: sticky; left: 0; z-index: 1; background: var(--panel); }
+table.pin td:first-child { box-shadow: 1px 0 0 var(--line); }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--chip); cursor: pointer; user-select: none; border: 1px solid transparent; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--chip); cursor: pointer; user-select: none; -webkit-user-select: none; border: 1px solid transparent; }
 .chip input { margin: 0; }
 .chip.on { background: var(--chip-on); border-color: color-mix(in srgb, var(--accent) 40%, transparent); }
 .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--chip); color: var(--muted); white-space: nowrap; }
+button.tag { border: 0; cursor: pointer; font: inherit; font-size: 12px; }
 .tag.ok { color: var(--ok); } .tag.bad { color: var(--bad); } .tag.warn { color: var(--warn); }
 .ok { color: var(--ok); } .bad { color: var(--bad); } .muted { color: var(--muted); }
 .variant { display: grid; grid-template-columns: 140px 1fr auto; gap: 8px; align-items: start; margin-bottom: 8px; }
-@media (max-width: 640px) { .variant { grid-template-columns: 1fr; } }
+@media (max-width: 640px) { .variant { grid-template-columns: 1fr auto; } .variant textarea { grid-column: 1 / -1; grid-row: 2; } }
 .dim-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
-.savebar { position: sticky; bottom: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; box-shadow: 0 -6px 20px rgb(0 0 0 / .06); }
-/* The messages take a full row on narrow screens and scroll, so the sticky bar never covers the page. */
-.savebar > .grow { flex: 1 1 260px; max-height: 30vh; overflow-y: auto; }
+.dim-head input.dimname { width: 170px; font-weight: 600; }
+.savebar { position: sticky; bottom: 0; z-index: 4; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; margin-bottom: max(0px, env(safe-area-inset-bottom)); display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; box-shadow: 0 -6px 20px rgb(0 0 0 / .06); }
+.savebar .msgs { flex: 1 1 260px; min-width: 0; }
+.savebar .list { max-height: 30vh; overflow-y: auto; margin-bottom: 6px; }
+.savebar .summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; }
+.savebar .actions { display: flex; gap: 8px; margin-left: auto; }
 .big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
 .stat { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
 .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
-pre.log { background: var(--code); border-radius: 8px; padding: 10px; height: 260px; overflow: auto; margin: 0; font-size: 12.5px; white-space: pre-wrap; }
-dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); width: min(900px, 94vw); max-height: 86vh; padding: 0; }
+.stats { display: flex; flex-wrap: wrap; gap: 16px 28px; align-items: flex-end; }
+.launch { display: flex; gap: 8px; margin-left: auto; flex-wrap: wrap; }
+pre.log { background: var(--code); border-radius: 8px; padding: 10px; height: 260px; overflow: auto; margin: 0; font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+dialog { border: 1px solid var(--line); border-radius: 12px; background: var(--panel); color: var(--ink); width: min(900px, 94vw); max-height: 86vh; max-height: 86dvh; padding: 0; overflow: hidden; }
 dialog::backdrop { background: rgb(0 0 0 / .45); }
-dialog .dhead { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
-dialog .dbody { padding: 16px; overflow: auto; max-height: calc(86vh - 56px); }
-dialog pre { white-space: pre-wrap; margin: 0; font-size: 13px; }
+dialog .dhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
+dialog .dhead strong { min-width: 0; overflow-wrap: anywhere; }
+dialog .dbody { padding: 16px; overflow: auto; max-height: calc(86vh - 56px); max-height: calc(86dvh - 56px); overscroll-behavior: contain; }
+dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 13px; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .grid2 > * { min-width: 0; }
 .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
 .errs { color: var(--bad); font-size: 13px; } .errs div::before { content: "• "; }
 .warns { color: var(--warn); font-size: 13px; } .warns div::before { content: "• "; }
-td input.score { width: 64px; } td input.notes { width: 180px; }
+input.score { width: 76px; } input.notes { width: 180px; }
+table.runs td.act button.icon { padding: 4px 4px; }
 tr.failed td { color: var(--bad); }
 .bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; min-width: 60px; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
@@ -98,10 +126,11 @@ a { color: var(--accent); }
 button.linkish { font: inherit; border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-weight: 600; text-align: left; }
 button.linkish:hover { text-decoration: underline; }
 nav .badge { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: var(--panel); font-size: 11.5px; font-weight: 700; line-height: 18px; text-align: center; }
+nav .badge.info { background: var(--accent); color: var(--accent-ink); }
 .tiles { display: flex; flex-wrap: wrap; gap: 14px 32px; }
 .tile { display: flex; flex-direction: column; gap: 2px; min-width: 100px; }
 .tile .k { color: var(--muted); font-size: 12.5px; }
-.tile .v { font-size: 24px; font-weight: 650; line-height: 1.2; }
+.tile .v { font-size: 24px; font-weight: 650; line-height: 1.2; font-variant-numeric: tabular-nums; }
 .tile .d { color: var(--muted); font-size: 12px; }
 .checks > div { display: grid; grid-template-columns: 20px 1fr; gap: 0 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .checks > div:last-child { border-bottom: 0; }
@@ -111,6 +140,8 @@ td.fx { text-align: right; font-variant-numeric: tabular-nums; white-space: nowr
 tr.fhead td { font-weight: 600; padding-top: 14px; }
 .chg { font-variant-numeric: tabular-nums; } .chg.sure { font-weight: 700; }
 th.plain { text-transform: none; letter-spacing: 0; }
+table.cmp { width: auto; min-width: min(100%, 520px); }
+table.cmp td:first-child { padding-right: 24px; }
 .legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--muted); font-size: 12.5px; }
 .legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
 .legend i.dot { border-radius: 50%; } .legend i.ring { border-radius: 50%; border: 2px solid var(--mark-bad); background: var(--panel); }
@@ -133,20 +164,161 @@ th.plain { text-transform: none; letter-spacing: 0; }
 .cols .c:hover, .cols .c:focus-visible { background: var(--chip); outline: none; }
 .cols .ok { background: var(--mark); } .cols .no { background: var(--mark-bad); }
 .xlabels { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; color: var(--muted); font-size: 11px; }
-#tip { position: fixed; z-index: 30; display: none; pointer-events: none; max-width: 320px; padding: 7px 9px; border-radius: 8px; background: var(--panel); color: var(--ink);
+#tip { position: fixed; z-index: 30; display: none; pointer-events: none; max-width: min(320px, calc(100vw - 16px)); padding: 7px 9px; border-radius: 8px; background: var(--panel); color: var(--ink);
   border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(0 0 0 / .14); font-size: 12.5px; line-height: 1.35; }
 #tip strong { display: block; font-size: 14px; } #tip span { display: block; }
+.banner { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px;
+  background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); }
+.banner.bad { background: color-mix(in srgb, var(--bad) 10%, var(--panel)); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
+.filters { display: contents; }
+.filtertoggle { display: none; }
+select.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--soft); }
+.only-phone, .cardsort { display: none; }
+td.br, td.errcell { display: none; }
+td.scorecell { text-align: right; }
+.lbl { color: var(--muted); font-size: 12px; margin-right: 4px; }
+td.dimcell .lbl, td.num .lbl, td.eff .lbl { display: none; }
 table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
+
+/* ---- Audit tab ---- */
+.finding { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 10px; }
+.finding.read:not([open]) { opacity: .62; }
+.finding .fhead { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; cursor: pointer; list-style: none; padding: 2px 0; }
+.finding .fhead::-webkit-details-marker { display: none; }
+.finding .fhead::before { content: "▸"; color: var(--muted); width: 12px; flex: none; }
+.finding[open] .fhead::before { content: "▾"; }
+.finding .ftitle { font-weight: 650; font-size: 14.5px; flex: 1 1 260px; min-width: 0; }
+.finding dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 12px; margin: 10px 0 0; }
+.finding dt { color: var(--muted); font-size: 12.5px; padding-top: 1px; }
+.finding dd { margin: 0; }
+.finding code, .audit-p code { font-family: ui-monospace, "Cascadia Mono", "Ubuntu Mono", Menlo, monospace; font-size: 12.5px; background: var(--code); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
+.sev-critical, .sev-high { color: var(--bad); } .sev-medium { color: var(--warn); } .sev-low, .sev-info { color: var(--muted); }
+.tag.sev-critical, .tag.sev-high { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); }
+.tag.sev-medium { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
+.tag.st-fixed { color: var(--ok); } .tag.st-open, .tag.st-yours { color: var(--warn); }
+.audit-list { margin: 8px 0 0; padding-left: 20px; } .audit-list li + li { margin-top: 6px; }
+
+/* ---- Touch screens: bigger targets, and 16px text in fields so iOS Safari doesn't zoom in on focus ---- */
+@media (pointer: coarse) {
+  :root { --tap: 40px; }
+  input, select, textarea { font-size: 16px; }
+  textarea.mono, input.mono { font-size: 15px; }
+  button.icon, button.btn, nav button, button.linkish { min-height: var(--tap); }
+  button.icon { min-width: 36px; }
+  .chip { min-height: 36px; }
+  input[type="checkbox"] { width: 20px; height: 20px; }
+}
+
+/* ---- Tablets and below ---- */
+@media (max-width: 900px) {
+  /* Runs table: one card per run */
+  table.runs thead { display: none; }
+  table.runs, table.runs tbody { display: block; }
+  table.runs tr { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 0 10px 30px; position: relative; border-bottom: 1px solid var(--line); }
+  table.runs td { display: block; border: 0; padding: 0; min-width: 0; }
+  table.runs td.br { display: block; flex-basis: 100%; height: 0; }
+  table.runs td.play { position: absolute; left: 4px; top: 10px; font-size: 16px; }
+  table.runs td.who { font-weight: 650; }
+  table.runs td.eff::before { content: "· "; color: var(--muted); }
+  table.runs td.st { margin-left: auto; text-align: right; }
+  table.runs td.st .hint { text-align: left; max-width: none !important; min-width: 0 !important; }
+  table.runs td.dimcell { color: var(--muted); font-size: 12.5px; }
+  table.runs td.dimcell .lbl { display: inline; font-size: 11.5px; margin-right: 2px; }
+  table.runs td.num { text-align: left; }
+  table.runs td.num .lbl { display: inline; }
+  table.runs td.when { font-size: 12.5px; }
+  table.runs td.notescell { flex: 1 1 160px; }
+  table.runs td.notescell input { width: 100%; }
+  table.runs td.act { margin-left: -6px; white-space: normal !important; display: flex; flex-wrap: wrap; }
+  table.runs input.score { width: 84px; }
+  table.runs .hide-cards { display: none; }
+  table.runs td.errcell { display: block; flex-basis: 100%; font-size: 12.5px; }
+  table.runs td.errcell::before { content: attr(data-err); }
+  table.runs td.scorecell { text-align: left; }
+  /* card lines: who · effort · status / variants / error / numbers / review / actions */
+  table.runs td.who, table.runs td.eff, table.runs td.st { order: 1; }
+  table.runs td.b1 { order: 2; } table.runs td.dimcell { order: 3; }
+  table.runs td.errcell { order: 4; } table.runs td.b2 { order: 5; }
+  table.runs td.num, table.runs td.when { order: 6; } table.runs td.b3 { order: 7; }
+  table.runs td.scorecell, table.runs td.notescell { order: 8; } table.runs td.b4 { order: 9; }
+  table.runs td.act { order: 10; }
+  .cardsort { display: inline-flex; }
+  /* Setup and Run: CLIs and models as cards */
+  table.stack, table.stack tbody { display: block; }
+  table.stack thead { display: none; }
+  table.stack tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  table.stack td { display: block; border: 0; padding: 3px 0; width: auto !important; min-width: 0 !important; }
+  table.stack td[data-label]::before { content: attr(data-label); display: block; color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: .4px; margin: 4px 0 2px; }
+  table.stack td.inline { display: inline-block; margin-right: 10px; vertical-align: middle; }
+  table.stack td.inline[data-label]::before { display: inline; margin-right: 6px; }
+  table.models td:first-child select { width: 100%; max-width: 440px; }
+  table.models tr { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; }
+  table.models td:nth-child(1), table.models td:nth-child(2) { flex-basis: 100%; }
+  table.models td.inline { margin-right: 0; }
+  table.models td.acts { display: flex; gap: 2px; margin-left: auto; }
+  table.runmodels td { padding-top: 2px; }
+}
+
+/* ---- Phones ---- */
 @media (max-width: 640px) {
+  :root { --gutter: 12px; }
+  header { padding-top: 6px; padding-bottom: 0; gap: 0 8px; }
+  header h1 { font-size: 15px; }
+  .pill { font-size: 12px; padding: 3px 9px; }
+  .pill .full { display: none; } .pill .short { display: inline; }
+  nav { order: 5; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; margin: 4px calc(-1 * var(--gutter)) 0; padding: 0 var(--gutter) 6px; }
+  nav::-webkit-scrollbar { display: none; }
+  nav { gap: 2px; }
+  nav button { flex: 1 0 auto; padding: 8px 6px; font-size: 13.5px; }
+  nav .badge { margin-left: 4px; min-width: 16px; padding: 0 4px; font-size: 11px; line-height: 16px; }
+  .card { padding: 14px 12px; border-radius: 10px; margin-bottom: 12px; }
+  .only-phone { display: revert; }
+  .hide-phone { display: none !important; }
+  .big { font-size: 30px; }
+  .stats { gap: 12px 20px; }
+  .stats .stat { min-width: 0; flex: 1 1 40%; }
+  .launch { width: 100%; margin-left: 0; }
+  .launch > button { flex: 1 1 0; }
+  /* Filters fold away behind a button */
+  .filtertoggle { display: inline-block; }
+  .filters { display: none; }
+  .filters.open { display: flex; flex-wrap: wrap; gap: 8px; width: 100%; }
+  .filters.open select { flex: 1 1 150px; }
+  table.opts td { display: block; border: 0; padding: 2px 0; } table.opts tr { display: block; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  table.opts input[type="number"] { width: 100% !important; }
+  .savebar { padding: 8px 12px; border-radius: 10px; }
+  .savebar .actions { width: 100%; } .savebar .actions button { flex: 1 1 0; }
+  dialog { width: 100vw; max-width: 100vw; height: 100dvh; max-height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  dialog[open] { display: flex; flex-direction: column; }
+  dialog .dbody { max-height: none; flex: 1; padding: 14px 12px; }
   table.look, table.look tbody, table.look tr, table.look td { display: block; }
   table.look tr { position: relative; padding: 8px 0 8px 22px; border-bottom: 1px solid var(--line); }
   table.look td { border: 0; padding: 2px 0; min-width: 0 !important; }
   table.look td.play { position: absolute; left: 0; top: 10px; }
+  .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
+  .tile { min-width: 0; }
+  .tile .v { font-size: 22px; }
+  .finding dl { grid-template-columns: 1fr; gap: 2px; }
+  .cmpctl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; }
+  .cmpctl > select, .cmpctl > .row { width: 100%; min-width: 0; } .cmpctl > .row select { flex: 1; min-width: 0; }
+  .cmpctl .cl { color: var(--muted); font-size: 13px; }
+  .cmpctl > label { grid-column: 1 / -1; }
+  .finding dd + dt { margin-top: 8px; }
+  input.notes { width: 100%; }
+}
+/* Phones held sideways: the header scrolls away, so the page isn't squeezed between two sticky bars */
+@media (max-height: 500px) and (orientation: landscape) {
+  header { position: static; }
+  .savebar .list { max-height: 40vh; }
 }
 @media (max-width: 480px) {
   .strip { grid-template-columns: fit-content(96px) minmax(0, 1fr); gap: 0 8px; }
   .strip .end { display: none; }
   .strip .axis span:nth-child(even) { display: none; }
+}
+@media (max-width: 360px) {
+  header h1 { font-size: 14px; }
+  nav button { padding: 8px 4px; font-size: 13px; }
 }
 </style>
 </head>
@@ -158,29 +330,34 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
     <button data-tab="run">Run</button>
     <button data-tab="results">Results</button>
     <button data-tab="insights">Insights</button>
+    <button data-tab="audit" hidden>Audit</button>
   </nav>
-  <span id="pill" class="pill">Idle</span>
-  <button class="icon" id="theme" title="Toggle light/dark">Theme</button>
+  <span id="pill" class="pill" role="status" aria-live="polite">Idle</span>
+  <button class="icon" id="theme" title="Toggle light/dark" aria-label="Toggle light or dark theme">◐</button>
 </header>
 <main>
   <section class="tab" id="tab-setup"></section>
   <section class="tab" id="tab-run"></section>
   <section class="tab" id="tab-results"></section>
   <section class="tab" id="tab-insights"></section>
+  <section class="tab" id="tab-audit"></section>
 </main>
-<dialog id="modal"><div class="dhead"><strong id="mtitle" class="grow"></strong><button class="icon" onclick="modal.close()">✕</button></div><div class="dbody" id="mbody"></div></dialog>
+<dialog id="modal"><div class="dhead"><strong id="mtitle" class="grow"></strong><button class="icon" onclick="modal.close()" aria-label="Close">✕</button></div><div class="dbody" id="mbody"></div></dialog>
 <div id="tip" role="tooltip"></div>
 
 <script>
 // ------------------------------------------------------------------ basics
 const $ = (s, el = document) => el.querySelector(s);
+// key: identifies a row across redraws (see patch). Handlers are kept on the element (el._on) and
+// called through fire, so a redraw that keeps the element can hand it the new ones.
 function h(tag, props, ...kids) {
   const el = document.createElement(tag);
   for (const [k, v] of Object.entries(props || {})) {
     if (v == null || v === false) continue;
     if (k === 'class') el.className = v;
     else if (k === 'style') el.style.cssText = v;
-    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else if (k === 'key') el.setAttribute('data-key', v);
+    else if (k.startsWith('on')) { (el._on ??= {})[k.slice(2)] = v; el.addEventListener(k.slice(2), fire); }
     else if (k === 'dataset') Object.assign(el.dataset, v);
     else if (k in el && !['list', 'type'].includes(k)) el[k] = v;
     else el.setAttribute(k, v === true ? '' : v);
@@ -188,13 +365,74 @@ function h(tag, props, ...kids) {
   for (const c of kids.flat(Infinity)) if (c != null && c !== false) el.append(c instanceof Node ? c : String(c));
   return el;
 }
+function fire(e) { return this._on?.[e.type]?.call(this, e); }
+
+// ---------------------------------------------------------------- redraws
+// Views are rebuilt from state and merged into the page rather than swapped in, so a redraw (a
+// click, or a live update while a batch runs) never loses what you're typing, the cursor, focus,
+// scroll positions or an open <details>. Children pair up by key (rows), else in order by tag;
+// nodes already in order stay put and only the others move.
+const keyOf = (n) => n.nodeType === 1 ? n.getAttribute('data-key') : null;
+function patch(a, b) {
+  if (a.nodeType !== b.nodeType || a.nodeName !== b.nodeName || keyOf(a) !== keyOf(b)) { a.replaceWith(b); return b; }
+  if (a.nodeType !== 1) { if (a.nodeValue !== b.nodeValue) a.nodeValue = b.nodeValue; return a; }
+  if (a.hasAttribute('data-keep') && b.hasAttribute('data-keep')) return a; // updated in place elsewhere (the batch log)
+  const focused = a === document.activeElement, tag = a.tagName, details = tag === 'DETAILS';
+  for (const { name } of [...a.attributes]) if (!b.hasAttribute(name) && !(details && name === 'open')) a.removeAttribute(name);
+  for (const { name, value } of [...b.attributes]) if (!(details && name === 'open') && a.getAttribute(name) !== value) a.setAttribute(name, value);
+  a._on = b._on; for (const t in b._on ?? {}) a.addEventListener(t, fire);
+  if (tag === 'INPUT') { if (a.type === 'checkbox' || a.type === 'radio') a.checked = b.checked; else if (!focused && a.value !== b.value) a.value = b.value; return a; }
+  if (tag === 'TEXTAREA') { if (!focused && a.value !== b.value) a.value = b.value; return a; }
+  if (tag === 'SELECT' && focused) return a; // leave an open dropdown alone
+  const want = tag === 'SELECT' ? b.value : null;
+  patchChildren(a, b);
+  if (want != null && a.value !== want) a.value = want;
+  return a;
+}
+function patchChildren(a, b) {
+  const old = [...a.childNodes], keyed = new Map(), free = [];
+  for (const n of old) { const k = keyOf(n); if (k != null) keyed.set(k, n); else free.push(n); }
+  let fi = 0;
+  const next = [...b.childNodes].map((nb) => {
+    const k = keyOf(nb);
+    let m = null;
+    if (k != null) { m = keyed.get(k) ?? null; keyed.delete(k); }
+    else for (let j = fi; j < Math.min(free.length, fi + 4); j++) if (free[j].nodeName === nb.nodeName) { m = free[j]; fi = j + 1; break; }
+    return m ? patch(m, nb) : nb;
+  });
+  const keep = new Set(next);
+  for (const n of [...a.childNodes]) if (!keep.has(n)) n.remove();
+  const pos = new Map([...a.childNodes].map((n, i) => [n, i])), stay = lis(next.map((n) => pos.get(n) ?? -1));
+  for (let i = next.length - 1, ref = null; i >= 0; ref = next[i--]) if (!stay.has(i)) a.insertBefore(next[i], ref);
+}
+// Indices of the longest increasing run of positions (ignoring -1): the nodes that can stay where they are.
+function lis(arr) {
+  const tails = [], at = [], prev = [];
+  arr.forEach((v, i) => {
+    if (v < 0) return;
+    let lo = 0, hi = tails.length;
+    while (lo < hi) { const mid = (lo + hi) >> 1; if (tails[mid] < v) lo = mid + 1; else hi = mid; }
+    tails[lo] = v; at[lo] = i; prev[i] = lo ? at[lo - 1] : -1;
+  });
+  const out = new Set();
+  for (let i = tails.length ? at[tails.length - 1] : -1; i >= 0; i = prev[i]) out.add(i);
+  return out;
+}
+// Column headers only screen readers get, for tables whose columns speak for themselves on screen.
+const srHead = (...names) => h('thead', { class: 'srhead' }, h('tr', {}, names.map((t) => h('th', {}, h('span', { class: 'sr-only' }, t)))));
+// Redraw el's contents (or el itself, by id) from freshly built nodes.
+const morph = (el, ...kids) => { if (el) patchChildren(el, h(el.tagName, {}, ...kids)); };
+const repaint = (id, node) => { const el = document.getElementById(id); if (el) patch(el, node); };
 const store = { get: (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
   set: (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
-async function api(path, method = 'GET', data) {
-  const r = await fetch(path, { method, headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
-  const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || r.statusText);
-  return j;
+async function api(path, method = 'GET', data, timeout = 0) {
+  const ctl = new AbortController(), timer = timeout ? setTimeout(() => ctl.abort(), timeout) : null;
+  try {
+    const r = await fetch(path, { method, signal: ctl.signal, headers: { 'Content-Type': 'application/json' }, body: data === undefined ? undefined : JSON.stringify(data) });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(j?.error || r.statusText);
+    return j;
+  } finally { clearTimeout(timer); }
 }
 const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : (+v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
 const fmtTok = (v) => v == null ? '—' : v >= 1e6 ? fmt(v / 1e6, 2) + 'M' : v >= 1e3 ? fmt(v / 1e3, 0) + 'K' : String(Math.round(v));
@@ -243,9 +481,15 @@ $('#theme').onclick = () => {
 };
 
 // ------------------------------------------------------------------ state
-const logPre = h('pre', { class: 'log mono', id: 'logpre' });
-let cfg = null, savedCfg = '', tmpl = '', savedTmpl = '', meta = {}, results = [], status = {}, logSince = 0;
+let cfg = null, savedCfg = '', tmpl = '', savedTmpl = '', meta = {}, results = [], status = {}, logSince = 0, logText = '';
 let clis = {}, cliCheckedAt = null, cliError = null, smokes = {}, smokeGoal = store.get('matrix.smokeGoal', false);
+// rev: what the server last said about the results, config, prompt and tests (see poll). onDisk: the
+// config or prompt changed on disk while Setup had unsaved edits. audit: audit.json, for the Audit tab.
+let rev = {}, onDisk = false, audit = null, offline = false;
+// View state that isn't worth a URL: open panels, per browser.
+let ui = store.get('matrix.ui', { saveOpen: null, filtersOpen: false, auditFilter: { sev: '', area: '', status: '', unread: false } });
+const saveUi = () => store.set('matrix.ui', ui);
+const auditRead = new Set(store.get('matrix.auditRead', []));
 let sel = store.get('matrix.sel', { offPick: [], offOnly: {}, opts: { repeat: 1, concurrency: 2, perCli: '', budget: '', timeout: '', rerunFailed: false } });
 let rv = store.get('matrix.results', { group: 'testing', filters: {}, q: '', sort: { k: 'finishedAt', d: -1 } });
 const saveSel = () => store.set('matrix.sel', sel);
@@ -257,19 +501,31 @@ const cached = (k, fn) => k in cache ? cache[k] : (cache[k] = fn());
 const dirty = () => JSON.stringify(cfg) !== savedCfg || tmpl !== savedTmpl;
 
 // tabs
-const TABS = ['setup', 'run', 'results', 'insights'];
+const TABS = ['setup', 'run', 'results', 'insights', 'audit'];
 let tab = location.hash.slice(1) || store.get('matrix.tab', 'run');
+const tabOk = (t) => TABS.includes(t) && (t !== 'audit' || !!audit);
 function showTab(t) {
   tipHide();
+  if (!tabOk(t)) t = 'run';
+  const moved = t !== tab;
   tab = t; store.set('matrix.tab', t); history.replaceState(null, '', '#' + t);
-  document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll('nav button').forEach((b) => { b.classList.toggle('on', b.dataset.tab === t); b.toggleAttribute('aria-current', b.dataset.tab === t); });
   document.querySelectorAll('section.tab').forEach((s) => s.classList.toggle('on', s.id === 'tab-' + t));
-  if (t === 'results') renderResults();
-  if (t === 'run') renderRun();
-  if (t === 'insights') renderInsights();
+  render();
+  if (moved) $(`nav button[data-tab="${t}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); // the tab bar scrolls on phones
+}
+// Redraws the open tab from the current state. Cheap, and safe at any time (see patch).
+function render() {
+  if (!cfg) return;
+  if (tab === 'setup') renderSetup();
+  else if (tab === 'run') renderRun();
+  else if (tab === 'results') renderResults();
+  else if (tab === 'insights') renderInsights();
+  else if (tab === 'audit') renderAudit();
+  if (tipAnchor && !tipAnchor.isConnected) tipHide(); // its chart mark went away
 }
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
-addEventListener('hashchange', () => { const t = location.hash.slice(1); if (cfg && TABS.includes(t) && t !== tab) showTab(t); });
+addEventListener('hashchange', () => { const t = location.hash.slice(1); if (cfg && tabOk(t) && t !== tab) showTab(t); });
 
 // ------------------------------------------------------------------- CLIs
 const cliModels = (p) => clis[p]?.models ?? [];
@@ -353,58 +609,55 @@ const effortLabel = (e) => e.endsWith('-uc') ? `${e.slice(0, -3)} + Ultracode` :
 const UPDATABLE = ['claude', 'codex', 'agy', 'grok'];
 let cliUpdating = null;
 function updateButton(p) {
-  const busy = status.running ? 'Wait for the batch to finish' : Object.values(smokes).some((s) => s.running) ? 'Wait for the tests to finish' : null;
+  const busy = status.running ? 'Wait for the batch to finish' : Object.values(smokes).some((s) => s.running) ? 'Wait for the tests to finish'
+    : status.updating && status.updating !== cliUpdating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null;
   return h('button', { class: 'icon', disabled: !!busy || !!cliUpdating, title: busy ?? `Run "${clis[p]?.bin ?? p} update"`,
     onclick: () => updateCli(p) }, cliUpdating === p ? 'updating…' : 'update');
 }
 async function updateCli(p) {
   const name = PROVIDERS[p], before = clis[p]?.version;
   if (!confirm(`Update ${name} now?\n\nRuns after this use the new version; each run records its CLI version, so you can still compare.`)) return;
-  cliUpdating = p; renderClis();
+  cliUpdating = p; render();
   try {
     const r = await api('/api/update-cli', 'POST', { provider: p });
     clis = r.clis; cliCheckedAt = r.checkedAt;
     const after = clis[p]?.version;
     alert(`${name}: ${!r.ok ? 'the update failed' : after !== before ? `updated ${before} → ${after}` : `already up to date (${after})`}${r.output ? `\n\n${r.output.slice(-1200)}` : ''}`);
   } catch (e) { alert(e.message); }
-  cliUpdating = null; renderClis(); updateSavebar();
-  $('#modelcard')?.replaceWith(modelsCard()); // a newer CLI may list more models
+  cliUpdating = null; render(); // a newer CLI may list more models
 }
 
 async function loadClis(refresh) {
-  if (refresh) { clis = {}; cliCheckedAt = null; renderClis(); }
+  if (refresh) { clis = {}; cliCheckedAt = null; render(); }
   cliError = null;
   try { const r = await api('/api/clis' + (refresh ? '?refresh=1' : '')); clis = r.clis; cliCheckedAt = r.checkedAt; }
   catch (e) { cliError = /not found/i.test(e.message) ? 'The dashboard server is older than this page: restart it (Ctrl-C, then node dashboard.mjs)' : e.message; }
-  renderClis(); updateSavebar();
-  $('#modelcard')?.replaceWith(modelsCard()); // per-model efforts may have changed
-  if (tab === 'run') renderRun();
+  render(); // per-model efforts may have changed
 }
 
-function renderClis() {
-  const el = $('#clicard'); if (!el) return;
-  el.replaceChildren(
+function clisCard() {
+  return h('div', { class: 'card', id: 'clicard', key: 'clis' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'CLIs'),
       cliError ? h('span', { class: 'bad' }, `Couldn't check: ${cliError}`)
         : h('span', { class: 'muted' }, cliCheckedAt ? `checked ${new Date(cliCheckedAt).toLocaleTimeString()}` : 'checking…'),
       h('button', { class: 'btn', onclick: () => loadClis(true) }, 'Re-check')),
     h('p', { class: 'sub' }, 'What this machine has installed. Click a model to add it to Models below, then press Test there to check it works end to end.'),
-    h('div', { class: 'scroll' }, h('table', {},
+    h('div', { class: 'scroll' }, h('table', { class: 'stack' },
       h('thead', {}, h('tr', {}, ['CLI', 'Version', 'Models (click to add)', 'Global instructions'].map((t) => h('th', {}, t)))),
       h('tbody', {}, Object.entries(PROVIDERS).map(([p, name]) => {
         const c = clis[p];
-        return h('tr', {},
-          h('td', { style: 'white-space:nowrap' }, h('strong', {}, name), h('div', { class: 'muted mono', style: 'font-size:12px' }, c?.bin ?? cfg.bins?.[p] ?? p)),
-          h('td', {}, !c ? h('span', { class: 'muted' }, cliError ? '—' : 'checking…')
-            : c.installed ? h('div', {}, h('span', { class: 'ok' }, '✔ ' + c.version), UPDATABLE.includes(p) ? h('div', {}, updateButton(p)) : null)
+        return h('tr', { key: p },
+          h('td', { style: 'min-width:150px' }, h('strong', {}, name), h('div', { class: 'muted mono', style: 'font-size:12px; overflow-wrap:anywhere' }, c?.bin ?? cfg.bins?.[p] ?? p)),
+          h('td', { class: 'inline' }, !c ? h('span', { class: 'muted' }, cliError ? '—' : 'checking…')
+            : c.installed ? h('div', { class: 'row', style: 'gap:0 6px' }, h('span', { class: 'ok' }, '✔ ' + c.version), UPDATABLE.includes(p) ? updateButton(p) : null)
             : h('span', { class: 'bad', title: c.error || '' }, '✘ not found')),
-          h('td', {}, h('div', { class: 'chips' }, catalog().filter((m) => m.provider === p).map((m) => {
+          h('td', { 'data-label': 'Models (click to add)' }, h('div', { class: 'chips' }, catalog().filter((m) => m.provider === p).map((m) => {
             const unlisted = c?.models?.length && !c.suggested && !c.models.some((x) => x.id === m.model);
-            return h('button', { class: 'chip', style: 'font-size:12.5px;color:inherit',
+            return h('button', { class: 'chip', key: m.model, style: 'font-size:12.5px;color:inherit',
               title: `${m.model} · efforts: ${m.efforts.join(', ')}${unlisted ? ` · ${name} doesn't list this model` : ''}`,
               onclick: () => addAgent(m) }, m.label, unlisted ? h('span', { class: 'bad' }, 'not listed') : null);
           })), c?.modelsError ? h('div', { class: 'hint' }, `Couldn't list models: ${c.modelsError}`) : null),
-          h('td', {}, c?.instructions?.length ? c.instructions.map((f) => h('div', { class: 'mono', style: 'font-size:12px' }, f)) : h('span', { class: 'muted' }, c ? 'none' : '')));
+          h('td', { 'data-label': 'Global instructions' }, c?.instructions?.length ? c.instructions.map((f) => h('div', { class: 'mono', style: 'font-size:12px' }, f)) : h('span', { class: 'muted' }, c ? 'none' : '')));
       })))),
     h('p', { class: 'hint' }, 'Global instruction files are added to every run of that CLI, so keep them neutral or the comparison is skewed. Grok and Muse also read your Claude Code file; Muse skips it (and ~/.codex/AGENTS.md) with --no-foreign-personal-context in its extra flags below.'));
 }
@@ -426,7 +679,7 @@ function smokeBadge(a) {
     s.ok ? '✔ works' : '✘ test failed');
 }
 const renderSmokes = () => document.querySelectorAll('[data-smoke]').forEach((el) => {
-  const a = cfg.agents.find((x) => x.id === el.dataset.smoke); el.replaceChildren(a ? smokeBadge(a) : '');
+  const a = cfg.agents.find((x) => x.id === el.dataset.smoke); morph(el, a ? smokeBadge(a) : '');
 });
 const hasWorked = (a) => smokeOf(a)?.ok || results.some((r) => r.agent === a.id && r.status === 'ok');
 
@@ -487,6 +740,9 @@ function validate() {
     else if (c?.models?.length && !c.suggested && a.model && !c.models.some((m) => m.id === a.model))
       warnings.push(`${a.id}: ${name} doesn't list "${a.model}" (it has ${c.models.map((m) => m.id).join(', ')})`);
   });
+  // No extra flags at all: permission prompts come back, and a headless run can't answer them.
+  for (const p of new Set(cfg.agents.map((a) => a.provider))) if (Array.isArray(cfg.extraArgs?.[p]) && !cfg.extraArgs[p].length && DEFAULT_EXTRA[p])
+    warnings.push(`${PROVIDERS[p] ?? p} has no extra flags, so it may stop at a permission prompt no one can answer (the default is ${DEFAULT_EXTRA[p].join(' ')})`);
   // A variant edited after it ran: those runs still count as done, so the new text wouldn't run.
   for (const [d, vs] of Object.entries(cfg.dimensions)) for (const v of vs) {
     const n = results.filter((r) => r[d] === v.id && r.changed?.includes(d)).length;
@@ -495,24 +751,32 @@ function validate() {
   return { errors, warnings, used };
 }
 
+// Saves what's on screen at the moment Save is pressed: edits made while it saves stay unsaved.
 async function save() {
   const v = validate();
   if (v.errors.length) { alert('Fix these first:\n\n' + v.errors.join('\n')); return false; }
-  await api('/api/config', 'PUT', cfg);
-  meta.promptVersion = (await api('/api/template', 'PUT', { text: tmpl })).version;
+  const c = JSON.stringify(cfg), t = tmpl;
+  try {
+    await api('/api/config', 'PUT', JSON.parse(c));
+    const r = await api('/api/template', 'PUT', { text: t });
+    meta.promptVersion = r.version;
+    if (r.rev) Object.assign(rev, { config: r.rev.config, template: r.rev.template }); // our own save isn't a change on disk
+  } catch (e) { alert(`Couldn't save: ${e.message}`); return false; }
+  savedCfg = c; savedTmpl = t; onDisk = false;
   await loadResults(); // which runs used a variant's old text depends on the saved config
-  savedCfg = JSON.stringify(cfg); savedTmpl = tmpl;
-  updateSavebar(); renderRun();
+  render();
   return true;
 }
 addEventListener('keydown', (e) => { if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (dirty()) save(); } });
 addEventListener('beforeunload', (e) => { if (cfg && dirty()) { e.preventDefault(); e.returnValue = ''; } });
 
 // ------------------------------------------------------------------ SETUP
+// Edits that change the layout redraw the tab; typing only refreshes the save bar (and the chips).
 function changed(rerender) {
-  if (rerender) renderSetup(); else updateSavebar();
+  if (rerender) render(); else updateSavebar();
 }
 const moveIn = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
+let addPick = null; // the model picked in "+ Add model", kept across redraws
 
 // Models card. Its own function so a CLI re-check can redraw it with fresh per-model efforts.
 function modelsCard() {
@@ -520,38 +784,40 @@ function modelsCard() {
     const opts = effortOptions(a), effs = a.efforts?.length ? a.efforts.map(effName) : ['default'];
     const setEffs = (list) => { a.efforts = list.length === 1 && list[0] === 'default' ? [] : list; changed(true); };
     return h('tr', {},
-      h('td', {}, modelSelect(a, (c) => switchModel(a, c), { style: 'min-width:190px' }),
+      h('td', { style: 'min-width:200px' }, modelSelect(a, (c) => switchModel(a, c), { style: 'width:100%', 'aria-label': 'Model' }),
         entryOf(a) ? h('div', { class: 'hint mono', style: 'margin:2px 0 0', title: `Run name: ${a.id}` }, a.model)
-          : h('input', { value: a.model, class: 'mono', placeholder: 'model ID', title: `Run name: ${a.id}`, style: 'display:block; width:100%; margin-top:4px',
+          : h('input', { value: a.model, class: 'mono', placeholder: 'model ID', title: `Run name: ${a.id}`, 'aria-label': 'Model ID', style: 'display:block; width:100%; margin-top:4px',
               oninput: (e) => { a.model = e.target.value.trim(); a.id = uniqueId(slug(a.model) || a.provider, a); changed(); },
               onchange: () => changed(true) })),
-      h('td', {}, h('div', { class: 'row', style: 'gap:4px; flex-wrap:wrap' },
+      h('td', { 'data-label': 'Effort levels' }, h('div', { class: 'row', style: 'gap:4px; flex-wrap:wrap' },
         effs.map((e, j) => h('span', { style: 'white-space:nowrap' },
-          h('select', { title: 'Effort level', onchange: (ev) => setEffs(effs.map((x, k) => k === j ? ev.target.value : x)) },
+          h('select', { title: 'Effort level', 'aria-label': 'Effort level', onchange: (ev) => setEffs(effs.map((x, k) => k === j ? ev.target.value : x)) },
             opts.includes(e) ? null : h('option', { value: e, selected: true }, `${e} (not taken)`),
             opts.map((o) => h('option', { value: o, selected: o === e, disabled: o !== e && effs.includes(o) }, effortLabel(o)))),
-          effs.length > 1 ? h('button', { class: 'icon', title: 'Remove this effort level', onclick: () => setEffs(effs.filter((_, k) => k !== j)) }, '✕') : null)),
+          effs.length > 1 ? h('button', { class: 'icon', title: 'Remove this effort level', 'aria-label': `Remove effort ${e}`, onclick: () => setEffs(effs.filter((_, k) => k !== j)) }, '✕') : null)),
         effs.length < opts.length ? h('button', { class: 'icon', title: 'Add another effort level to sweep',
           onclick: () => setEffs([...effs, opts.find((o) => o !== 'default' && !effs.includes(o)) ?? opts.find((o) => !effs.includes(o))]) }, '+ effort') : null)),
-      h('td', {}, h('input', { type: 'number', min: 0, value: a.timeout ?? '', placeholder: 'none', style: 'width:80px',
+      h('td', { class: 'inline', 'data-label': 'Time limit (min)' }, h('input', { type: 'number', min: 0, inputmode: 'numeric', value: a.timeout ?? '', placeholder: 'none', style: 'width:80px', 'aria-label': 'Time limit in minutes',
         oninput: (e) => { if (e.target.value === '') delete a.timeout; else a.timeout = +e.target.value; changed(); } })),
-      h('td', { style: 'white-space:nowrap' }, h('span', { dataset: { smoke: a.id } }, smokeBadge(a)),
+      h('td', { class: 'inline', style: 'white-space:nowrap' }, h('span', { dataset: { smoke: a.id } }, smokeBadge(a)),
         h('button', { class: 'icon', title: `Run one tiny task through ${PROVIDERS[a.provider] ?? a.provider} with this model at effort ${effortsOf(a)[0]} (saves first)`, onclick: () => testModels([a]) }, 'Test')),
-      h('td', { style: 'white-space:nowrap' },
-        h('button', { class: 'icon', title: 'Move up', onclick: () => { moveIn(cfg.agents, i, -1); changed(true); } }, '↑'),
-        h('button', { class: 'icon', title: 'Move down', onclick: () => { moveIn(cfg.agents, i, 1); changed(true); } }, '↓'),
-        h('button', { class: 'icon', title: 'Duplicate', onclick: () => { cfg.agents.splice(i + 1, 0, { ...structuredClone(a), id: uniqueId(a.id) }); changed(true); } }, '⧉'),
-        h('button', { class: 'icon', title: 'Remove', onclick: () => { cfg.agents.splice(i, 1); changed(true); } }, '✕')));
+      h('td', { class: 'acts', style: 'white-space:nowrap' },
+        h('button', { class: 'icon', title: 'Move up', 'aria-label': 'Move up', disabled: i === 0, onclick: () => { moveIn(cfg.agents, i, -1); changed(true); } }, '↑'),
+        h('button', { class: 'icon', title: 'Move down', 'aria-label': 'Move down', disabled: i === cfg.agents.length - 1, onclick: () => { moveIn(cfg.agents, i, 1); changed(true); } }, '↓'),
+        h('button', { class: 'icon', title: 'Duplicate', 'aria-label': 'Duplicate', onclick: () => { cfg.agents.splice(i + 1, 0, { ...structuredClone(a), id: uniqueId(a.id) }); changed(true); } }, '⧉'),
+        h('button', { class: 'icon', title: 'Remove', 'aria-label': 'Remove', onclick: () => { cfg.agents.splice(i, 1); changed(true); } }, '✕')));
   });
-  let pick = catalog()[0]; // Custom adds a row with an empty model ID to type in
-  return h('div', { class: 'card', id: 'modelcard' },
+  const all = [...catalog(), ...Object.keys(PROVIDERS).map(customOf)];
+  const pick = all.find((c) => c.key === addPick?.key && c.provider === addPick?.provider && !!c.custom === !!addPick?.custom) ?? all[0];
+  return h('div', { class: 'card', id: 'modelcard', key: 'models' },
     h('h2', {}, 'Models'),
     h('p', { class: 'sub' }, 'Each model and its effort levels to sweep. On the Run tab you tick which ones to run. Test runs one tiny task through the CLI (about a minute; Grok with /goal takes a few) to check the install, login, model ID, flags and that results are read correctly.'),
-    h('div', { class: 'scroll' }, h('table', {},
-      h('thead', {}, h('tr', {}, ['Model', 'Effort levels', 'Time limit (min)', 'Works?', ''].map((t) => h('th', {}, t)))),
+    h('div', { class: 'scroll' }, h('table', { class: 'stack models' },
+      h('thead', {}, h('tr', {}, ['Model', 'Effort levels', 'Time limit (min)', 'Works?'].map((t) => h('th', {}, t)), h('th', {}, h('span', { class: 'sr-only' }, 'Order and remove')))),
       h('tbody', {}, agentRows))),
+    cfg.agents.length ? null : h('p', { class: 'muted' }, 'No models yet: pick one below, or click one in CLIs above.'),
     h('div', { class: 'row', style: 'margin-top:10px' },
-      modelSelect(pick, (c) => { pick = c; }, { title: 'Model to add' }),
+      modelSelect(pick, (c) => { addPick = c; }, { title: 'Model to add', 'aria-label': 'Model to add', style: 'flex:1 1 200px; max-width:320px' }),
       h('button', { class: 'btn', onclick: () => addAgent(pick) }, '+ Add model'),
       h('span', { class: 'grow' }),
       h('label', { class: 'row', style: 'gap:6px', title: 'Test with a tiny /goal instead (slower; Codex has no /goal and tests without)' },
@@ -561,16 +827,6 @@ function modelsCard() {
 }
 
 function renderSetup() {
-  const root = $('#tab-setup'); root.replaceChildren();
-
-  // CLIs
-  root.append(h('div', { class: 'card', id: 'clicard' }));
-  renderClis();
-
-  // Models
-  root.append(modelsCard());
-
-  // Dimensions
   const dimNames = Object.keys(cfg.dimensions);
   const renameDim = (oldName, newName) => {
     const next = {};
@@ -580,9 +836,9 @@ function renderSetup() {
   };
   const dimCards = dimNames.map((d, di) => {
     const vs = cfg.dimensions[d];
-    return h('div', { class: 'card' },
+    return h('div', { class: 'card', key: 'dim:' + d },
       h('div', { class: 'dim-head' },
-        h('input', { value: d, class: 'mono', style: 'width:170px; font-weight:600', title: 'Dimension name = the {{placeholder}} in your prompt',
+        h('input', { value: d, class: 'mono dimname', title: 'Dimension name = the {{placeholder}} in your prompt', 'aria-label': 'Dimension name',
           onchange: (e) => {
             const n = e.target.value.trim();
             if (!/^\w+$/.test(n) || RESERVED.includes(n) || (n !== d && cfg.dimensions[n])) { alert('Use letters, numbers or _ only, not a name already in use, and not: ' + RESERVED.join(', ')); e.target.value = d; return; }
@@ -592,85 +848,98 @@ function renderSetup() {
         d === GOAL_DIM ? h('span', { class: 'tag' }, 'sent as /goal · Codex*') : h('span', { class: 'tag mono' }, `{{${d}}}`),
         h('span', { class: 'muted' }, `${vs.length} variant${vs.length === 1 ? '' : 's'}`),
         h('span', { class: 'grow' }),
-        h('button', { class: 'icon', title: 'Move up', onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, -1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↑'),
-        h('button', { class: 'icon', title: 'Move down', onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, 1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↓'),
-        h('button', { class: 'icon', title: 'Remove dimension', onclick: () => { if (confirm(`Remove "${d}" and its ${vs.length} variants?`)) { delete cfg.dimensions[d]; changed(true); } } }, '✕')),
+        h('button', { class: 'icon', title: 'Move up', 'aria-label': `Move ${d} up`, disabled: di === 0, onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, -1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↑'),
+        h('button', { class: 'icon', title: 'Move down', 'aria-label': `Move ${d} down`, disabled: di === dimNames.length - 1, onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, 1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↓'),
+        h('button', { class: 'icon', title: 'Remove dimension', 'aria-label': `Remove ${d}`, onclick: () => { if (confirm(`Remove "${d}" and its ${vs.length} variants?`)) { delete cfg.dimensions[d]; changed(true); } } }, '✕')),
       d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and the agent gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until the condition is checked as met. Add "or stop after N turns" to cap it. Claude Code, Grok, agy and Muse all run /goal headless (each with its own goal loop: Grok plans, builds and verifies with extra agents, so it takes longer). * Codex has no headless /goal, so its runs of a goal variant get the same prompt without /goal.') : null,
       vs.map((v, i) => h('div', { class: 'variant' },
-        h('input', { value: v.id, placeholder: 'short name', title: 'Short name used in folder names and filters',
+        h('input', { value: v.id, placeholder: 'short name', title: 'Short name used in folder names and filters', 'aria-label': `${d} variant short name`,
           oninput: (e) => { v.id = e.target.value.trim(); changed(); } }),
-        h('textarea', { rows: Math.min(8, Math.max(1, Math.ceil((v.text || '').length / 110))), value: v.text ?? '', placeholder: d === GOAL_DIM ? 'Empty = no goal' : 'Text inserted into the prompt',
+        h('textarea', { rows: Math.min(8, Math.max(1, Math.ceil((v.text || '').length / 110))), value: v.text ?? '', placeholder: d === GOAL_DIM ? 'Empty = no goal' : 'Text inserted into the prompt', 'aria-label': `${d} variant text`,
           oninput: (e) => { v.text = e.target.value; changed(); } }),
         h('div', { style: 'white-space:nowrap' },
-          h('button', { class: 'icon', title: 'Move up', onclick: () => { moveIn(vs, i, -1); changed(true); } }, '↑'),
-          h('button', { class: 'icon', title: 'Move down', onclick: () => { moveIn(vs, i, 1); changed(true); } }, '↓'),
-          h('button', { class: 'icon', title: 'Remove', onclick: () => { vs.splice(i, 1); changed(true); } }, '✕')))),
+          h('button', { class: 'icon', title: 'Move up', 'aria-label': 'Move variant up', disabled: i === 0, onclick: () => { moveIn(vs, i, -1); changed(true); } }, '↑'),
+          h('button', { class: 'icon', title: 'Move down', 'aria-label': 'Move variant down', disabled: i === vs.length - 1, onclick: () => { moveIn(vs, i, 1); changed(true); } }, '↓'),
+          h('button', { class: 'icon', title: 'Remove', 'aria-label': 'Remove variant', onclick: () => { vs.splice(i, 1); changed(true); } }, '✕')))),
       h('button', { class: 'btn', onclick: () => { vs.push({ id: 'v' + (vs.length + 1), text: '' }); changed(true); } }, '+ Add variant'));
   });
-  root.append(h('div', { class: 'card', style: 'margin-bottom:8px' },
-    h('h2', {}, 'Dimensions'),
-    h('p', { class: 'sub', style: 'margin:0' }, 'Each dimension fills its {{placeholder}} in the prompt with one variant per run. Every combination gets run. Order variants however you like; Results follow this order.')));
-  root.append(...dimCards);
-  root.append(h('div', { class: 'row', style: 'margin:-4px 0 16px' },
-    !cfg.dimensions[GOAL_DIM] ? h('button', { class: 'btn', onclick: () => { cfg.dimensions[GOAL_DIM] = [{ id: 'off', text: '' }, { id: 'on', text: '' }]; changed(true); } }, '+ Add goal dimension') : null,
-    h('button', { class: 'btn', onclick: () => {
-      const n = prompt('Name for the new dimension (becomes {{name}} in the prompt):');
-      if (!n) return;
-      if (!/^\w+$/.test(n) || RESERVED.includes(n) || cfg.dimensions[n]) return alert('Use letters, numbers or _ only, and a name not already in use.');
-      cfg.dimensions[n] = [{ id: 'v1', text: '' }]; changed(true);
-    } }, '+ Add dimension')));
-
-  // Prompt template
-  const chips = h('div', { class: 'chips', id: 'tchips' });
-  const tarea = h('textarea', { class: 'mono', rows: 24, value: tmpl, spellcheck: false, oninput: (e) => { tmpl = e.target.value; updateChips(); changed(); } });
-  root.append(h('div', { class: 'card' },
-    h('h2', {}, 'Prompt'),
-    h('p', { class: 'sub' }, h('span', {}, 'Saved to '), h('span', { class: 'mono' }, meta.templatePath || cfg.templateFile)),
-    tarea,
-    h('div', { style: 'margin-top:10px' }, chips),
-    h('p', { class: 'hint' }, 'Filled automatically for every run: {{model}} {{effort}} {{lab}} {{environment}} {{stamp}} (YYYYMMDD-HHMM) {{date}} (YYYY-MM-DD HH:MM). Click a chip to insert it at the cursor.')));
-  function updateChips() {
-    const { used } = validate();
-    chips.replaceChildren(...[...Object.keys(cfg.dimensions).filter((n) => n !== GOAL_DIM), ...RESERVED].map((n) => {
-      const isDim = !!cfg.dimensions[n];
-      const cls = used.has(n) ? 'tag ok' : isDim ? 'tag warn' : 'tag';
-      return h('button', { class: cls + ' mono', style: 'border:0;cursor:pointer', title: used.has(n) ? 'Used in prompt' : isDim ? 'Not used yet' : 'Optional',
-        onclick: () => { const s = tarea.selectionStart, e2 = tarea.selectionEnd; tarea.setRangeText(`{{${n}}}`, s, e2, 'end'); tarea.focus(); tmpl = tarea.value; updateChips(); changed(); } },
-        (used.has(n) ? '✓ ' : '') + `{{${n}}}`);
-    }));
-  }
-  updateChips();
-
-  // Advanced
   cfg.bins ??= {}; cfg.extraArgs ??= {};
-  root.append(h('div', { class: 'card' },
-    h('h2', {}, 'Advanced'),
-    h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
-    h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', {},
-      h('strong', {}, n),
-      h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Command'),
-        h('input', { class: 'mono grow', value: cfg.bins[p] ?? p, oninput: (e) => { cfg.bins[p] = e.target.value.trim(); changed(); } })),
-      h('div', { class: 'muted', style: 'margin-bottom:4px' }, 'Extra flags (one per line)'),
-      h('textarea', { class: 'mono', rows: 3, value: (cfg.extraArgs[p] ?? DEFAULT_EXTRA[p] ?? []).join('\n'),
-        oninput: (e) => { cfg.extraArgs[p] = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); changed(); } })))),
-    h('div', { class: 'row', style: 'margin-top:12px' }, h('span', { class: 'muted' }, 'Prompt file'),
-      h('input', { class: 'mono', value: cfg.templateFile || 'prompt-template.md', onchange: (e) => { cfg.templateFile = e.target.value.trim(); changed(); } }),
-      h('span', { class: 'hint', style: 'margin:0' }, 'Change to keep several prompts side by side; the current text is saved to the new file.'))));
-
-  root.append(h('div', { class: 'savebar', id: 'savebar' }));
-  updateSavebar();
+  morph($('#tab-setup'),
+    onDisk ? h('div', { class: 'banner', key: 'ondisk' },
+      h('span', { class: 'grow' }, 'The config or prompt changed on disk while you had unsaved edits here.'),
+      h('button', { class: 'btn', onclick: async () => { if (!confirm('Load the config and prompt from disk? Your unsaved edits here are discarded.')) return; await loadSetup(); render(); } }, 'Load from disk'),
+      h('span', { class: 'muted' }, 'or Save to keep yours.')) : null,
+    clisCard(),
+    modelsCard(),
+    h('div', { class: 'card', key: 'dims', style: 'margin-bottom:8px' },
+      h('h2', {}, 'Dimensions'),
+      h('p', { class: 'sub', style: 'margin:0' }, 'Each dimension fills its {{placeholder}} in the prompt with one variant per run. Every combination gets run. Order variants however you like; Results follow this order.')),
+    dimCards,
+    h('div', { class: 'row', key: 'adddim', style: 'margin:-4px 0 16px' },
+      !cfg.dimensions[GOAL_DIM] ? h('button', { class: 'btn', onclick: () => { cfg.dimensions[GOAL_DIM] = [{ id: 'off', text: '' }, { id: 'on', text: '' }]; changed(true); } }, '+ Add goal dimension') : null,
+      h('button', { class: 'btn', onclick: () => {
+        const n = prompt('Name for the new dimension (becomes {{name}} in the prompt):');
+        if (!n) return;
+        if (!/^\w+$/.test(n) || RESERVED.includes(n) || cfg.dimensions[n]) return alert('Use letters, numbers or _ only, and a name not already in use.');
+        cfg.dimensions[n] = [{ id: 'v1', text: '' }]; changed(true);
+      } }, '+ Add dimension')),
+    // Prompt template
+    h('div', { class: 'card', key: 'prompt' },
+      h('h2', {}, 'Prompt'),
+      h('p', { class: 'sub' }, h('span', {}, 'Saved to '), h('span', { class: 'mono' }, meta.templatePath || cfg.templateFile)),
+      h('textarea', { class: 'mono', id: 'tmplarea', rows: 24, value: tmpl, spellcheck: false, 'aria-label': 'Prompt template',
+        oninput: (e) => { tmpl = e.target.value; updateChips(); changed(); } }),
+      h('div', { class: 'chips', id: 'tchips', style: 'margin-top:10px' }, chipButtons()),
+      h('p', { class: 'hint' }, 'Filled automatically for every run: {{model}} {{effort}} {{lab}} {{environment}} {{stamp}} (YYYYMMDD-HHMM) {{date}} (YYYY-MM-DD HH:MM). Click a chip to insert it at the cursor.')),
+    // Advanced
+    h('div', { class: 'card', key: 'advanced' },
+      h('h2', {}, 'Advanced'),
+      h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
+      h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', { key: p },
+        h('strong', {}, n),
+        h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Command'),
+          h('input', { class: 'mono grow', value: cfg.bins[p] ?? p, 'aria-label': `${n} command`, oninput: (e) => { cfg.bins[p] = e.target.value.trim(); changed(); } })),
+        h('div', { class: 'muted', style: 'margin-bottom:4px' }, 'Extra flags (one per line)'),
+        h('textarea', { class: 'mono', rows: 3, value: (cfg.extraArgs[p] ?? DEFAULT_EXTRA[p] ?? []).join('\n'), 'aria-label': `${n} extra flags`,
+          oninput: (e) => { cfg.extraArgs[p] = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); changed(); } })))),
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('span', { class: 'muted' }, 'Prompt file'),
+        h('input', { class: 'mono', value: cfg.templateFile || 'prompt-template.md', 'aria-label': 'Prompt file', onchange: (e) => { cfg.templateFile = e.target.value.trim(); changed(); } }),
+        h('span', { class: 'hint', style: 'margin:0' }, 'Change to keep several prompts side by side; the current text is saved to the new file.'))),
+    savebar());
 }
 
-function updateSavebar() {
-  const bar = $('#savebar'); if (!bar) return;
-  const v = validate(), d = dirty();
-  bar.replaceChildren(
-    h('div', { class: 'grow' },
-      v.errors.length ? h('div', { class: 'errs' }, v.errors.slice(0, 6).map((e) => h('div', {}, e))) : null,
-      v.warnings.length ? h('div', { class: 'warns' }, v.warnings.map((e) => h('div', {}, e))) : null,
-      !v.errors.length && !v.warnings.length ? h('span', { class: d ? '' : 'muted' }, d ? 'Unsaved changes' : 'All changes saved') : null),
-    h('button', { class: 'btn', disabled: !d, onclick: async () => { if (confirm('Discard unsaved changes?')) { await loadSetup(); renderSetup(); renderRun(); } } }, 'Discard'),
-    h('button', { class: 'btn primary', disabled: !d || v.errors.length > 0, onclick: save }, 'Save (Ctrl+S)'));
+// The {{placeholder}} chips under the prompt: green when used, amber for a dimension the prompt leaves out.
+function chipButtons() {
+  const { used } = validate();
+  return [...Object.keys(cfg.dimensions).filter((n) => n !== GOAL_DIM), ...RESERVED].map((n) => {
+    const isDim = !!cfg.dimensions[n];
+    const cls = used.has(n) ? 'tag ok' : isDim ? 'tag warn' : 'tag';
+    return h('button', { class: cls + ' mono', key: n, title: used.has(n) ? 'Used in prompt' : isDim ? 'Not used yet' : 'Optional',
+      onclick: () => { const ta = $('#tmplarea'), s = ta.selectionStart, e2 = ta.selectionEnd; ta.setRangeText(`{{${n}}}`, s, e2, 'end'); ta.focus(); tmpl = ta.value; updateChips(); changed(); } },
+      (used.has(n) ? '✓ ' : '') + `{{${n}}}`);
+  });
+}
+const updateChips = () => morph($('#tchips'), chipButtons());
+
+// Errors block saving and always show; warnings fold into a count you can open (open by default on wide screens).
+const updateSavebar = () => repaint('savebar', savebar());
+function savebar() {
+  const v = validate(), d = dirty(), n = v.errors.length + v.warnings.length;
+  const open = n > 0 && (ui.saveOpen ?? matchMedia('(min-width: 900px)').matches);
+  return h('div', { class: 'savebar', id: 'savebar', key: 'savebar' },
+    h('div', { class: 'msgs' },
+      open ? h('div', { class: 'list' },
+        v.errors.length ? h('div', { class: 'errs' }, v.errors.map((e) => h('div', {}, e))) : null,
+        v.warnings.length ? h('div', { class: 'warns' }, v.warnings.map((e) => h('div', {}, e))) : null) : null,
+      h('div', { class: 'summary' },
+        h('span', { class: d ? '' : 'muted' }, onDisk ? 'Unsaved changes · changed on disk too' : d ? 'Unsaved changes' : 'All changes saved'),
+        v.errors.length ? h('span', { class: 'bad' }, `✘ ${plural(v.errors.length, 'error')}`) : null,
+        v.warnings.length ? h('span', { class: 'warn' }, `⚠ ${plural(v.warnings.length, 'warning')}`) : null,
+        n ? h('button', { class: 'linkish', 'aria-expanded': String(open), onclick: () => { ui.saveOpen = !open; saveUi(); updateSavebar(); } }, open ? 'Hide' : 'Show') : null),
+      !open && v.errors.length ? h('div', { class: 'errs', style: 'margin-top:2px' }, v.errors[0]) : null),
+    h('div', { class: 'actions' },
+      h('button', { class: 'btn', disabled: !d, onclick: async () => { if (confirm('Discard unsaved changes?')) { await loadSetup(); render(); } } }, 'Discard'),
+      h('button', { class: 'btn primary', disabled: !d || v.errors.length > 0, onclick: save }, h('span', {}, 'Save'), h('span', { class: 'hide-phone' }, '(Ctrl+S)'))));
 }
 
 // -------------------------------------------------------------------- RUN
@@ -703,101 +972,106 @@ function selection() {
   return { pick, only, repeat, count, done, doneOld, combos };
 }
 
-function chip(label, on, toggle, title) {
-  return h('label', { class: 'chip' + (on ? ' on' : ''), title },
+function chip(label, on, toggle, title, key) {
+  return h('label', { class: 'chip' + (on ? ' on' : ''), title, key },
     h('input', { type: 'checkbox', checked: on, onchange: (e) => toggle(e.target.checked) }), label);
 }
 const setOff = (arr, key, off) => { const i = arr.indexOf(key); if (off && i < 0) arr.push(key); if (!off && i >= 0) arr.splice(i, 1); };
 
 function renderRun() {
   if (!cfg) return;
-  const root = $('#tab-run'); root.replaceChildren();
   const s = selection();
   const rerender = () => { saveSel(); renderRun(); };
+  const running = !!status.running;
 
   // Summary + launch
-  const running = !!status.running;
-  root.append(h('div', { class: 'card' },
-    h('div', { class: 'row', style: 'gap:28px; align-items:flex-end' },
+  const summary = h('div', { class: 'card', key: 'summary' },
+    h('div', { class: 'stats' },
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Will run'), h('span', { class: 'big' }, (s.count - s.done).toLocaleString())),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Selected'), h('span', {}, `${s.count.toLocaleString()} combinations`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Already done'), h('span', {}, `${s.done.toLocaleString()} (skipped)`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per model+effort'), h('span', {}, `up to ${s.combos * s.repeat} runs`)),
-      h('span', { class: 'grow' }),
-      h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
-      running
-        ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
-        : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) }, '▶ Start')),
+      h('div', { class: 'launch' },
+        h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
+        running
+          ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
+          : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))),
     dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, 'Setup has unsaved changes; they will be saved when you start.') : null,
-    s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with a different prompt (the prompt or a variant's text was edited since). They're skipped, not redone. To run the new text and keep the old runs, give the edited variant a new short name in Setup; or delete the old runs in Results (✕).`) : null));
+    s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with a different prompt (the prompt or a variant's text was edited since). They're skipped, not redone. To run the new text and keep the old runs, give the edited variant a new short name in Setup; or delete the old runs in Results (✕).`) : null);
 
   // Models & efforts
   const allKeys = cfg.agents.flatMap((a) => effortsOf(a).map((e) => `${a.id}:${e}`));
-  root.append(h('div', { class: 'grid2' },
+  const models = h('div', { class: 'grid2', key: 'pick' },
     h('div', { class: 'card' },
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Models & effort'),
         h('button', { class: 'icon', onclick: () => { sel.offPick = []; rerender(); } }, 'all'),
         h('button', { class: 'icon', onclick: () => { sel.offPick = [...allKeys]; rerender(); } }, 'none')),
-      h('div', { class: 'scroll' }, h('table', {}, h('tbody', {}, cfg.agents.map((a) => {
+      cfg.agents.length ? null : h('p', { class: 'muted' }, 'No models yet. Add some in Setup.'),
+      h('div', { class: 'scroll' }, h('table', { class: 'stack runmodels' }, srHead('Model', 'Efforts to run', 'Tick all or none'), h('tbody', {}, cfg.agents.map((a) => {
         const effs = effortsOf(a);
         const keys = effs.map((e) => `${a.id}:${e}`);
         const c = clis[a.provider];
-        return h('tr', {},
-          h('td', {}, h('strong', {}, a.id), ' ',
+        return h('tr', { key: a.id },
+          h('td', {}, h('div', { class: 'row', style: 'gap:2px 6px' }, h('strong', {}, a.id),
             c && !c.installed ? h('span', { class: 'tag bad', title: `"${c.bin}" wasn't found; these runs are skipped` }, 'CLI not found')
-              : [h('span', { dataset: { smoke: a.id } }, smokeBadge(a)), h('button', { class: 'icon', title: 'Run one tiny task to check it works', onclick: () => testModels([a]) }, 'test')],
-            h('div', { class: 'muted mono', style: 'font-size:12px' }, `${PROVIDERS[a.provider] ?? a.provider} · ${a.model}`)),
+              : [h('span', { dataset: { smoke: a.id } }, smokeBadge(a)), h('button', { class: 'icon', title: 'Run one tiny task to check it works', onclick: () => testModels([a]) }, 'test')]),
+            h('div', { class: 'muted mono', style: 'font-size:12px; overflow-wrap:anywhere' }, `${PROVIDERS[a.provider] ?? a.provider} · ${a.model}`)),
           h('td', {}, h('div', { class: 'chips' }, effs.map((e, i) => chip(e.endsWith('-uc') ? e.slice(0, -3) + ' + ultracode' : e,
-            !sel.offPick.includes(keys[i]), (on) => { setOff(sel.offPick, keys[i], !on); rerender(); }, e.endsWith('-uc') ? 'Ultracode on: dynamic workflows on every task' : null)))),
-          h('td', { style: 'width:1%; white-space:nowrap' },
-            h('button', { class: 'icon', onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, false)); rerender(); } }, 'all'),
-            h('button', { class: 'icon', onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, true)); rerender(); } }, 'none')));
+            !sel.offPick.includes(keys[i]), (on) => { setOff(sel.offPick, keys[i], !on); rerender(); }, e.endsWith('-uc') ? 'Ultracode on: dynamic workflows on every task' : null, e)))),
+          h('td', { style: 'width:1%; white-space:nowrap' }, effs.length > 1 ? [ // one effort: its chip is the switch
+            h('button', { class: 'icon', title: `Tick every effort of ${a.id}`, onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, false)); rerender(); } }, 'all'),
+            h('button', { class: 'icon', title: `Untick every effort of ${a.id}`, onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, true)); rerender(); } }, 'none')] : null));
       }))))),
     h('div', { class: 'card' },
       h('h2', {}, 'Options'),
-      h('table', {}, h('tbody', {},
-        optRow('Parallel runs', 'concurrency', 'number', 'How many agents run at once. Runs take turns across CLIs, so parallel slots go to different services.'),
-        optRow('Max per CLI', 'perCli', 'number', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit.'),
-        optRow('Repeat each', 'repeat', 'number', 'Run each combination this many times (to see variance)'),
-        optRow('Budget ($)', 'budget', 'number', 'Stop starting new runs after this much reported spend. Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'),
-        optRow('Time limit (min)', 'timeout', 'number', 'Per run, unless the model has its own. Empty = no limit.'),
+      h('table', { class: 'opts' }, h('tbody', {},
+        optRow('Parallel runs', 'concurrency', 'How many agents run at once. Runs take turns across CLIs, so parallel slots go to different services.'),
+        optRow('Max per CLI', 'perCli', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit.'),
+        optRow('Repeat each', 'repeat', 'Run each combination this many times (to see variance)'),
+        optRow('Budget ($)', 'budget', 'Stop starting new runs after this much reported spend (runs already going finish). Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'),
+        optRow('Time limit (min)', 'timeout', 'Per run, unless the model has its own. Empty = no limit.'),
         h('tr', {}, h('td', {}, 'Retry failed'), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: !!sel.opts.rerunFailed,
-          onchange: (e) => { sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before')))))))));
-  function optRow(label, key, type, hint) {
-    return h('tr', {}, h('td', { style: 'white-space:nowrap' }, label),
-      h('td', {}, h('input', { type, min: ['concurrency', 'repeat', 'perCli'].includes(key) ? 1 : 0, value: sel.opts[key] ?? '', style: 'width:100px', placeholder: ['budget', 'timeout', 'perCli'].includes(key) ? 'none' : '',
+          onchange: (e) => { sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before'))))))));
+  function optRow(label, key, hint) {
+    const whole = ['concurrency', 'repeat', 'perCli'].includes(key);
+    return h('tr', { key }, h('td', { style: 'white-space:nowrap' }, h('label', { for: 'opt-' + key }, label)),
+      h('td', {}, h('input', { type: 'number', id: 'opt-' + key, min: whole ? 1 : 0, step: key === 'budget' ? 'any' : 1, inputmode: key === 'budget' ? 'decimal' : 'numeric',
+        value: sel.opts[key] ?? '', style: 'width:100px', placeholder: ['budget', 'timeout', 'perCli'].includes(key) ? 'none' : '',
         onchange: (e) => { sel.opts[key] = e.target.value; rerender(); } }), h('div', { class: 'hint' }, hint)));
   }
 
   // Dimensions
-  root.append(h('div', { class: 'grid2' }, Object.entries(cfg.dimensions).map(([d, vs]) => {
+  const dims = h('div', { class: 'grid2', key: 'dims' }, Object.entries(cfg.dimensions).map(([d, vs]) => {
     sel.offOnly[d] ??= [];
-    return h('div', { class: 'card' },
+    return h('div', { class: 'card', key: d },
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, d),
-        h('button', { class: 'icon', onclick: () => { sel.offOnly[d] = []; rerender(); } }, 'all'),
-        h('button', { class: 'icon', onclick: () => { sel.offOnly[d] = vs.map((v) => v.id); rerender(); } }, 'none')),
-      h('div', { class: 'chips' }, vs.map((v) => chip(d === GOAL_DIM && (v.text || '').trim() ? v.id + '*' : v.id, !sel.offOnly[d].includes(v.id), (on) => { setOff(sel.offOnly[d], v.id, !on); rerender(); }, v.text))),
+        h('button', { class: 'icon', title: `Tick every ${d} variant`, onclick: () => { sel.offOnly[d] = []; rerender(); } }, 'all'),
+        h('button', { class: 'icon', title: `Untick every ${d} variant`, onclick: () => { sel.offOnly[d] = vs.map((v) => v.id); rerender(); } }, 'none')),
+      h('div', { class: 'chips' }, vs.map((v) => chip(d === GOAL_DIM && (v.text || '').trim() ? v.id + '*' : v.id, !sel.offOnly[d].includes(v.id), (on) => { setOff(sel.offOnly[d], v.id, !on); rerender(); }, v.text, v.id))),
       d === GOAL_DIM && vs.some((v) => (v.text || '').trim()) ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, '* Not on Codex: it has no headless /goal, so it gets the same prompt without /goal.') : null);
-  })));
+  }));
 
-  // Live
-  root.append(h('div', { class: 'card', id: 'live' }));
-  renderLive();
+  // While a batch runs, Live comes right after the summary, so it's on screen without scrolling.
+  morph($('#tab-run'), summary, running ? liveCard() : null, models, dims, running ? null : liveCard());
+  const pre = $('#logpre'); if (pre && logFollow) pre.scrollTop = pre.scrollHeight;
 }
 
-function renderLive() {
-  const el = $('#live'); if (!el) return;
+const renderLive = () => repaint('live', liveCard());
+function liveCard() {
   const st = status, hb = batchHealth();
   const head = st.running
     ? `Running · ${st.finished} finished · ${st.active.length} in progress · started ${new Date(st.startedAt).toLocaleTimeString()}`
     : st.finishedAt ? `Last batch ended ${new Date(st.finishedAt).toLocaleString()} (${st.finished} finished)` : 'No batch started since the dashboard opened.';
-  el.replaceChildren(...[h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
+  return h('div', { class: 'card', id: 'live', key: 'live' }, h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
     hb ? liveHealth(hb) : null,
-    h('div', { class: 'chips', style: hb?.active.length ? 'margin-bottom:10px' : 'display:none' }, (hb?.active ?? []).map((a) =>
-      h('span', { class: 'tag' + (a.slow ? ' warn' : ''), title: a.usual ? `Running for ${fmtMin(a.mins)}; this setup usually takes ~${fmtMin(a.usual)}` : 'Running for' },
-        `${a.slow ? '⚠' : '▶'} ${a.id} · ${since(st.activeSince?.[a.id])}${a.usual ? ` of ~${fmtMin(a.usual)}` : ''}`))),
-    logPre].filter(Boolean));
+    hb?.active.length ? h('div', { class: 'chips', style: 'margin-bottom:10px' }, hb.active.map((a) =>
+      h('span', { class: 'tag' + (a.slow ? ' warn' : ''), key: a.id, style: 'white-space:normal; overflow-wrap:anywhere', title: a.usual ? `Running for ${fmtMin(a.mins)}; this setup usually takes ~${fmtMin(a.usual)}` : 'Running for' },
+        `${a.slow ? '⚠' : '▶'} ${a.id} · ${since(st.activeSince?.[a.id])}${a.usual ? ` of ~${fmtMin(a.usual)}` : ''}`))) : null,
+    // The log is appended to in place (see poll), so a redraw keeps it and where you've scrolled it to.
+    h('pre', { class: 'log mono', id: 'logpre', key: 'log', 'data-keep': '', tabindex: 0, role: 'log', 'aria-label': 'Batch log',
+      onscroll: (e) => { const p = e.currentTarget; logFollow = p.scrollTop + p.clientHeight >= p.scrollHeight - 8; } }, logText));
 }
+function resetLog() { logSince = 0; logText = ''; const pre = $('#logpre'); if (pre) pre.textContent = ''; }
 
 // Progress, per-CLI tallies and warnings for the current (or last) batch, from the runs it has finished.
 function batchHealth() {
@@ -869,13 +1143,14 @@ async function start() {
   try {
     await api('/api/run', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed,
       concurrency: sel.opts.concurrency, perCli: sel.opts.perCli, budget: sel.opts.budget, timeout: sel.opts.timeout });
-    logSince = 0; logPre.textContent = '';
+    resetLog();
     await poll();
   } catch (e) { alert(e.message); }
 }
 async function stop() {
   if (!confirm('Stop the batch? Running agents are ended and their unfinished runs discarded (they run fresh next time). Finished runs are kept.')) return;
-  await api('/api/stop', 'POST', {}); await poll();
+  try { await api('/api/stop', 'POST', {}); } catch (e) { alert(e.message); }
+  await poll();
 }
 
 // ---------------------------------------------------------------- RESULTS
@@ -927,11 +1202,22 @@ function sortVals(f, vals) {
   return [...vals].sort((a, b) => rk(a) - rk(b) || String(a).localeCompare(String(b), undefined, { numeric: true }));
 }
 // One dropdown per field, for a view's filters (state.filters[field] = value).
+// A filter whose value no run has any more (its runs were deleted) still shows, so it can't hide everything unseen.
 function filterSelects(state, rows, rerender) {
-  return runFields().map((f) => h('select', { title: fieldLabel(f), onchange: (e) => { state.filters[f] = e.target.value; rerender(); } },
-    h('option', { value: '' }, `${fieldLabel(f)}: all`),
-    sortVals(f, [...new Set(rows.map((r) => String(r[f] ?? '')))]).map((v) =>
-      h('option', { value: v, selected: state.filters[f] === v }, `${fieldLabel(f)}: ${valLabel(f, v)}`))));
+  return runFields().map((f) => {
+    const vals = sortVals(f, [...new Set(rows.map((r) => String(r[f] ?? '')))]), cur = state.filters[f];
+    return h('select', { title: fieldLabel(f), key: f, 'aria-label': `Filter by ${fieldLabel(f)}`, class: cur ? 'on' : null, onchange: (e) => { state.filters[f] = e.target.value; rerender(); } },
+      h('option', { value: '' }, `${fieldLabel(f)}: all`),
+      vals.map((v) => h('option', { value: v, selected: cur === v }, `${fieldLabel(f)}: ${valLabel(f, v)}`)),
+      cur && !vals.includes(cur) ? h('option', { value: cur, selected: true }, `${fieldLabel(f)}: ${valLabel(f, cur)} (no runs)`) : null);
+  });
+}
+// On phones the filters fold behind one button that says how many are on.
+function filterBar(state, rows, rerender) {
+  const n = Object.values(state.filters ?? {}).filter(Boolean).length;
+  return [h('button', { class: 'btn filtertoggle', key: 'ftoggle', 'aria-expanded': String(!!ui.filtersOpen), onclick: () => { ui.filtersOpen = !ui.filtersOpen; saveUi(); render(); } },
+      `Filters${n ? ` · ${n} on` : ''} ${ui.filtersOpen ? '▴' : '▾'}`),
+    h('div', { class: 'filters' + (ui.filtersOpen ? ' open' : ''), key: 'filters' }, filterSelects(state, rows, rerender))];
 }
 const passes = (state, r) => runFields().every((f) => !state.filters[f] || String(r[f] ?? '') === state.filters[f]);
 
@@ -1103,13 +1389,14 @@ function effortLadder(rows) {
 }
 
 // One tooltip for every chart: values lead, the run or bin follows.
+let tipAnchor = null;
 function tipShow(el, content) {
-  const t = $('#tip'); t.replaceChildren(content); t.style.display = 'block';
+  const t = $('#tip'); t.replaceChildren(content); t.style.display = 'block'; tipAnchor = el;
   const b = el.getBoundingClientRect(), w = t.offsetWidth, ht = t.offsetHeight;
   t.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, b.left + b.width / 2 - w / 2))}px`;
   t.style.top = `${b.top - ht - 6 < 8 ? b.bottom + 6 : b.top - ht - 6}px`;
 }
-function tipHide() { const t = $('#tip'); if (t) t.style.display = 'none'; }
+function tipHide() { const t = $('#tip'); if (t) t.style.display = 'none'; tipAnchor = null; }
 addEventListener('scroll', tipHide, true);
 const hover = (content) => ({ onpointerenter: (e) => tipShow(e.currentTarget, content()), onpointerleave: tipHide,
   onfocus: (e) => tipShow(e.currentTarget, content()), onblur: tipHide });
@@ -1124,30 +1411,28 @@ const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
 
 function renderInsights() {
   if (!cfg) return;
-  tipHide();
   iv.filters ??= {};
   const t0 = rangeStart(), rows = results.filter((r) => (!t0 || Date.parse(r.finishedAt ?? r.startedAt) >= t0) && passes(iv, r));
   const rerender = () => { saveIv(); renderInsights(); };
-  const root = $('#tab-insights');
-  root.replaceChildren(h('div', { class: 'card' },
+  const head = h('div', { class: 'card', key: 'filters' },
     h('div', { class: 'row' },
-      h('select', { title: 'Which runs', onchange: (e) => { iv.range = e.target.value; iv.showAll = false; rerender(); } },
+      h('select', { title: 'Which runs', 'aria-label': 'Which runs', onchange: (e) => { iv.range = e.target.value; iv.showAll = false; rerender(); } },
         Object.entries(RANGES).filter(([k]) => k !== 'batch' || status.startedAt).map(([k, l]) => h('option', { value: k, selected: iv.range === k },
           k === 'batch' ? `${l} (from ${new Date(status.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : l))),
-      filterSelects(iv, results, rerender),
+      filterBar(iv, results, rerender),
       h('button', { class: 'btn', onclick: () => { iv.filters = {}; iv.range = 'all'; rerender(); } }, 'Clear')),
-    h('p', { class: 'hint' }, `${rows.length} of ${plural(results.length, 'run')}. Everything below uses these; what's usual for a setup is learned from all runs.`)));
-  if (!rows.length) return root.append(h('div', { class: 'card' }, h('p', { class: 'muted', style: 'margin:0' },
+    h('p', { class: 'hint' }, `${rows.length} of ${plural(results.length, 'run')}. Everything below uses these; what's usual for a setup is learned from all runs.`));
+  if (!rows.length) return morph($('#tab-insights'), head, h('div', { class: 'card', key: 'empty' }, h('p', { class: 'muted', style: 'margin:0' },
     results.length ? 'No runs match these filters.' : 'No runs yet. Start a batch on the Run tab; this page fills in as runs finish.')));
-  root.append(tilesCard(rows), checksCard(rows), lookCard(rows), effectsCard(rows), spreadCard(rows),
-    h('div', { class: 'grid2' }, timeCard(rows), failCard(rows)));
+  morph($('#tab-insights'), head, tilesCard(rows), checksCard(rows), lookCard(rows), effectsCard(rows), spreadCard(rows),
+    h('div', { class: 'grid2', key: 'timefail' }, timeCard(rows), failCard(rows)));
 }
 
 function tilesCard(rows) {
   const ok = rows.filter((r) => r.status === 'ok'), flags = runFlags(), costed = rows.filter((r) => r.costUsd != null);
   const scored = rows.filter((r) => r.score != null).length;
   const tile = (k, v, d) => h('div', { class: 'tile' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v), d ? h('span', { class: 'd' }, d) : null);
-  return h('div', { class: 'card' }, h('div', { class: 'tiles' },
+  return h('div', { class: 'card', key: 'tiles' }, h('div', { class: 'tiles' },
     tile('Runs', rows.length.toLocaleString(), RANGES[iv.range] ?? ''),
     tile('Finished OK', pct(ok.length / rows.length), `${plural(rows.length - ok.length, 'failure')}`),
     tile('Delivered a game', pct(rows.filter((r) => r.delivered).length / rows.length)),
@@ -1190,7 +1475,7 @@ function checksCard(rows) {
     : moved.length ? `${moved.map(([, vs]) => vs.join(' → ')).join('; ')}. An update can change results; filter by CLI version above to compare like with like.`
     : `${cliVers.map(([, vs]) => vs[0]).join(', ')}.`);
   const icon = { ok: ['✔', 'ok'], warn: ['⚠', 'warn'], na: ['–', 'muted'] };
-  return h('div', { class: 'card' }, h('h2', {}, 'Expectations'),
+  return h('div', { class: 'card', key: 'checks' }, h('h2', {}, 'Expectations'),
     h('p', { class: 'sub' }, 'What should hold across the matrix, checked automatically.'),
     h('div', { class: 'checks' }, list.map((c) => h('div', {},
       h('span', { class: 'ic ' + icon[c.state][1], title: { ok: 'Holds', warn: 'Worth a look', na: 'Not enough runs to tell' }[c.state] }, icon[c.state][0]),
@@ -1200,23 +1485,23 @@ function checksCard(rows) {
 function lookCard(rows) {
   const ids = new Set(rows.map((r) => r.id)), all = [...runFlags().values()].filter((f) => ids.has(f.r.id)).sort((a, b) => b.sev - a.sev);
   const open = all.filter((f) => !reviewed(f.r)), shown = iv.showSeen ? all : open, limit = iv.showAll ? Infinity : 25, picks = typicalPicks(rows);
-  return h('div', { class: 'card' },
+  return h('div', { class: 'card', key: 'look' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Needs a look'),
       all.length > open.length ? h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!iv.showSeen,
         onchange: (e) => { iv.showSeen = e.target.checked; saveIv(); renderInsights(); } }), `Show reviewed (${all.length - open.length})`) : null),
     h('p', { class: 'sub' }, 'Finished runs that look off: no game or reply, TODOs left, a time, cost or output at least 2× off what\'s usual for its setup, or a game under half the usual size. A score, a note or "looked at" clears one.'),
-    shown.length ? h('div', { class: 'scroll' }, h('table', { class: 'look' }, h('tbody', {}, shown.slice(0, limit).map((f) => lookRow(f.r,
+    shown.length ? h('div', { class: 'scroll' }, h('table', { class: 'look' }, srHead('Play', 'Run', 'Why', 'Files and actions'), h('tbody', {}, shown.slice(0, limit).map((f) => lookRow(f.r,
       f.items.map((i) => h('div', {}, h('span', { class: 'tag ' + (i.bad ? 'bad' : 'warn') }, i.tag), ' ', i.text)))))))
       : h('p', { class: 'muted' }, all.length ? 'All reviewed ✔' : 'Nothing stands out ✔'),
     shown.length > limit ? h('button', { class: 'btn', onclick: () => { iv.showAll = true; saveIv(); renderInsights(); } }, `Show all ${shown.length}`) : null,
     picks.length ? [h('h2', { style: 'margin-top:18px' }, 'Typical runs to score'),
       h('p', { class: 'sub' }, 'For each model + effort with fewer than 3 scores, the run closest to usual on time, cost, output and size. Its score says the most about that setup as a whole.'),
-      h('div', { class: 'scroll' }, h('table', { class: 'look' }, h('tbody', {}, picks.map((p) => lookRow(p.r,
+      h('div', { class: 'scroll' }, h('table', { class: 'look' }, srHead('Play', 'Run', 'Why', 'Files and actions'), h('tbody', {}, picks.map((p) => lookRow(p.r,
         h('span', { class: 'muted' }, `Most typical of ${plural(p.n, `${p.r.agent} · ${p.r.effort} run`)} (${p.scored} scored)`))))))] : null);
 }
 function lookRow(r, why) {
-  return h('tr', {},
-    h('td', { class: 'play', style: 'width:1%' }, r.entry ? h('a', { href: '/runs/' + r.entry, target: '_blank', title: 'Play', style: 'text-decoration:none' }, '▶') : h('span', { class: 'muted', title: 'No game file' }, '—')),
+  return h('tr', { key: r.id },
+    h('td', { class: 'play', style: 'width:1%' }, playLink(r)),
     h('td', { class: 'run' }, h('button', { class: 'linkish', title: r.id, onclick: () => showRun(r) }, `${r.agent} · ${r.effort}`),
       h('div', { class: 'muted', style: 'font-size:12px' }, variantsText(r))),
     h('td', { class: 'why' }, why),
@@ -1224,7 +1509,7 @@ function lookRow(r, why) {
       h('button', { class: 'icon', disabled: !r.hasReply, title: 'Agent reply', onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
       h('button', { class: 'icon', title: 'Raw CLI output', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out'),
       h('button', { class: 'icon', title: 'Everything about this run', onclick: () => showRun(r) }, 'details'),
-      reviewed(r) ? null : h('button', { class: 'icon', title: 'Mark as looked at, which clears it from this list', onclick: async () => { await saveReview(r, { seen: true }); renderInsights(); } }, 'looked at')));
+      reviewed(r) ? null : h('button', { class: 'icon', title: 'Mark as looked at, which clears it from this list', onclick: () => saveReview(r, { seen: true }) }, 'looked at')));
 }
 
 // How each choice moves time, cost, output and size with everything else held equal: the same
@@ -1258,9 +1543,9 @@ function effectsCard(rows) {
         })));
     }
   });
-  return h('div', { class: 'card' }, h('h2', {}, 'What each choice changes'),
+  return h('div', { class: 'card', key: 'effects' }, h('h2', {}, 'What each choice changes'),
     h('p', { class: 'sub' }, 'Each row against its group\'s baseline with everything else held equal, estimated from the finished runs in view (robust to odd runs). +60% time means it takes 60% longer. Orange: more than the baseline; blue: less. A choice that only ever ran with one model can\'t be told apart from that model; Compare on the Results tab pairs runs exactly.'),
-    facs.length ? h('div', { class: 'scroll' }, h('table', {},
+    facs.length ? h('div', { class: 'scroll' }, h('table', { class: 'pin' },
       h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'num' }, 'Runs'), h('th', { class: 'num' }, 'Failed'), FLAG_METRICS.map((k) => h('th', { class: 'num' }, METRICS[k].label)))),
       h('tbody', {}, body)))
       : h('p', { class: 'muted' }, 'Every run in view has the same setup, so there\'s nothing to compare yet.'));
@@ -1288,10 +1573,10 @@ function spreadCard(rows) {
   const groups = groupBy(pts, ([r]) => fieldVal(r, g)), keys = sortVals(g, [...groups.keys()]);
   const set = (patch) => { Object.assign(iv, patch); saveIv(); renderInsights(); };
   const head = h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Spread'),
-    h('span', { class: 'muted' }, 'Group by'), h('select', { onchange: (e) => set({ group: e.target.value }) }, groupOpts.map((f) => h('option', { value: f, selected: f === g }, fieldLabel(f)))),
-    h('span', { class: 'muted' }, 'Show'), h('select', { onchange: (e) => set({ metric: e.target.value }) },
+    h('span', { class: 'muted' }, 'Group by'), h('select', { 'aria-label': 'Group by', onchange: (e) => set({ group: e.target.value }) }, groupOpts.map((f) => h('option', { value: f, selected: f === g }, fieldLabel(f)))),
+    h('span', { class: 'muted' }, 'Show'), h('select', { 'aria-label': 'Measure to show', onchange: (e) => set({ metric: e.target.value }) },
       Object.entries(METRICS).filter(([, x]) => !x.rate).map(([kk, x]) => h('option', { value: kk, selected: kk === k }, x.label))));
-  if (!pts.length) return h('div', { class: 'card' }, head, h('p', { class: 'muted' }, k === 'score' ? 'No scored runs in view yet.' : 'No values in view yet.'));
+  if (!pts.length) return h('div', { class: 'card', key: 'spread' }, head, h('p', { class: 'muted' }, k === 'score' ? 'No scored runs in view yet.' : 'No values in view yet.'));
   const vs = pts.map(([, v]) => v);
   let lo = Math.min(...vs), hi = Math.max(...vs);
   if (log) { if (hi / lo < 4) { const c = Math.sqrt(lo * hi); lo = c / 2; hi = c * 2; } lo /= 1.15; hi *= 1.15; } else { lo = Math.min(0, lo); hi = Math.max(10, hi); }
@@ -1304,14 +1589,14 @@ function spreadCard(rows) {
     return [h('div', { class: 'lab', title: valLabel(g, key) }, valLabel(g, key)),
       h('div', { class: 'track' }, ticks.map((t) => h('span', { class: 'gl', style: `left:${x(t)}%` })),
         h('span', { class: 'med', style: `left:${x(med)}%` }),
-        list.map(([r, v]) => h('button', { class: 'dot' + (r.status === 'ok' ? '' : ' bad'), style: `left:${x(v)}%; top:calc(50% + ${jitter(r.id)}px)`,
+        list.map(([r, v]) => h('button', { class: 'dot' + (r.status === 'ok' ? '' : ' bad'), key: r.id, style: `left:${x(v)}%; top:calc(50% + ${jitter(r.id)}px)`,
           'aria-label': `${m.fmt(v)}, ${r.id}`, onclick: () => showRun(r), ...hover(tipFor(r, v)) }))),
       h('div', { class: 'end', title: `Median ${m.fmt(med)} over ${plural(list.length, 'run')}` }, `~${m.fmt(med)} · ${list.length}`)];
   });
-  const table = h('table', {}, h('thead', {}, h('tr', {}, [fieldLabel(g), 'Runs', 'Min', '25%', 'Median', '75%', 'Max'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))),
+  const table = h('table', { class: 'pin' }, h('thead', {}, h('tr', {}, [fieldLabel(g), 'Runs', 'Min', '25%', 'Median', '75%', 'Max'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))),
     h('tbody', {}, keys.map((key) => { const s = groups.get(key).map(([, v]) => v).sort((a, b) => a - b);
       return h('tr', {}, h('td', {}, valLabel(g, key)), h('td', { class: 'num' }, s.length), [s[0], quant(s, .25), quant(s, .5), quant(s, .75), s[s.length - 1]].map((v) => h('td', { class: 'num' }, m.fmt(v)))); })));
-  return h('div', { class: 'card' }, head,
+  return h('div', { class: 'card', key: 'spread' }, head,
     h('p', { class: 'sub' }, `Each dot is a run${log ? ' (log scale)' : ''}; the bar is its group's median. Hover for the run, click for everything about it. Dots far from their group's bar are worth a look.`),
     h('div', { class: 'legend', style: 'margin-bottom:6px' }, h('span', {}, h('i', { class: 'dot', style: 'background:var(--mark)' }), 'finished'),
       h('span', {}, h('i', { class: 'ring' }), 'failed'), h('span', {}, h('i', { style: 'width:2px; height:12px; border-radius:1px; background:var(--ink)' }), 'median')),
@@ -1321,7 +1606,7 @@ function spreadCard(rows) {
 
 // Runs finished per time step, OK vs failed: throughput, and bursts of failures (outages, rate limits).
 function timeCard(rows) {
-  const card = h('div', { class: 'card' }, h('h2', {}, 'Over time'));
+  const card = h('div', { class: 'card', key: 'time' }, h('h2', {}, 'Over time'));
   const ts = rows.map((r) => [r, Date.parse(r.finishedAt)]).filter(([, t]) => Number.isFinite(t));
   if (!ts.length) return card.append(h('p', { class: 'muted' }, 'No finished runs in view.')), card;
   const end = Date.now(), start = rangeStart() ?? Math.min(...ts.map(([, t]) => t));
@@ -1340,7 +1625,7 @@ function timeCard(rows) {
     h('div', { class: 'cols' }, bins.map((b) => {
       const segs = [seg(b.ok, 'ok'), seg(b.bad, 'no')].filter(Boolean);
       if (segs.length) segs[segs.length - 1].style.borderRadius = '4px 4px 0 0';
-      return h('div', { class: 'c', tabindex: 0, 'aria-label': `${when(b.t)}: ${b.ok} OK, ${b.bad} failed`,
+      return h('div', { class: 'c', tabindex: 0, role: 'img', 'aria-label': `${when(b.t)}: ${b.ok} OK, ${b.bad} failed`,
         ...hover(() => h('div', {}, h('strong', {}, `${b.ok + b.bad} finished`), h('span', { class: 'muted' }, `${when(b.t)} · ${b.ok} OK · ${b.bad} failed`))) }, segs);
     })),
     h('div', { class: 'xlabels' }, [bins[0], bins[Math.floor(bins.length / 2)], bins[bins.length - 1]].filter((b, i, a) => a.indexOf(b) === i).map((b) => h('span', {}, when(b.t)))),
@@ -1356,11 +1641,11 @@ function timeCard(rows) {
 
 // Failed runs grouped by what the error says, per CLI.
 function failCard(rows) {
-  const card = h('div', { class: 'card' }, h('h2', {}, 'Failures')), failed = rows.filter((r) => r.status !== 'ok');
+  const card = h('div', { class: 'card', key: 'fail' }, h('h2', {}, 'Failures')), failed = rows.filter((r) => r.status !== 'ok');
   if (!failed.length) return card.append(h('p', { class: 'muted', style: 'margin:0' }, 'No failed runs in view ✔')), card;
   const byCause = groupBy(failed, (r) => causeOf(r.error)), clis = sortVals('provider', [...new Set(failed.map((r) => r.provider))]);
   card.append(h('p', { class: 'sub' }, `${failed.length} of ${plural(rows.length, 'run')} failed (${pct(failed.length / rows.length)}), grouped by what the error says.`),
-    h('div', { class: 'scroll' }, h('table', {},
+    h('div', { class: 'scroll' }, h('table', { class: 'pin' },
       h('thead', {}, h('tr', {}, h('th', {}, 'Cause'), clis.map((p) => h('th', { class: 'num', title: PROVIDERS[p] ?? p }, SHORT[p] ?? p)), h('th', {}, 'Latest'))),
       h('tbody', {}, [...byCause.entries()].sort((a, b) => b[1].length - a[1].length).map(([cause, rs]) => {
         const last = rs.sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0];
@@ -1373,25 +1658,22 @@ function failCard(rows) {
 }
 
 // ---------------------------------------------------------------- RESULTS
+let searchTimer = null;
 function renderResults() {
   if (!cfg) return;
-  const root = $('#tab-results'); root.replaceChildren();
   const dims = Object.keys(cfg.dimensions);
   const rerender = () => { saveRv(); renderResults(); };
   const filtered = results.filter((r) => passes(rv, r) &&
     (!rv.q || [r.id, r.notes].join(' ').toLowerCase().includes(rv.q.toLowerCase())));
 
   // toolbar
-  root.append(h('div', { class: 'card' },
+  const toolbar = h('div', { class: 'card', key: 'toolbar' },
     h('div', { class: 'row' },
-      h('input', { placeholder: 'Search run names and notes', value: rv.q, class: 'grow', style: 'min-width:200px',
-        oninput: (e) => { rv.q = e.target.value; saveRv(); clearTimeout(window.__qt); window.__qt = setTimeout(renderResults, 250); } }),
-      filterSelects(rv, results, rerender),
-      h('button', { class: 'btn', onclick: () => { rv.filters = {}; rv.q = ''; rerender(); } }, 'Clear'),
-      h('button', { class: 'btn', onclick: async () => { await loadResults(); renderResults(); } }, 'Refresh')),
-    h('p', { class: 'hint' }, `${filtered.length} of ${results.length} runs shown; Compare and the tables below use these. Score out of 10 as you play; scores and notes save instantly.`)));
-
-  root.append(compareCard(filtered));
+      h('input', { type: 'search', placeholder: 'Search runs and notes', 'aria-label': 'Search runs and notes', value: rv.q, class: 'grow', style: 'min-width:min(200px, 100%)',
+        oninput: (e) => { rv.q = e.target.value; saveRv(); clearTimeout(searchTimer); searchTimer = setTimeout(renderResults, 200); } }),
+      filterBar(rv, results, rerender),
+      h('button', { class: 'btn', onclick: () => { rv.filters = {}; rv.q = ''; rerender(); } }, 'Clear')),
+    h('p', { class: 'hint' }, `${filtered.length} of ${results.length} runs shown; Compare and the tables below use these. Score out of 10 as you play; scores and notes save instantly. This page updates by itself as runs finish.`));
 
   // averages by group
   const groupFields = ['agent+effort', ...runFields().filter((f) => f !== 'status'), 'model', 'status'];
@@ -1401,31 +1683,34 @@ function renderResults() {
   const sum = (rows, f) => rows.reduce((a, r) => a + (+r[f] || 0), 0);
   const gRows = sortVals(rv.group, [...groups.keys()]).map((k) => [k, groups.get(k)]);
   const maxCost = Math.max(0, ...gRows.map(([, rs]) => avg(rs, 'costUsd').v || 0));
-  root.append(h('div', { class: 'card' },
+  const averages = h('div', { class: 'card', key: 'averages' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Averages by group'),
       h('span', { class: 'muted' }, 'Group by'),
-      h('select', { onchange: (e) => { rv.group = e.target.value; rerender(); } },
+      h('select', { 'aria-label': 'Group by', onchange: (e) => { rv.group = e.target.value; rerender(); } },
         groupFields.map((g) => h('option', { value: g, selected: rv.group === g }, fieldLabel(g))))),
     h('p', { class: 'sub' }, 'Plain averages per group, everything else mixed in. Cost averages only runs whose CLI reported a cost (n shown). Score averages only scored runs.'),
-    h('div', { class: 'scroll' }, h('table', {},
+    gRows.length ? h('div', { class: 'scroll' }, h('table', { class: 'pin' },
       h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
       h('tbody', {}, gRows.map(([k, rs]) => {
         const c = avg(rs, 'costUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
-        return h('tr', {},
+        return h('tr', { key: k },
           h('td', {}, h('strong', {}, valLabel(rv.group, k))),
           h('td', { class: 'num' }, rs.length),
           h('td', { class: 'num' }, `${Math.round(100 * del / rs.length)}%`),
           h('td', { class: 'num' }, fmtMin(avg(rs, 'wallMinutes').v)),
-          h('td', { class: 'num' }, c.n ? `${fmtUsd(c.v)}` : '—', c.n && c.n < rs.length ? h('span', { class: 'muted' }, ` (n=${c.n})`) : null),
+          h('td', { class: 'num', style: 'white-space:nowrap' }, c.n ? `${fmtUsd(c.v)}` : '—', c.n && c.n < rs.length ? h('span', { class: 'muted' }, ` (n=${c.n})`) : null),
           h('td', {}, c.v ? h('div', { class: 'bar', title: 'Relative avg cost' }, h('span', { style: `width:${Math.round(100 * c.v / maxCost)}%` })) : null),
           h('td', { class: 'num' }, c.n ? fmtUsd(sum(rs, 'costUsd')) : '—'),
           h('td', { class: 'num' }, fmtTok(avg(rs, 'outputTokens').v)),
-          h('td', { class: 'num' }, sc.n ? fmt(sc.v, 1) : '—', sc.n ? h('span', { class: 'muted' }, ` (${sc.n})`) : null));
-      }))))));
+          h('td', { class: 'num', style: 'white-space:nowrap' }, sc.n ? fmt(sc.v, 1) : '—', sc.n ? h('span', { class: 'muted' }, ` (${sc.n})`) : null));
+      })))) : h('p', { class: 'muted' }, 'No runs shown.'));
 
-  // runs table
+  // runs table: a table on wide screens, one card per run on narrow ones (see table.runs in the CSS).
+  // A variant that's the same for every run shown says nothing per row: it's named once above instead.
+  const same = filtered.length > 1 ? dims.filter((d) => new Set(filtered.map((r) => r[d] ?? '')).size === 1) : [];
+  const shownDims = dims.filter((d) => !same.includes(d));
   const cols = [
-    ['', null], ['model', 'agent'], ['effort', 'effort'], ...dims.map((d) => [d, d]), ['status', 'status'],
+    ['', null], ['model', 'agent'], ['effort', 'effort'], ...shownDims.map((d) => [d, d]), ['status', 'status'],
     ['time', 'wallMinutes', 1], ['cost', 'costUsd', 1], ['out tok', 'outputTokens', 1], ['KB', 'kb', 1],
     ['score', 'score', 1], ['notes', 'notes'], ['finished', 'finishedAt'], ['', null]];
   const sk = rv.sort.k, sd = rv.sort.d;
@@ -1434,43 +1719,60 @@ function renderResults() {
     if (x == null && y == null) return 0; if (x == null) return 1; if (y == null) return -1;
     return (typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y), undefined, { numeric: true })) * sd;
   });
-  const LIMIT = 500;
-  root.append(h('div', { class: 'card' },
-    h('h2', {}, 'Runs'),
-    h('div', { class: 'scroll' }, h('table', {},
-      h('thead', {}, h('tr', {}, cols.map(([label, key, num]) => h('th', {
-        class: (key ? 'sort ' : '') + (num ? 'num' : ''),
-        onclick: key ? () => { rv.sort = { k: key, d: rv.sort.k === key ? -rv.sort.d : (num ? -1 : 1) }; saveRv(); renderResults(); } : null },
-        label, key === sk ? (sd > 0 ? ' ▲' : ' ▼') : '')))),
-      h('tbody', {}, sorted.slice(0, LIMIT).map(runRow)))),
-    sorted.length > LIMIT ? h('p', { class: 'hint' }, `Showing the first ${LIMIT}. Use filters to narrow down.`) : null));
+  const LIMIT = 500, sortable = cols.filter(([, k]) => k);
+  const setSort = (key, num) => { rv.sort = { k: key, d: rv.sort.k === key ? -rv.sort.d : (num ? -1 : 1) }; saveRv(); renderResults(); };
+  const runs = h('div', { class: 'card', key: 'runs' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Runs'),
+      h('label', { class: 'cardsort row', style: 'gap:6px' }, h('span', { class: 'muted' }, 'Sort'),
+        h('select', { 'aria-label': 'Sort runs by', onchange: (e) => { const [k, d] = e.target.value.split('|'); rv.sort = { k, d: +d }; saveRv(); renderResults(); } },
+          sortable.flatMap(([label, key, num]) => [[key, num ? -1 : 1], [key, num ? 1 : -1]].map(([k, d]) =>
+            h('option', { value: `${k}|${d}`, selected: k === sk && d === sd }, `${label} ${num ? (d < 0 ? '(high first)' : '(low first)') : (d > 0 ? 'A→Z' : 'Z→A')}`)))))),
+    same.length ? h('p', { class: 'hint', style: 'margin:0 0 6px' }, 'Same for every run shown: ', same.map((d, i) => [i ? ' · ' : '', `${d} `, h('strong', {}, filtered[0][d] ?? '—')])) : null,
+    sorted.length ? h('div', { class: 'scroll' }, h('table', { class: 'runs' },
+      h('thead', {}, h('tr', {}, cols.map(([label, key, num], i) => h('th', {
+        class: (key ? 'sort ' : '') + (num ? 'num' : ''), 'aria-sort': key === sk ? (sd > 0 ? 'ascending' : 'descending') : null,
+        onclick: key ? () => setSort(key, num) : null },
+        label || h('span', { class: 'sr-only' }, i ? 'Files and actions' : 'Play'), key === sk ? (sd > 0 ? ' ▲' : ' ▼') : '')))),
+      h('tbody', {}, sorted.slice(0, LIMIT).map(runRow)))) : h('p', { class: 'muted' }, results.length ? 'No runs match.' : 'No runs yet. Start a batch on the Run tab.'),
+    sorted.length > LIMIT ? h('p', { class: 'hint' }, `Showing the first ${LIMIT}. Use filters to narrow down.`) : null);
+
+  morph($('#tab-results'), toolbar, compareCard(filtered), averages, runs);
 
   function runRow(r) {
-    const fl = runFlags().get(r.id);
-    return h('tr', { class: r.status === 'failed' ? 'failed' : '' },
-      h('td', {}, r.entry ? h('a', { href: '/runs/' + r.entry, target: '_blank', title: 'Play', style: 'text-decoration:none' }, '▶') : h('span', { class: 'muted', title: 'No game file' }, '—')),
-      h('td', {}, r.agent), h('td', {}, r.effort), dims.map((d) => h('td', {}, r[d] ?? '—')),
-      h('td', {}, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad'), title: r.error || '' }, r.status),
-        fl ? h('button', { class: 'tag ' + (fl.items[0].bad ? 'bad' : 'warn'), style: 'border:0;cursor:pointer;font:inherit;font-size:12px;margin-left:4px',
+    const fl = runFlags().get(r.id), failed = r.status !== 'ok';
+    const err = failed && r.error ? (r.error.length > 120 ? r.error.slice(0, 117) + '…' : r.error) : null;
+    return h('tr', { class: failed ? 'failed' : null, key: r.id },
+      h('td', { class: 'play' }, playLink(r)),
+      h('td', { class: 'who', style: 'white-space:nowrap' }, r.agent), h('td', { class: 'eff', style: 'white-space:nowrap' }, r.effort),
+      shownDims.map((d) => h('td', { class: 'dimcell', title: d }, h('span', { class: 'lbl' }, d), r[d] ?? '—')),
+      h('td', { class: 'st' }, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad'), title: r.error || '' }, r.status),
+        fl ? h('button', { class: 'tag ' + (fl.items[0].bad ? 'bad' : 'warn'), style: 'margin-left:4px',
           title: `${fl.items.map((i) => i.text).join('\n')}\n\nClick for details`, onclick: () => showRun(r) }, `⚑ ${fl.items[0].tag}${fl.items.length > 1 ? ` +${fl.items.length - 1}` : ''}`) : null,
-        r.status === 'failed' && r.error ? h('div', { class: 'hint', style: 'margin:2px 0 0; min-width:220px; max-width:300px; white-space:normal', title: r.error }, r.error.length > 120 ? r.error.slice(0, 117) + '…' : r.error) : null),
-      h('td', { class: 'num' }, fmtMin(r.wallMinutes)),
-      h('td', { class: 'num' }, r.costUsd != null ? fmtUsd(r.costUsd) : h('span', { class: 'muted', title: 'This CLI does not report cost' }, 'n/a')),
-      h('td', { class: 'num' }, fmtTok(r.outputTokens)),
-      h('td', { class: 'num' }, r.kb ?? '—'),
-      h('td', { class: 'num' }, h('input', { type: 'number', min: 0, max: 10, step: 0.5, class: 'score', value: r.score ?? '',
-        onchange: (e) => saveReview(r, { score: e.target.value === '' ? null : +e.target.value }) })),
-      h('td', {}, h('input', { class: 'notes', value: r.notes ?? '', placeholder: 'notes', onchange: (e) => saveReview(r, { notes: e.target.value }) })),
-      h('td', { class: 'muted', style: 'white-space:nowrap' }, r.finishedAt ? new Date(r.finishedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''),
-      h('td', { style: 'white-space:nowrap' },
+        err ? h('div', { class: 'hint hide-cards', style: 'margin:2px 0 0; min-width:220px; max-width:300px; white-space:normal', title: r.error }, err) : null),
+      h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'time'), fmtMin(r.wallMinutes)),
+      h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'cost'), r.costUsd != null ? fmtUsd(r.costUsd) : h('span', { class: 'muted', title: 'This CLI does not report cost' }, 'n/a')),
+      h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'out'), fmtTok(r.outputTokens)),
+      h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'KB'), r.kb ?? '—'),
+      h('td', { class: 'scorecell' }, h('input', { type: 'number', min: 0, max: 10, step: 0.5, inputmode: 'decimal', class: 'score', value: r.score ?? '', placeholder: 'score', 'aria-label': `Score for ${r.id}`,
+        onchange: (e) => saveScore(r, e.target) })),
+      h('td', { class: 'notescell' }, h('input', { class: 'notes', value: r.notes ?? '', placeholder: 'notes', 'aria-label': `Notes for ${r.id}`, onchange: (e) => saveReview(r, { notes: e.target.value }) })),
+      h('td', { class: 'when muted', style: 'white-space:nowrap' }, r.finishedAt ? new Date(r.finishedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''),
+      h('td', { class: 'act', style: 'white-space:nowrap' },
         h('button', { class: 'icon', title: 'Everything about this run', onclick: () => showRun(r) }, 'details'),
         fileButtons(r),
-        h('button', { class: 'icon', title: 'Delete this run so it runs again next time', onclick: async () => {
-          if (!confirm(`Delete ${r.id}? Its folder and game are removed and it will run again in the next batch.`)) return;
-          try { await api('/api/delete-run', 'POST', { id: r.id }); await loadResults(); renderResults(); } catch (e) { alert(e.message); }
-        } }, '✕')));
+        h('button', { class: 'icon', title: 'Delete this run so it runs again next time', 'aria-label': `Delete ${r.id}`, onclick: async () => {
+          if (!confirm(`Delete ${r.id}? Its folder, game and review are removed and it will run again in the next batch.`)) return;
+          try { await api('/api/delete-run', 'POST', { id: r.id }); await loadResults(); render(); } catch (e) { alert(e.message); }
+        } }, '✕')),
+      // Line breaks and the error for the card layout (see table.runs in the CSS); empty and hidden in the table.
+      ['b1', 'b2', 'b3', 'b4'].map((b) => h('td', { class: 'br ' + b, 'aria-hidden': 'true' })),
+      err ? h('td', { class: 'errcell bad', 'data-err': err, title: r.error, 'aria-hidden': 'true' }) : null);
   }
 }
+// A game's path, made safe for a URL (a title can hold # ? % or spaces).
+const runUrl = (rel) => '/runs/' + String(rel).split('/').map(encodeURIComponent).join('/');
+const playLink = (r) => r.entry ? h('a', { href: runUrl(r.entry), target: '_blank', rel: 'noopener', title: 'Play', 'aria-label': `Play ${r.id}`, style: 'text-decoration:none' }, '▶')
+  : h('span', { class: 'muted', title: 'No game file' }, '—');
 
 // A → B on any field, optionally once per value of another ("for each"): opus · medium → sonnet · medium,
 // or effort medium → high for each model, to see whether one model gains more from extra effort than another.
@@ -1491,15 +1793,15 @@ function compareCard(rows) {
   const all = vals.length > 1 ? compareAB(rows, c) : [], pairs = (col) => col.m.ok?.n ?? 0;
   const res = all.filter((col) => col.nA && col.nB), gone = all.filter((col) => !col.nA || !col.nB);
   const none = !res.length || (c.matched && res.every((col) => !pairs(col)));
-  return h('div', { class: 'card' },
+  return h('div', { class: 'card', key: 'compare' },
     h('h2', {}, 'Compare'),
-    h('div', { class: 'row', style: 'margin:8px 0 4px' },
-      pick(c.f, fields.map((f) => [f, fieldLabel(f)]), (f) => set({ f }), 'What differs between A and B'),
-      pick(c.a, vals.map((v) => [v, valLabel(c.f, v)]), (a) => set({ a }), 'A'),
-      h('span', { class: 'muted' }, '→'),
-      pick(c.b, vals.map((v) => [v, valLabel(c.f, v)]), (b) => set({ b }), 'B'),
-      h('button', { class: 'icon', title: 'Swap A and B', onclick: () => set({ a: c.b, b: c.a }) }, '⇄'),
-      h('span', { class: 'muted' }, 'for each'),
+    h('div', { class: 'row cmpctl', style: 'margin:8px 0 4px' },
+      h('span', { class: 'cl only-phone' }, 'Compare'), pick(c.f, fields.map((f) => [f, fieldLabel(f)]), (f) => set({ f }), 'What differs between A and B'),
+      h('span', { class: 'cl only-phone' }, 'A'), pick(c.a, vals.map((v) => [v, valLabel(c.f, v)]), (a) => set({ a }), 'A'),
+      h('span', { class: 'muted hide-phone' }, '→'),
+      h('span', { class: 'cl only-phone' }, 'B'), h('span', { class: 'row', style: 'gap:4px; flex-wrap:nowrap' }, pick(c.b, vals.map((v) => [v, valLabel(c.f, v)]), (b) => set({ b }), 'B'),
+        h('button', { class: 'icon', title: 'Swap A and B', 'aria-label': 'Swap A and B', onclick: () => set({ a: c.b, b: c.a }) }, '⇄')),
+      h('span', { class: 'muted cl' }, 'for each'),
       pick(c.by, [['', 'nothing (all together)'], ...splits.map((g) => [g, fieldLabel(g)])], (by) => set({ by }), 'Show the change separately for each value of this field'),
       h('label', { class: 'row', style: 'gap:6px', title: 'Pair each A run with the B runs that match it in everything else (the other variants, model or effort, prompt), so the difference comes from what you compare. Untick to compare all their runs as they are.' },
         h('input', { type: 'checkbox', checked: c.matched, onchange: (e) => set({ matched: e.target.checked }) }), 'Only matching variants')),
@@ -1507,7 +1809,7 @@ function compareCard(rows) {
     vals.length < 2 ? h('p', { class: 'muted' }, 'Needs runs that differ in something.')
       : none ? h('p', { class: 'warns' }, !res.length ? `No ${fieldLabel(c.by)} has runs on both sides.`
         : `No matching pairs: A and B never ran with the same other variants${c.by ? ` within one ${fieldLabel(c.by)}` : ''}. Untick Only matching variants to compare all their runs anyway.`)
-      : h('div', { class: 'scroll' }, h('table', {},
+      : h('div', { class: 'scroll' }, h('table', { class: 'cmp pin' },
         h('thead', {}, h('tr', {}, h('th', { class: 'plain', style: 'white-space:normal; min-width:110px' }, `${valLabel(c.f, c.a)} → ${valLabel(c.f, c.b)}`),
           res.map((col) => h('th', { class: 'num plain' }, col.col == null ? 'All' : valLabel(c.by, col.col),
             h('div', { class: 'muted', style: 'font-weight:400' }, c.matched ? plural(pairs(col), 'pair') : `${col.nA} vs ${col.nB} runs`))))),
@@ -1531,14 +1833,15 @@ async function showFile(id, name, title, error) {
   openModal(`${title} · ${id}`, h('div', {}, error ? h('p', { class: 'errs' }, error) : null,
     h('pre', { class: name.endsWith('.md') ? '' : 'mono' }, text.length > 400000 ? '…' + text.slice(-400000) : text || '(empty)')));
 }
-function openModal(title, content) { $('#mtitle').textContent = title; $('#mbody').replaceChildren(content); modal.showModal(); }
-// A review changed in the dialog: redraw the view behind it once it closes.
-let reviewChanged = false;
-modal.addEventListener('close', () => {
-  if (!reviewChanged) return;
-  reviewChanged = false;
-  if (tab === 'insights') renderInsights(); else if (tab === 'results') renderResults();
-});
+// refresh, if given, rebuilds the content: the dialog then follows the data while it's open (see poll).
+let modalRefresh = null;
+function openModal(title, content, refresh) {
+  $('#mtitle').textContent = title; $('#mbody').replaceChildren(content); modalRefresh = refresh ?? null;
+  if (!modal.open) modal.showModal();
+  $('#mbody').scrollTop = 0;
+}
+modal.addEventListener('close', () => { modalRefresh = null; });
+const refreshModal = () => { if (modal.open && modalRefresh) morph($('#mbody'), modalRefresh()); };
 
 const fileButtons = (r) => [
   h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
@@ -1547,26 +1850,43 @@ const fileButtons = (r) => [
   h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, 'agent.err', 'Errors', r.error) }, 'log'),
   h('button', { class: 'icon', title: 'Raw CLI output (agent.out), the end of it for long runs', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out')];
 
-// Score, notes and "looked at" all go to runs/scores.json; any of them counts as reviewed.
+// Score, notes and "looked at" all go to runs/scores.json; any of them counts as reviewed. Saved with
+// the run's startedAt, so a re-run of it starts unreviewed. Everything showing the run redraws.
 async function saveReview(r, patch) {
-  Object.assign(r, patch); reviewChanged = true;
-  try { await api('/api/score', 'PUT', { id: r.id, score: r.score ?? '', notes: r.notes ?? '', seen: !!r.seen }); } catch (e) { alert(e.message); }
-  updateBadge();
+  const cur = results.find((x) => x.id === r.id) ?? r, before = { score: cur.score, notes: cur.notes, seen: cur.seen };
+  Object.assign(cur, patch); if (cur !== r) Object.assign(r, patch);
+  try { await api('/api/score', 'PUT', { id: cur.id, score: cur.score ?? '', notes: cur.notes ?? '', seen: !!cur.seen, startedAt: cur.startedAt }); }
+  catch (e) { Object.assign(cur, before); if (cur !== r) Object.assign(r, before); alert(`Couldn't save: ${e.message}`); }
+  updateBadge(); render(); refreshModal();
+}
+// A score is 0 to 10 (halves are fine); anything else is pulled into range.
+function saveScore(r, input) {
+  if (input.value === '') return saveReview(r, { score: null });
+  const n = Math.min(10, Math.max(0, Math.round(+input.value * 10) / 10));
+  if (!Number.isFinite(n)) { input.value = r.score ?? ''; return; }
+  input.value = n; saveReview(r, { score: n });
 }
 // The Insights tab shows how many flagged runs nobody has reviewed yet.
 function updateBadge() {
   const b = $('nav button[data-tab="insights"]'); if (!b || !cfg) return;
   const n = [...runFlags().values()].filter((f) => !reviewed(f.r)).length;
-  b.replaceChildren('Insights', n ? h('span', { class: 'badge', title: `${plural(n, 'finished run')} look off and haven't been reviewed` }, n) : '');
+  morph(b, 'Insights', n ? h('span', { class: 'badge', title: `${plural(n, 'finished run')} look off and haven't been reviewed` }, n) : null);
+  const a = $('nav button[data-tab="audit"]'); if (!a) return;
+  a.hidden = !audit;
+  const unread = (audit?.findings ?? []).filter((f) => !auditRead.has(f.id)).length;
+  morph(a, 'Audit', unread ? h('span', { class: 'badge info', title: `${plural(unread, 'finding')} not marked read yet` }, unread) : null);
 }
 
 // Everything about one run: what it was, what it measured against what's usual for its setup, and why it's flagged.
-function showRun(r) {
+// It follows the run while open: a review saved elsewhere, or the run deleted, shows up here too.
+function showRun(r) { openModal(r.id, runDetails(r), () => runDetails(results.find((x) => x.id === r.id) ?? { ...r, gone: true })); }
+function runDetails(r) {
   const fl = runFlags().get(r.id), fits = usualFits();
   const usual = (k) => { const u = fits[k]?.usual(r); return u && r[k] > 0 && r.status === 'ok' ? `usual ~${METRICS[k].fmt(u)} (${fmtX(r[k] / u)})` : ''; };
   const line = (label, v, note) => h('tr', {}, h('td', { class: 'muted' }, label), h('td', { class: 'num' }, v ?? '—'), h('td', { class: 'muted', style: 'font-size:12.5px' }, note || ''));
   const tok = (k) => r[k] == null ? null : fmtTok(r[k]), when = (t) => t ? new Date(t).toLocaleString() : null;
-  openModal(r.id, h('div', {},
+  return h('div', {},
+    r.gone ? h('p', { class: 'banner bad' }, 'This run has been deleted.') : null,
     h('div', { class: 'chips', style: 'margin-bottom:10px' },
       h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad') }, r.status),
       h('span', { class: 'tag' }, `${PROVIDERS[r.provider] ?? r.provider} · ${r.model ?? r.agent}`), h('span', { class: 'tag' }, `effort ${r.effort}`),
@@ -1594,14 +1914,99 @@ function showRun(r) {
         line('CLI version', r.cli),
         line('Prompt', promptLabel(r.promptVersion)),
         line('Started', when(r.startedAt)), line('Finished', when(r.finishedAt))))),
-    h('div', { class: 'row', style: 'margin-top:12px' },
-      h('span', { class: 'muted' }, 'Score'),
-      h('input', { type: 'number', min: 0, max: 10, step: 0.5, class: 'score', value: r.score ?? '', onchange: (e) => saveReview(r, { score: e.target.value === '' ? null : +e.target.value }) }),
-      h('input', { class: 'grow', value: r.notes ?? '', placeholder: 'notes', style: 'min-width:160px', onchange: (e) => saveReview(r, { notes: e.target.value }) }),
+    r.gone ? null : h('div', { class: 'row', style: 'margin-top:12px' },
+      h('label', { class: 'muted', for: 'dlg-score' }, 'Score'),
+      h('input', { type: 'number', id: 'dlg-score', min: 0, max: 10, step: 0.5, inputmode: 'decimal', class: 'score', value: r.score ?? '', onchange: (e) => saveScore(r, e.target) }),
+      h('input', { class: 'grow', value: r.notes ?? '', placeholder: 'notes', 'aria-label': 'Notes', style: 'min-width:min(160px, 100%)', onchange: (e) => saveReview(r, { notes: e.target.value }) }),
       h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!r.seen, onchange: (e) => saveReview(r, { seen: e.target.checked }) }), 'Looked at')),
-    h('div', { class: 'row', style: 'margin-top:10px' },
-      r.entry ? h('button', { class: 'btn primary', onclick: () => window.open('/runs/' + r.entry, '_blank') }, '▶ Play') : null,
-      fileButtons(r))));
+    r.gone ? null : h('div', { class: 'row', style: 'margin-top:10px' },
+      r.entry ? h('a', { class: 'btn primary', href: runUrl(r.entry), target: '_blank', rel: 'noopener', style: 'text-decoration:none' }, '▶ Play') : null,
+      fileButtons(r)));
+}
+
+// ------------------------------------------------------------------- AUDIT
+// audit.json, written by whoever audits the repo: what was found, what was done about it, what's left to
+// decide, and how it was checked. Read marks stay in this browser.
+const SEVS = ['critical', 'high', 'medium', 'low', 'info'];
+const STATUS = { fixed: 'Fixed', yours: 'Your call', open: 'Not fixed', note: 'Note' };
+// Plain text with `code` spans and blank-line paragraphs.
+const prose = (t) => String(t ?? '').split(/\n{2,}/).map((para) => h('p', { class: 'audit-p', style: 'margin:0 0 6px' },
+  para.split('`').map((bit, i) => i % 2 ? h('code', {}, bit) : bit)));
+const inline = (t) => String(t ?? '').split('`').map((bit, i) => i % 2 ? h('code', {}, bit) : bit);
+const openFindings = (on) => document.querySelectorAll('#tab-audit details.finding').forEach((d) => { d.open = on; });
+function markRead(ids, on) {
+  for (const id of ids) on ? auditRead.add(id) : auditRead.delete(id);
+  store.set('matrix.auditRead', [...auditRead]); updateBadge(); render();
+}
+function renderAudit() {
+  const root = $('#tab-audit');
+  if (!audit) return morph(root, h('div', { class: 'card', key: 'none' }, h('p', { class: 'muted', style: 'margin:0' }, 'No audit.json next to dashboard.mjs.')));
+  const all = audit.findings ?? [], f = ui.auditFilter ??= {};
+  const shown = all.filter((x) => (!f.sev || x.severity === f.sev) && (!f.area || x.area === f.area) && (!f.status || x.status === f.status) && (!f.unread || !auditRead.has(x.id)));
+  const count = (fn) => all.filter(fn).length, read = count((x) => auditRead.has(x.id));
+  const setF = (patch) => { Object.assign(f, patch); saveUi(); renderAudit(); };
+  const sel = (key, label, opts) => h('select', { 'aria-label': label, class: f[key] ? 'on' : null, onchange: (e) => setF({ [key]: e.target.value }) },
+    h('option', { value: '' }, `${label}: all`), opts.map(([v, l]) => h('option', { value: v, selected: f[key] === v }, `${label}: ${l}`)));
+  const tile = (k, v, d) => h('div', { class: 'tile' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v), d ? h('span', { class: 'd' }, d) : null);
+  const areas = [...new Set(all.map((x) => x.area))];
+  const t = audit.tests ?? {}, sc = audit.screens ?? {};
+  morph(root,
+    h('div', { class: 'card', key: 'head' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, audit.title ?? 'Audit'), audit.date ? h('span', { class: 'muted' }, audit.date) : null),
+      audit.summary ? h('div', { style: 'margin:6px 0 12px' }, prose(audit.summary)) : null,
+      h('div', { class: 'tiles' },
+        tile('Findings', all.length, `${count((x) => x.status === 'fixed')} fixed`),
+        audit.decisions?.length ? tile('Your call', audit.decisions.length, 'decisions left for you') : null,
+        t.passed != null ? tile('Tests', `${t.passed} ✔`, t.failed ? `${t.failed} failing` : 'all passing') : null,
+        sc.rows ? tile('Screens checked', sc.rows.length, sc.note ?? '') : null,
+        tile('Read', `${read} / ${all.length}`, read === all.length ? 'all read ✔' : 'tick each finding as you go'))),
+    audit.decisions?.length ? h('div', { class: 'card', key: 'decisions' },
+      h('h2', {}, 'Your call'),
+      h('p', { class: 'sub' }, 'Things I left for you to decide, most important first.'),
+      h('ol', { class: 'audit-list' }, audit.decisions.map((d) => h('li', { key: d.title }, h('strong', {}, inline(d.title)), h('div', {}, prose(d.detail)))))) : null,
+    h('div', { class: 'card', key: 'findings' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Findings'),
+        h('button', { class: 'btn', onclick: () => openFindings(true) }, 'Expand all'),
+        h('button', { class: 'btn', onclick: () => openFindings(false) }, 'Collapse all'),
+        h('button', { class: 'btn', disabled: !shown.some((x) => !auditRead.has(x.id)), onclick: () => markRead(shown.map((x) => x.id), true) }, 'Mark shown as read')),
+      h('div', { class: 'row', style: 'margin:8px 0 2px' },
+        sel('sev', 'Severity', SEVS.filter((v) => all.some((x) => x.severity === v)).map((v) => [v, v])),
+        sel('area', 'Area', areas.map((v) => [v, v])),
+        sel('status', 'Status', Object.entries(STATUS).filter(([k]) => all.some((x) => x.status === k))),
+        h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!f.unread, onchange: (e) => setF({ unread: e.target.checked }) }), 'Unread only')),
+      h('p', { class: 'hint' }, `${shown.length} of ${all.length} shown, most serious first. High ones and your calls start open; click a title to open or close it.`),
+      shown.length ? shown.map((x) => { const read = auditRead.has(x.id);
+        return h('details', { class: 'finding' + (read ? ' read' : ''), key: x.id, id: 'finding-' + x.id, open: x.severity === 'high' || x.status === 'yours' },
+          h('summary', { class: 'fhead' },
+            h('span', { class: `tag sev-${x.severity}` }, x.severity),
+            h('span', { class: `tag st-${x.status}` }, STATUS[x.status] ?? x.status),
+            h('span', { class: 'tag' }, x.area),
+            h('span', { class: 'ftitle' }, inline(x.title)),
+            read ? h('span', { class: 'ok', title: 'Read' }, '✓ read') : null),
+          h('dl', {},
+            x.found ? [h('dt', {}, 'What I found'), h('dd', {}, prose(x.found))] : null,
+            x.did ? [h('dt', {}, x.status === 'fixed' ? 'What I did' : 'Why not / next'), h('dd', {}, prose(x.did))] : null,
+            x.check ? [h('dt', {}, 'How I checked'), h('dd', {}, prose(x.check))] : null,
+            x.where?.length ? [h('dt', {}, 'Where'), h('dd', {}, x.where.map((w, i) => [i ? ', ' : '', h('code', {}, w)]))] : null),
+          h('label', { class: 'row', style: 'gap:6px; margin-top:10px; justify-content:flex-end' },
+            h('input', { type: 'checkbox', checked: read, onchange: (e) => markRead([x.id], e.target.checked) }), 'Read'));
+      }) : h('p', { class: 'muted' }, 'Nothing matches these filters.')),
+    audit.changes?.length ? h('div', { class: 'card', key: 'changes' },
+      h('h2', {}, 'What\'s new'),
+      h('ul', { class: 'audit-list' }, audit.changes.map((c) => h('li', { key: c.title }, h('strong', {}, inline(c.title)), c.detail ? h('div', { class: 'muted' }, prose(c.detail)) : null)))) : null,
+    t.suites?.length ? h('div', { class: 'card', key: 'tests' },
+      h('h2', {}, 'How it was tested'), t.summary ? h('div', { class: 'sub' }, prose(t.summary)) : null,
+      h('div', { class: 'scroll' }, h('table', { class: 'pin' },
+        h('thead', {}, h('tr', {}, ['Suite', 'Result', 'What it covers'].map((x) => h('th', {}, x)))),
+        h('tbody', {}, t.suites.map((x) => h('tr', { key: x.name }, h('td', { style: 'min-width:140px' }, h('strong', {}, inline(x.name))),
+          h('td', { style: 'white-space:nowrap' }, h('span', { class: 'tag ' + (x.result === 'pass' ? 'ok' : 'bad') }, x.result === 'pass' ? `✔ ${x.count ?? ''} passed` : `✘ ${x.result}`)),
+          h('td', { style: 'min-width:240px' }, prose(x.detail)))))))) : null,
+    sc.rows?.length ? h('div', { class: 'card', key: 'screens' },
+      h('h2', {}, 'Screens checked'), sc.summary ? h('div', { class: 'sub' }, prose(sc.summary)) : null,
+      h('div', { class: 'scroll' }, h('table', { class: 'pin' },
+        h('thead', {}, h('tr', {}, ['Screen', 'Engine', 'Size', 'Result'].map((x) => h('th', {}, x)))),
+        h('tbody', {}, sc.rows.map((x) => h('tr', { key: x.device + x.engine }, h('td', {}, x.device), h('td', {}, x.engine), h('td', { class: 'num' }, x.size),
+          h('td', {}, h('span', { class: 'tag ' + (x.result === 'ok' ? 'ok' : 'warn') }, x.result === 'ok' ? '✔ ok' : x.result)))))))) : null);
 }
 
 // ------------------------------------------------------------------- data
@@ -1612,48 +2017,78 @@ async function loadSetup() {
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
   const t = await api('/api/template'); tmpl = t.text; savedTmpl = tmpl; meta.templatePath = t.path; meta.promptVersion = t.version;
+  if (c.rev) Object.assign(rev, { config: c.rev.config, template: c.rev.template, results: rev.results ?? c.rev.results });
+  onDisk = false; cache = {};
 }
 async function loadResults() {
-  results = await api('/api/results');
-  for (const r of results) {
+  const rows = await api('/api/results');
+  for (const r of rows) {
     r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
     if (r.cliVersion) r.cli = `${SHORT[r.provider] ?? r.provider} ${r.cliVersion}`; // versions only compare within a CLI
   }
-  cache = {}; updateBadge();
+  results = rows; cache = {}; updateBadge();
 }
+async function loadAudit() { try { audit = await api('/api/audit'); } catch { audit = null; } updateBadge(); }
 
-let wasRunning = false;
-async function poll() {
+// Every 2 s (10 s while the page is hidden): batch progress and the log, plus signatures of the results,
+// config, prompt and tests. Whatever changed is reloaded and the open tab redrawn, wherever the change
+// came from: this page, another tab, `node run-matrix.mjs` in a terminal, or a hand edit. One poll at
+// a time, so a slow answer can't add the same log lines twice.
+let pollChain = Promise.resolve(), pollTimer = null, wasRunning = false, logFollow = true;
+function poll() {
+  clearTimeout(pollTimer);
+  const p = pollChain = pollChain.then(pollOnce, pollOnce).catch((e) => console.error(e)).finally(() => {
+    if (p === pollChain) pollTimer = setTimeout(poll, document.hidden ? 10000 : 2000);
+  });
+  return p;
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden && cfg) poll(); });
+
+async function pollOnce() {
   let st;
-  try { st = await api('/api/status?since=' + logSince); }
-  catch { $('#pill').textContent = 'Dashboard server not reachable'; $('#pill').classList.remove('live'); return; }
-  if (st.logTotal < logSince) { logSince = 0; logPre.textContent = ''; return poll(); } // a new batch reset the log
+  try { st = await api(`/api/status?since=${logSince}&smokes=${rev.smokes ?? ''}`, 'GET', undefined, 15000); }
+  catch { if (!offline) { offline = true; setPill(); } return; }
+  const back = offline; offline = false;
+  if (st.logTotal < logSince) { resetLog(); return pollOnce(); } // a new batch (or a restarted server) started a new log
   status = st;
-  const prevSmokes = JSON.stringify(smokes);
-  smokes = st.smokes ?? {};
-  if (JSON.stringify(smokes) !== prevSmokes || Object.values(smokes).some((s) => s.running)) renderSmokes();
-  const pre = logPre;
+  let changed = back || wasRunning !== !!st.running;
+  if (st.smokes) { smokes = st.smokes; changed = true; }
+  if (st.rev?.smokes != null) rev.smokes = st.rev.smokes;
   if (st.log.length) {
-    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
-    pre.textContent += st.log.join('\n') + '\n';
-    if (atBottom) pre.scrollTop = pre.scrollHeight;
+    const add = st.log.join('\n') + '\n', pre = $('#logpre');
+    logText += add;
+    if (logText.length > 500000) { logText = logText.slice(-400000); if (pre) pre.textContent = logText; } else pre?.append(add);
+    if (pre && logFollow) pre.scrollTop = pre.scrollHeight;
   }
   logSince = st.logTotal;
-  const finishedOne = st.log.some((l) => /^[✔✘]/.test(l));
-  if (finishedOne || (wasRunning && !st.running)) {
-    await loadResults();
-    if (tab === 'results') renderResults();
-    if (tab === 'insights') renderInsights();
+  // What changed on disk since the last poll.
+  const r = st.rev ?? {};
+  const setupChanged = rev.config != null && (r.config !== rev.config || r.template !== rev.template);
+  if (setupChanged) {
+    rev.config = r.config; rev.template = r.template;
+    if (dirty()) onDisk = true; else await loadSetup();
+    changed = true;
   }
-  // The pill and the browser tab's title show progress and live warnings, so a background tab shows them too.
-  const hb = batchHealth(), warn = st.running ? hb?.alerts.length ?? 0 : 0, pill = $('#pill');
-  pill.textContent = st.running ? (st.stopping ? 'Stopping…'
-    : `Running · ${st.active.length} active · ${st.finished}${hb?.total ? ` of ${hb.total}` : ''} done${warn ? ` · ⚠ ${warn}` : ''}`) : 'Idle';
-  pill.classList.toggle('live', !!st.running);
-  document.title = `${warn ? '⚠ ' : ''}${st.running && hb?.total ? `${st.finished}/${hb.total} · ` : ''}Matrix Dashboard`;
-  if (tab === 'run') { if (wasRunning !== !!st.running || finishedOne) renderRun(); else renderLive(); }
-  if (wasRunning !== !!st.running || JSON.stringify(smokes) !== prevSmokes) renderClis(); // Update is off during batches and tests
+  if (r.results !== rev.results || setupChanged) { rev.results = r.results; await loadResults(); changed = true; }
   wasRunning = !!st.running;
+  setPill();
+  if (changed) { render(); refreshModal(); }
+  else if (tab === 'run') renderLive(); // the timers tick
+  if (Object.values(smokes).some((x) => x.running)) renderSmokes(); // "testing… 12s"
+}
+
+// The pill and the browser tab's title show progress and live warnings, so a background tab shows them too.
+function setPill() {
+  const pill = $('#pill'), st = status, hb = cfg ? batchHealth() : null, warn = st.running ? hb?.alerts.length ?? 0 : 0;
+  let full, short, cls = '';
+  if (offline) { full = short = 'Dashboard server not reachable'; cls = ' off'; }
+  else if (st.running) {
+    full = st.stopping ? 'Stopping…' : `Running · ${st.active.length} active · ${st.finished}${hb?.total ? ` of ${hb.total}` : ''} done${warn ? ` · ⚠ ${warn}` : ''}`;
+    short = st.stopping ? 'Stopping…' : `● ${st.finished}${hb?.total ? `/${hb.total}` : ''} done${warn ? ` ⚠${warn}` : ''}`; cls = ' live';
+  } else full = short = st.updating ? `Updating ${PROVIDERS[st.updating] ?? st.updating}…` : 'Idle';
+  morph(pill, h('span', { class: 'full' }, full), h('span', { class: 'short' }, short));
+  pill.className = 'pill' + cls; pill.title = full;
+  document.title = `${offline || warn ? '⚠ ' : ''}${st.running && hb?.total ? `${st.finished}/${hb.total} · ` : ''}Matrix Dashboard`;
 }
 
 (async () => {
@@ -1667,13 +2102,22 @@ async function poll() {
     $('#pill').textContent = 'Not started';
     return;
   }
-  await loadSetup();
-  await loadResults();
-  renderSetup();
+  // The server may still be starting (or was restarted): keep trying instead of showing a blank page.
+  for (let tries = 0; ; tries++) {
+    try { await loadSetup(); await loadResults(); break; }
+    catch (e) {
+      offline = true; setPill();
+      morph($('#tab-run'), h('div', { class: 'card', key: 'wait' }, h('h2', {}, 'Waiting for the dashboard server…'),
+        h('p', { class: 'muted' }, `Start it with node dashboard.mjs in this folder. Trying again every few seconds (${e.message}).`)));
+      $('#tab-run').classList.add('on');
+      await new Promise((r) => setTimeout(r, Math.min(10000, 1500 * (tries + 1))));
+    }
+  }
+  offline = false;
+  await loadAudit();
   loadClis(); // takes a few seconds (it asks each CLI); the page works meanwhile
   await poll(); // batch status first, so a view of the last batch opens on it
-  showTab(TABS.includes(tab) ? tab : 'run');
-  setInterval(poll, 2000);
+  showTab(tab);
 })();
 </script>
 </body>

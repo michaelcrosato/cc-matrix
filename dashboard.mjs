@@ -3,7 +3,8 @@
 //   node dashboard.mjs            then open http://localhost:4173
 //   node dashboard.mjs --port 5000 --config matrix.config.json --out runs --open
 // No dependencies; Node 18+. Works the same on Ubuntu, macOS and Windows (PowerShell).
-// Listens on 127.0.0.1 only: it can launch agents with permissions bypassed.
+// Listens on 127.0.0.1 only: it can launch agents with permissions bypassed. For the same reason it
+// only answers its own page: see refused() for why other websites can't drive it.
 
 import http from 'node:http';
 import fs from 'node:fs';
@@ -14,18 +15,20 @@ import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const opts = { port: 4173, config: 'matrix.config.json', out: 'runs', open: false };
+const opts = { port: 4173, config: 'matrix.config.json', out: 'runs', open: false, allowHosts: [] };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i];
   if (a === '--port') opts.port = +process.argv[++i];
   else if (a === '--config') opts.config = process.argv[++i];
   else if (a === '--out') opts.out = process.argv[++i];
   else if (a === '--open') opts.open = true;
+  else if (a === '--allow-host') opts.allowHosts.push(...process.argv[++i].split(',').map((s) => s.trim().toLowerCase()).filter(Boolean));
 }
 const CONFIG = path.resolve(HERE, opts.config);
 const OUT = path.resolve(HERE, opts.out);
 const RUNNER = path.join(HERE, 'run-matrix.mjs');
 const PAGE = path.join(HERE, 'dashboard.html');
+const AUDIT = path.join(HERE, 'audit.json');
 fs.mkdirSync(OUT, { recursive: true });
 
 // ---------------------------------------------------------------- helpers
@@ -38,10 +41,29 @@ function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
   res.end(typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body));
 }
+class HttpError extends Error { constructor(code, msg) { super(msg); this.code = code; } }
 const body = (req) => new Promise((resolve, reject) => {
-  let s = ''; req.on('data', (c) => { s += c; if (s.length > 20e6) reject(new Error('too large')); });
-  req.on('end', () => resolve(s)); req.on('error', reject);
+  let s = ''; req.on('data', (c) => { s += c; if (s.length > 20e6) reject(new HttpError(413, 'too large')); });
+  req.on('end', () => { try { resolve(JSON.parse(s || '{}')); } catch { reject(new HttpError(400, 'The request body isn\'t valid JSON.')); } });
+  req.on('error', reject);
 });
+
+// Listening on 127.0.0.1 alone doesn't keep other websites out: a page open in any tab can POST
+// here (a text/plain POST needs no CORS preflight), and a domain that resolves to 127.0.0.1
+// (DNS rebinding) can read and write like this page does. Either could start agents with
+// permissions off or point a CLI's command at anything. So: the Host must be this machine (or
+// one passed with --allow-host), and a write must be JSON from this page's own origin.
+const LOCAL = new Set(['localhost', '127.0.0.1', '[::1]']);
+const hostOk = (host) => { const h = String(host ?? '').toLowerCase().replace(/:\d+$/, ''); return LOCAL.has(h) || opts.allowHosts.includes(h); };
+function refused(req) {
+  if (!hostOk(req.headers.host)) return 'Unknown host. Open the dashboard at http://localhost:' + opts.port;
+  if (req.method === 'GET' || req.method === 'HEAD') return null;
+  const site = req.headers['sec-fetch-site'], origin = req.headers.origin;
+  if (site && site !== 'same-origin' && site !== 'none') return 'Cross-site request refused.';
+  if (origin) { let o; try { o = new URL(origin).host; } catch {} if (o !== String(req.headers.host).toLowerCase()) return 'Cross-origin request refused.'; }
+  if (!/^application\/json\b/i.test(req.headers['content-type'] ?? '')) return 'Send JSON (Content-Type: application/json).';
+  return null;
+}
 
 // ------------------------------------------------------------------- CLIs
 // What the Setup tab shows per CLI: version, the models it offers (with the effort levels
@@ -149,8 +171,9 @@ async function updateCli(p) {
 // Finished results are kept in runs/.smoke.json so they survive a restart.
 const SMOKE_FILE = path.join(OUT, '.smoke.json');
 const smokes = readJSON(SMOKE_FILE, {});
+let smokesRev = 1; // bumped on every change, so /api/status only sends the tests when they changed
 function startSmoke(key, goal) {
-  smokes[key] = { running: true, goal: !!goal, startedAt: new Date().toISOString() };
+  smokes[key] = { running: true, goal: !!goal, startedAt: new Date().toISOString() }; smokesRev++;
   const a = [RUNNER, '--config', CONFIG, '--out', OUT, '--smoke', key];
   if (goal) a.push('--smoke-goal');
   const child = spawn(process.execPath, a, { cwd: HERE });
@@ -159,6 +182,7 @@ function startSmoke(key, goal) {
   child.on('close', () => {
     try { smokes[key] = JSON.parse(out.trim().split('\n').pop()); }
     catch { smokes[key] = { key, ok: false, goal: !!goal, at: new Date().toISOString(), error: (err || out || 'The test crashed').trim().slice(-2000) }; }
+    smokesRev++;
     fs.writeFileSync(SMOKE_FILE, JSON.stringify(Object.fromEntries(Object.entries(smokes).filter(([, v]) => !v.running)), null, 2));
   });
 }
@@ -203,8 +227,12 @@ function startRun(s) {
 }
 
 // ------------------------------------------------------------------ results
-// A run's saved prompt (prompt.md, or goal.md for the goal) no longer contains the current text of
-// one of its variants: the variant was edited after the run, so the run's label is out of date.
+// Whether a run used different text for one of its variants than the config has now (the variant was
+// edited after it ran, so its label is out of date). Runs record a hash of each variant's text
+// (variantHashes), so that's exact; for older runs, check whether the saved prompt (prompt.md, or
+// goal.md for the goal) still contains the current text.
+const textHash = (t) => crypto.createHash('sha1').update(t).digest('hex').slice(0, 8); // same as run-matrix.mjs
+const variantText = (v) => { try { return v.text ?? (v.file ? fs.readFileSync(path.resolve(path.dirname(CONFIG), v.file), 'utf8') : ''); } catch { return ''; } };
 const sentCache = new Map(); // file -> { mtime, text }; a rerun rewrites the file
 const sentText = (file) => {
   try {
@@ -216,31 +244,58 @@ const sentText = (file) => {
 function changedVariants(dir, r, dims, tmpl) {
   const out = [];
   for (const [d, vs] of Object.entries(dims)) {
-    const text = (vs.find((v) => v.id === r[d])?.text ?? '').trim();
+    const v = vs.find((x) => x.id === r[d]);
+    if (!v) continue; // a variant no longer in the config can't be out of date
+    const text = variantText(v).trim(), isGoal = d === 'goal';
+    if (isGoal ? r.goalSkipped : !tmpl.includes(`{{${d}}}`)) continue; // its text wasn't sent
+    if (r.variantHashes?.[d] != null) { if (r.variantHashes[d] !== textHash(text)) out.push(d); continue; }
     if (!text) continue;
-    const isGoal = d === 'goal';
-    if (isGoal ? r.goalSkipped : !tmpl.includes(`{{${d}}}`)) continue;
     const sent = sentText(path.join(dir, isGoal ? 'goal.md' : 'prompt.md'));
     if (sent != null && !sent.replace(/\s+/g, ' ').includes(text.replace(/\s+/g, ' '))) out.push(d);
   }
   return out;
 }
 
+// A review (score, notes, "looked at") belongs to one attempt at a run: it's saved with the run's
+// startedAt, so a re-run (Retry failed, or after ✕) starts unreviewed instead of inheriting it.
+// Reviews saved before that have no startedAt and still apply.
+const SCORES = path.join(OUT, 'scores.json');
+const reviewOf = (scores, r) => { const s = scores[r.id]; if (!s || (s.startedAt && s.startedAt !== r.startedAt)) return {};
+  const { startedAt, ...rest } = s; return rest; };
+
 function results() {
-  const scores = readJSON(path.join(OUT, 'scores.json'), {});
+  const scores = readJSON(SCORES, {});
   const dims = readJSON(CONFIG, {}).dimensions ?? {};
   let tmpl = ''; try { tmpl = fs.readFileSync(templatePath(), 'utf8'); } catch {}
   const rows = [];
   for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
     if (!d.isDirectory()) continue;
     const dir = path.join(OUT, d.name), r = readJSON(path.join(dir, 'result.json'), null);
-    if (!r) continue;
+    if (!r?.id) continue;
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;
-    rows.push({ ...r, ...(scores[r.id] ?? {}) });
+    rows.push({ ...r, ...reviewOf(scores, r) });
   }
   return rows;
+}
+
+// Cheap signatures of what the page shows, so it can react to any change, wherever it came from:
+// a run finishing (also from `node run-matrix.mjs` in a terminal), a score saved in another tab,
+// a hand edit to the config or prompt. The page compares them on every status poll.
+const stamp = (f) => { try { const s = fs.statSync(f); return `${Math.round(s.mtimeMs)}.${s.size}`; } catch { return '-'; } };
+let revCache = null;
+function revs(fresh) {
+  if (!fresh && revCache && Date.now() - revCache.at < 900) return revCache.value;
+  const h = crypto.createHash('sha1');
+  try {
+    for (const d of fs.readdirSync(OUT, { withFileTypes: true })) if (d.isDirectory())
+      h.update(`${d.name}|${stamp(path.join(OUT, d.name, 'result.json'))}|${stamp(path.join(OUT, d.name, 'reply.md'))}\n`);
+  } catch {}
+  h.update(stamp(SCORES));
+  const value = { results: h.digest('hex').slice(0, 12), config: stamp(CONFIG), template: stamp(templatePath()), smokes: smokesRev };
+  revCache = { at: Date.now(), value };
+  return value;
 }
 
 let reportTimer = null;
@@ -249,43 +304,64 @@ const refreshReport = () => { clearTimeout(reportTimer); reportTimer = setTimeou
 
 // ------------------------------------------------------------------ static
 const TYPES = { '.html': 'text/html; charset=utf-8', '.htm': 'text/html; charset=utf-8', '.js': 'text/javascript',
-  '.mjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.md': 'text/plain; charset=utf-8',
-  '.txt': 'text/plain; charset=utf-8', '.out': 'text/plain; charset=utf-8', '.err': 'text/plain; charset=utf-8',
-  '.wasm': 'application/wasm', '.png': 'image/png', '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.glb': 'model/gltf-binary',
-  '.gltf': 'model/gltf+json', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav', '.wgsl': 'text/plain', '.glsl': 'text/plain' };
+  '.mjs': 'text/javascript', '.cjs': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.map': 'application/json',
+  '.md': 'text/plain; charset=utf-8', '.txt': 'text/plain; charset=utf-8', '.csv': 'text/csv; charset=utf-8',
+  '.out': 'text/plain; charset=utf-8', '.err': 'text/plain; charset=utf-8', '.xml': 'application/xml',
+  '.wasm': 'application/wasm', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif',
+  '.webp': 'image/webp', '.avif': 'image/avif', '.ico': 'image/x-icon', '.svg': 'image/svg+xml', '.ktx2': 'image/ktx2', '.hdr': 'image/vnd.radiance',
+  '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json', '.mp3': 'audio/mpeg', '.ogg': 'audio/ogg', '.wav': 'audio/wav',
+  '.m4a': 'audio/mp4', '.flac': 'audio/flac', '.mp4': 'video/mp4', '.webm': 'video/webm',
+  '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf',
+  '.wgsl': 'text/plain; charset=utf-8', '.glsl': 'text/plain; charset=utf-8' };
 
-function serveRunFile(res, rel) {
-  const file = path.resolve(OUT, decodeURIComponent(rel));
-  if (!file.startsWith(OUT + path.sep) || !fs.existsSync(file) || fs.statSync(file).isDirectory()) return send(res, 404, 'Not found', 'text/plain');
-  send(res, 200, fs.readFileSync(file), TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream');
+// Games, their assets and run files. Streamed, so a long agent.out doesn't sit in memory.
+function serveRunFile(req, res, rel) {
+  let file; try { file = path.resolve(OUT, decodeURIComponent(rel)); } catch { return send(res, 400, 'Bad path', 'text/plain'); }
+  let st; try { st = fs.statSync(file); } catch {}
+  if (!file.startsWith(OUT + path.sep) || !st?.isFile()) return send(res, 404, 'Not found', 'text/plain');
+  res.writeHead(200, { 'Content-Type': TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream', 'Content-Length': st.size, 'Cache-Control': 'no-store' });
+  if (req.method === 'HEAD') return res.end();
+  fs.createReadStream(file).on('error', () => res.destroy()).pipe(res);
+}
+
+// A run's folder: a direct child of the runs folder with a result.json (never scores.json and the like).
+function runDir(id) {
+  if (typeof id !== 'string' || !/^[\w.-]+$/.test(id) || id.startsWith('.')) return null;
+  const dir = path.join(OUT, id);
+  return path.dirname(dir) === OUT && fs.existsSync(path.join(dir, 'result.json')) ? dir : null;
 }
 
 // ------------------------------------------------------------------ routes
 const server = http.createServer(async (req, res) => {
   try {
+    const why = refused(req);
+    if (why) return send(res, 403, { error: why });
     const url = new URL(req.url, 'http://localhost');
-    const p = url.pathname, m = req.method;
+    const p = url.pathname, m = req.method === 'HEAD' ? 'GET' : req.method;
 
     if (p === '/' && m === 'GET') return send(res, 200, fs.readFileSync(PAGE), 'text/html; charset=utf-8');
-    if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(res, p.slice(6));
+    if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(req, res, p.slice(6));
+    if (p === '/api/audit' && m === 'GET') return send(res, 200, readJSON(AUDIT, null));
 
-    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform });
+    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true) });
     if (p === '/api/config' && m === 'PUT') {
-      const c = JSON.parse(await body(req));
+      const c = await body(req);
+      if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });
       fs.writeFileSync(CONFIG, JSON.stringify(c, null, 2) + '\n'); refreshReport();
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, rev: revs(true) });
     }
     if (p === '/api/template' && m === 'GET') {
       const text = fs.existsSync(templatePath()) ? fs.readFileSync(templatePath(), 'utf8') : '';
       return send(res, 200, { text, path: templatePath(), version: promptVersion(text) });
     }
     if (p === '/api/template' && m === 'PUT') {
-      const { text } = JSON.parse(await body(req));
-      fs.writeFileSync(templatePath(), text); return send(res, 200, { ok: true, version: promptVersion(text) });
+      const { text } = await body(req);
+      if (typeof text !== 'string') return send(res, 400, { error: 'Expected { text }.' });
+      fs.writeFileSync(templatePath(), text); return send(res, 200, { ok: true, version: promptVersion(text), rev: revs(true) });
     }
 
     if (p === '/api/preview' && m === 'POST') {
-      const s = JSON.parse(await body(req));
+      const s = await body(req);
       const r = spawnSync(process.execPath, [RUNNER, ...selectionArgs(s), '--dry-run', '--json'], { cwd: HERE, encoding: 'utf8', maxBuffer: 50e6 });
       if (r.status !== 0) return send(res, 400, { error: (r.stderr || r.stdout || 'preview failed').trim() });
       return send(res, 200, JSON.parse(r.stdout.trim().split('\n').pop()));
@@ -294,7 +370,7 @@ const server = http.createServer(async (req, res) => {
     if (p === '/api/run' && m === 'POST') {
       if (runner) return send(res, 409, { error: 'A batch is already running.' });
       if (updating) return send(res, 409, { error: `${updating} is updating; start when it's done.` });
-      startRun(JSON.parse(await body(req)));
+      startRun(await body(req));
       return send(res, 200, { ok: true });
     }
     if (p === '/api/stop' && m === 'POST') {
@@ -302,17 +378,18 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { ok: true });
     }
     if (p === '/api/status' && m === 'GET') {
-      const since = +(url.searchParams.get('since') ?? 0);
+      const since = +(url.searchParams.get('since') ?? 0), known = url.searchParams.get('smokes');
       return send(res, 200, { running: !!runner, stopping: fs.existsSync(path.join(OUT, '.stop')),
         startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...run.active.keys()],
         activeSince: Object.fromEntries(run.active), finished: run.finished, planned: run.planned, settings: run.settings, logTotal: run.log.length,
-        log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), smokes });
+        log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), updating, rev: revs(),
+        ...(known === String(smokesRev) ? {} : { smokes }) }); // the tests only when they changed
     }
 
     if (p === '/api/clis' && m === 'GET') return send(res, 200, await checkClis(url.searchParams.has('refresh')));
-    if (p === '/api/update-cli' && m === 'POST') return send(res, 200, await updateCli(JSON.parse(await body(req)).provider));
+    if (p === '/api/update-cli' && m === 'POST') return send(res, 200, await updateCli((await body(req)).provider));
     if (p === '/api/smoke' && m === 'POST') {
-      const { tests = [] } = JSON.parse(await body(req)); // [{ key: 'agent:effort', goal }]
+      const { tests = [] } = await body(req); // [{ key: 'agent:effort', goal }]
       if (updating) return send(res, 409, { error: `${updating} is updating; test when it's done.` });
       for (const t of tests) if (!smokes[t.key]?.running) startSmoke(t.key, t.goal);
       return send(res, 200, { ok: true });
@@ -320,28 +397,38 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/results' && m === 'GET') return send(res, 200, results());
     if (p === '/api/score' && m === 'PUT') {
-      const { id, score, notes, seen } = JSON.parse(await body(req));
-      const f = path.join(OUT, 'scores.json'), all = readJSON(f, {});
-      all[id] = { score: score === '' || score == null ? null : +score, notes: notes ?? '', ...(seen ? { seen: true } : {}) };
+      const { id, score, notes, seen, startedAt } = await body(req);
+      if (!runDir(id)) return send(res, 400, { error: 'No such run.' });
+      const all = readJSON(SCORES, {}), n = score === '' || score == null ? null : +score;
+      if (n != null && !(n >= 0 && n <= 10)) return send(res, 400, { error: 'A score is a number from 0 to 10.' });
+      all[id] = { score: n, notes: notes ?? '', ...(seen ? { seen: true } : {}), ...(startedAt ? { startedAt } : {}) };
       if (all[id].score == null && !all[id].notes && !all[id].seen) delete all[id];
-      fs.writeFileSync(f, JSON.stringify(all, null, 2)); refreshReport();
-      return send(res, 200, { ok: true });
+      fs.writeFileSync(SCORES, JSON.stringify(all, null, 2)); refreshReport();
+      return send(res, 200, { ok: true, rev: revs(true) });
     }
     if (p === '/api/delete-run' && m === 'POST') {
-      const { id } = JSON.parse(await body(req));
-      const dir = path.resolve(OUT, id);
-      if (!dir.startsWith(OUT + path.sep) || run.active.has(id)) return send(res, 400, { error: 'Cannot delete that run.' });
-      fs.rmSync(dir, { recursive: true, force: true }); refreshReport();
-      return send(res, 200, { ok: true });
+      const { id } = await body(req), dir = runDir(id);
+      if (!dir || run.active.has(id)) return send(res, 400, { error: 'Cannot delete that run.' });
+      fs.rmSync(dir, { recursive: true, force: true });
+      const all = readJSON(SCORES, {}); // its review was of the game just deleted
+      if (all[id]) { delete all[id]; fs.writeFileSync(SCORES, JSON.stringify(all, null, 2)); }
+      refreshReport();
+      return send(res, 200, { ok: true, rev: revs(true) });
     }
     send(res, 404, { error: 'Not found' });
-  } catch (e) { send(res, 500, { error: e.message }); }
+  } catch (e) { if (!res.headersSent) send(res, e instanceof HttpError ? e.code : 500, { error: e.message }); else res.destroy(); }
 });
 
+server.on('error', (e) => {
+  if (e.code !== 'EADDRINUSE') throw e;
+  console.error(`Port ${opts.port} is already in use: the dashboard may be running already (open http://localhost:${opts.port}),\nor start this one on another port: node dashboard.mjs --port ${opts.port + 1}`);
+  process.exit(1);
+});
 server.listen(opts.port, '127.0.0.1', () => {
   checkClis(); // warm the cache so the Setup tab has it on first load
   const link = `http://localhost:${opts.port}`;
   console.log(`Matrix dashboard: ${link}\nConfig: ${CONFIG}\nRuns:   ${OUT}\nCtrl-C to quit (a running batch keeps its finished results).`);
+  if (opts.allowHosts.length) console.log(`Also answering as ${opts.allowHosts.join(', ')}: anyone who can reach that address can start agents.`);
   if (opts.open) {
     const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', link]]
       : process.platform === 'darwin' ? ['open', [link]] : ['xdg-open', [link]];
