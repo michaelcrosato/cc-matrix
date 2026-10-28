@@ -179,6 +179,13 @@ td.scorecell { text-align: right; }
 .lbl { color: var(--muted); font-size: 12px; margin-right: 4px; }
 td.dimcell .lbl, td.num .lbl, td.eff .lbl { display: none; }
 table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
+.vrow { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.vrow:last-child { border-bottom: 0; }
+.vrow .note { flex: 1 1 220px; } /* wraps onto its own line on phones */
+.diff > div { padding: 0 6px; border-radius: 3px; }
+.diff .add { background: color-mix(in srgb, var(--ok) 16%, transparent); }
+.diff .del { background: color-mix(in srgb, var(--bad) 14%, transparent); }
+.diff .gap { color: var(--muted); }
 
 /* ---- Audit tab ---- */
 .finding { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; margin-top: 10px; }
@@ -486,6 +493,8 @@ let clis = {}, cliCheckedAt = null, cliError = null, smokes = {}, smokeGoal = st
 // rev: what the server last said about the results, config, prompt and tests (see poll). onDisk: the
 // config or prompt changed on disk while Setup had unsaved edits. audit: audit.json, for the Audit tab.
 let rev = {}, onDisk = false, audit = null, offline = false;
+// prompts: every version of the prompt, oldest first: { v, hash, at, text } (runs/prompt-history.json).
+let prompts = [];
 // View state that isn't worth a URL: open panels, per browser.
 let ui = store.get('matrix.ui', { saveOpen: null, filtersOpen: false, auditFilter: { sev: '', area: '', status: '', unread: false } });
 const saveUi = () => store.set('matrix.ui', ui);
@@ -759,7 +768,7 @@ async function save() {
   try {
     await api('/api/config', 'PUT', JSON.parse(c));
     const r = await api('/api/template', 'PUT', { text: t });
-    meta.promptVersion = r.version;
+    meta.promptVersion = r.version; meta.savedAt = r.savedAt;
     if (r.rev) Object.assign(rev, { config: r.rev.config, template: r.rev.template }); // our own save isn't a change on disk
   } catch (e) { alert(`Couldn't save: ${e.message}`); return false; }
   savedCfg = c; savedTmpl = t; onDisk = false;
@@ -836,6 +845,9 @@ function renderSetup() {
   };
   const dimCards = dimNames.map((d, di) => {
     const vs = cfg.dimensions[d];
+    // Finished runs from before this dimension existed: which variant they count as, so they aren't redone.
+    const older = results.filter((r) => r[d] == null || r.predates?.includes(d)).length, ov = olderVariant(d);
+    const setOlder = (id) => { for (const v of vs) { if (v.id === id) v.olderRuns = true; else delete v.olderRuns; } changed(true); };
     return h('div', { class: 'card', key: 'dim:' + d },
       h('div', { class: 'dim-head' },
         h('input', { value: d, class: 'mono dimname', title: 'Dimension name = the {{placeholder}} in your prompt', 'aria-label': 'Dimension name',
@@ -852,6 +864,10 @@ function renderSetup() {
         h('button', { class: 'icon', title: 'Move down', 'aria-label': `Move ${d} down`, disabled: di === dimNames.length - 1, onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, 1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↓'),
         h('button', { class: 'icon', title: 'Remove dimension', 'aria-label': `Remove ${d}`, onclick: () => { if (confirm(`Remove "${d}" and its ${vs.length} variants?`)) { delete cfg.dimensions[d]; changed(true); } } }, '✕')),
       d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and the agent gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until the condition is checked as met. Add "or stop after N turns" to cap it. Claude Code, Grok, agy and Muse all run /goal headless (each with its own goal loop: Grok plans, builds and verifies with extra agents, so it takes longer). * Codex has no headless /goal, so its runs of a goal variant get the same prompt without /goal.') : null,
+      older && vs.length ? h('div', { class: 'row hint', style: 'margin:-4px 0 10px' },
+        h('label', { for: 'older-' + d }, `${plural(older, 'finished run')} ${older === 1 ? 'is' : 'are'} from before {{${d}}} existed. They count as`),
+        h('select', { id: 'older-' + d, onchange: (e) => setOlder(e.target.value) }, vs.map((v) => h('option', { value: v.id, selected: v.id === ov }, v.id))),
+        h('span', {}, 'so they aren\'t redone.')) : null,
       vs.map((v, i) => h('div', { class: 'variant' },
         h('input', { value: v.id, placeholder: 'short name', title: 'Short name used in folder names and filters', 'aria-label': `${d} variant short name`,
           oninput: (e) => { v.id = e.target.value.trim(); changed(); } }),
@@ -876,21 +892,23 @@ function renderSetup() {
       h('p', { class: 'sub', style: 'margin:0' }, 'Each dimension fills its {{placeholder}} in the prompt with one variant per run. Every combination gets run. Order variants however you like; Results follow this order.')),
     dimCards,
     h('div', { class: 'row', key: 'adddim', style: 'margin:-4px 0 16px' },
-      !cfg.dimensions[GOAL_DIM] ? h('button', { class: 'btn', onclick: () => { cfg.dimensions[GOAL_DIM] = [{ id: 'off', text: '' }, { id: 'on', text: '' }]; changed(true); } }, '+ Add goal dimension') : null,
+      // olderRuns: finished runs (made without this dimension) count as its first variant, wherever it's moved.
+      !cfg.dimensions[GOAL_DIM] ? h('button', { class: 'btn', onclick: () => { cfg.dimensions[GOAL_DIM] = [{ id: 'off', text: '', ...(results.length ? { olderRuns: true } : {}) }, { id: 'on', text: '' }]; changed(true); } }, '+ Add goal dimension') : null,
       h('button', { class: 'btn', onclick: () => {
         const n = prompt('Name for the new dimension (becomes {{name}} in the prompt):');
         if (!n) return;
         if (!/^\w+$/.test(n) || RESERVED.includes(n) || cfg.dimensions[n]) return alert('Use letters, numbers or _ only, and a name not already in use.');
-        cfg.dimensions[n] = [{ id: 'v1', text: '' }]; changed(true);
+        cfg.dimensions[n] = [{ id: 'v1', text: '', ...(results.length ? { olderRuns: true } : {}) }]; changed(true);
       } }, '+ Add dimension')),
     // Prompt template
     h('div', { class: 'card', key: 'prompt' },
       h('h2', {}, 'Prompt'),
       h('p', { class: 'sub' }, h('span', {}, 'Saved to '), h('span', { class: 'mono' }, meta.templatePath || cfg.templateFile)),
       h('textarea', { class: 'mono', id: 'tmplarea', rows: 24, value: tmpl, spellcheck: false, 'aria-label': 'Prompt template',
-        oninput: (e) => { tmpl = e.target.value; updateChips(); changed(); } }),
+        oninput: (e) => { tmpl = e.target.value; updateChips(); updateHistory(); changed(); } }),
       h('div', { class: 'chips', id: 'tchips', style: 'margin-top:10px' }, chipButtons()),
       h('p', { class: 'hint' }, 'Filled automatically for every run: {{model}} {{effort}} {{lab}} {{environment}} {{stamp}} (YYYYMMDD-HHMM) {{date}} (YYYY-MM-DD HH:MM). Click a chip to insert it at the cursor.')),
+    historyCard(),
     // Advanced
     h('div', { class: 'card', key: 'advanced' },
       h('h2', {}, 'Advanced'),
@@ -921,6 +939,73 @@ function chipButtons() {
 }
 const updateChips = () => morph($('#tchips'), chipButtons());
 
+// Line diff by longest common subsequence: [' ' | '-' | '+', line] in order. Prompts are short, so the full table is fine.
+function lineDiff(a, b) {
+  const x = a.split('\n'), y = b.split('\n'), m = x.length, n = y.length;
+  const L = Array.from({ length: m + 1 }, () => new Uint32Array(n + 1));
+  for (let i = m - 1; i >= 0; i--) for (let j = n - 1; j >= 0; j--) L[i][j] = x[i] === y[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+  const out = [];
+  for (let i = 0, j = 0; i < m || j < n;) {
+    if (i < m && j < n && x[i] === y[j]) { out.push([' ', x[i++]]); j++; }
+    else if (i < m && (j === n || L[i + 1][j] >= L[i][j + 1])) out.push(['-', x[i++]]);
+    else out.push(['+', y[j++]]);
+  }
+  return out;
+}
+// The changed lines with two lines around each change; ⋯ marks what's left out.
+function diffView(a, b) {
+  const d = lineDiff(a, b), near = (k) => d.slice(Math.max(0, k - 2), k + 3).some(([t]) => t !== ' ');
+  if (!d.some(([t]) => t !== ' ')) return h('p', { class: 'muted' }, 'No changes.');
+  const rows = [];
+  d.forEach(([t, s], k) => {
+    if (near(k)) rows.push(h('div', { class: t === '+' ? 'add' : t === '-' ? 'del' : null }, `${t} ${s}`));
+    else if (rows.at(-1)?.className !== 'gap') rows.push(h('div', { class: 'gap' }, '⋯'));
+  });
+  return h('pre', { class: 'mono diff' }, rows);
+}
+const placeholders = (t) => new Set([...t.matchAll(/\{\{(\w+)\}\}/g)].map((m) => m[1]));
+// What changed from the version before: fields added or removed, and how many lines.
+function changeNote(prev, p) {
+  if (!prev) return 'first recorded version';
+  if (prev.text == null || p.text == null) return 'text not kept';
+  const a = placeholders(prev.text), b = placeholders(p.text), d = lineDiff(prev.text, p.text);
+  const added = [...b].filter((x) => !a.has(x)), removed = [...a].filter((x) => !b.has(x)), list = (xs) => xs.map((x) => `{{${x}}}`).join(' ');
+  return [added.length ? `added ${list(added)}` : '', removed.length ? `removed ${list(removed)}` : '',
+    `+${d.filter(([t]) => t === '+').length} −${d.filter(([t]) => t === '-').length} lines`].filter(Boolean).join(' · ');
+}
+// The prompt's versions, newest first: when each was edited and first ran, what changed from the one before
+// and how many runs used it. A version gets its number when a batch first runs it, so until then the prompt
+// in the editor (saved or not) is the next version, however many times it's edited.
+function historyCard() {
+  const byV = [...prompts].sort((a, b) => a.v - b.v), last = byV.at(-1), runs = groupBy(results, (r) => r.promptVersion ?? '');
+  const unrec = runs.get('')?.length ?? 0, unsaved = tmpl !== savedTmpl;
+  // Whether the editor holds a version already (by hash once saved, by text while unsaved); if not, it's the next one.
+  const same = unsaved ? byV.find((p) => p.text === tmpl) : byV.find((p) => p.hash === meta.promptVersion);
+  const next = same ? null : { v: (last?.v ?? 0) + 1, text: tmpl };
+  const when = (p) => [p.at ? `edited ${fmtWhen(p.at)}` : '', p.ranAt ? `first run ${fmtWhen(p.ranAt)}` : ''].filter(Boolean).join(' · ');
+  const row = (p, prev, key, tag, time, count) => h('div', { class: 'vrow', key },
+    h('strong', {}, `v${p.v}`), tag,
+    h('span', { class: 'muted' }, time),
+    h('span', { class: 'note' }, changeNote(prev, p)),
+    h('span', { class: 'muted' }, count),
+    h('span', { style: 'white-space:nowrap' },
+      h('button', { class: 'icon', disabled: p.text == null, title: p.text == null ? 'This version\'s text wasn\'t kept' : 'The whole prompt',
+        onclick: () => openModal(`Prompt v${p.v}`, h('pre', { class: 'mono' }, p.text)) }, 'view'),
+      h('button', { class: 'icon', disabled: !prev || prev.text == null || p.text == null, title: prev ? `What changed from v${prev.v}` : null,
+        onclick: () => openModal(`Prompt v${prev.v} → v${p.v}`, diffView(prev.text, p.text)) }, 'changes')));
+  return h('div', { class: 'card', id: 'historycard', key: 'history' },
+    h('h2', {}, 'Prompt history'),
+    h('p', { class: 'sub' }, 'A version gets its number when a batch first runs it, so all the edits between two batches make one new version. A run keeps the version it was made with, and finished runs still count as done after a change. To see what a change did, compare by prompt in Results → Compare.'),
+    next ? row(next, last, 'next', h('span', { class: 'tag warn' }, 'next run'),
+      unsaved ? 'unsaved edits' : meta.savedAt ? `edited ${fmtWhen(meta.savedAt)}` : '', 'not run yet') : null,
+    unsaved && same ? h('div', { class: 'vrow', key: 'back' }, h('span', { class: 'tag warn' }, 'unsaved'), h('span', { class: 'note' }, `Back to v${same.v}'s text`)) : null,
+    byV.map((p, i) => row(p, byV[i - 1], p.hash, !unsaved && p === same ? h('span', { class: 'tag ok' }, 'current') : null,
+      when(p), plural(runs.get(p.hash)?.length ?? 0, 'run'))).reverse(),
+    unrec ? h('div', { class: 'vrow', key: 'unrec' }, h('strong', { class: 'muted' }, 'not recorded'),
+      h('span', { class: 'note muted' }, 'Runs from before prompt versions were saved'), h('span', { class: 'muted' }, plural(unrec, 'run'))) : null);
+}
+const updateHistory = () => repaint('historycard', historyCard());
+
 // Errors block saving and always show; warnings fold into a count you can open (open by default on wide screens).
 const updateSavebar = () => repaint('savebar', savebar());
 function savebar() {
@@ -943,6 +1028,15 @@ function savebar() {
 }
 
 // -------------------------------------------------------------------- RUN
+// Mirrors run-matrix.mjs: a finished run counts for the id it would get now. One from before a dimension
+// was added counts as that dimension's olderRuns variant (else its first); a dimension removed since is left out.
+const olderVariant = (d) => (cfg.dimensions[d].find((v) => v.olderRuns) ?? cfg.dimensions[d][0])?.id;
+function runKey(r) {
+  const parts = r.id.split('__'), last = parts.at(-1), dims = Object.keys(cfg.dimensions);
+  const rep = parts.length > 1 && /^r\d+$/.test(last) && !dims.some((d) => r[d] === last) ? last : null;
+  return [parts[0], ...dims.map((d) => r[d] == null || r.predates?.includes(d) ? olderVariant(d) : r[d]), rep].filter(Boolean).join('__');
+}
+
 function selection() {
   const offP = new Set(sel.offPick), pick = [], only = {};
   for (const a of cfg.agents) for (const e of effortsOf(a)) {
@@ -956,7 +1050,7 @@ function selection() {
   const count = pick.length * combos * repeat;
   let done = 0, doneOld = 0; // doneOld: of those, made with an older prompt or a variant's old text
   if (count <= 50000) {
-    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || !sel.opts.rerunFailed).map((r) => [r.id, r]));
+    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || !sel.opts.rerunFailed).map((r) => [runKey(r), r]));
     const walk = (i, acc, base) => {
       if (i === lists.length) {
         for (let r = 1; r <= repeat; r++) {
@@ -997,7 +1091,7 @@ function renderRun() {
           ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
           : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))),
     dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, 'Setup has unsaved changes; they will be saved when you start.') : null,
-    s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with a different prompt (the prompt or a variant's text was edited since). They're skipped, not redone. To run the new text and keep the old runs, give the edited variant a new short name in Setup; or delete the old runs in Results (✕).`) : null);
+    s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with an earlier version of the prompt or of a variant's text. They still count as done, so they're skipped (Setup lists the prompt's versions; Results → Compare by prompt shows what a change did). To redo one with the current text, delete it in Results (✕); to run a variant's new text beside its old runs, give the variant a new short name.`) : null);
 
   // Models & efforts
   const allKeys = cfg.agents.flatMap((a) => effortsOf(a).map((e) => `${a.id}:${e}`));
@@ -1221,16 +1315,19 @@ function filterBar(state, rows, rerender) {
 }
 const passes = (state, r) => runFields().every((f) => !state.filters[f] || String(r[f] ?? '') === state.filters[f]);
 
-// Prompt versions in the results, named v1, v2 … in the order they were first used.
+// Prompt versions oldest first: v1, v2 … as numbered in the prompt history, then any a run used that the
+// history doesn't have (shown by hash), in the order they were first used.
 const promptVersions = () => cached('versions', () => {
-  const first = new Map();
-  for (const r of results) { const v = r.promptVersion, t = r.startedAt ?? ''; if (v && (!first.has(v) || t < first.get(v))) first.set(v, t); }
-  return { list: [...first.keys()].sort((a, b) => first.get(a).localeCompare(first.get(b))), first };
+  const byHash = new Map(prompts.map((p) => [p.hash, p])), first = new Map();
+  for (const r of results) { const v = r.promptVersion, t = r.startedAt ?? ''; if (v && !byHash.has(v) && (!first.has(v) || t < first.get(v))) first.set(v, t); }
+  const list = [...prompts].sort((a, b) => a.v - b.v).map((p) => p.hash);
+  return { list: [...list, ...[...first.keys()].sort((a, b) => first.get(a).localeCompare(first.get(b)))], byHash, first };
 });
+const fmtWhen = (t) => new Date(t).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
 function promptLabel(v) {
   if (!v) return 'not recorded';
-  const { list, first } = promptVersions(), i = list.indexOf(v), t = first.get(v);
-  return `${i < 0 ? v : `v${i + 1}`}${t ? ` · ${new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}${v === meta.promptVersion ? ' (current)' : ''}`;
+  const { byHash, first } = promptVersions(), p = byHash.get(v), t = p ? p.at ?? p.ranAt : first.get(v);
+  return `${p ? `v${p.v}` : v}${t ? ` · ${fmtWhen(t)}` : ''}${v === meta.promptVersion ? ' (current)' : ''}`;
 }
 
 // Why a run failed, from its error text (first match wins).
@@ -1467,7 +1564,7 @@ function checksCard(rows) {
   const versions = new Set(rows.map((r) => r.promptVersion).filter(Boolean)), unrec = rows.filter((r) => !r.promptVersion).length;
   const edited = rows.filter((r) => r.changed?.length), editedNames = [...new Set(edited.flatMap((r) => r.changed.map((d) => `${d} "${r[d]}"`)))];
   add(!versions.size && !edited.length ? 'na' : versions.size > 1 || edited.length ? 'warn' : 'ok', 'Runs used the same prompt', !versions.size && !edited.length ? 'The prompt version is recorded for new runs.'
-    : [versions.size > 1 ? `They used ${versions.size} versions of the prompt. Filter by prompt above to compare like with like.` : versions.size ? `One version${unrec ? ` (${plural(unrec, 'older run')} not recorded)` : ''}.` : '',
+    : [versions.size > 1 ? `They used ${versions.size} versions of the prompt (${sortVals('promptVersion', [...versions]).map((v) => promptLabel(v).split(' · ')[0]).join(', ')}). Filter by prompt above to compare like with like; Setup → Prompt history shows what changed.` : versions.size ? `One version${unrec ? ` (${plural(unrec, 'older run')} not recorded)` : ''}.` : '',
       edited.length ? `${plural(edited.length, 'run')} used text that has since been edited (${editedNames.join(', ')}), so they're grouped with runs of the new text. Give an edited variant a new short name to keep them apart.` : ''].filter(Boolean).join(' '));
   const cliVers = [...groupBy(rows.filter((r) => r.cliVersion), (r) => r.provider)].map(([p, rs]) => [p, sortVals('cli', [...new Set(rs.map((r) => r.cli))])]);
   const moved = cliVers.filter(([, vs]) => vs.length > 1);
@@ -1892,6 +1989,7 @@ function runDetails(r) {
       h('span', { class: 'tag' }, `${PROVIDERS[r.provider] ?? r.provider} · ${r.model ?? r.agent}`), h('span', { class: 'tag' }, `effort ${r.effort}`),
       Object.keys(cfg.dimensions).map((d) => d === GOAL_DIM && r.goalSkipped
         ? h('span', { class: 'tag', title: 'Codex has no headless /goal: this run got the same prompt without it' }, `${d}=${r[d]}* (no /goal)`)
+        : r.predates?.includes(d) ? h('span', { class: 'tag', title: `This run is from before {{${d}}} existed, so it counts as ${r[d]} (set in Setup)` }, `${d}=${r[d]} (before this field)`)
         : h('span', { class: 'tag', title: r.changed?.includes(d) ? 'This variant\'s text was edited after the run' : null }, `${d}=${r[d] ?? '—'}${r.changed?.includes(d) ? ' (old text)' : ''}`))),
     r.error ? h('p', { class: 'errs' }, `${causeOf(r.error)}: ${r.error}`) : null,
     fl ? h('div', { class: 'warns', style: 'margin-bottom:10px' }, fl.items.map((i) => h('div', {}, i.text))) : null,
@@ -2016,8 +2114,8 @@ async function loadSetup() {
   cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
-  const t = await api('/api/template'); tmpl = t.text; savedTmpl = tmpl; meta.templatePath = t.path; meta.promptVersion = t.version;
-  if (c.rev) Object.assign(rev, { config: c.rev.config, template: c.rev.template, results: rev.results ?? c.rev.results });
+  const t = await api('/api/template'); tmpl = t.text; savedTmpl = tmpl; meta.templatePath = t.path; meta.promptVersion = t.version; meta.savedAt = t.savedAt; prompts = t.history ?? [];
+  if (c.rev) Object.assign(rev, { config: c.rev.config, template: c.rev.template, history: c.rev.history, results: rev.results ?? c.rev.results });
   onDisk = false; cache = {};
 }
 async function loadResults() {
@@ -2070,6 +2168,8 @@ async function pollOnce() {
     changed = true;
   }
   if (r.results !== rev.results || setupChanged) { rev.results = r.results; await loadResults(); changed = true; }
+  // A batch numbered the prompt it runs (from this page or a terminal): its runs now show as that version.
+  if (r.history !== rev.history) { rev.history = r.history; prompts = (await api('/api/template')).history ?? prompts; cache = {}; changed = true; }
   wasRunning = !!st.running;
   setPill();
   if (changed) { render(); refreshModal(); }

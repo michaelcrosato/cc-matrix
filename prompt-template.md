@@ -10,6 +10,10 @@ Art Direction: {{artDirection}}
 
 Animation: {{animation}}
 
+Audio: {{audio}}
+
+Online: {{online}}
+
 Working Environment and deliverable:
 Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] here you can keep all your dev files. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when the goal has been completed. You may use external CDN dependencies. Do not read files outside what you need - other agents share this directory.
 
@@ -50,6 +54,8 @@ CRTICAL: Put Source Information, Engine Feedback and Prompt Feedback in your cha
 - Tech: stack, libraries/engines, with versions if applicable
 - Art Direction: style used
 - Animation: system used
+- Audio: music, sound effects and voice used
+- Online: network features used, or none
 - Testing: testing parameters allowed
 - Environment: {{environment}}
 - Model: {{lab}}, {{model}}, reasoning effort {{effort}}
