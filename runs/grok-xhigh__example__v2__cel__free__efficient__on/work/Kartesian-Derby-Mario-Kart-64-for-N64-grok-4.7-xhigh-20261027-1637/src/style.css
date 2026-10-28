@@ -1,0 +1,198 @@
+:root {
+  color-scheme: dark;
+  --ink: #f6f0e4;
+  --muted: #e7d3ae;
+  --gold: #ffb703;
+  --panel: rgba(16, 12, 10, 0.72);
+  --line: rgba(255, 183, 3, 0.85);
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: #140e0c;
+  color: var(--ink);
+  overflow: hidden;
+}
+
+[hidden] { display: none !important; }
+
+#view {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  background: #140e0c;
+}
+
+#ui {
+  position: fixed;
+  z-index: 2;
+  left: 4vw;
+  top: 6vh;
+  width: min(40rem, 90vw);
+  pointer-events: none;
+}
+
+#product-title {
+  margin: 0;
+  font-size: clamp(2.6rem, 6vw, 4.8rem);
+  line-height: 0.95;
+  letter-spacing: 0.01em;
+  text-shadow: 0 0.12em 0 #2a120c;
+}
+
+#blurb {
+  margin: 0.6rem 0 1rem;
+  max-width: 36rem;
+  font-size: clamp(1.05rem, 2vw, 1.35rem);
+  color: var(--muted);
+}
+
+#panel {
+  max-height: 68vh;
+  overflow: auto;
+  padding-right: 0.4rem;
+  pointer-events: auto;
+}
+
+.kicker {
+  margin: 0 0 0.4rem;
+  color: var(--gold);
+  font-size: 0.95rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+button.choice {
+  display: block;
+  width: 100%;
+  margin: 0.28rem 0;
+  padding: 0.72rem 0.9rem 0.72rem 1rem;
+  text-align: left;
+  font: inherit;
+  font-size: clamp(1.25rem, 2.4vw, 1.7rem);
+  color: var(--ink);
+  background: transparent;
+  border: 0;
+  border-left: 0.35rem solid transparent;
+  cursor: pointer;
+}
+
+button.choice.is-selected {
+  background: var(--panel);
+  border-left-color: var(--line);
+}
+
+.detail, .help p, .results {
+  margin: 0.2rem 0 0.7rem;
+  font-size: clamp(1rem, 1.8vw, 1.2rem);
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.help p { margin: 0.35rem 0; }
+.help strong { color: var(--ink); display: inline-block; min-width: 9.5rem; }
+
+.results { padding-left: 1.4rem; }
+.results li { margin: 0.25rem 0; }
+
+#about-copy {
+  margin: 0 0 0.8rem;
+  max-height: none;
+  white-space: pre-wrap;
+  font: 0.92rem/1.45 "Segoe UI", sans-serif;
+  color: #f3eadc;
+}
+
+#hud {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.cluster {
+  position: absolute;
+  width: min(18rem, 42vw);
+  padding: 0.7rem 0.85rem;
+  background: var(--panel);
+  text-shadow: 0 1px 0 #000;
+}
+
+.cluster .place { font-size: clamp(1.6rem, 3vw, 2.4rem); line-height: 1; }
+.cluster .meta, .cluster .speed, .cluster .item { font-size: clamp(0.95rem, 1.6vw, 1.15rem); margin-top: 0.15rem; }
+.cluster .item { color: var(--gold); }
+.cluster .map { display: block; width: 9.5rem; height: 7.2rem; margin-top: 0.45rem; background: transparent; }
+.cluster .order { margin: 0.4rem 0 0; padding-left: 1.1rem; font-size: 0.85rem; }
+.cluster .order .me { color: var(--gold); }
+
+#hud[data-players="1"] .p0 { top: 1rem; left: 1rem; }
+#hud[data-players="2"] .p0 { top: 0.6rem; left: 0.8rem; }
+#hud[data-players="2"] .p1 { top: calc(50% + 0.6rem); left: 0.8rem; }
+#hud[data-players="3"] .p0 { top: 0.5rem; left: 0.6rem; }
+#hud[data-players="3"] .p1 { top: 0.5rem; left: calc(50% + 0.6rem); }
+#hud[data-players="3"] .p2 { top: calc(50% + 0.5rem); left: 0.6rem; }
+#hud[data-players="4"] .p0 { top: 0.45rem; left: 0.45rem; }
+#hud[data-players="4"] .p1 { top: 0.45rem; left: calc(50% + 0.45rem); }
+#hud[data-players="4"] .p2 { top: calc(50% + 0.45rem); left: 0.45rem; }
+#hud[data-players="4"] .p3 { top: calc(50% + 0.45rem); left: calc(50% + 0.45rem); }
+
+.attract-banner {
+  position: absolute;
+  top: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 0.45rem 0.9rem;
+  background: var(--panel);
+  color: var(--gold);
+  font-size: 1.2rem;
+}
+
+#countdown {
+  position: fixed;
+  z-index: 4;
+  left: 50%;
+  top: 42%;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  font-size: clamp(4rem, 12vw, 8rem);
+  letter-spacing: 0.04em;
+  text-shadow: 0 0.08em 0 #2a120c;
+  pointer-events: none;
+}
+
+#touch-gate, #gate {
+  position: fixed;
+  z-index: 6;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.2rem;
+  padding: 2rem;
+  background: rgba(12, 8, 7, 0.88);
+  text-align: center;
+}
+
+#touch-gate p, #gate {
+  margin: 0;
+  max-width: 40rem;
+  font-size: clamp(1.6rem, 4vw, 2.6rem);
+}
+
+#touch-settings {
+  font: inherit;
+  font-size: 1.4rem;
+  color: #1a120c;
+  background: var(--gold);
+  border: 0;
+  padding: 0.8rem 1.4rem;
+  cursor: pointer;
+}

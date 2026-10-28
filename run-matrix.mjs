@@ -22,6 +22,7 @@
 //        --reparse                    re-read tokens/cost from each run's saved agent.out (after parser changes)
 
 import { spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -82,7 +83,7 @@ const effortName = (e) => parseEffort(e).label;
 
 // A dimension named "goal" is special: its text becomes a /goal completion
 // condition instead of filling a placeholder. These CLIs run /goal headless;
-// the others (Codex) only run the empty variant.
+// the others (Codex) run goal variants with the plain prompt, without /goal.
 const GOAL_DIM = 'goal';
 const GOAL_CLIS = new Set(['claude', 'grok', 'agy', 'muse']);
 const goalText = (combo) => (combo[GOAL_DIM] ? variantText(combo[GOAL_DIM]).trim() : '');
@@ -103,7 +104,6 @@ for (const agent of cfg.agents) {
     const pe = parseEffort(e), effort = pe.label;
     if (pe.ultracode && agent.provider !== 'claude') continue; // Ultracode is Claude Code only
     for (const combo of product()) {
-      if (goalText(combo) && !GOAL_CLIS.has(agent.provider)) continue; // this CLI has no headless /goal
       const fields = { agent: agent.id, provider: agent.provider, effort, ultracode: pe.ultracode,
         ...Object.fromEntries(dimNames.map((d) => [d, combo[d].id])) };
       if (!matches(fields)) continue;
@@ -119,6 +119,10 @@ let queue = runs.slice(0, args.limit);
 
 // ------------------------------------------------------------- prompt
 const template = cfg.templateFile ? fs.readFileSync(path.resolve(configDir, cfg.templateFile), 'utf8') : cfg.template;
+// Saved with each run so results made with an edited prompt can be told apart (the dashboard
+// computes the same hash for the current template).
+const cliVersions = {}; // provider -> version, filled in when a batch starts
+const promptVersion = crypto.createHash('sha1').update(template ?? '').digest('hex').slice(0, 8);
 const LABS = { claude: 'Anthropic', codex: 'OpenAI', grok: 'xAI', agy: 'Google', muse: 'Meta' };
 const CLIS = { claude: 'Claude Code CLI', codex: 'Codex CLI', grok: 'Grok CLI', agy: 'Antigravity CLI', muse: 'Muse Code CLI' };
 // agy also serves other labs' models (Claude, GPT-OSS), so the model name decides the lab first.
@@ -140,7 +144,7 @@ function runVars(run, d = new Date()) {
 // the condition, capped at 4,000 characters).
 function goalMessage(run) {
   const g = goalText(run.combo);
-  if (!g) return null;
+  if (!g || !GOAL_CLIS.has(run.agent.provider)) return null;
   const msg = `/goal Read TASK.md in the current folder and complete the task it describes. Done when: ${g}`;
   if (msg.length > 4000) throw new Error(`Goal condition is ${msg.length} characters; /goal allows 4,000`);
   return msg;
@@ -286,6 +290,8 @@ function parseClaude(text) {
   const j = JSON.parse(line);
   return { reply: j.result, costUsd: j.total_cost_usd, costSource: j.total_cost_usd != null ? 'reported' : 'none',
     ...usageTotals(j), turns: j.num_turns, apiMinutes: j.duration_api_ms ? j.duration_api_ms / 60000 : null,
+    // Each /goal round ends with a result; num_turns counts only the last one.
+    rounds: j.result_index != null ? j.result_index + 1 : undefined, subagents: j.subagent_stats?.spawned,
     isError: !!j.is_error, error: j.is_error && j.errors?.length ? j.errors.join('; ') : undefined, sessionId: j.session_id };
 }
 
@@ -339,7 +345,7 @@ function parseMuse(text) {
 }
 
 function parseCodex(text) {
-  let input = 0, cached = 0, output = 0, reasoning = 0, turns = 0, isError = false, sessionId, reply;
+  let input = 0, cached = 0, output = 0, reasoning = 0, turns = 0, isError = false, sessionId, reply, error;
   for (const l of text.split('\n')) {
     let e; try { e = JSON.parse(l); } catch { continue; }
     if (e.type === 'thread.started') sessionId = e.thread_id;
@@ -348,10 +354,11 @@ function parseCodex(text) {
       turns++; input += e.usage.input_tokens ?? 0; cached += e.usage.cached_input_tokens ?? 0;
       output += e.usage.output_tokens ?? 0; reasoning += e.usage.reasoning_output_tokens ?? 0;
     }
-    if (e.type === 'turn.failed' || e.type === 'error') isError = true;
+    // { type: 'error', message } or { type: 'turn.failed', error: { message } }, e.g. a usage limit
+    if (e.type === 'turn.failed' || e.type === 'error') { isError = true; error = e.error?.message ?? e.message ?? error; }
   }
   return { reply, costUsd: null, costSource: 'none', inputTokens: input, cachedTokens: cached,
-    outputTokens: output, reasoningTokens: reasoning, turns, isError, sessionId };
+    outputTokens: output, reasoningTokens: reasoning, turns, isError, error, sessionId };
 }
 
 // ------------------------------------------------------------------ run
@@ -411,6 +418,7 @@ async function spawnAgent(run, dir, prompt, limit) {
 
   let metrics = {};
   try { metrics = tokenTotals(parse(fs.readFileSync(outPath, 'utf8'), run.agent)); } catch (e) { metrics = { isError: true, parseError: e.message }; }
+  metrics.replyChars = String(metrics.reply ?? '').trim().length;
   if ((exitCode !== 0 || metrics.isError) && !metrics.error)
     metrics.error = lastLine(errPath) || metrics.parseError || (exitCode == null ? 'killed' : `exit code ${exitCode}`);
   return { exitCode, metrics, start, bin, argv };
@@ -443,7 +451,9 @@ async function runOne(run) {
   if (metrics.reply) fs.writeFileSync(path.join(dir, 'reply.md'), metrics.reply);
   delete metrics.reply;
   const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed';
-  const result = { id: run.id, ...run.fields, model: run.agent.model, status, exitCode,
+  // goalSkipped: a goal variant on a CLI without headless /goal, so it got the plain prompt.
+  const goalSkipped = !!goalText(run.combo) && !goalMessage(run);
+  const result = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion, ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
     wallMinutes: (Date.now() - start) / 60000, ...metrics, ...measureOutput(work),
     startedAt: new Date(start).toISOString(), finishedAt: new Date().toISOString() };
   fs.writeFileSync(resFile, JSON.stringify(result, null, 2));
@@ -453,12 +463,12 @@ async function runOne(run) {
   writeReport();
 }
 
-// --reparse: refresh token and cost fields of finished runs from their saved agent.out,
-// leaving status, timing, output measurements and scores alone.
+// --reparse: refresh token and cost fields of finished runs from their saved agent.out (and the
+// TODO count from the saved game), leaving status, timing, other measurements and scores alone.
 function reparseAll() {
   const parsers = { claude: parseClaude, codex: parseCodex, grok: parseGrok, agy: parseAgy, muse: parseMuse };
   const metricKeys = ['costUsd', 'costSource', 'inputTokens', 'cachedTokens', 'cacheWriteTokens', 'uncachedInputTokens',
-    'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'apiMinutes', 'models'];
+    'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents', 'replyChars', 'apiMinutes', 'models'];
   if (!fs.existsSync(outDir)) return;
   let n = 0;
   for (const d of fs.readdirSync(outDir)) {
@@ -467,11 +477,17 @@ function reparseAll() {
     const r = JSON.parse(fs.readFileSync(resFile, 'utf8')), parse = parsers[r.provider];
     if (!parse) continue;
     let m; try { m = tokenTotals(parse(fs.readFileSync(outFile, 'utf8'), {})); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
+    m.replyChars = String(m.reply ?? '').trim().length;
     for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k];
+    try { if (r.entry) r.todos = markers(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch {}
     fs.writeFileSync(resFile, JSON.stringify(r, null, 2)); n++;
   }
   console.log(`Reparsed ${n} run(s).`);
 }
+
+// TODO / FIXME left in the game file (the prompt asks for none). Only these two: "not implemented"
+// and "placeholder" also turn up in bundled libraries and HTML attributes.
+const markers = (t) => (t.match(/\bTODO\b|\bFIXME\b/g) ?? []).length;
 
 // The deliverable is the bundled .html in the work folder's root. Size is
 // measured on that file; dev files are counted separately.
@@ -492,9 +508,9 @@ function measureOutput(work) {
     walk(work);
   } catch {}
   const file = entry ?? fallback;
-  let kb = null, loc = null;
-  if (file) { const t = fs.readFileSync(file, 'utf8'); kb = Math.round(t.length / 1024); loc = t.split('\n').length; }
-  return { delivered: !!entry, kb, loc, files: devFiles,
+  let kb = null, loc = null, todos = null;
+  if (file) { const t = fs.readFileSync(file, 'utf8'); kb = Math.round(t.length / 1024); loc = t.split('\n').length; todos = markers(t); }
+  return { delivered: !!entry, kb, loc, files: devFiles, todos,
     entry: file ? path.relative(outDir, file).split(path.sep).join('/') : null };
 }
 
@@ -569,7 +585,14 @@ for (const p of missingClis()) {
 const noCost = [...new Set(queue.filter((r) => !['claude', 'grok'].includes(r.agent.provider)).map((r) => r.agent.id))];
 if (noCost.length && args.budget !== Infinity)
   console.log(`Note: ${noCost.join(', ')} don't report cost, so the budget only counts Claude/Grok spend.`);
-console.log(`${queue.length} runs → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
+// Each CLI's version, saved with every run: an update can change results as much as the model.
+for (const p of new Set(queue.filter((r) => !isDone(r.id)).map((r) => r.agent.provider))) {
+  const v = spawnSync(binOf(p), ['--version'], { encoding: 'utf8', shell: isWin, timeout: 30000 });
+  cliVersions[p] = `${v.stdout ?? ''}${v.stderr ?? ''}`.match(/\d+\.\d+[\w.-]*/)?.[0];
+}
+// The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
+const already = queue.filter((r) => isDone(r.id)).length;
+console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
 await pool();
 clearInterval(stopPoll);
 fs.rmSync(stopFile, { force: true });
@@ -592,8 +615,9 @@ function writeReport() {
   const dims = cfg.dimensions ? Object.keys(cfg.dimensions) : [];
   const scores = readScores();
   for (const r of rows) Object.assign(r, scores[r.id] ?? {});
-  const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource',
-    'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'delivered', 'kb', 'loc', 'files', 'score', 'notes', 'error', 'entry'];
+  const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource',
+    'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
+    'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt'];
   const cell = (v) => v == null ? '' : typeof v === 'number' ? +v.toFixed(4)
     : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
   fs.writeFileSync(path.join(outDir, 'results.csv'),
