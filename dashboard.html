@@ -9,18 +9,22 @@
   --bg: #f6f6f4; --panel: #ffffff; --ink: #1b1b1a; --muted: #6b6a66; --line: #e2e1dc;
   --accent: #2f5bd3; --accent-ink: #ffffff; --soft: #eef1fb; --ok: #1f7a46; --bad: #b3261e; --warn: #9a6200;
   --chip: #f0efeb; --chip-on: #dfe7fd; --code: #f3f2ee;
+  /* chart marks, checked with the dataviz palette validator: finished vs failed, more vs less than a baseline */
+  --mark: #2a78d6; --mark-bad: #d03b3b; --more: #eb6834; --less: #2a78d6;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #151515; --panel: #1e1e1d; --ink: #ecebe7; --muted: #9a9993; --line: #33332f;
     --accent: #7f9cff; --accent-ink: #0d1330; --soft: #232a40; --ok: #6fcf97; --bad: #ff8a80; --warn: #f2c063;
     --chip: #2a2a28; --chip-on: #2c3657; --code: #232321;
+    --mark: #3987e5; --mark-bad: #e66767; --more: #d95926; --less: #3987e5;
   }
 }
 :root[data-theme="dark"] {
   --bg: #151515; --panel: #1e1e1d; --ink: #ecebe7; --muted: #9a9993; --line: #33332f;
   --accent: #7f9cff; --accent-ink: #0d1330; --soft: #232a40; --ok: #6fcf97; --bad: #ff8a80; --warn: #f2c063;
   --chip: #2a2a28; --chip-on: #2c3657; --code: #232321;
+  --mark: #3987e5; --mark-bad: #e66767; --more: #d95926; --less: #3987e5;
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Ubuntu, sans-serif; }
@@ -43,6 +47,7 @@ textarea { width: 100%; resize: vertical; }
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 .invalid { border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 8%, var(--bg)); }
 .mono, textarea.mono { font-family: ui-monospace, "Cascadia Mono", "Ubuntu Mono", Menlo, monospace; font-size: 13px; }
+.sub .mono { overflow-wrap: anywhere; } /* long file paths wrap on small phones */
 button.btn { font: inherit; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 12px; border-radius: 8px; cursor: pointer; }
 button.btn:hover { background: var(--chip); }
 button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
@@ -68,6 +73,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 640px) { .variant { grid-template-columns: 1fr; } }
 .dim-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
 .savebar { position: sticky; bottom: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; box-shadow: 0 -6px 20px rgb(0 0 0 / .06); }
+/* The messages take a full row on narrow screens and scroll, so the sticky bar never covers the page. */
+.savebar > .grow { flex: 1 1 260px; max-height: 30vh; overflow-y: auto; }
 .big { font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; }
 .stat { display: flex; flex-direction: column; gap: 4px; min-width: 120px; }
 .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
@@ -87,6 +94,60 @@ tr.failed td { color: var(--bad); }
 .bar { height: 6px; background: var(--chip); border-radius: 3px; overflow: hidden; min-width: 60px; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 a { color: var(--accent); }
+.warn { color: var(--warn); }
+button.linkish { font: inherit; border: 0; background: none; padding: 0; color: var(--accent); cursor: pointer; font-weight: 600; text-align: left; }
+button.linkish:hover { text-decoration: underline; }
+nav .badge { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 5px; border-radius: 999px; background: var(--warn); color: var(--panel); font-size: 11.5px; font-weight: 700; line-height: 18px; text-align: center; }
+.tiles { display: flex; flex-wrap: wrap; gap: 14px 32px; }
+.tile { display: flex; flex-direction: column; gap: 2px; min-width: 100px; }
+.tile .k { color: var(--muted); font-size: 12.5px; }
+.tile .v { font-size: 24px; font-weight: 650; line-height: 1.2; }
+.tile .d { color: var(--muted); font-size: 12px; }
+.checks > div { display: grid; grid-template-columns: 20px 1fr; gap: 0 8px; padding: 7px 0; border-bottom: 1px solid var(--line); }
+.checks > div:last-child { border-bottom: 0; }
+.checks .ic { font-weight: 700; text-align: center; }
+.why > div + div { margin-top: 3px; }
+td.fx { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.fhead td { font-weight: 600; padding-top: 14px; }
+.chg { font-variant-numeric: tabular-nums; } .chg.sure { font-weight: 700; }
+th.plain { text-transform: none; letter-spacing: 0; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: center; color: var(--muted); font-size: 12.5px; }
+.legend i { display: inline-block; width: 10px; height: 10px; margin-right: 6px; border-radius: 2px; vertical-align: -1px; }
+.legend i.dot { border-radius: 50%; } .legend i.ring { border-radius: 50%; border: 2px solid var(--mark-bad); background: var(--panel); }
+.strip { display: grid; grid-template-columns: fit-content(170px) minmax(0, 1fr) auto; gap: 0 12px; align-items: center; }
+.strip .lab { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.strip .track { position: relative; height: 30px; }
+.strip .track::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; height: 1px; background: var(--line); }
+.strip .gl { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line); }
+.strip .med { position: absolute; top: 5px; bottom: 5px; width: 2px; margin-left: -1px; border-radius: 1px; background: var(--ink); }
+.strip .dot { position: absolute; width: 24px; height: 24px; margin: -12px 0 0 -12px; padding: 0; border: 0; background: none; cursor: pointer; }
+.strip .dot::after { content: ""; position: absolute; inset: 8px; border-radius: 50%; background: var(--mark); box-shadow: 0 0 0 2px var(--panel); }
+.strip .dot.bad::after { background: var(--panel); border: 2px solid var(--mark-bad); }
+.strip .dot:hover::after, .strip .dot:focus-visible::after { inset: 6px; }
+.strip .dot:focus-visible { outline: none; }
+.strip .end { font-size: 12px; color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.strip .axis { position: relative; height: 18px; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.strip .axis span { position: absolute; top: 2px; transform: translateX(-50%); white-space: nowrap; }
+.cols { display: flex; align-items: flex-end; gap: 2px; height: 140px; border-bottom: 1px solid var(--line); }
+.cols .c { flex: 1 1 0; max-width: 24px; height: 100%; display: flex; flex-direction: column-reverse; gap: 2px; border-radius: 4px 4px 0 0; }
+.cols .c:hover, .cols .c:focus-visible { background: var(--chip); outline: none; }
+.cols .ok { background: var(--mark); } .cols .no { background: var(--mark-bad); }
+.xlabels { display: flex; justify-content: space-between; gap: 8px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+#tip { position: fixed; z-index: 30; display: none; pointer-events: none; max-width: 320px; padding: 7px 9px; border-radius: 8px; background: var(--panel); color: var(--ink);
+  border: 1px solid var(--line); box-shadow: 0 6px 18px rgb(0 0 0 / .14); font-size: 12.5px; line-height: 1.35; }
+#tip strong { display: block; font-size: 14px; } #tip span { display: block; }
+table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
+@media (max-width: 640px) {
+  table.look, table.look tbody, table.look tr, table.look td { display: block; }
+  table.look tr { position: relative; padding: 8px 0 8px 22px; border-bottom: 1px solid var(--line); }
+  table.look td { border: 0; padding: 2px 0; min-width: 0 !important; }
+  table.look td.play { position: absolute; left: 0; top: 10px; }
+}
+@media (max-width: 480px) {
+  .strip { grid-template-columns: fit-content(96px) minmax(0, 1fr); gap: 0 8px; }
+  .strip .end { display: none; }
+  .strip .axis span:nth-child(even) { display: none; }
+}
 </style>
 </head>
 <body>
@@ -96,6 +157,7 @@ a { color: var(--accent); }
     <button data-tab="setup">Setup</button>
     <button data-tab="run">Run</button>
     <button data-tab="results">Results</button>
+    <button data-tab="insights">Insights</button>
   </nav>
   <span id="pill" class="pill">Idle</span>
   <button class="icon" id="theme" title="Toggle light/dark">Theme</button>
@@ -104,8 +166,10 @@ a { color: var(--accent); }
   <section class="tab" id="tab-setup"></section>
   <section class="tab" id="tab-run"></section>
   <section class="tab" id="tab-results"></section>
+  <section class="tab" id="tab-insights"></section>
 </main>
 <dialog id="modal"><div class="dhead"><strong id="mtitle" class="grow"></strong><button class="icon" onclick="modal.close()">✕</button></div><div class="dbody" id="mbody"></div></dialog>
+<div id="tip" role="tooltip"></div>
 
 <script>
 // ------------------------------------------------------------------ basics
@@ -133,9 +197,16 @@ async function api(path, method = 'GET', data) {
   return j;
 }
 const fmt = (v, d = 1) => v == null || Number.isNaN(v) ? '—' : (+v).toLocaleString(undefined, { minimumFractionDigits: d, maximumFractionDigits: d });
-const fmtTok = (v) => v == null ? '—' : v >= 1e6 ? fmt(v / 1e6, 2) + 'M' : v >= 1e3 ? fmt(v / 1e3, 0) + 'K' : String(v);
+const fmtTok = (v) => v == null ? '—' : v >= 1e6 ? fmt(v / 1e6, 2) + 'M' : v >= 1e3 ? fmt(v / 1e3, 0) + 'K' : String(Math.round(v));
 const fmtUsd = (v) => v == null ? '—' : '$' + fmt(v, 2);
-const fmtMin = (v) => v == null ? '—' : v >= 60 ? fmt(v / 60, 1) + 'h' : fmt(v, 0) + 'm';
+const fmtMin = (v) => v == null ? '—' : v >= 60 ? fmt(v / 60, 1) + 'h' : v >= 1 ? fmt(v, 0) + 'm' : fmt(v * 60, 0) + 's';
+const fmtKb = (v) => v == null ? '—' : v >= 1024 ? fmt(v / 1024, 1) + ' MB' : fmt(v, 0) + ' KB';
+const fmtNum = (v) => v == null ? '—' : v >= 1e4 ? fmt(v / 1e3, 0) + 'K' : v >= 1e3 ? fmt(v / 1e3, 1) + 'K' : fmt(v, 0);
+const pct = (x) => x == null || Number.isNaN(x) ? '—' : `${Math.round(100 * x)}%`;
+const fmtX = (x) => x < 0.01 ? '<0.01×' : `${fmt(x, x >= 10 ? 0 : x < 0.1 ? 2 : 1)}×`;
+// A ratio as a change: +60% or −40% up to doubling or halving, then 2.5× or 0.3×.
+const fmtChange = (x) => x >= 2 || x < 0.5 ? fmtX(x) : Math.abs(x - 1) < 0.005 ? '±0%' : `${x > 1 ? '+' : '−'}${Math.round(Math.abs(x - 1) * 100)}%`;
+const signed = (v, unit = '', d = 0) => Math.abs(v) < 0.5 * 10 ** -d ? `±0${unit}` : `${v > 0 ? '+' : '−'}${fmt(Math.abs(v), d)}${unit}`;
 // Mirrors run-matrix.mjs: 'high-uc' = high effort with Ultracode on (Claude Code only).
 function parseEffort(e) {
   let s = String(e ?? '').trim().toLowerCase(), uc = false;
@@ -151,11 +222,12 @@ const effortsOf = (a) => (a.efforts?.length ? a.efforts : ['default']).map(effNa
   .filter((e) => a.provider === 'claude' || !e.endsWith('-uc'));
 const RESERVED = ['model', 'effort', 'lab', 'environment', 'stamp', 'date'];
 const PROVIDERS = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', agy: 'Antigravity (agy)', muse: 'Muse Code' };
+const SHORT = { claude: 'Claude', codex: 'Codex', grok: 'Grok', agy: 'agy', muse: 'Muse' };
 // Mirrors run-matrix.mjs. Effort levels each CLI accepts; agy and Muse narrow them per model (see the CLIs card).
 const EFFORTS = { claude: ['low', 'medium', 'high', 'xhigh', 'max'], codex: ['low', 'medium', 'high', 'xhigh', 'max', 'ultra'],
   grok: ['low', 'medium', 'high', 'xhigh'], agy: ['low', 'medium', 'high', 'xhigh', 'max'],
   muse: ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'] };
-const GOAL_CLIS = ['claude', 'grok', 'agy', 'muse']; // run /goal headless; Codex only runs the empty goal variant
+const GOAL_CLIS = ['claude', 'grok', 'agy', 'muse']; // run /goal headless; Codex runs goal variants with the plain prompt
 const DEFAULT_EXTRA = { claude: ['--dangerously-skip-permissions'], codex: ['--yolo'],
   grok: ['--always-approve'], agy: ['--dangerously-skip-permissions'], muse: ['--yolo'] };
 const fmtSecs = (s) => s == null ? '—' : s < 90 ? `${Math.round(s)}s` : s < 5400 ? `${Math.round(s / 60)}m` : `${fmt(s / 3600, 1)}h`;
@@ -173,24 +245,31 @@ $('#theme').onclick = () => {
 // ------------------------------------------------------------------ state
 const logPre = h('pre', { class: 'log mono', id: 'logpre' });
 let cfg = null, savedCfg = '', tmpl = '', savedTmpl = '', meta = {}, results = [], status = {}, logSince = 0;
-let clis = {}, cliCheckedAt = null, smokes = {}, smokeGoal = store.get('matrix.smokeGoal', false);
+let clis = {}, cliCheckedAt = null, cliError = null, smokes = {}, smokeGoal = store.get('matrix.smokeGoal', false);
 let sel = store.get('matrix.sel', { offPick: [], offOnly: {}, opts: { repeat: 1, concurrency: 2, perCli: '', budget: '', timeout: '', rerunFailed: false } });
 let rv = store.get('matrix.results', { group: 'testing', filters: {}, q: '', sort: { k: 'finishedAt', d: -1 } });
 const saveSel = () => store.set('matrix.sel', sel);
 const saveRv = () => store.set('matrix.results', rv);
+let iv = store.get('matrix.insights', { range: 'all', filters: {}, group: 'agent+effort', metric: 'wallMinutes', showSeen: false, showAll: false });
+const saveIv = () => store.set('matrix.insights', iv);
+let cache = {}; // figures worked out from the results; cleared whenever they reload
+const cached = (k, fn) => k in cache ? cache[k] : (cache[k] = fn());
 const dirty = () => JSON.stringify(cfg) !== savedCfg || tmpl !== savedTmpl;
 
 // tabs
+const TABS = ['setup', 'run', 'results', 'insights'];
 let tab = location.hash.slice(1) || store.get('matrix.tab', 'run');
 function showTab(t) {
+  tipHide();
   tab = t; store.set('matrix.tab', t); history.replaceState(null, '', '#' + t);
   document.querySelectorAll('nav button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
   document.querySelectorAll('section.tab').forEach((s) => s.classList.toggle('on', s.id === 'tab-' + t));
   if (t === 'results') renderResults();
   if (t === 'run') renderRun();
+  if (t === 'insights') renderInsights();
 }
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
-addEventListener('hashchange', () => { const t = location.hash.slice(1); if (cfg && ['setup', 'run', 'results'].includes(t) && t !== tab) showTab(t); });
+addEventListener('hashchange', () => { const t = location.hash.slice(1); if (cfg && TABS.includes(t) && t !== tab) showTab(t); });
 
 // ------------------------------------------------------------------- CLIs
 const cliModels = (p) => clis[p]?.models ?? [];
@@ -269,9 +348,34 @@ function effortOptions(a) {
 }
 const effortLabel = (e) => e.endsWith('-uc') ? `${e.slice(0, -3)} + Ultracode` : e;
 
+// Each CLI's own `update` (not Muse: its update command starts Muse). Off during a batch or a test,
+// so a CLI never changes under a running agent; the version is saved with every run either way.
+const UPDATABLE = ['claude', 'codex', 'agy', 'grok'];
+let cliUpdating = null;
+function updateButton(p) {
+  const busy = status.running ? 'Wait for the batch to finish' : Object.values(smokes).some((s) => s.running) ? 'Wait for the tests to finish' : null;
+  return h('button', { class: 'icon', disabled: !!busy || !!cliUpdating, title: busy ?? `Run "${clis[p]?.bin ?? p} update"`,
+    onclick: () => updateCli(p) }, cliUpdating === p ? 'updating…' : 'update');
+}
+async function updateCli(p) {
+  const name = PROVIDERS[p], before = clis[p]?.version;
+  if (!confirm(`Update ${name} now?\n\nRuns after this use the new version; each run records its CLI version, so you can still compare.`)) return;
+  cliUpdating = p; renderClis();
+  try {
+    const r = await api('/api/update-cli', 'POST', { provider: p });
+    clis = r.clis; cliCheckedAt = r.checkedAt;
+    const after = clis[p]?.version;
+    alert(`${name}: ${!r.ok ? 'the update failed' : after !== before ? `updated ${before} → ${after}` : `already up to date (${after})`}${r.output ? `\n\n${r.output.slice(-1200)}` : ''}`);
+  } catch (e) { alert(e.message); }
+  cliUpdating = null; renderClis(); updateSavebar();
+  $('#modelcard')?.replaceWith(modelsCard()); // a newer CLI may list more models
+}
+
 async function loadClis(refresh) {
   if (refresh) { clis = {}; cliCheckedAt = null; renderClis(); }
-  try { const r = await api('/api/clis' + (refresh ? '?refresh=1' : '')); clis = r.clis; cliCheckedAt = r.checkedAt; } catch {}
+  cliError = null;
+  try { const r = await api('/api/clis' + (refresh ? '?refresh=1' : '')); clis = r.clis; cliCheckedAt = r.checkedAt; }
+  catch (e) { cliError = /not found/i.test(e.message) ? 'The dashboard server is older than this page: restart it (Ctrl-C, then node dashboard.mjs)' : e.message; }
   renderClis(); updateSavebar();
   $('#modelcard')?.replaceWith(modelsCard()); // per-model efforts may have changed
   if (tab === 'run') renderRun();
@@ -281,7 +385,8 @@ function renderClis() {
   const el = $('#clicard'); if (!el) return;
   el.replaceChildren(
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'CLIs'),
-      h('span', { class: 'muted' }, cliCheckedAt ? `checked ${new Date(cliCheckedAt).toLocaleTimeString()}` : 'checking…'),
+      cliError ? h('span', { class: 'bad' }, `Couldn't check: ${cliError}`)
+        : h('span', { class: 'muted' }, cliCheckedAt ? `checked ${new Date(cliCheckedAt).toLocaleTimeString()}` : 'checking…'),
       h('button', { class: 'btn', onclick: () => loadClis(true) }, 'Re-check')),
     h('p', { class: 'sub' }, 'What this machine has installed. Click a model to add it to Models below, then press Test there to check it works end to end.'),
     h('div', { class: 'scroll' }, h('table', {},
@@ -290,8 +395,9 @@ function renderClis() {
         const c = clis[p];
         return h('tr', {},
           h('td', { style: 'white-space:nowrap' }, h('strong', {}, name), h('div', { class: 'muted mono', style: 'font-size:12px' }, c?.bin ?? cfg.bins?.[p] ?? p)),
-          h('td', {}, !c ? h('span', { class: 'muted' }, 'checking…')
-            : c.installed ? h('span', { class: 'ok' }, '✔ ' + c.version) : h('span', { class: 'bad', title: c.error || '' }, '✘ not found')),
+          h('td', {}, !c ? h('span', { class: 'muted' }, cliError ? '—' : 'checking…')
+            : c.installed ? h('div', {}, h('span', { class: 'ok' }, '✔ ' + c.version), UPDATABLE.includes(p) ? h('div', {}, updateButton(p)) : null)
+            : h('span', { class: 'bad', title: c.error || '' }, '✘ not found')),
           h('td', {}, h('div', { class: 'chips' }, catalog().filter((m) => m.provider === p).map((m) => {
             const unlisted = c?.models?.length && !c.suggested && !c.models.some((x) => x.id === m.model);
             return h('button', { class: 'chip', style: 'font-size:12.5px;color:inherit',
@@ -372,8 +478,7 @@ function validate() {
     else if (!dimNames.includes(u) && !RESERVED.includes(u)) errors.push(`Prompt uses {{${u}}}, which isn't a dimension`);
   for (const d of dimNames) if (d !== GOAL_DIM && !used.has(d)) warnings.push(`Dimension "${d}" isn't used in the prompt (add {{${d}}})`);
   for (const v of cfg.dimensions[GOAL_DIM] ?? []) if ((v.text || '').length > 3850) errors.push(`goal "${v.id}" is too long (${v.text.length} characters; /goal allows about 3,850 here)`);
-  const goalVariants = cfg.dimensions[GOAL_DIM] ?? [], onlyGoals = goalVariants.length > 0 && goalVariants.every((v) => (v.text || '').trim());
-  cfg.agents.forEach((a) => {
+    cfg.agents.forEach((a) => {
     const name = PROVIDERS[a.provider] ?? a.provider, c = clis[a.provider];
     if (a.provider !== 'claude' && (a.efforts || []).some((e) => parseEffort(e).ultracode)) warnings.push(`${a.id}: Ultracode (-uc) only applies to Claude Code, so those efforts are skipped`);
     const ok = effortsFor(a), bad = (a.efforts || []).map((e) => parseEffort(e).base).filter((b) => b && ok.length && !ok.includes(b));
@@ -381,8 +486,12 @@ function validate() {
     if (c && !c.installed) warnings.push(`${a.id}: the ${name} CLI ("${c.bin}") isn't installed or didn't start, so its runs are skipped`);
     else if (c?.models?.length && !c.suggested && a.model && !c.models.some((m) => m.id === a.model))
       warnings.push(`${a.id}: ${name} doesn't list "${a.model}" (it has ${c.models.map((m) => m.id).join(', ')})`);
-    if (onlyGoals && !GOAL_CLIS.includes(a.provider)) warnings.push(`${a.id}: ${name} has no headless /goal and every goal variant has text, so it has nothing to run (add an empty goal variant)`);
   });
+  // A variant edited after it ran: those runs still count as done, so the new text wouldn't run.
+  for (const [d, vs] of Object.entries(cfg.dimensions)) for (const v of vs) {
+    const n = results.filter((r) => r[d] === v.id && r.changed?.includes(d)).length;
+    if (n) warnings.push(`${d} "${v.id}": ${plural(n, 'finished run')} used different text. They count as done, so the new text won't run for them: give the variant a new short name to run it and keep the old runs apart`);
+  }
   return { errors, warnings, used };
 }
 
@@ -390,7 +499,8 @@ async function save() {
   const v = validate();
   if (v.errors.length) { alert('Fix these first:\n\n' + v.errors.join('\n')); return false; }
   await api('/api/config', 'PUT', cfg);
-  await api('/api/template', 'PUT', { text: tmpl });
+  meta.promptVersion = (await api('/api/template', 'PUT', { text: tmpl })).version;
+  await loadResults(); // which runs used a variant's old text depends on the saved config
   savedCfg = JSON.stringify(cfg); savedTmpl = tmpl;
   updateSavebar(); renderRun();
   return true;
@@ -479,13 +589,13 @@ function renderSetup() {
             if (confirm(`Rename {{${d}}} to {{${n}}} in the prompt too?`)) tmpl = tmpl.replaceAll(`{{${d}}}`, `{{${n}}}`);
             renameDim(d, n); changed(true);
           } }),
-        d === GOAL_DIM ? h('span', { class: 'tag' }, 'sent as /goal · not Codex') : h('span', { class: 'tag mono' }, `{{${d}}}`),
+        d === GOAL_DIM ? h('span', { class: 'tag' }, 'sent as /goal · Codex*') : h('span', { class: 'tag mono' }, `{{${d}}}`),
         h('span', { class: 'muted' }, `${vs.length} variant${vs.length === 1 ? '' : 's'}`),
         h('span', { class: 'grow' }),
         h('button', { class: 'icon', title: 'Move up', onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, -1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↑'),
         h('button', { class: 'icon', title: 'Move down', onclick: () => { const k = Object.keys(cfg.dimensions); moveIn(k, di, 1); cfg.dimensions = Object.fromEntries(k.map((x) => [x, cfg.dimensions[x]])); changed(true); } }, '↓'),
         h('button', { class: 'icon', title: 'Remove dimension', onclick: () => { if (confirm(`Remove "${d}" and its ${vs.length} variants?`)) { delete cfg.dimensions[d]; changed(true); } } }, '✕')),
-      d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and the agent gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until the condition is checked as met. Add "or stop after N turns" to cap it. Claude Code, Grok, agy and Muse all run /goal headless (each with its own goal loop: Grok plans, builds and verifies with extra agents, so it takes longer). Codex only runs the empty variant.') : null,
+      d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and the agent gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until the condition is checked as met. Add "or stop after N turns" to cap it. Claude Code, Grok, agy and Muse all run /goal headless (each with its own goal loop: Grok plans, builds and verifies with extra agents, so it takes longer). * Codex has no headless /goal, so its runs of a goal variant get the same prompt without /goal.') : null,
       vs.map((v, i) => h('div', { class: 'variant' },
         h('input', { value: v.id, placeholder: 'short name', title: 'Short name used in folder names and filters',
           oninput: (e) => { v.id = e.target.value.trim(); changed(); } }),
@@ -573,24 +683,24 @@ function selection() {
     const off = new Set(sel.offOnly[d] || []); only[d] = vs.filter((v) => !off.has(v.id)).map((v) => v.id);
   }
   const repeat = Math.max(1, +sel.opts.repeat || 1);
-  const goalOn = new Set((cfg.dimensions[GOAL_DIM] || []).filter((v) => (v.text || '').trim()).map((v) => v.id));
-  const provOf = Object.fromEntries(cfg.agents.map((a) => [a.id, a.provider]));
-  // Variant ids per dimension for one agent (goal variants only run on CLIs with a headless /goal).
-  const listsFor = (agentId) => Object.entries(only).map(([d, l]) => d === GOAL_DIM && !GOAL_CLIS.includes(provOf[agentId]) ? l.filter((v) => !goalOn.has(v)) : l);
-  const combosFor = (agentId) => listsFor(agentId).reduce((n, l) => n * l.length, 1);
-  const combos = Object.values(only).reduce((n, l) => n * l.length, 1);
-  const count = pick.reduce((n, k) => n + combosFor(k.split(':')[0]), 0) * repeat;
-  let done = 0;
+  const lists = Object.values(only), combos = lists.reduce((n, l) => n * l.length, 1);
+  const count = pick.length * combos * repeat;
+  let done = 0, doneOld = 0; // doneOld: of those, made with an older prompt or a variant's old text
   if (count <= 50000) {
-    const doneIds = new Set(results.filter((r) => r.status === 'ok' || !sel.opts.rerunFailed).map((r) => r.id));
-    let lists;
+    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || !sel.opts.rerunFailed).map((r) => [r.id, r]));
     const walk = (i, acc, base) => {
-      if (i === lists.length) { for (let r = 1; r <= repeat; r++) if (doneIds.has([base, ...acc, repeat > 1 ? `r${r}` : null].filter(Boolean).join('__'))) done++; return; }
+      if (i === lists.length) {
+        for (let r = 1; r <= repeat; r++) {
+          const d = doneRuns.get([base, ...acc, repeat > 1 ? `r${r}` : null].filter(Boolean).join('__'));
+          if (d) { done++; if (d.changed?.length || (d.promptVersion && meta.promptVersion && d.promptVersion !== meta.promptVersion)) doneOld++; }
+        }
+        return;
+      }
       for (const v of lists[i]) walk(i + 1, [...acc, v], base);
     };
-    for (const k of pick) { const [a, e] = k.split(':'); lists = listsFor(a); walk(0, [], `${a}-${e}`); }
+    for (const k of pick) { const [a, e] = k.split(':'); walk(0, [], `${a}-${e}`); }
   }
-  return { pick, only, repeat, count, done, combos };
+  return { pick, only, repeat, count, done, doneOld, combos };
 }
 
 function chip(label, on, toggle, title) {
@@ -618,7 +728,8 @@ function renderRun() {
       running
         ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
         : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) }, '▶ Start')),
-    dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, 'Setup has unsaved changes; they will be saved when you start.') : null));
+    dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, 'Setup has unsaved changes; they will be saved when you start.') : null,
+    s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with a different prompt (the prompt or a variant's text was edited since). They're skipped, not redone. To run the new text and keep the old runs, give the edited variant a new short name in Setup; or delete the old runs in Results (✕).`) : null));
 
   // Models & efforts
   const allKeys = cfg.agents.flatMap((a) => effortsOf(a).map((e) => `${a.id}:${e}`));
@@ -665,7 +776,8 @@ function renderRun() {
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, d),
         h('button', { class: 'icon', onclick: () => { sel.offOnly[d] = []; rerender(); } }, 'all'),
         h('button', { class: 'icon', onclick: () => { sel.offOnly[d] = vs.map((v) => v.id); rerender(); } }, 'none')),
-      h('div', { class: 'chips' }, vs.map((v) => chip(v.id, !sel.offOnly[d].includes(v.id), (on) => { setOff(sel.offOnly[d], v.id, !on); rerender(); }, v.text))));
+      h('div', { class: 'chips' }, vs.map((v) => chip(d === GOAL_DIM && (v.text || '').trim() ? v.id + '*' : v.id, !sel.offOnly[d].includes(v.id), (on) => { setOff(sel.offOnly[d], v.id, !on); rerender(); }, v.text))),
+      d === GOAL_DIM && vs.some((v) => (v.text || '').trim()) ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, '* Not on Codex: it has no headless /goal, so it gets the same prompt without /goal.') : null);
   })));
 
   // Live
@@ -675,15 +787,58 @@ function renderRun() {
 
 function renderLive() {
   const el = $('#live'); if (!el) return;
-  const st = status;
+  const st = status, hb = batchHealth();
   const head = st.running
     ? `Running · ${st.finished} finished · ${st.active.length} in progress · started ${new Date(st.startedAt).toLocaleTimeString()}`
     : st.finishedAt ? `Last batch ended ${new Date(st.finishedAt).toLocaleString()} (${st.finished} finished)` : 'No batch started since the dashboard opened.';
-  const pre = logPre;
-  el.replaceChildren(h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
-    h('div', { class: 'chips', style: st.active?.length ? 'margin-bottom:10px' : 'display:none' }, (st.active ?? []).map((id) =>
-      h('span', { class: 'tag', title: 'Running for' }, `▶ ${id} · ${since(st.activeSince?.[id])}`))),
-    pre);
+  el.replaceChildren(...[h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
+    hb ? liveHealth(hb) : null,
+    h('div', { class: 'chips', style: hb?.active.length ? 'margin-bottom:10px' : 'display:none' }, (hb?.active ?? []).map((a) =>
+      h('span', { class: 'tag' + (a.slow ? ' warn' : ''), title: a.usual ? `Running for ${fmtMin(a.mins)}; this setup usually takes ~${fmtMin(a.usual)}` : 'Running for' },
+        `${a.slow ? '⚠' : '▶'} ${a.id} · ${since(st.activeSince?.[a.id])}${a.usual ? ` of ~${fmtMin(a.usual)}` : ''}`))),
+    logPre].filter(Boolean));
+}
+
+// Progress, per-CLI tallies and warnings for the current (or last) batch, from the runs it has finished.
+function batchHealth() {
+  const st = status; if (!st.startedAt || !cfg) return null;
+  const t0 = Date.parse(st.startedAt), per = {}, alerts = [];
+  const fin = results.filter((r) => Date.parse(r.finishedAt) >= t0).sort((a, b) => String(a.finishedAt).localeCompare(String(b.finishedAt)));
+  const cli = (p) => per[p] ??= { ok: 0, failed: 0, running: 0, streak: 0, last: null };
+  for (const r of fin) { const c = cli(r.provider); if (r.status === 'ok') { c.ok++; c.streak = 0; } else { c.failed++; c.streak++; c.last = r; } }
+  const active = (st.active ?? []).map((id) => {
+    const a = agentOfId(id), mins = (Date.now() - Date.parse(st.activeSince?.[id])) / 60000, usual = usualMinutes(id);
+    if (a) cli(a.provider).running++;
+    return { id, mins, usual, slow: !!usual && mins >= 10 && mins >= 2 * usual };
+  });
+  const mostly = (p) => { const by = groupBy(fin.filter((r) => r.provider === p && r.status !== 'ok'), (r) => causeOf(r.error));
+    return [...by.entries()].sort((a, b) => b[1].length - a[1].length)[0]?.[0]; };
+  for (const [p, c] of Object.entries(per)) {
+    if (c.streak >= 3) alerts.push(`${PROVIDERS[p] ?? p}: the last ${c.streak} runs failed (${causeOf(c.last.error)})`);
+    else if (c.failed >= 3 && c.failed >= c.ok) alerts.push(`${PROVIDERS[p] ?? p}: ${c.failed} of ${c.ok + c.failed} runs failed this batch, mostly ${mostly(p).toLowerCase()}`);
+  }
+  for (const a of active) if (a.slow) alerts.push(`${a.id} has been running ${fmtMin(a.mins)}, ${fmtX(a.mins / a.usual)} the usual ~${fmtMin(a.usual)} for its setup`);
+  const total = st.planned ?? null, left = total != null ? Math.max(0, total - st.finished - active.length) : null;
+  const perMin = st.running && st.finished >= 2 ? st.finished / ((Date.now() - t0) / 60000) : null;
+  return { per, active, alerts, total, left, eta: perMin && left != null ? (left + active.length / 2) / perMin : null,
+    flagged: fin.filter((r) => runFlags().has(r.id) && !reviewed(r)) };
+}
+
+function liveHealth(hb) {
+  const st = status, n = (x, w) => `${x} ${w}${x === 1 ? '' : 's'}`;
+  return h('div', { style: 'margin-bottom:10px' },
+    hb.total ? h('div', { class: 'row', style: 'gap:10px; margin-bottom:8px' },
+      h('div', { class: 'bar grow', style: 'max-width:320px', title: `${st.finished} of ${hb.total} done` },
+        h('span', { style: `width:${Math.min(100, Math.round(100 * st.finished / hb.total))}%` })),
+      h('span', {}, `${st.finished} of ${hb.total} done`, st.running ? ` · ${hb.active.length} running · ${hb.left} to go` : '',
+        hb.eta ? ` · about ${fmtMin(hb.eta)} left at this pace` : '')) : null,
+    Object.keys(hb.per).length ? h('div', { class: 'chips' }, Object.entries(hb.per).map(([p, c]) =>
+      h('span', { class: 'tag' + (c.streak >= 3 ? ' bad' : ''), title: c.last ? `Latest failure: ${c.last.error ?? 'no message'}` : 'No failures this batch' },
+        `${PROVIDERS[p] ?? p}: ✔ ${c.ok}${c.failed ? ` · ✘ ${c.failed}` : ''}${c.running ? ` · ▶ ${c.running}` : ''}`))) : null,
+    hb.alerts.length && st.running ? h('div', { class: 'warns', style: 'margin-top:8px' }, hb.alerts.map((a) => h('div', {}, a))) : null,
+    hb.flagged.length ? h('div', { class: 'row', style: 'margin-top:8px' },
+      h('span', { class: 'warn' }, `⚑ ${n(hb.flagged.length, 'finished run')} in this batch ${hb.flagged.length === 1 ? 'looks' : 'look'} off`),
+      h('button', { class: 'btn', onclick: () => { iv.range = 'batch'; iv.filters = {}; saveIv(); showTab('insights'); } }, 'See in Insights')) : null);
 }
 
 async function preview() {
@@ -724,22 +879,506 @@ async function stop() {
 }
 
 // ---------------------------------------------------------------- RESULTS
+// ------------------------------------------------------------------ STATS
+// Shared by Compare (Results), Insights and the live checks on the Run tab, all worked out here from the result rows.
+const finite = (x) => x != null && x !== '' && typeof x !== 'boolean' && Number.isFinite(+x);
+function median(xs) {
+  const v = xs.filter(finite).map(Number).sort((a, b) => a - b), n = v.length;
+  return n ? (n % 2 ? v[(n - 1) / 2] : (v[n / 2 - 1] + v[n / 2]) / 2) : null;
+}
+const quant = (s, q) => { const i = (s.length - 1) * q, lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo); };
+const mean = (xs) => { const v = xs.filter(finite).map(Number); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+const gmean = (xs) => { const v = xs.filter((x) => x > 0); return v.length ? Math.exp(v.reduce((s, x) => s + Math.log(x), 0) / v.length) : null; };
+const groupBy = (rows, fn) => { const m = new Map(); for (const r of rows) { const k = fn(r); if (!m.has(k)) m.set(k, []); m.get(k).push(r); } return m; };
+
+// What the stats measure. log: compared as ratios, over runs that finished OK; rate: share of all runs.
+const METRICS = {
+  ok: { label: 'Finished OK', rate: true, get: (r) => r.status === 'ok' ? 1 : 0 },
+  delivered: { label: 'Delivered a game', rate: true, get: (r) => r.delivered ? 1 : 0 },
+  wallMinutes: { label: 'Time', short: 'time', log: true, fmt: fmtMin },
+  costUsd: { label: 'Cost', short: 'cost', log: true, fmt: fmtUsd },
+  outputTokens: { label: 'Output tokens', short: 'output', log: true, fmt: fmtTok },
+  totalTokens: { label: 'Total tokens', short: 'tokens', log: true, fmt: fmtTok },
+  kb: { label: 'Game size', short: 'size', log: true, fmt: fmtKb },
+  loc: { label: 'Lines', short: 'lines', log: true, fmt: fmtNum },
+  score: { label: 'Score', fmt: (v) => fmt(v, 1) },
+};
+const mval = (r, k) => { const m = METRICS[k]; if (m.get) return m.get(r);
+  return !finite(r[k]) || (m.log && (r.status !== 'ok' || +r[k] <= 0)) ? null : +r[k]; };
+
+// Fields runs are filtered, grouped and compared by. 'agent+effort' is a model row at one effort.
+const LADDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
+const effBase = (r) => parseEffort(r.effort).base ?? 'default';
+const effRank = (e) => { const p = parseEffort(e), i = LADDER.indexOf(p.base); return (i < 0 ? 99 : i) * 2 + (p.ultracode ? 1 : 0); };
+const FIELD_LABEL = { 'agent+effort': 'model + effort', agent: 'model', provider: 'CLI', model: 'model ID', cli: 'CLI version', promptVersion: 'prompt' };
+const fieldLabel = (f) => FIELD_LABEL[f] ?? f;
+const fieldVal = (r, f) => f === 'agent+effort' ? `${r.agent} · ${r.effort}` : String(r[f] ?? '');
+const valLabel = (f, v) => f === 'promptVersion' ? promptLabel(v) : f === 'provider' ? PROVIDERS[v] ?? v : v || '—';
+const runFields = () => cached('fields:' + Object.keys(cfg.dimensions), () => ['agent', 'provider', 'effort', 'ultracode',
+  ...Object.keys(cfg.dimensions), ...(results.some((r) => r.cli) ? ['cli'] : []), ...(results.some((r) => r.promptVersion) ? ['promptVersion'] : []), 'status']);
+// Values in a useful order: models and variants as in Setup, efforts low to high, prompts oldest first.
+function sortVals(f, vals) {
+  const agents = cfg.agents.map((a) => a.id), variants = cfg.dimensions[f]?.map((v) => v.id);
+  const rank = f === 'agent' ? (v) => agents.indexOf(v) : f === 'provider' ? (v) => Object.keys(PROVIDERS).indexOf(v)
+    : f === 'effort' ? effRank : f === 'promptVersion' ? (v) => promptVersions().list.indexOf(v)
+    : f === 'agent+effort' ? (v) => { const [a, e] = v.split(' · '), i = agents.indexOf(a); return (i < 0 ? 999 : i) * 1000 + effRank(e); }
+    : variants ? (v) => variants.indexOf(v) : () => 0;
+  const rk = (v) => { const x = rank(v); return x < 0 ? 1e9 : x; };
+  return [...vals].sort((a, b) => rk(a) - rk(b) || String(a).localeCompare(String(b), undefined, { numeric: true }));
+}
+// One dropdown per field, for a view's filters (state.filters[field] = value).
+function filterSelects(state, rows, rerender) {
+  return runFields().map((f) => h('select', { title: fieldLabel(f), onchange: (e) => { state.filters[f] = e.target.value; rerender(); } },
+    h('option', { value: '' }, `${fieldLabel(f)}: all`),
+    sortVals(f, [...new Set(rows.map((r) => String(r[f] ?? '')))]).map((v) =>
+      h('option', { value: v, selected: state.filters[f] === v }, `${fieldLabel(f)}: ${valLabel(f, v)}`))));
+}
+const passes = (state, r) => runFields().every((f) => !state.filters[f] || String(r[f] ?? '') === state.filters[f]);
+
+// Prompt versions in the results, named v1, v2 … in the order they were first used.
+const promptVersions = () => cached('versions', () => {
+  const first = new Map();
+  for (const r of results) { const v = r.promptVersion, t = r.startedAt ?? ''; if (v && (!first.has(v) || t < first.get(v))) first.set(v, t); }
+  return { list: [...first.keys()].sort((a, b) => first.get(a).localeCompare(first.get(b))), first };
+});
+function promptLabel(v) {
+  if (!v) return 'not recorded';
+  const { list, first } = promptVersions(), i = list.indexOf(v), t = first.get(v);
+  return `${i < 0 ? v : `v${i + 1}`}${t ? ` · ${new Date(t).toLocaleDateString([], { month: 'short', day: 'numeric' })}` : ''}${v === meta.promptVersion ? ' (current)' : ''}`;
+}
+
+// Why a run failed, from its error text (first match wins).
+const CAUSES = [
+  ['Usage or rate limit', /rate.?limit|\b429\b|quota|usage limit|too many requests|overloaded|\b529\b|resource.?exhausted|credit|limit reached/i],
+  ['Login or access', /\b40[13]\b|unauthori[sz]ed|forbidden|log(?:ged)? ?(?:in|out)\b|\bauth|credential|api.?key/i],
+  ['Model not available', /model.?not.?found|unknown model|invalid model|no such model|not supported|does not exist/i],
+  ['Time limit', /timed out/i],
+  ['Network', /ECONN|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|network|socket hang up|fetch failed|\b50[234]\b/i],
+  ['Stopped or killed', /\bkilled\b|\bSIG[A-Z]{3,}/],
+];
+const causeOf = (err) => !err ? 'No error message' : CAUSES.find(([, re]) => re.test(err))?.[0] ?? (/^exit code -?\d+$/.test(err) ? 'Exit code only' : 'Other');
+// The configured model a run id belongs to (ids start with "<model>-<effort>__").
+const agentOfId = (id) => { const ae = id.split('__')[0]; return cfg.agents.filter((a) => ae.startsWith(a.id + '-')).sort((x, y) => y.id.length - x.id.length)[0]; };
+
+// Tukey's median polish over any number of factors: y ≈ mu + Σ effect(level). Medians keep it
+// robust, so the odd runs it's meant to spot don't drag the baseline with them.
+function polish(data, nf) {
+  const eff = Array.from({ length: nf }, () => new Map()), count = Array.from({ length: nf }, () => new Map());
+  for (const d of data) d.lv.forEach((l, k) => count[k].set(l, (count[k].get(l) ?? 0) + 1));
+  let mu = median(data.map((d) => d.y));
+  for (let it = 0; it < 8; it++) for (let k = 0; k < nf; k++) {
+    const g = new Map();
+    for (const d of data) {
+      let rest = d.y - mu;
+      for (let j = 0; j < nf; j++) if (j !== k) rest -= eff[j].get(d.lv[j]) ?? 0;
+      if (!g.has(d.lv[k])) g.set(d.lv[k], []);
+      g.get(d.lv[k]).push(rest);
+    }
+    for (const [l, v] of g) eff[k].set(l, median(v));
+    const c = median([...eff[k].values()]); mu += c;
+    for (const [l, v] of eff[k]) eff[k].set(l, v - c);
+  }
+  return { eff, count, fit: (lv) => lv.reduce((s, l, k) => s + (eff[k].get(l) ?? NaN), mu) };
+}
+
+// What's usual for a run's exact setup (model+effort, each variant, prompt version), learned from
+// every finished run in log space, so it works even when that exact combination ran only once.
+// usual(r) stays null until each part of the setup has at least 3 finished runs behind it.
+const FLAG_METRICS = ['wallMinutes', 'costUsd', 'outputTokens', 'kb', 'loc'];
+const usualFits = () => cached('usual', () => {
+  const ok = results.filter((r) => r.status === 'ok');
+  const dims = Object.keys(cfg.dimensions).filter((d) => new Set(ok.map((r) => r[d] ?? '')).size > 1);
+  const facs = [(r) => r.id.split('__')[0], ...dims.map((d) => (r) => String(r[d] ?? '')), (r) => r.promptVersion ?? ''];
+  return Object.fromEntries(FLAG_METRICS.map((k) => {
+    const data = ok.filter((r) => r[k] > 0).map((r) => ({ y: Math.log(r[k]), lv: facs.map((f) => f(r)) }));
+    if (data.length < 6) return [k, null];
+    const p = polish(data, facs.length);
+    const scale = Math.max(1.4826 * median(data.map((d) => Math.abs(d.y - p.fit(d.lv)))), Math.log(1.25));
+    const usual = (r) => { const lv = facs.map((f) => f(r)); return lv.every((l, i) => (p.count[i].get(l) ?? 0) >= 3) ? Math.exp(p.fit(lv)) : null; };
+    return [k, { usual, scale }];
+  }));
+});
+
+// Finished runs that look off, most serious first: no game, no reply, TODOs left, a time, cost or
+// output at least 2× off what's usual for its setup (and unusual for how much that measure normally
+// varies), or a game under half the usual size. A big game isn't flagged: bundling the libraries into
+// the file is allowed and makes it 10× bigger (and fewer lines, minified). Judged against every run,
+// whatever a view's filters.
+const runFlags = () => cached('flags', () => {
+  const fits = usualFits(), out = new Map();
+  for (const r of results) {
+    if (r.status !== 'ok') continue;
+    const items = [];
+    if (!r.delivered) items.push({ sev: 100, bad: true, tag: 'no game', text: 'Finished OK but left no game file (.html) in the work folder root' });
+    if (!r.hasReply) items.push({ sev: 60, tag: 'no reply', text: r.rounds > 1 ? `No final reply: the last of its ${r.rounds} /goal rounds ended without text` : 'No final reply: its last message was empty' });
+    if (r.todos > 0) items.push({ sev: 40 + Math.min(r.todos, 20), tag: `${r.todos} TODO`, text: `${r.todos} TODO/FIXME left in the game file` });
+    const bundle = fits.kb?.usual(r) && r.kb >= 2 * fits.kb.usual(r);
+    for (const k of FLAG_METRICS) {
+      const f = fits[k], u = f?.usual(r), v = +r[k], m = METRICS[k];
+      if (!u || !(v > 0) || (['kb', 'loc'].includes(k) && (v > u || bundle))) continue;
+      const e = Math.log(v / u);
+      if (Math.abs(e) >= Math.log(2) && Math.abs(e) / f.scale >= 2.5)
+        items.push({ sev: 30 + 10 * Math.abs(Math.log2(v / u)), tag: `${fmtX(v / u)} ${m.short}`, text: `${m.label} ${m.fmt(v)}: ${fmtX(v / u)} the usual ~${m.fmt(u)} for this setup` });
+    }
+    items.sort((a, b) => b.sev - a.sev);
+    // The worst problem leads; more problems on the same run add a little.
+    if (items.length) out.set(r.id, { r, items, sev: items[0].sev + 0.25 * items.slice(1).reduce((s, i) => s + i.sev, 0) });
+  }
+  return out;
+});
+const reviewed = (r) => r.score != null || !!r.notes || !!r.seen;
+
+// Per model+effort with fewer than 3 scores, the unreviewed run closest to usual on every measure:
+// the fairest one to play when you can only score a few.
+function typicalPicks(rows) {
+  const fits = usualFits(), flags = runFlags(), out = [];
+  const off = (r) => { let s = 0, n = 0;
+    for (const k of FLAG_METRICS) { const u = fits[k]?.usual(r); if (u && r[k] > 0) { s += Math.abs(Math.log(r[k] / u)) / fits[k].scale; n++; } }
+    return n >= 3 ? s / n : null; };
+  for (const rs of groupBy(rows.filter((r) => r.status === 'ok'), (r) => r.id.split('__')[0]).values()) {
+    const scored = rs.filter((r) => r.score != null).length, cand = rs.filter((r) => !reviewed(r) && !flags.has(r.id));
+    if (scored >= 3 || !cand.length) continue;
+    const t = median(rs.map((r) => r.wallMinutes)) || 1; // too few runs to judge: the one nearest the median time
+    const best = cand.map((r) => ({ r, d: off(r) ?? 100 + Math.abs(Math.log((r.wallMinutes || t) / t)) })).sort((a, b) => a.d - b.d)[0];
+    out.push({ r: best.r, n: rs.length, scored });
+  }
+  const order = sortVals('agent+effort', out.map((p) => fieldVal(p.r, 'agent+effort')));
+  return out.sort((a, b) => order.indexOf(fieldVal(a.r, 'agent+effort')) - order.indexOf(fieldVal(b.r, 'agent+effort')));
+}
+
+// Usual time for a run that's still going, from its id (model-effort, then one variant per dimension).
+function usualMinutes(id) {
+  const parts = id.split('__'), dims = Object.keys(cfg.dimensions);
+  const r = { id, promptVersion: meta.promptVersion, ...Object.fromEntries(dims.map((d, i) => [d, parts[i + 1]])) };
+  return usualFits().wallMinutes?.usual(r)
+    ?? median(results.filter((x) => x.status === 'ok' && x.id.split('__')[0] === parts[0]).map((x) => x.wallMinutes));
+}
+
+// Side A vs side B on measure k. Runs pair up when everything else that defines them matches (key);
+// repeats are averaged first. Log measures use geometric means, so b / a is also the typical per-pair ratio.
+function pairUp(A, B, key, k) {
+  const m = METRICS[k], agg = (rs) => { const v = rs.map((r) => mval(r, k)).filter((x) => x != null); return v.length ? (m.log ? gmean(v) : mean(v)) : null; };
+  const gb = groupBy(B, key), pts = [];
+  for (const [kk, ra] of groupBy(A, key)) if (gb.has(kk)) { const x = agg(ra), y = agg(gb.get(kk)); if (x != null && y != null) pts.push([x, y]); }
+  if (!pts.length) return null;
+  const f = m.log ? gmean : mean;
+  return { a: f(pts.map((p) => p[0])), b: f(pts.map((p) => p[1])), n: pts.length,
+    up: pts.filter(([x, y]) => y > x).length, down: pts.filter(([x, y]) => y < x).length };
+}
+// Everything that defines a run except what's being compared: runs that agree on it make a fair pair.
+function matchKey(f) {
+  const noAgent = ['agent', 'provider', 'model', 'agent+effort'].includes(f);
+  const eff = f === 'ultracode' ? effBase : ['effort', 'agent+effort'].includes(f) ? null : (r) => r.effort;
+  const parts = [noAgent ? null : (r) => r.agent, eff, ...Object.keys(cfg.dimensions).filter((d) => d !== f).map((d) => (r) => r[d] ?? ''),
+    f === 'promptVersion' ? null : (r) => r.promptVersion ?? ''].filter(Boolean);
+  return (r) => parts.map((p) => p(r)).join('␟');
+}
+// A comparison of f can't be split by a field that's part of what's compared.
+const TIES = { 'agent+effort': ['agent', 'provider', 'effort', 'ultracode'], agent: ['provider', 'agent+effort'],
+  provider: ['agent', 'agent+effort'], effort: ['ultracode', 'agent+effort'], ultracode: ['effort', 'agent+effort'] };
+const canSplit = (f, g) => g !== f && !(TIES[f] ?? []).includes(g);
+function compareAB(rows, c) {
+  const key = c.matched ? matchKey(c.f) : () => '';
+  const cols = c.by ? sortVals(c.by, [...new Set(rows.filter((r) => [c.a, c.b].includes(fieldVal(r, c.f))).map((r) => fieldVal(r, c.by)))]) : [null];
+  return cols.map((col) => {
+    const sub = col == null ? rows : rows.filter((r) => fieldVal(r, c.by) === col);
+    const A = sub.filter((r) => fieldVal(r, c.f) === c.a), B = sub.filter((r) => fieldVal(r, c.f) === c.b);
+    return { col, nA: A.length, nB: B.length, m: Object.fromEntries(Object.keys(METRICS).map((k) => [k, pairUp(A, B, key, k)])) };
+  });
+}
+// Does one step up in effort (same model, same variants) bring more output and more time?
+function effortLadder(rows) {
+  const key = matchKey('effort'), bad = [];
+  let checked = 0;
+  for (const rs of groupBy(rows.filter((r) => r.status === 'ok'), (r) => `${r.agent}|${r.ultracode}`).values()) {
+    const lv = sortVals('effort', [...new Set(rs.map(effBase))].filter((e) => e !== 'default'));
+    for (let i = 1; i < lv.length; i++) for (const k of ['outputTokens', 'wallMinutes']) {
+      const p = pairUp(rs.filter((r) => effBase(r) === lv[i - 1]), rs.filter((r) => effBase(r) === lv[i]), key, k);
+      if (!p || p.n < 2) continue;
+      checked++;
+      if (p.b < 0.9 * p.a) bad.push({ r: rs[0], lo: lv[i - 1], hi: lv[i], k, ...p });
+    }
+  }
+  return { checked, bad };
+}
+
+// One tooltip for every chart: values lead, the run or bin follows.
+function tipShow(el, content) {
+  const t = $('#tip'); t.replaceChildren(content); t.style.display = 'block';
+  const b = el.getBoundingClientRect(), w = t.offsetWidth, ht = t.offsetHeight;
+  t.style.left = `${Math.max(8, Math.min(innerWidth - w - 8, b.left + b.width / 2 - w / 2))}px`;
+  t.style.top = `${b.top - ht - 6 < 8 ? b.bottom + 6 : b.top - ht - 6}px`;
+}
+function tipHide() { const t = $('#tip'); if (t) t.style.display = 'none'; }
+addEventListener('scroll', tipHide, true);
+const hover = (content) => ({ onpointerenter: (e) => tipShow(e.currentTarget, content()), onpointerleave: tipHide,
+  onfocus: (e) => tipShow(e.currentTarget, content()), onblur: tipHide });
+
+// ------------------------------------------------------------------ INSIGHTS
+const RANGES = { all: 'All time', '24h': 'Last 24 hours', '7d': 'Last 7 days', batch: 'Last batch' };
+const rangeStart = () => iv.range === '24h' ? Date.now() - 864e5 : iv.range === '7d' ? Date.now() - 7 * 864e5
+  : iv.range === 'batch' && status.startedAt ? Date.parse(status.startedAt) : null;
+const varyingDims = () => cached('vdims', () => Object.keys(cfg.dimensions).filter((d) => new Set(results.map((r) => r[d] ?? '')).size > 1));
+const variantsText = (r) => varyingDims().map((d) => `${d}=${r[d] ?? '—'}`).join(' · ');
+const plural = (n, w) => `${n.toLocaleString()} ${w}${n === 1 ? '' : 's'}`;
+
+function renderInsights() {
+  if (!cfg) return;
+  tipHide();
+  iv.filters ??= {};
+  const t0 = rangeStart(), rows = results.filter((r) => (!t0 || Date.parse(r.finishedAt ?? r.startedAt) >= t0) && passes(iv, r));
+  const rerender = () => { saveIv(); renderInsights(); };
+  const root = $('#tab-insights');
+  root.replaceChildren(h('div', { class: 'card' },
+    h('div', { class: 'row' },
+      h('select', { title: 'Which runs', onchange: (e) => { iv.range = e.target.value; iv.showAll = false; rerender(); } },
+        Object.entries(RANGES).filter(([k]) => k !== 'batch' || status.startedAt).map(([k, l]) => h('option', { value: k, selected: iv.range === k },
+          k === 'batch' ? `${l} (from ${new Date(status.startedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})` : l))),
+      filterSelects(iv, results, rerender),
+      h('button', { class: 'btn', onclick: () => { iv.filters = {}; iv.range = 'all'; rerender(); } }, 'Clear')),
+    h('p', { class: 'hint' }, `${rows.length} of ${plural(results.length, 'run')}. Everything below uses these; what's usual for a setup is learned from all runs.`)));
+  if (!rows.length) return root.append(h('div', { class: 'card' }, h('p', { class: 'muted', style: 'margin:0' },
+    results.length ? 'No runs match these filters.' : 'No runs yet. Start a batch on the Run tab; this page fills in as runs finish.')));
+  root.append(tilesCard(rows), checksCard(rows), lookCard(rows), effectsCard(rows), spreadCard(rows),
+    h('div', { class: 'grid2' }, timeCard(rows), failCard(rows)));
+}
+
+function tilesCard(rows) {
+  const ok = rows.filter((r) => r.status === 'ok'), flags = runFlags(), costed = rows.filter((r) => r.costUsd != null);
+  const scored = rows.filter((r) => r.score != null).length;
+  const tile = (k, v, d) => h('div', { class: 'tile' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v), d ? h('span', { class: 'd' }, d) : null);
+  return h('div', { class: 'card' }, h('div', { class: 'tiles' },
+    tile('Runs', rows.length.toLocaleString(), RANGES[iv.range] ?? ''),
+    tile('Finished OK', pct(ok.length / rows.length), `${plural(rows.length - ok.length, 'failure')}`),
+    tile('Delivered a game', pct(rows.filter((r) => r.delivered).length / rows.length)),
+    tile('Need a look', rows.filter((r) => flags.has(r.id) && !reviewed(r)).length.toLocaleString(), 'flagged, not reviewed yet'),
+    tile('Scored', scored.toLocaleString(), `${pct(scored / rows.length)} of runs`),
+    tile('Reported spend', fmtUsd(costed.reduce((s, r) => s + r.costUsd, 0)), costed.length < rows.length ? `${costed.length} of ${rows.length} runs report cost` : 'all runs report cost'),
+    tile('Median time', fmtMin(median(ok.map((r) => r.wallMinutes))), 'finished runs')));
+}
+
+// Things that should hold across the matrix, checked on the runs in view.
+function checksCard(rows) {
+  const ok = rows.filter((r) => r.status === 'ok'), list = [], add = (state, title, detail) => list.push({ state, title, detail });
+  const lad = effortLadder(rows);
+  const step = (b) => `${b.r.agent}${b.r.ultracode === 'on' ? ' + Ultracode' : ''} at ${b.hi}: ${fmtChange(b.b / b.a)} ${METRICS[b.k].label.toLowerCase()} vs ${b.lo} (lower in ${b.down} of ${b.n} pairs)`;
+  add(!lad.checked ? 'na' : lad.bad.length ? 'warn' : 'ok', 'More effort brings more output and more time',
+    !lad.checked ? 'Needs the same model at two effort levels with matching variants.'
+      : lad.bad.length ? lad.bad.slice(0, 4).map(step).join('; ') + (lad.bad.length > 4 ? `; and ${lad.bad.length - 4} more` : '') + '.'
+      : `Holds in all ${plural(lad.checked, 'step')} up checked (output and time, matched variants).`);
+  const count = (fn) => ok.filter(fn).length, noGame = count((r) => !r.delivered), noReply = count((r) => !r.hasReply);
+  add(noGame ? 'warn' : 'ok', 'Finished runs leave a game file', noGame ? `${noGame} of ${ok.length} didn't (listed under Needs a look).` : `All ${ok.length} did.`);
+  add(noReply ? 'warn' : 'ok', 'Finished runs end with a reply', noReply ? `${noReply} of ${ok.length} ended without one (listed under Needs a look).` : `All ${ok.length} did.`);
+  const counted = ok.filter((r) => r.todos != null), todo = counted.filter((r) => r.todos > 0).length;
+  add(!counted.length ? 'na' : todo ? 'warn' : 'ok', 'No TODO or FIXME left in games',
+    !counted.length ? 'Counted for new runs (or after node run-matrix.mjs --reparse).' : todo ? `${todo} of ${counted.length} games still have some.` : `None in ${plural(counted.length, 'game')}.`);
+  const reps = [...groupBy(ok, (r) => r.id.replace(/__r\d+$/, '')).entries()].map(([k, rs]) => {
+    const t = rs.map((r) => r.wallMinutes).filter((x) => x > 0);
+    return { k, spread: t.length > 1 ? Math.max(...t) / Math.min(...t) : null };
+  }).filter((x) => x.spread).sort((a, b) => b.spread - a.spread);
+  add(!reps.length ? 'na' : reps[0].spread >= 3 ? 'warn' : 'ok', 'Repeats of a setup agree', !reps.length
+    ? 'Nothing has run more than once yet. Repeat each (Run tab) shows how consistent a setup is.'
+    : `${plural(reps.length, 'setup')} ran more than once; slowest ÷ fastest is ${fmtX(median(reps.map((x) => x.spread)))} typically${reps[0].spread >= 3 ? `, ${fmtX(reps[0].spread)} for ${reps[0].k}` : ''}.`);
+  const versions = new Set(rows.map((r) => r.promptVersion).filter(Boolean)), unrec = rows.filter((r) => !r.promptVersion).length;
+  const edited = rows.filter((r) => r.changed?.length), editedNames = [...new Set(edited.flatMap((r) => r.changed.map((d) => `${d} "${r[d]}"`)))];
+  add(!versions.size && !edited.length ? 'na' : versions.size > 1 || edited.length ? 'warn' : 'ok', 'Runs used the same prompt', !versions.size && !edited.length ? 'The prompt version is recorded for new runs.'
+    : [versions.size > 1 ? `They used ${versions.size} versions of the prompt. Filter by prompt above to compare like with like.` : versions.size ? `One version${unrec ? ` (${plural(unrec, 'older run')} not recorded)` : ''}.` : '',
+      edited.length ? `${plural(edited.length, 'run')} used text that has since been edited (${editedNames.join(', ')}), so they're grouped with runs of the new text. Give an edited variant a new short name to keep them apart.` : ''].filter(Boolean).join(' '));
+  const cliVers = [...groupBy(rows.filter((r) => r.cliVersion), (r) => r.provider)].map(([p, rs]) => [p, sortVals('cli', [...new Set(rs.map((r) => r.cli))])]);
+  const moved = cliVers.filter(([, vs]) => vs.length > 1);
+  add(!cliVers.length ? 'na' : moved.length ? 'warn' : 'ok', 'Each CLI stayed on one version', !cliVers.length ? 'The CLI version is recorded for new runs.'
+    : moved.length ? `${moved.map(([, vs]) => vs.join(' → ')).join('; ')}. An update can change results; filter by CLI version above to compare like with like.`
+    : `${cliVers.map(([, vs]) => vs[0]).join(', ')}.`);
+  const icon = { ok: ['✔', 'ok'], warn: ['⚠', 'warn'], na: ['–', 'muted'] };
+  return h('div', { class: 'card' }, h('h2', {}, 'Expectations'),
+    h('p', { class: 'sub' }, 'What should hold across the matrix, checked automatically.'),
+    h('div', { class: 'checks' }, list.map((c) => h('div', {},
+      h('span', { class: 'ic ' + icon[c.state][1], title: { ok: 'Holds', warn: 'Worth a look', na: 'Not enough runs to tell' }[c.state] }, icon[c.state][0]),
+      h('div', {}, h('strong', {}, c.title), h('div', { class: 'muted' }, c.detail))))));
+}
+
+function lookCard(rows) {
+  const ids = new Set(rows.map((r) => r.id)), all = [...runFlags().values()].filter((f) => ids.has(f.r.id)).sort((a, b) => b.sev - a.sev);
+  const open = all.filter((f) => !reviewed(f.r)), shown = iv.showSeen ? all : open, limit = iv.showAll ? Infinity : 25, picks = typicalPicks(rows);
+  return h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Needs a look'),
+      all.length > open.length ? h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!iv.showSeen,
+        onchange: (e) => { iv.showSeen = e.target.checked; saveIv(); renderInsights(); } }), `Show reviewed (${all.length - open.length})`) : null),
+    h('p', { class: 'sub' }, 'Finished runs that look off: no game or reply, TODOs left, a time, cost or output at least 2× off what\'s usual for its setup, or a game under half the usual size. A score, a note or "looked at" clears one.'),
+    shown.length ? h('div', { class: 'scroll' }, h('table', { class: 'look' }, h('tbody', {}, shown.slice(0, limit).map((f) => lookRow(f.r,
+      f.items.map((i) => h('div', {}, h('span', { class: 'tag ' + (i.bad ? 'bad' : 'warn') }, i.tag), ' ', i.text)))))))
+      : h('p', { class: 'muted' }, all.length ? 'All reviewed ✔' : 'Nothing stands out ✔'),
+    shown.length > limit ? h('button', { class: 'btn', onclick: () => { iv.showAll = true; saveIv(); renderInsights(); } }, `Show all ${shown.length}`) : null,
+    picks.length ? [h('h2', { style: 'margin-top:18px' }, 'Typical runs to score'),
+      h('p', { class: 'sub' }, 'For each model + effort with fewer than 3 scores, the run closest to usual on time, cost, output and size. Its score says the most about that setup as a whole.'),
+      h('div', { class: 'scroll' }, h('table', { class: 'look' }, h('tbody', {}, picks.map((p) => lookRow(p.r,
+        h('span', { class: 'muted' }, `Most typical of ${plural(p.n, `${p.r.agent} · ${p.r.effort} run`)} (${p.scored} scored)`))))))] : null);
+}
+function lookRow(r, why) {
+  return h('tr', {},
+    h('td', { class: 'play', style: 'width:1%' }, r.entry ? h('a', { href: '/runs/' + r.entry, target: '_blank', title: 'Play', style: 'text-decoration:none' }, '▶') : h('span', { class: 'muted', title: 'No game file' }, '—')),
+    h('td', { class: 'run' }, h('button', { class: 'linkish', title: r.id, onclick: () => showRun(r) }, `${r.agent} · ${r.effort}`),
+      h('div', { class: 'muted', style: 'font-size:12px' }, variantsText(r))),
+    h('td', { class: 'why' }, why),
+    h('td', { style: 'white-space:nowrap' },
+      h('button', { class: 'icon', disabled: !r.hasReply, title: 'Agent reply', onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
+      h('button', { class: 'icon', title: 'Raw CLI output', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out'),
+      h('button', { class: 'icon', title: 'Everything about this run', onclick: () => showRun(r) }, 'details'),
+      reviewed(r) ? null : h('button', { class: 'icon', title: 'Mark as looked at, which clears it from this list', onclick: async () => { await saveReview(r, { seen: true }); renderInsights(); } }, 'looked at')));
+}
+
+// How each choice moves time, cost, output and size with everything else held equal: the same
+// median polish, with model, effort, Ultracode, each variant and the prompt as separate factors.
+function effectsCard(rows) {
+  const ok = rows.filter((r) => r.status === 'ok');
+  const facs = [['agent', 'Model', (r) => r.agent], ['effort', 'Effort', effBase], ['ultracode', 'Ultracode', (r) => r.ultracode],
+    ...Object.keys(cfg.dimensions).map((d) => [d, d, (r) => String(r[d] ?? '')]), ['promptVersion', 'Prompt', (r) => r.promptVersion ?? '']]
+    .filter(([, , fn]) => new Set(rows.map(fn)).size > 1);
+  const fits = Object.fromEntries(FLAG_METRICS.map((k) => {
+    const data = ok.filter((r) => r[k] > 0).map((r) => ({ y: Math.log(r[k]), lv: facs.map(([, , fn]) => fn(r)) }));
+    return [k, data.length >= 4 && facs.length ? polish(data, facs.length) : null];
+  }));
+  const body = [];
+  facs.forEach(([f, label, fn], i) => {
+    const levels = sortVals(f, [...new Set(rows.map(fn))]);
+    const ref = levels.find((l) => FLAG_METRICS.every((k) => (fits[k]?.count[i].get(l) ?? 0) >= 2)) ?? levels[0];
+    body.push(h('tr', { class: 'fhead' }, h('td', { colspan: FLAG_METRICS.length + 3 }, label)));
+    for (const l of levels) {
+      const rs = rows.filter((r) => fn(r) === l), failed = rs.filter((r) => r.status !== 'ok').length;
+      body.push(h('tr', {},
+        h('td', { style: 'padding-left:16px' }, valLabel(f, l), l === ref ? h('span', { class: 'muted' }, ' · baseline') : null),
+        h('td', { class: 'num' }, rs.length), h('td', { class: 'num' }, failed || h('span', { class: 'muted' }, '0')),
+        FLAG_METRICS.map((k) => {
+          const p = fits[k], n = (x) => p?.count[i].get(x) ?? 0;
+          if (l === ref) return h('td', { class: 'fx muted' }, '—');
+          if (n(l) < 2 || n(ref) < 2) return h('td', { class: 'fx muted', title: 'Needs at least 2 finished runs on each side' }, '…');
+          const x = Math.exp(p.eff[i].get(l) - p.eff[i].get(ref)), s = Math.min(Math.abs(Math.log(x)) / Math.log(3), 1);
+          return h('td', { class: 'fx', title: `${METRICS[k].label}: ${fmtChange(x)} vs ${valLabel(f, ref)}, everything else equal`,
+            style: `background:color-mix(in srgb, var(${x > 1 ? '--more' : '--less'}) ${Math.round(4 + 26 * s)}%, transparent)` }, fmtChange(x));
+        })));
+    }
+  });
+  return h('div', { class: 'card' }, h('h2', {}, 'What each choice changes'),
+    h('p', { class: 'sub' }, 'Each row against its group\'s baseline with everything else held equal, estimated from the finished runs in view (robust to odd runs). +60% time means it takes 60% longer. Orange: more than the baseline; blue: less. A choice that only ever ran with one model can\'t be told apart from that model; Compare on the Results tab pairs runs exactly.'),
+    facs.length ? h('div', { class: 'scroll' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, ''), h('th', { class: 'num' }, 'Runs'), h('th', { class: 'num' }, 'Failed'), FLAG_METRICS.map((k) => h('th', { class: 'num' }, METRICS[k].label)))),
+      h('tbody', {}, body)))
+      : h('p', { class: 'muted' }, 'Every run in view has the same setup, so there\'s nothing to compare yet.'));
+}
+
+// Ticks at 1, 2, 5 × 10^n, thinned to powers of ten when there are too many.
+function logTicks(lo, hi) {
+  const t = [];
+  for (let e = Math.floor(Math.log10(lo)); e <= Math.ceil(Math.log10(hi)); e++) for (const m of [1, 2, 5]) { const v = m * 10 ** e; if (v >= lo && v <= hi) t.push(v); }
+  const tens = t.filter((v) => Math.abs(Math.log10(v) - Math.round(Math.log10(v))) < 1e-9);
+  return t.length > 7 && tens.length >= 2 ? tens : t;
+}
+const TIME_TICKS = [1 / 6, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 240, 480, 960, 1920];
+const ticksFor = (k, lo, hi) => { if (k !== 'wallMinutes') return logTicks(lo, hi);
+  const t = TIME_TICKS.filter((v) => v >= lo && v <= hi); return t.length > 7 ? t.filter((_, i) => i % 2 === 0) : t; };
+const jitter = (s) => { let x = 7; for (const c of s) x = (x * 31 + c.charCodeAt(0)) | 0; return ((x >>> 0) % 11) - 5; };
+
+// Every run as a dot per group, with the group's median: shows spread and outliers at a glance.
+function spreadCard(rows) {
+  const groupOpts = ['agent+effort', ...runFields()];
+  if (!groupOpts.includes(iv.group)) iv.group = 'agent+effort';
+  if (!METRICS[iv.metric] || METRICS[iv.metric].rate) iv.metric = 'wallMinutes';
+  const g = iv.group, k = iv.metric, m = METRICS[k], log = !!m.log;
+  const pts = rows.map((r) => [r, k === 'score' ? (finite(r.score) ? +r.score : null) : r[k] > 0 ? +r[k] : null]).filter(([, v]) => v != null);
+  const groups = groupBy(pts, ([r]) => fieldVal(r, g)), keys = sortVals(g, [...groups.keys()]);
+  const set = (patch) => { Object.assign(iv, patch); saveIv(); renderInsights(); };
+  const head = h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Spread'),
+    h('span', { class: 'muted' }, 'Group by'), h('select', { onchange: (e) => set({ group: e.target.value }) }, groupOpts.map((f) => h('option', { value: f, selected: f === g }, fieldLabel(f)))),
+    h('span', { class: 'muted' }, 'Show'), h('select', { onchange: (e) => set({ metric: e.target.value }) },
+      Object.entries(METRICS).filter(([, x]) => !x.rate).map(([kk, x]) => h('option', { value: kk, selected: kk === k }, x.label))));
+  if (!pts.length) return h('div', { class: 'card' }, head, h('p', { class: 'muted' }, k === 'score' ? 'No scored runs in view yet.' : 'No values in view yet.'));
+  const vs = pts.map(([, v]) => v);
+  let lo = Math.min(...vs), hi = Math.max(...vs);
+  if (log) { if (hi / lo < 4) { const c = Math.sqrt(lo * hi); lo = c / 2; hi = c * 2; } lo /= 1.15; hi *= 1.15; } else { lo = Math.min(0, lo); hi = Math.max(10, hi); }
+  const x = (v) => 100 * (log ? Math.log(v / lo) / Math.log(hi / lo) : (v - lo) / (hi - lo));
+  const ticks = log ? ticksFor(k, lo, hi) : [0, 2, 4, 6, 8, 10].filter((t) => t >= lo && t <= hi);
+  const tipFor = (r, v) => () => h('div', {}, h('strong', {}, m.fmt(v)), h('span', { class: 'muted' }, `${r.agent} · ${r.effort}${r.status === 'ok' ? '' : ' · failed'}`),
+    variantsText(r) ? h('span', { class: 'muted' }, variantsText(r)) : null, runFlags().has(r.id) ? h('span', { class: 'warn' }, `⚑ ${runFlags().get(r.id).items.map((i) => i.tag).join(', ')}`) : null);
+  const cells = keys.flatMap((key) => {
+    const list = groups.get(key), med = median(list.map(([, v]) => v));
+    return [h('div', { class: 'lab', title: valLabel(g, key) }, valLabel(g, key)),
+      h('div', { class: 'track' }, ticks.map((t) => h('span', { class: 'gl', style: `left:${x(t)}%` })),
+        h('span', { class: 'med', style: `left:${x(med)}%` }),
+        list.map(([r, v]) => h('button', { class: 'dot' + (r.status === 'ok' ? '' : ' bad'), style: `left:${x(v)}%; top:calc(50% + ${jitter(r.id)}px)`,
+          'aria-label': `${m.fmt(v)}, ${r.id}`, onclick: () => showRun(r), ...hover(tipFor(r, v)) }))),
+      h('div', { class: 'end', title: `Median ${m.fmt(med)} over ${plural(list.length, 'run')}` }, `~${m.fmt(med)} · ${list.length}`)];
+  });
+  const table = h('table', {}, h('thead', {}, h('tr', {}, [fieldLabel(g), 'Runs', 'Min', '25%', 'Median', '75%', 'Max'].map((t, i) => h('th', { class: i ? 'num' : '' }, t)))),
+    h('tbody', {}, keys.map((key) => { const s = groups.get(key).map(([, v]) => v).sort((a, b) => a - b);
+      return h('tr', {}, h('td', {}, valLabel(g, key)), h('td', { class: 'num' }, s.length), [s[0], quant(s, .25), quant(s, .5), quant(s, .75), s[s.length - 1]].map((v) => h('td', { class: 'num' }, m.fmt(v)))); })));
+  return h('div', { class: 'card' }, head,
+    h('p', { class: 'sub' }, `Each dot is a run${log ? ' (log scale)' : ''}; the bar is its group's median. Hover for the run, click for everything about it. Dots far from their group's bar are worth a look.`),
+    h('div', { class: 'legend', style: 'margin-bottom:6px' }, h('span', {}, h('i', { class: 'dot', style: 'background:var(--mark)' }), 'finished'),
+      h('span', {}, h('i', { class: 'ring' }), 'failed'), h('span', {}, h('i', { style: 'width:2px; height:12px; border-radius:1px; background:var(--ink)' }), 'median')),
+    h('div', { class: 'strip' }, cells, h('div', {}), h('div', { class: 'axis' }, ticks.map((t) => h('span', { style: `left:${x(t)}%` }, m.fmt(t)))), h('div', { class: 'end' })),
+    h('details', { style: 'margin-top:10px' }, h('summary', { class: 'muted' }, 'As a table'), h('div', { class: 'scroll' }, table)));
+}
+
+// Runs finished per time step, OK vs failed: throughput, and bursts of failures (outages, rate limits).
+function timeCard(rows) {
+  const card = h('div', { class: 'card' }, h('h2', {}, 'Over time'));
+  const ts = rows.map((r) => [r, Date.parse(r.finishedAt)]).filter(([, t]) => Number.isFinite(t));
+  if (!ts.length) return card.append(h('p', { class: 'muted' }, 'No finished runs in view.')), card;
+  const end = Date.now(), start = rangeStart() ?? Math.min(...ts.map(([, t]) => t));
+  const STEPS = [[6e5, '10 minutes'], [36e5, 'hour'], [6 * 36e5, '6 hours'], [864e5, 'day'], [7 * 864e5, 'week']];
+  const [step, per] = STEPS.find(([s]) => (end - start) / s <= 48) ?? STEPS[STEPS.length - 1];
+  const d = new Date(start);
+  if (step >= 864e5) d.setHours(0, 0, 0, 0); else if (step >= 36e5) d.setHours(d.getHours() - d.getHours() % (step / 36e5), 0, 0, 0); else d.setMinutes(d.getMinutes() - d.getMinutes() % 10, 0, 0);
+  const t0 = +d, bins = Array.from({ length: Math.max(1, Math.ceil((end - t0) / step)) }, (_, i) => ({ t: t0 + i * step, ok: 0, bad: 0 }));
+  for (const [r, t] of ts) { const b = bins[Math.floor((t - t0) / step)]; if (b) b[r.status === 'ok' ? 'ok' : 'bad']++; }
+  const max = Math.max(1, ...bins.map((b) => b.ok + b.bad));
+  const when = (t) => new Date(t).toLocaleString([], step >= 864e5 ? { month: 'short', day: 'numeric' } : { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const seg = (n, cls) => n ? h('span', { class: cls, style: `height:calc((100% - 2px) * ${n / max})` }) : null;
+  const byCli = groupBy(rows, (r) => r.provider);
+  card.append(h('div', { class: 'legend', style: 'margin-bottom:8px' }, h('span', {}, `Runs finished per ${per} (tallest: ${max})`),
+      h('span', {}, h('i', { style: 'background:var(--mark)' }), 'finished OK'), h('span', {}, h('i', { style: 'background:var(--mark-bad)' }), 'failed')),
+    h('div', { class: 'cols' }, bins.map((b) => {
+      const segs = [seg(b.ok, 'ok'), seg(b.bad, 'no')].filter(Boolean);
+      if (segs.length) segs[segs.length - 1].style.borderRadius = '4px 4px 0 0';
+      return h('div', { class: 'c', tabindex: 0, 'aria-label': `${when(b.t)}: ${b.ok} OK, ${b.bad} failed`,
+        ...hover(() => h('div', {}, h('strong', {}, `${b.ok + b.bad} finished`), h('span', { class: 'muted' }, `${when(b.t)} · ${b.ok} OK · ${b.bad} failed`))) }, segs);
+    })),
+    h('div', { class: 'xlabels' }, [bins[0], bins[Math.floor(bins.length / 2)], bins[bins.length - 1]].filter((b, i, a) => a.indexOf(b) === i).map((b) => h('span', {}, when(b.t)))),
+    h('div', { class: 'scroll', style: 'margin-top:12px' }, h('table', {},
+      h('thead', {}, h('tr', {}, ['CLI', 'Runs', 'OK', 'Median time', 'Last finished'].map((t, i) => h('th', { class: i && i < 4 ? 'num' : '' }, t)))),
+      h('tbody', {}, sortVals('provider', [...byCli.keys()]).map((p) => {
+        const rs = byCli.get(p), ok = rs.filter((r) => r.status === 'ok'), last = rs.map((r) => r.finishedAt).filter(Boolean).sort().pop();
+        return h('tr', {}, h('td', {}, PROVIDERS[p] ?? p), h('td', { class: 'num' }, rs.length), h('td', { class: 'num' }, pct(ok.length / rs.length)),
+          h('td', { class: 'num' }, fmtMin(median(ok.map((r) => r.wallMinutes)))), h('td', { class: 'muted' }, last ? `${since(last)} ago` : '—'));
+      })))));
+  return card;
+}
+
+// Failed runs grouped by what the error says, per CLI.
+function failCard(rows) {
+  const card = h('div', { class: 'card' }, h('h2', {}, 'Failures')), failed = rows.filter((r) => r.status !== 'ok');
+  if (!failed.length) return card.append(h('p', { class: 'muted', style: 'margin:0' }, 'No failed runs in view ✔')), card;
+  const byCause = groupBy(failed, (r) => causeOf(r.error)), clis = sortVals('provider', [...new Set(failed.map((r) => r.provider))]);
+  card.append(h('p', { class: 'sub' }, `${failed.length} of ${plural(rows.length, 'run')} failed (${pct(failed.length / rows.length)}), grouped by what the error says.`),
+    h('div', { class: 'scroll' }, h('table', {},
+      h('thead', {}, h('tr', {}, h('th', {}, 'Cause'), clis.map((p) => h('th', { class: 'num', title: PROVIDERS[p] ?? p }, SHORT[p] ?? p)), h('th', {}, 'Latest'))),
+      h('tbody', {}, [...byCause.entries()].sort((a, b) => b[1].length - a[1].length).map(([cause, rs]) => {
+        const last = rs.sort((a, b) => String(b.finishedAt).localeCompare(String(a.finishedAt)))[0];
+        return h('tr', {}, h('td', { style: 'min-width:130px' }, h('strong', {}, cause), h('div', { class: 'muted' }, plural(rs.length, 'run'))),
+          clis.map((p) => h('td', { class: 'num' }, rs.filter((r) => r.provider === p).length || h('span', { class: 'muted' }, '0'))),
+          h('td', { style: 'min-width:200px' }, h('button', { class: 'linkish', onclick: () => showRun(last) }, `${last.agent} · ${last.effort}`),
+            h('div', { class: 'hint', style: 'margin:2px 0 0' }, (last.error || '').slice(0, 160))));
+      })))));
+  return card;
+}
+
+// ---------------------------------------------------------------- RESULTS
 function renderResults() {
   if (!cfg) return;
   const root = $('#tab-results'); root.replaceChildren();
   const dims = Object.keys(cfg.dimensions);
-  const order = { agent: cfg.agents.map((a) => a.id), provider: Object.keys(PROVIDERS), ...Object.fromEntries(dims.map((d) => [d, cfg.dimensions[d].map((v) => v.id)])) };
-  const effOrder = [...new Set(cfg.agents.flatMap((a) => (a.efforts || []).map(effName))), 'default'];
-  for (const r of results) r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
-  const fields = ['agent', 'provider', 'effort', 'ultracode', ...dims, 'status'];
-  const valuesOf = (f) => {
-    const vals = [...new Set(results.map((r) => String(r[f] ?? '')))];
-    const ord = f === 'effort' ? effOrder : order[f] || [];
-    return vals.sort((a, b) => ((ord.indexOf(a) + 1 || 999) - (ord.indexOf(b) + 1 || 999)) || a.localeCompare(b));
-  };
-
-  const filtered = results.filter((r) =>
-    fields.every((f) => !rv.filters[f] || String(r[f] ?? '') === rv.filters[f]) &&
+  const rerender = () => { saveRv(); renderResults(); };
+  const filtered = results.filter((r) => passes(rv, r) &&
     (!rv.q || [r.id, r.notes].join(' ').toLowerCase().includes(rv.q.toLowerCase())));
 
   // toolbar
@@ -747,35 +1386,33 @@ function renderResults() {
     h('div', { class: 'row' },
       h('input', { placeholder: 'Search run names and notes', value: rv.q, class: 'grow', style: 'min-width:200px',
         oninput: (e) => { rv.q = e.target.value; saveRv(); clearTimeout(window.__qt); window.__qt = setTimeout(renderResults, 250); } }),
-      fields.map((f) => h('select', { title: f, onchange: (e) => { rv.filters[f] = e.target.value; saveRv(); renderResults(); } },
-        h('option', { value: '' }, `${f}: all`), valuesOf(f).map((v) => h('option', { value: v, selected: rv.filters[f] === v }, `${f}: ${v || '—'}`)))),
-      h('button', { class: 'btn', onclick: () => { rv.filters = {}; rv.q = ''; saveRv(); renderResults(); } }, 'Clear'),
+      filterSelects(rv, results, rerender),
+      h('button', { class: 'btn', onclick: () => { rv.filters = {}; rv.q = ''; rerender(); } }, 'Clear'),
       h('button', { class: 'btn', onclick: async () => { await loadResults(); renderResults(); } }, 'Refresh')),
-    h('p', { class: 'hint' }, `${filtered.length} of ${results.length} runs shown. Score out of 10 as you play; scores and notes save instantly.`)));
+    h('p', { class: 'hint' }, `${filtered.length} of ${results.length} runs shown; Compare and the tables below use these. Score out of 10 as you play; scores and notes save instantly.`)));
 
-  // compare by
-  const groupFields = ['agent', 'provider', 'effort', 'agent+effort', 'ultracode', ...dims, 'model'];
-  if (!groupFields.includes(rv.group)) rv.group = 'agent';
-  const keyOf = (r) => rv.group === 'agent+effort' ? `${r.agent} · ${r.effort}` : String(r[rv.group] ?? '');
-  const groups = new Map();
-  for (const r of filtered) { const k = keyOf(r); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
-  const gOrd = rv.group === 'effort' ? effOrder : order[rv.group] || [];
+  root.append(compareCard(filtered));
+
+  // averages by group
+  const groupFields = ['agent+effort', ...runFields().filter((f) => f !== 'status'), 'model', 'status'];
+  if (!groupFields.includes(rv.group)) rv.group = 'agent+effort';
+  const groups = groupBy(filtered, (r) => fieldVal(r, rv.group));
   const avg = (rows, f) => { const v = rows.map((r) => r[f]).filter((x) => x != null && !Number.isNaN(+x)); return v.length ? { v: v.reduce((a, b) => a + +b, 0) / v.length, n: v.length } : { v: null, n: 0 }; };
   const sum = (rows, f) => rows.reduce((a, r) => a + (+r[f] || 0), 0);
-  const gRows = [...groups.entries()].sort(([a], [b]) => ((gOrd.indexOf(a) + 1 || 999) - (gOrd.indexOf(b) + 1 || 999)) || a.localeCompare(b, undefined, { numeric: true }));
+  const gRows = sortVals(rv.group, [...groups.keys()]).map((k) => [k, groups.get(k)]);
   const maxCost = Math.max(0, ...gRows.map(([, rs]) => avg(rs, 'costUsd').v || 0));
   root.append(h('div', { class: 'card' },
-    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Compare'),
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Averages by group'),
       h('span', { class: 'muted' }, 'Group by'),
-      h('select', { onchange: (e) => { rv.group = e.target.value; saveRv(); renderResults(); } },
-        groupFields.map((g) => h('option', { value: g, selected: rv.group === g }, g)))),
-    h('p', { class: 'sub' }, 'Averages per group. Cost averages only runs whose CLI reported a cost (n shown). Score averages only scored runs.'),
+      h('select', { onchange: (e) => { rv.group = e.target.value; rerender(); } },
+        groupFields.map((g) => h('option', { value: g, selected: rv.group === g }, fieldLabel(g))))),
+    h('p', { class: 'sub' }, 'Plain averages per group, everything else mixed in. Cost averages only runs whose CLI reported a cost (n shown). Score averages only scored runs.'),
     h('div', { class: 'scroll' }, h('table', {},
-      h('thead', {}, h('tr', {}, h('th', {}, rv.group), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
+      h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
       h('tbody', {}, gRows.map(([k, rs]) => {
         const c = avg(rs, 'costUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
         return h('tr', {},
-          h('td', {}, h('strong', {}, k || '—')),
+          h('td', {}, h('strong', {}, valLabel(rv.group, k))),
           h('td', { class: 'num' }, rs.length),
           h('td', { class: 'num' }, `${Math.round(100 * del / rs.length)}%`),
           h('td', { class: 'num' }, fmtMin(avg(rs, 'wallMinutes').v)),
@@ -788,7 +1425,7 @@ function renderResults() {
 
   // runs table
   const cols = [
-    ['', null], ['agent', 'agent'], ['effort', 'effort'], ...dims.map((d) => [d, d]), ['status', 'status'],
+    ['', null], ['model', 'agent'], ['effort', 'effort'], ...dims.map((d) => [d, d]), ['status', 'status'],
     ['time', 'wallMinutes', 1], ['cost', 'costUsd', 1], ['out tok', 'outputTokens', 1], ['KB', 'kb', 1],
     ['score', 'score', 1], ['notes', 'notes'], ['finished', 'finishedAt'], ['', null]];
   const sk = rv.sort.k, sd = rv.sort.d;
@@ -809,34 +1446,83 @@ function renderResults() {
     sorted.length > LIMIT ? h('p', { class: 'hint' }, `Showing the first ${LIMIT}. Use filters to narrow down.`) : null));
 
   function runRow(r) {
-    const saveScore = async (patch) => {
-      Object.assign(r, patch);
-      try { await api('/api/score', 'PUT', { id: r.id, score: r.score ?? '', notes: r.notes ?? '' }); } catch (e) { alert(e.message); }
-    };
+    const fl = runFlags().get(r.id);
     return h('tr', { class: r.status === 'failed' ? 'failed' : '' },
       h('td', {}, r.entry ? h('a', { href: '/runs/' + r.entry, target: '_blank', title: 'Play', style: 'text-decoration:none' }, '▶') : h('span', { class: 'muted', title: 'No game file' }, '—')),
       h('td', {}, r.agent), h('td', {}, r.effort), dims.map((d) => h('td', {}, r[d] ?? '—')),
-      h('td', {}, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad'), title: r.error || '' }, r.status), r.delivered === false && r.status === 'ok' ? h('span', { class: 'tag warn', title: 'No bundled .html in the root' }, 'no html') : null,
+      h('td', {}, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad'), title: r.error || '' }, r.status),
+        fl ? h('button', { class: 'tag ' + (fl.items[0].bad ? 'bad' : 'warn'), style: 'border:0;cursor:pointer;font:inherit;font-size:12px;margin-left:4px',
+          title: `${fl.items.map((i) => i.text).join('\n')}\n\nClick for details`, onclick: () => showRun(r) }, `⚑ ${fl.items[0].tag}${fl.items.length > 1 ? ` +${fl.items.length - 1}` : ''}`) : null,
         r.status === 'failed' && r.error ? h('div', { class: 'hint', style: 'margin:2px 0 0; min-width:220px; max-width:300px; white-space:normal', title: r.error }, r.error.length > 120 ? r.error.slice(0, 117) + '…' : r.error) : null),
       h('td', { class: 'num' }, fmtMin(r.wallMinutes)),
       h('td', { class: 'num' }, r.costUsd != null ? fmtUsd(r.costUsd) : h('span', { class: 'muted', title: 'This CLI does not report cost' }, 'n/a')),
       h('td', { class: 'num' }, fmtTok(r.outputTokens)),
       h('td', { class: 'num' }, r.kb ?? '—'),
       h('td', { class: 'num' }, h('input', { type: 'number', min: 0, max: 10, step: 0.5, class: 'score', value: r.score ?? '',
-        onchange: (e) => saveScore({ score: e.target.value === '' ? null : +e.target.value }) })),
-      h('td', {}, h('input', { class: 'notes', value: r.notes ?? '', placeholder: 'notes', onchange: (e) => saveScore({ notes: e.target.value }) })),
+        onchange: (e) => saveReview(r, { score: e.target.value === '' ? null : +e.target.value }) })),
+      h('td', {}, h('input', { class: 'notes', value: r.notes ?? '', placeholder: 'notes', onchange: (e) => saveReview(r, { notes: e.target.value }) })),
       h('td', { class: 'muted', style: 'white-space:nowrap' }, r.finishedAt ? new Date(r.finishedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''),
       h('td', { style: 'white-space:nowrap' },
-        h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
-        h('button', { class: 'icon', title: 'Prompt sent', onclick: () => showFile(r.id, 'prompt.md', 'Prompt') }, 'prompt'),
-        r.goal && r.goal !== 'off' ? h('button', { class: 'icon', title: 'The /goal message sent', onclick: () => showFile(r.id, 'goal.md', 'Goal') }, 'goal') : null,
-        h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, 'agent.err', 'Errors', r.error) }, 'log'),
-        h('button', { class: 'icon', title: 'Raw CLI output (agent.out), the end of it for long runs', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out'),
+        h('button', { class: 'icon', title: 'Everything about this run', onclick: () => showRun(r) }, 'details'),
+        fileButtons(r),
         h('button', { class: 'icon', title: 'Delete this run so it runs again next time', onclick: async () => {
           if (!confirm(`Delete ${r.id}? Its folder and game are removed and it will run again in the next batch.`)) return;
           try { await api('/api/delete-run', 'POST', { id: r.id }); await loadResults(); renderResults(); } catch (e) { alert(e.message); }
         } }, '✕')));
   }
+}
+
+// A → B on any field, optionally once per value of another ("for each"): opus · medium → sonnet · medium,
+// or effort medium → high for each model, to see whether one model gains more from extra effort than another.
+function compareCard(rows) {
+  const c = rv.cmp ??= { f: 'agent+effort', a: '', b: '', by: '', matched: true };
+  const fields = ['agent+effort', 'agent', 'effort', 'provider', 'ultracode', ...Object.keys(cfg.dimensions),
+    ...(rows.some((r) => r.cli) ? ['cli'] : []), ...(rows.some((r) => r.promptVersion) ? ['promptVersion'] : [])];
+  const valsOf = (f) => sortVals(f, [...new Set(rows.map((r) => fieldVal(r, f)))]);
+  if (!fields.includes(c.f) || valsOf(c.f).length < 2) c.f = fields.find((f) => valsOf(f).length > 1) ?? 'agent+effort';
+  const vals = valsOf(c.f);
+  if (!vals.includes(c.a)) c.a = vals[0] ?? '';
+  if (!vals.includes(c.b) || c.b === c.a) c.b = vals.find((v) => v !== c.a) ?? '';
+  const splits = fields.filter((g) => canSplit(c.f, g));
+  if (!splits.includes(c.by)) c.by = '';
+  const set = (patch) => { Object.assign(c, patch); saveRv(); renderResults(); };
+  const pick = (value, opts, onpick, title) => h('select', { title, onchange: (e) => onpick(e.target.value) },
+    opts.map(([v, l]) => h('option', { value: v, selected: v === value }, l)));
+  const all = vals.length > 1 ? compareAB(rows, c) : [], pairs = (col) => col.m.ok?.n ?? 0;
+  const res = all.filter((col) => col.nA && col.nB), gone = all.filter((col) => !col.nA || !col.nB);
+  const none = !res.length || (c.matched && res.every((col) => !pairs(col)));
+  return h('div', { class: 'card' },
+    h('h2', {}, 'Compare'),
+    h('div', { class: 'row', style: 'margin:8px 0 4px' },
+      pick(c.f, fields.map((f) => [f, fieldLabel(f)]), (f) => set({ f }), 'What differs between A and B'),
+      pick(c.a, vals.map((v) => [v, valLabel(c.f, v)]), (a) => set({ a }), 'A'),
+      h('span', { class: 'muted' }, '→'),
+      pick(c.b, vals.map((v) => [v, valLabel(c.f, v)]), (b) => set({ b }), 'B'),
+      h('button', { class: 'icon', title: 'Swap A and B', onclick: () => set({ a: c.b, b: c.a }) }, '⇄'),
+      h('span', { class: 'muted' }, 'for each'),
+      pick(c.by, [['', 'nothing (all together)'], ...splits.map((g) => [g, fieldLabel(g)])], (by) => set({ by }), 'Show the change separately for each value of this field'),
+      h('label', { class: 'row', style: 'gap:6px', title: 'Pair each A run with the B runs that match it in everything else (the other variants, model or effort, prompt), so the difference comes from what you compare. Untick to compare all their runs as they are.' },
+        h('input', { type: 'checkbox', checked: c.matched, onchange: (e) => set({ matched: e.target.checked }) }), 'Only matching variants')),
+    h('p', { class: 'sub' }, 'How B differs from A in the runs shown. For example model + effort: opus · medium → sonnet · medium; or effort: medium → high for each model, to see which model gains more from extra effort. Bold: the same direction in at least 80% of 3 or more pairs.'),
+    vals.length < 2 ? h('p', { class: 'muted' }, 'Needs runs that differ in something.')
+      : none ? h('p', { class: 'warns' }, !res.length ? `No ${fieldLabel(c.by)} has runs on both sides.`
+        : `No matching pairs: A and B never ran with the same other variants${c.by ? ` within one ${fieldLabel(c.by)}` : ''}. Untick Only matching variants to compare all their runs anyway.`)
+      : h('div', { class: 'scroll' }, h('table', {},
+        h('thead', {}, h('tr', {}, h('th', { class: 'plain', style: 'white-space:normal; min-width:110px' }, `${valLabel(c.f, c.a)} → ${valLabel(c.f, c.b)}`),
+          res.map((col) => h('th', { class: 'num plain' }, col.col == null ? 'All' : valLabel(c.by, col.col),
+            h('div', { class: 'muted', style: 'font-weight:400' }, c.matched ? plural(pairs(col), 'pair') : `${col.nA} vs ${col.nB} runs`))))),
+        h('tbody', {}, Object.entries(METRICS).map(([k, m]) => h('tr', {}, h('td', {}, m.label),
+          res.map((col) => h('td', { class: 'num', style: 'white-space:nowrap' }, cmpCell(m, col.m[k], c.matched)))))))),
+    gone.length && !none ? h('p', { class: 'hint' }, `Left out, no runs on one side: ${gone.map((col) => valLabel(c.by, col.col)).join(', ')}.`) : null);
+}
+function cmpCell(m, p, matched) {
+  if (!p) return h('span', { class: 'muted' }, '—');
+  const show = (v) => m.rate ? pct(v) : m.fmt(v);
+  const chg = m.log ? fmtChange(p.b / p.a) : m.rate ? signed((p.b - p.a) * 100, ' pts') : signed(p.b - p.a, '', 1);
+  const sure = matched && p.n >= 3 && Math.max(p.up, p.down) >= 0.8 * p.n;
+  return h('div', { title: matched ? `Higher in ${p.up} of ${p.n} pairs, lower in ${p.down}` : 'All runs of A and B, not paired' },
+    h('span', { class: 'chg' + (sure ? ' sure' : '') }, chg),
+    h('div', { class: 'muted', style: 'font-size:12px' }, `${show(p.a)} → ${show(p.b)}`, matched && p.n > 1 && p.up + p.down ? ` · ${p.up}↑ ${p.down}↓` : ''));
 }
 
 async function showFile(id, name, title, error) {
@@ -846,6 +1532,77 @@ async function showFile(id, name, title, error) {
     h('pre', { class: name.endsWith('.md') ? '' : 'mono' }, text.length > 400000 ? '…' + text.slice(-400000) : text || '(empty)')));
 }
 function openModal(title, content) { $('#mtitle').textContent = title; $('#mbody').replaceChildren(content); modal.showModal(); }
+// A review changed in the dialog: redraw the view behind it once it closes.
+let reviewChanged = false;
+modal.addEventListener('close', () => {
+  if (!reviewChanged) return;
+  reviewChanged = false;
+  if (tab === 'insights') renderInsights(); else if (tab === 'results') renderResults();
+});
+
+const fileButtons = (r) => [
+  h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
+  h('button', { class: 'icon', title: 'Prompt sent', onclick: () => showFile(r.id, 'prompt.md', 'Prompt') }, 'prompt'),
+  r.goal && r.goal !== 'off' ? h('button', { class: 'icon', title: 'The /goal message sent', onclick: () => showFile(r.id, 'goal.md', 'Goal') }, 'goal') : null,
+  h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, 'agent.err', 'Errors', r.error) }, 'log'),
+  h('button', { class: 'icon', title: 'Raw CLI output (agent.out), the end of it for long runs', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out')];
+
+// Score, notes and "looked at" all go to runs/scores.json; any of them counts as reviewed.
+async function saveReview(r, patch) {
+  Object.assign(r, patch); reviewChanged = true;
+  try { await api('/api/score', 'PUT', { id: r.id, score: r.score ?? '', notes: r.notes ?? '', seen: !!r.seen }); } catch (e) { alert(e.message); }
+  updateBadge();
+}
+// The Insights tab shows how many flagged runs nobody has reviewed yet.
+function updateBadge() {
+  const b = $('nav button[data-tab="insights"]'); if (!b || !cfg) return;
+  const n = [...runFlags().values()].filter((f) => !reviewed(f.r)).length;
+  b.replaceChildren('Insights', n ? h('span', { class: 'badge', title: `${plural(n, 'finished run')} look off and haven't been reviewed` }, n) : '');
+}
+
+// Everything about one run: what it was, what it measured against what's usual for its setup, and why it's flagged.
+function showRun(r) {
+  const fl = runFlags().get(r.id), fits = usualFits();
+  const usual = (k) => { const u = fits[k]?.usual(r); return u && r[k] > 0 && r.status === 'ok' ? `usual ~${METRICS[k].fmt(u)} (${fmtX(r[k] / u)})` : ''; };
+  const line = (label, v, note) => h('tr', {}, h('td', { class: 'muted' }, label), h('td', { class: 'num' }, v ?? '—'), h('td', { class: 'muted', style: 'font-size:12.5px' }, note || ''));
+  const tok = (k) => r[k] == null ? null : fmtTok(r[k]), when = (t) => t ? new Date(t).toLocaleString() : null;
+  openModal(r.id, h('div', {},
+    h('div', { class: 'chips', style: 'margin-bottom:10px' },
+      h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad') }, r.status),
+      h('span', { class: 'tag' }, `${PROVIDERS[r.provider] ?? r.provider} · ${r.model ?? r.agent}`), h('span', { class: 'tag' }, `effort ${r.effort}`),
+      Object.keys(cfg.dimensions).map((d) => d === GOAL_DIM && r.goalSkipped
+        ? h('span', { class: 'tag', title: 'Codex has no headless /goal: this run got the same prompt without it' }, `${d}=${r[d]}* (no /goal)`)
+        : h('span', { class: 'tag', title: r.changed?.includes(d) ? 'This variant\'s text was edited after the run' : null }, `${d}=${r[d] ?? '—'}${r.changed?.includes(d) ? ' (old text)' : ''}`))),
+    r.error ? h('p', { class: 'errs' }, `${causeOf(r.error)}: ${r.error}`) : null,
+    fl ? h('div', { class: 'warns', style: 'margin-bottom:10px' }, fl.items.map((i) => h('div', {}, i.text))) : null,
+    h('div', { class: 'grid2' },
+      h('table', {}, h('tbody', {},
+        line('Time', fmtMin(r.wallMinutes), usual('wallMinutes')),
+        line('API time', r.apiMinutes != null ? fmtMin(r.apiMinutes) : null, r.apiMinutes && r.wallMinutes ? `${pct(r.apiMinutes / r.wallMinutes)} of the time` : ''),
+        line('Cost', r.costUsd != null ? fmtUsd(r.costUsd) : null, r.costUsd != null ? usual('costUsd') : 'this CLI doesn\'t report cost'),
+        line('Output tokens', tok('outputTokens'), [r.reasoningTokens != null ? `${fmtTok(r.reasoningTokens)} reasoning` : '', usual('outputTokens')].filter(Boolean).join(' · ')),
+        line('Input tokens', tok('inputTokens'), r.inputTokens != null ? `${fmtTok(r.cachedTokens ?? 0)} cache read${r.cacheWriteTokens != null ? ` · ${fmtTok(r.cacheWriteTokens)} cache write` : ''}` : ''),
+        line('Total tokens', tok('totalTokens')),
+        line('Turns', r.turns, r.rounds > 1 ? `in the last of ${r.rounds} /goal rounds` : ''),
+        line('Subagents', r.subagents))),
+      h('table', {}, h('tbody', {},
+        line('Game file', r.delivered ? fmtKb(r.kb) : 'none', r.delivered ? usual('kb') : ''),
+        line('Lines', r.loc != null ? fmtNum(r.loc) : null, usual('loc')),
+        line('Dev files', r.files),
+        line('TODO / FIXME', r.todos),
+        line('Reply', r.hasReply ? (r.replyChars ? `${fmtNum(r.replyChars)} characters` : 'yes') : 'none'),
+        line('CLI version', r.cli),
+        line('Prompt', promptLabel(r.promptVersion)),
+        line('Started', when(r.startedAt)), line('Finished', when(r.finishedAt))))),
+    h('div', { class: 'row', style: 'margin-top:12px' },
+      h('span', { class: 'muted' }, 'Score'),
+      h('input', { type: 'number', min: 0, max: 10, step: 0.5, class: 'score', value: r.score ?? '', onchange: (e) => saveReview(r, { score: e.target.value === '' ? null : +e.target.value }) }),
+      h('input', { class: 'grow', value: r.notes ?? '', placeholder: 'notes', style: 'min-width:160px', onchange: (e) => saveReview(r, { notes: e.target.value }) }),
+      h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!r.seen, onchange: (e) => saveReview(r, { seen: e.target.checked }) }), 'Looked at')),
+    h('div', { class: 'row', style: 'margin-top:10px' },
+      r.entry ? h('button', { class: 'btn primary', onclick: () => window.open('/runs/' + r.entry, '_blank') }, '▶ Play') : null,
+      fileButtons(r))));
+}
 
 // ------------------------------------------------------------------- data
 async function loadSetup() {
@@ -854,36 +1611,49 @@ async function loadSetup() {
   cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
-  const t = await api('/api/template'); tmpl = t.text; savedTmpl = tmpl; meta.templatePath = t.path;
+  const t = await api('/api/template'); tmpl = t.text; savedTmpl = tmpl; meta.templatePath = t.path; meta.promptVersion = t.version;
 }
-async function loadResults() { results = await api('/api/results'); }
+async function loadResults() {
+  results = await api('/api/results');
+  for (const r of results) {
+    r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
+    if (r.cliVersion) r.cli = `${SHORT[r.provider] ?? r.provider} ${r.cliVersion}`; // versions only compare within a CLI
+  }
+  cache = {}; updateBadge();
+}
 
 let wasRunning = false;
 async function poll() {
-  try {
-    const st = await api('/api/status?since=' + logSince);
-    if (st.logTotal < logSince) { logSince = 0; logPre.textContent = ''; return poll(); } // a new batch reset the log
-    status = st;
-    const prevSmokes = JSON.stringify(smokes);
-    smokes = st.smokes ?? {};
-    if (JSON.stringify(smokes) !== prevSmokes || Object.values(smokes).some((s) => s.running)) renderSmokes();
-    const pre = logPre;
-    if (st.log.length) {
-      const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
-      pre.textContent += st.log.join('\n') + '\n';
-      if (atBottom) pre.scrollTop = pre.scrollHeight;
-    }
-    logSince = st.logTotal;
-    const pill = $('#pill');
-    pill.textContent = st.running ? (st.stopping ? 'Stopping…' : `Running · ${st.active.length} active · ${st.finished} done`) : 'Idle';
-    pill.classList.toggle('live', !!st.running);
-    const finishedOne = st.log.some((l) => /^[✔✘]/.test(l));
-    if (finishedOne || (wasRunning && !st.running)) { await loadResults(); if (tab === 'results') renderResults(); }
-    if (tab === 'run') { if (wasRunning !== !!st.running || finishedOne) renderRun(); else renderLive(); }
-    wasRunning = !!st.running;
-  } catch {
-    $('#pill').textContent = 'Dashboard server not reachable'; $('#pill').classList.remove('live');
+  let st;
+  try { st = await api('/api/status?since=' + logSince); }
+  catch { $('#pill').textContent = 'Dashboard server not reachable'; $('#pill').classList.remove('live'); return; }
+  if (st.logTotal < logSince) { logSince = 0; logPre.textContent = ''; return poll(); } // a new batch reset the log
+  status = st;
+  const prevSmokes = JSON.stringify(smokes);
+  smokes = st.smokes ?? {};
+  if (JSON.stringify(smokes) !== prevSmokes || Object.values(smokes).some((s) => s.running)) renderSmokes();
+  const pre = logPre;
+  if (st.log.length) {
+    const atBottom = pre.scrollTop + pre.clientHeight >= pre.scrollHeight - 8;
+    pre.textContent += st.log.join('\n') + '\n';
+    if (atBottom) pre.scrollTop = pre.scrollHeight;
   }
+  logSince = st.logTotal;
+  const finishedOne = st.log.some((l) => /^[✔✘]/.test(l));
+  if (finishedOne || (wasRunning && !st.running)) {
+    await loadResults();
+    if (tab === 'results') renderResults();
+    if (tab === 'insights') renderInsights();
+  }
+  // The pill and the browser tab's title show progress and live warnings, so a background tab shows them too.
+  const hb = batchHealth(), warn = st.running ? hb?.alerts.length ?? 0 : 0, pill = $('#pill');
+  pill.textContent = st.running ? (st.stopping ? 'Stopping…'
+    : `Running · ${st.active.length} active · ${st.finished}${hb?.total ? ` of ${hb.total}` : ''} done${warn ? ` · ⚠ ${warn}` : ''}`) : 'Idle';
+  pill.classList.toggle('live', !!st.running);
+  document.title = `${warn ? '⚠ ' : ''}${st.running && hb?.total ? `${st.finished}/${hb.total} · ` : ''}Matrix Dashboard`;
+  if (tab === 'run') { if (wasRunning !== !!st.running || finishedOne) renderRun(); else renderLive(); }
+  if (wasRunning !== !!st.running || JSON.stringify(smokes) !== prevSmokes) renderClis(); // Update is off during batches and tests
+  wasRunning = !!st.running;
 }
 
 (async () => {
@@ -900,9 +1670,9 @@ async function poll() {
   await loadSetup();
   await loadResults();
   renderSetup();
-  showTab(['setup', 'run', 'results'].includes(tab) ? tab : 'run');
   loadClis(); // takes a few seconds (it asks each CLI); the page works meanwhile
-  await poll();
+  await poll(); // batch status first, so a view of the last batch opens on it
+  showTab(TABS.includes(tab) ? tab : 'run');
   setInterval(poll, 2000);
 })();
 </script>

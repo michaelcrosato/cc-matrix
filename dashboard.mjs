@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -30,6 +31,8 @@ fs.mkdirSync(OUT, { recursive: true });
 // ---------------------------------------------------------------- helpers
 const readJSON = (f, fallback) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return fallback; } };
 const templatePath = () => path.resolve(path.dirname(CONFIG), readJSON(CONFIG, {}).templateFile || 'prompt-template.md');
+// Same hash run-matrix.mjs saves with each run as promptVersion.
+const promptVersion = (text) => crypto.createHash('sha1').update(text).digest('hex').slice(0, 8);
 
 function send(res, code, body, type = 'application/json') {
   res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
@@ -125,6 +128,22 @@ function checkClis(refresh) {
   return cliCheck;
 }
 
+// Update a CLI with its own `update` command (Muse's starts Muse instead, so it has none here).
+// Never during a batch or a test, so a CLI can't change under a running agent.
+const UPDATABLE = ['claude', 'codex', 'agy', 'grok'];
+let updating = null;
+async function updateCli(p) {
+  if (!UPDATABLE.includes(p)) throw new Error(`No update command for ${p}`);
+  if (runner) throw new Error('Wait for the batch to finish before updating a CLI.');
+  if (Object.values(smokes).some((s) => s.running)) throw new Error('Wait for the tests to finish before updating a CLI.');
+  if (updating) throw new Error(`${updating} is already updating.`);
+  updating = p;
+  try {
+    const bin = readJSON(CONFIG, {}).bins?.[p] || p, r = await runCmd(bin, ['update'], 5 * 60000);
+    return { ok: r.code === 0, output: `${r.out}\n${r.err}`.trim().slice(-3000), ...(await checkClis(true)) };
+  } finally { updating = null; }
+}
+
 // ------------------------------------------------------------ smoke tests
 // One tiny task per model+effort through the real runner (run-matrix.mjs --smoke).
 // Finished results are kept in runs/.smoke.json so they survive a restart.
@@ -158,13 +177,14 @@ function selectionArgs(sel = {}) {
 // ------------------------------------------------------------- run state
 let runner = null;
 // active: run id -> start time
-const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Map(), finished: 0, settings: null };
+const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Map(), finished: 0, planned: null, settings: null };
 function logLine(line) {
   if (!line) return;
   run.log.push(line);
   if (run.log.length > 3000) run.log.splice(0, run.log.length - 3000);
   const m = line.match(/^(▶|✔|✘|■) (\S+)/);
   if (m) { if (m[1] === '▶') run.active.set(m[2], new Date().toISOString()); else { run.active.delete(m[2]); if (m[1] !== '■') run.finished++; } }
+  else { const p = line.match(/^(\d+) runs(?: \((\d+) already done\))? → /); if (p) run.planned = p[1] - (p[2] ?? 0); } // runs this batch will do
 }
 
 function startRun(s) {
@@ -173,7 +193,7 @@ function startRun(s) {
   if (+s.budget > 0) a.push('--budget', String(+s.budget));
   if (+s.timeout > 0) a.push('--timeout', String(+s.timeout));
   Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null,
-    active: new Map(), finished: 0, settings: s });
+    active: new Map(), finished: 0, planned: null, settings: s });
   runner = spawn(process.execPath, a, { cwd: HERE });
   let buf = '';
   const onData = (d) => { buf += d; const lines = buf.split(/\r?\n/); buf = lines.pop(); lines.forEach(logLine); };
@@ -183,14 +203,41 @@ function startRun(s) {
 }
 
 // ------------------------------------------------------------------ results
+// A run's saved prompt (prompt.md, or goal.md for the goal) no longer contains the current text of
+// one of its variants: the variant was edited after the run, so the run's label is out of date.
+const sentCache = new Map(); // file -> { mtime, text }; a rerun rewrites the file
+const sentText = (file) => {
+  try {
+    const mtime = fs.statSync(file).mtimeMs, c = sentCache.get(file);
+    if (c?.mtime === mtime) return c.text;
+    const text = fs.readFileSync(file, 'utf8'); sentCache.set(file, { mtime, text }); return text;
+  } catch { return null; }
+};
+function changedVariants(dir, r, dims, tmpl) {
+  const out = [];
+  for (const [d, vs] of Object.entries(dims)) {
+    const text = (vs.find((v) => v.id === r[d])?.text ?? '').trim();
+    if (!text) continue;
+    const isGoal = d === 'goal';
+    if (isGoal ? r.goalSkipped : !tmpl.includes(`{{${d}}}`)) continue;
+    const sent = sentText(path.join(dir, isGoal ? 'goal.md' : 'prompt.md'));
+    if (sent != null && !sent.replace(/\s+/g, ' ').includes(text.replace(/\s+/g, ' '))) out.push(d);
+  }
+  return out;
+}
+
 function results() {
   const scores = readJSON(path.join(OUT, 'scores.json'), {});
+  const dims = readJSON(CONFIG, {}).dimensions ?? {};
+  let tmpl = ''; try { tmpl = fs.readFileSync(templatePath(), 'utf8'); } catch {}
   const rows = [];
   for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
     if (!d.isDirectory()) continue;
-    const r = readJSON(path.join(OUT, d.name, 'result.json'), null);
+    const dir = path.join(OUT, d.name), r = readJSON(path.join(dir, 'result.json'), null);
     if (!r) continue;
-    r.hasReply = fs.existsSync(path.join(OUT, d.name, 'reply.md'));
+    r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
+    const changed = changedVariants(dir, r, dims, tmpl);
+    if (changed.length) r.changed = changed;
     rows.push({ ...r, ...(scores[r.id] ?? {}) });
   }
   return rows;
@@ -228,8 +275,14 @@ const server = http.createServer(async (req, res) => {
       fs.writeFileSync(CONFIG, JSON.stringify(c, null, 2) + '\n'); refreshReport();
       return send(res, 200, { ok: true });
     }
-    if (p === '/api/template' && m === 'GET') return send(res, 200, { text: fs.existsSync(templatePath()) ? fs.readFileSync(templatePath(), 'utf8') : '', path: templatePath() });
-    if (p === '/api/template' && m === 'PUT') { fs.writeFileSync(templatePath(), JSON.parse(await body(req)).text); return send(res, 200, { ok: true }); }
+    if (p === '/api/template' && m === 'GET') {
+      const text = fs.existsSync(templatePath()) ? fs.readFileSync(templatePath(), 'utf8') : '';
+      return send(res, 200, { text, path: templatePath(), version: promptVersion(text) });
+    }
+    if (p === '/api/template' && m === 'PUT') {
+      const { text } = JSON.parse(await body(req));
+      fs.writeFileSync(templatePath(), text); return send(res, 200, { ok: true, version: promptVersion(text) });
+    }
 
     if (p === '/api/preview' && m === 'POST') {
       const s = JSON.parse(await body(req));
@@ -240,6 +293,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/run' && m === 'POST') {
       if (runner) return send(res, 409, { error: 'A batch is already running.' });
+      if (updating) return send(res, 409, { error: `${updating} is updating; start when it's done.` });
       startRun(JSON.parse(await body(req)));
       return send(res, 200, { ok: true });
     }
@@ -251,23 +305,25 @@ const server = http.createServer(async (req, res) => {
       const since = +(url.searchParams.get('since') ?? 0);
       return send(res, 200, { running: !!runner, stopping: fs.existsSync(path.join(OUT, '.stop')),
         startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...run.active.keys()],
-        activeSince: Object.fromEntries(run.active), finished: run.finished, settings: run.settings, logTotal: run.log.length,
+        activeSince: Object.fromEntries(run.active), finished: run.finished, planned: run.planned, settings: run.settings, logTotal: run.log.length,
         log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), smokes });
     }
 
     if (p === '/api/clis' && m === 'GET') return send(res, 200, await checkClis(url.searchParams.has('refresh')));
+    if (p === '/api/update-cli' && m === 'POST') return send(res, 200, await updateCli(JSON.parse(await body(req)).provider));
     if (p === '/api/smoke' && m === 'POST') {
       const { tests = [] } = JSON.parse(await body(req)); // [{ key: 'agent:effort', goal }]
+      if (updating) return send(res, 409, { error: `${updating} is updating; test when it's done.` });
       for (const t of tests) if (!smokes[t.key]?.running) startSmoke(t.key, t.goal);
       return send(res, 200, { ok: true });
     }
 
     if (p === '/api/results' && m === 'GET') return send(res, 200, results());
     if (p === '/api/score' && m === 'PUT') {
-      const { id, score, notes } = JSON.parse(await body(req));
+      const { id, score, notes, seen } = JSON.parse(await body(req));
       const f = path.join(OUT, 'scores.json'), all = readJSON(f, {});
-      all[id] = { score: score === '' || score == null ? null : +score, notes: notes ?? '' };
-      if (all[id].score == null && !all[id].notes) delete all[id];
+      all[id] = { score: score === '' || score == null ? null : +score, notes: notes ?? '', ...(seen ? { seen: true } : {}) };
+      if (all[id].score == null && !all[id].notes && !all[id].seen) delete all[id];
       fs.writeFileSync(f, JSON.stringify(all, null, 2)); refreshReport();
       return send(res, 200, { ok: true });
     }
