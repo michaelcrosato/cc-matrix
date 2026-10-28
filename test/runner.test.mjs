@@ -164,6 +164,11 @@ test('adding a dimension keeps finished runs done: they count as its olderRuns v
   assert.match(r.all, /· skip opus-low__a__free \(already ok as opus-low__a\)/);
   assert.match(r.all, /▶ opus-low__a__loud/);
   assert.doesNotMatch(r.all, /▶ opus-low__a__free/);
+  // the spreadsheet shows the older run as the variant it counts as, like the dashboard
+  const [head, ...rows] = fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8').trim().split('\n').map((l) => l.split(','));
+  const audioOf = (id) => rows.find((x) => x[0] === id)?.[head.indexOf('audio')];
+  assert.equal(audioOf('opus-low__a'), 'free');
+  assert.equal(audioOf('opus-low__a__loud'), 'loud');
   // unmarked, they count as the first variant: loud (done twice over) and not free
   setup({ ...one, audio: [{ id: 'loud', text: 'loud' }, { id: 'free', text: 'your choice' }] }, 'Testing: {{testing}}\nAudio: {{audio}}\n');
   assert.deepEqual(dry(), [2, 1]);

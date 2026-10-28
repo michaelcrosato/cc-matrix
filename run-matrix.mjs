@@ -183,7 +183,8 @@ function readResult(id) { try { return JSON.parse(fs.readFileSync(path.join(outD
 // dimension was added doesn't have it (in its folder name or result.json), so it counts as that
 // dimension's variant marked olderRuns, else its first: adding a field to the prompt doesn't redo
 // every finished run. A dimension removed since is left out, so its runs count for what's left.
-const olderVariant = (d) => (cfg.dimensions[d].find((v) => v.olderRuns) ?? cfg.dimensions[d][0])?.id;
+// A declaration too: the report fills these in.
+function olderVariant(d) { return (cfg.dimensions[d].find((v) => v.olderRuns) ?? cfg.dimensions[d][0])?.id; }
 function runKey(r) {
   const parts = r.id.split('__'), last = parts.at(-1);
   const rep = parts.length > 1 && /^r\d+$/.test(last) && !dimNames.some((d) => r[d] === last) ? last : null;
@@ -692,6 +693,8 @@ function writeReport() {
   const scores = readScores();
   // A review saved with a startedAt belongs to that attempt only (the dashboard does the same).
   for (const r of rows) { const s = scores[r.id]; if (s && (!s.startedAt || s.startedAt === r.startedAt)) { const { startedAt, ...rest } = s; Object.assign(r, rest); } }
+  // A run from before a dimension was added shows as the variant it counts as, like in the dashboard.
+  for (const r of rows) for (const d of dims) r[d] ??= olderVariant(d);
   const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
     'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt'];
