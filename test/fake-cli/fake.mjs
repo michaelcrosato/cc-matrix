@@ -10,6 +10,9 @@
 //   FAKE:noreply          finish OK with an empty final reply
 //   FAKE:todo             leave a TODO in the game
 // FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
+// With CODEX_HOME or GROK_HOME set, codex and grok also write session logs there the way the real ones
+// do (a Codex subagent thread; Grok /goal helper sessions), for the runner to find.
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -67,37 +70,122 @@ export async function run(cli) {
 
   if (cli === 'claude' || cli === 'grok') {
     if (fail && cli === 'grok' && /start/.test(fail)) { line({ type: 'error', message: fail }); process.exit(1); }
-    if (cli === 'grok') line({ type: 'system', subtype: 'init', model });
+    const sessionId = cli === 'grok' ? crypto.randomUUID() : 'fake-session';
+    // The stream (Claude Code's stream-json, Grok's copy of it): two responses, the first in two events (one per
+    // content block) with a tool call each; one tool fails; one compaction; Claude Code's plan limits twice.
+    const [read, edit] = cli === 'grok' ? ['read_file', 'search_replace'] : ['Read', 'Edit'];
+    line({ type: 'system', subtype: 'init', model, session_id: sessionId });
+    if (cli === 'claude') line({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: {
+      five_hour: { utilization: 0.1, resetsAt: 1793275800 }, seven_day: { utilization: 0.5, resetsAt: 1793559600 } } } });
+    line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'tool_use', id: 't1', name: read, input: {} }] } });
+    line({ type: 'assistant', message: { id: 'msg_1', content: [{ type: 'tool_use', id: 't2', name: edit, input: {} }] } });
+    line({ type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }, { type: 'tool_result', tool_use_id: 't2', is_error: true, content: 'no match' }] } });
+    line({ type: 'system', subtype: 'compact_boundary', compact_metadata: { trigger: 'auto', pre_tokens: 1000 } });
+    line({ type: 'assistant', message: { id: 'msg_2', content: [{ type: 'text', text: reply }] } });
+    if (cli === 'claude') line({ type: 'rate_limit_event', rate_limit_info: { status: 'allowed', unifiedWindows: {
+      five_hour: { utilization: 0.12, resetsAt: 1793275800 }, seven_day: { utilization: 0.51, resetsAt: 1793559600 } } } });
+    // Grok's result has no helper model and costs its main model 0.0425.
+    const modelUsage = { [model]: { inputTokens: tok.input, outputTokens: tok.output, cacheReadInputTokens: tok.cacheRead,
+      cacheCreationInputTokens: tok.cacheWrite, ...(cli === 'claude' ? { thinkingTokens: tok.reasoning } : {}), costUSD: cli === 'claude' ? 0.04 : 0.0425 },
+      ...(cli === 'claude' ? { 'claude-haiku-5-5': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 0, cacheCreationInputTokens: 5, costUSD: 0.0025 } } : {}) };
     line({ type: 'result', subtype: fail ? 'error_during_execution' : 'success', is_error: !!fail, ...(fail ? { errors: [fail] } : {}),
       duration_ms: 2000, duration_api_ms: 1500, num_turns: 4, ...(goal ? { result_index: 1 } : {}), result: fail ? '' : reply,
-      session_id: 'fake-session', total_cost_usd: 0.0425, subagent_stats: { spawned: 1 },
-      modelUsage: { [model]: { inputTokens: tok.input, outputTokens: tok.output, cacheReadInputTokens: tok.cacheRead,
-        cacheCreationInputTokens: tok.cacheWrite, thinkingTokens: tok.reasoning, costUSD: 0.04 },
-        'claude-haiku-5-5': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 0, cacheCreationInputTokens: 5, costUSD: 0.0025 } } });
+      session_id: sessionId, total_cost_usd: 0.0425, ...(cli === 'claude' ? { subagent_stats: { spawned: 1 }, ttft_ms: 900 } : {}), modelUsage });
+    if (cli === 'grok' && process.env.GROK_HOME) grokSession(sessionId);
     process.exit(fail ? 1 : 0);
   }
   if (cli === 'codex') {
-    line({ type: 'thread.started', thread_id: 'fake-thread' });
+    const thread = crypto.randomUUID();
+    line({ type: 'thread.started', thread_id: thread });
     if (fail) { line({ type: 'turn.failed', error: { message: fail } }); process.exit(1); }
-    line({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text: reply } });
+    line({ type: 'item.completed', item: { id: 'item_0', type: 'command_execution', status: 'completed', exit_code: 0 } });
+    line({ type: 'item.completed', item: { id: 'item_1', type: 'command_execution', status: 'failed', exit_code: 1 } });
+    line({ type: 'item.completed', item: { id: 'item_2', type: 'file_change', status: 'completed' } });
+    line({ type: 'item.completed', item: { id: 'item_3', type: 'agent_message', text: reply } });
     line({ type: 'turn.completed', usage: { input_tokens: tok.input + tok.cacheRead, cached_input_tokens: tok.cacheRead, output_tokens: tok.output, reasoning_output_tokens: tok.reasoning } });
+    if (process.env.CODEX_HOME) codexRollouts(thread, model);
     process.exit(0);
   }
   if (cli === 'agy') {
-    line({ status: fail ? 'ERROR' : 'SUCCESS', response: fail ? '' : reply, ...(fail ? { error: fail } : {}), num_turns: 3,
+    const result = { status: fail ? 'ERROR' : 'SUCCESS', response: fail ? '' : reply, ...(fail ? { error: fail } : {}), num_turns: 3,
       usage: { input_tokens: tok.input, output_tokens: tok.output, thinking_tokens: tok.reasoning, cache_read_tokens: tok.cacheRead, total_tokens: tok.input + tok.output },
-      conversation_id: 'fake-conv' });
+      conversation_id: 'fake-conv' };
+    if (after(argv, '--output-format') !== 'stream-json') { line(result); process.exit(fail ? 1 : 0); }
+    // stream-json: two model responses whose usage adds up to the result's, a tool call that works and one that fails.
+    const step = (i, o) => line({ event: 'step_update', step_update: { conversation_id: 'fake-conv', step_index: i, ...o } });
+    line({ event: 'init', conversation_id: 'fake-conv', init: { model } });
+    step(0, { state: 'DONE', step_type: 'user_input' });
+    step(1, { state: 'DONE', step_type: 'agent_response', usage: { input_tokens: 700, output_tokens: 400, thinking_tokens: 100, cache_read_tokens: 4000, total_tokens: 1100 } });
+    step(2, { state: 'ACTIVE', step_type: 'tool', tool_name: 'run_command' });
+    step(2, { state: 'DONE', step_type: 'tool', tool_name: 'run_command' });
+    step(3, { state: 'ERROR', step_type: 'tool', tool_name: 'view_file' });
+    step(4, { state: 'ACTIVE', step_type: 'agent_response', text_delta: 'Do' });
+    step(4, { state: 'DONE', step_type: 'agent_response', usage: { input_tokens: 500, output_tokens: 240, thinking_tokens: 20, cache_read_tokens: 5000, total_tokens: 740 } });
+    line({ event: 'result', result });
     process.exit(fail ? 1 : 0);
   }
   // muse
   line({ stream: { kind: 'session', id: 'fake-muse-session' }, payload_type: 'session.started', payload: {} });
   line({ payload_type: 'session.run.linked', payload: { run_stream: { id: 'run-1' } } });
   // Like the real thing: input_tokens includes the cached ones, and the main run doesn't include its subagents.
+  line({ payload_type: 'tool.result', payload: { run_stream: { id: 'run-1' }, correlation_facts: { outcome: 'success', tool_name: 'read_file' } } });
+  line({ payload_type: 'tool.result', payload: { run_stream: { id: 'run-1' }, correlation_facts: { outcome: 'failure', tool_name: 'bash' } } });
   line({ payload_type: 'run.usage', payload: { run_stream: { id: 'run-1' }, calls: 5, children_included: false,
+    allowance: { tier: 'Muse Code High Usage', window: { used_percent: 9, resets_at_ms: 1793268601000 }, weekly: { used_percent: 11, resets_at_ms: 1793577600000 } },
     models: [{ model, input_tokens: tok.input + tok.cacheRead, cached_tokens: tok.cacheRead, output_tokens: tok.output, reasoning_tokens: tok.reasoning }] } });
   line({ payload_type: 'run.usage', payload: { run_stream: { id: 'run-sub' }, calls: 2, children_included: false,
     models: [{ model, input_tokens: 300, cached_tokens: 100, output_tokens: 50, reasoning_tokens: 10 }] } });
   line({ payload_type: fail ? 'run.terminal.failed' : 'run.terminal.completed', payload: { run_stream: { id: 'run-1' },
     terminal: fail ? 'failed' : 'completed', ...(fail ? { reason: fail } : { text: reply }) } });
   process.exit(fail ? 1 : 0);
+}
+
+const pad = (n) => String(n).padStart(2, '0');
+const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+
+// Codex: the main thread's rollout (2 requests, plan limits at the start and end) and one subagent's, which
+// starts with a copy of the parent's history (including a token count that isn't its own).
+function codexRollouts(thread, model) {
+  const d = new Date(), dir = path.join(process.env.CODEX_HOME, 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+  const stamp = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}-${pad(d.getMinutes())}-${pad(d.getSeconds())}`;
+  const limits = (five, week) => ({ plan_type: 'pro', primary: { used_percent: five, window_minutes: 300, resets_at: 1793275800 },
+    secondary: { used_percent: week, window_minutes: 10080, resets_at: 1793774604 } });
+  const count = (input, cached, output, reasoning, rl) => ({ type: 'event_msg', payload: { type: 'token_count', rate_limits: rl,
+    info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: reasoning } } } });
+  const sub = crypto.randomUUID();
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, `rollout-${stamp}-${thread}.jsonl`), jsonl([
+    { type: 'session_meta', payload: { id: thread, source: 'exec' } },
+    { type: 'event_msg', payload: { type: 'thread_settings_applied', thread_id: thread } },
+    { type: 'turn_context', payload: { model } },
+    { type: 'token_usage_record', payload: { thread_id: thread } }, count(5000, 4000, 300, 60, limits(10, 40)),
+    { type: 'token_usage_record', payload: { thread_id: thread } }, count(10200, 9000, 640, 120, limits(12, 41)),
+    { type: 'event_msg', payload: { type: 'task_complete', time_to_first_token_ms: 1234 } }]));
+  fs.writeFileSync(path.join(dir, `rollout-${stamp}-${sub}.jsonl`), jsonl([
+    { type: 'session_meta', payload: { id: sub, source: { subagent: { thread_spawn: { parent_thread_id: thread, depth: 1 } } } } },
+    { type: 'session_meta', payload: { id: thread } },
+    { type: 'token_usage_record', payload: { thread_id: thread } }, count(99999, 0, 9999, 0),
+    { type: 'event_msg', payload: { type: 'thread_settings_applied', thread_id: sub } },
+    { type: 'turn_context', payload: { model } },
+    { type: 'event_msg', payload: { type: 'item_completed', thread_id: sub, item: { type: 'CommandExecution', status: 'completed' } } },
+    { type: 'event_msg', payload: { type: 'item_completed', thread_id: sub, item: { type: 'Reasoning' } } },
+    { type: 'token_usage_record', payload: { thread_id: sub } }, { type: 'token_usage_record', payload: { thread_id: sub } },
+    count(3000, 2000, 300, 50)]));
+}
+
+// Grok: the session's usage.json (which, like the real one, already includes the planner) and two /goal
+// helpers, each a session of its own beside it, listed in subagents/.
+function grokSession(id) {
+  const root = path.join(process.env.GROK_HOME, 'sessions', encodeURIComponent(process.cwd()));
+  const kids = { planner: { inputTokens: 500, cachedReadTokens: 100, cacheCreationTokens: 0, outputTokens: 50, reasoningTokens: 30, modelCalls: 1, costUsdTicks: 1e8 },
+    verifier: { inputTokens: 2000, cachedReadTokens: 1500, cacheCreationTokens: 0, outputTokens: 200, reasoningTokens: 100, modelCalls: 3, costUsdTicks: 5e8 } };
+  for (const [name, u] of Object.entries(kids)) {
+    const child = `${id}-${name}`;
+    fs.mkdirSync(path.join(root, id, 'subagents', child), { recursive: true });
+    fs.writeFileSync(path.join(root, id, 'subagents', child, 'meta.json'), JSON.stringify({ child_session_id: child, description: name }));
+    fs.mkdirSync(path.join(root, child), { recursive: true });
+    fs.writeFileSync(path.join(root, child, 'usage.json'), JSON.stringify({ session: { ...u, primaryModelId: 'grok-4.7-build' } }));
+  }
+  fs.writeFileSync(path.join(root, id, 'usage.json'), JSON.stringify({ session: { inputTokens: 11000 + 500, cachedReadTokens: 9000 + 100,
+    outputTokens: 640 + 50, reasoningTokens: 400 + 30, modelCalls: 5 + 1, costUsdTicks: 4.25e8 + 1e8 } }));
 }

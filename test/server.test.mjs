@@ -176,3 +176,48 @@ test('prompt history: saving edits numbers nothing, a batch does (and the page h
   const old = (await dd.api('/api/results')).json[0];
   assert.deepEqual([old.id, old.audio, old.predates], ['opus-low__a', 'free', ['audio']]);
 });
+
+test('a running batch takes changes: limits, pause and ending a run, checked first and answered with its state', async (t) => {
+  const sb2 = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: `FAKE:sleep=1500 ${id}` })) },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  const d2 = await dashboard(sb2);
+  t.after(async () => { await d2.stop(); cleanup(sb2); });
+  assert.equal((await d2.api('/api/adjust', 'POST', { set: { concurrency: 2 } })).status, 409); // no batch
+  assert.equal((await d2.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['a', 'b', 'c'] }, concurrency: 2 })).status, 200);
+  await waitFor(async () => (await d2.api('/api/status')).json.active.length === 2);
+  assert.equal((await d2.api('/api/adjust', 'POST', { set: { concurrency: 0 } })).status, 400);
+  assert.equal((await d2.api('/api/adjust', 'POST', { set: { budget: 'lots' } })).status, 400);
+
+  const r = await d2.api('/api/adjust', 'POST', { set: { concurrency: 1, perCli: '', budget: 0, timeout: 30, paused: true }, requeue: ['opus-low__a', 'not-running'] });
+  assert.equal(r.status, 200, r.text);
+  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 } });
+  const s = await waitFor(async () => { const x = (await d2.api('/api/status?since=0')).json; return x.active.length === 1 ? x : null; });
+  assert.ok(s.log.some((l) => l.startsWith('↺ opus-low__a requeued')), s.log.join('\n'));
+  assert.ok(s.log.some((l) => l.startsWith('⚙ Parallel runs: 2 → 1')));
+  assert.ok(!s.log.some((l) => l.startsWith('@state')), 'state lines leaked into the log');
+  assert.equal(s.planned, 3); // a requeued run is still to do
+  assert.equal(s.state.paused, true);
+
+  assert.equal((await d2.api('/api/adjust', 'POST', { set: { paused: false, concurrency: 3 } })).status, 200);
+  const done = await waitFor(async () => { const x = (await d2.api('/api/status?since=0')).json; return !x.running && x.finishedAt ? x : null; });
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.equal(done.finished, 3);
+});
+
+test('Ctrl-C on the dashboard with agents running asks to be pressed again before it ends them', async (t) => {
+  const sb3 = sandbox({ dimensions: { testing: [{ id: 'long', text: 'FAKE:sleep=20000' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  const d3 = await dashboard(sb3);
+  t.after(() => cleanup(sb3));
+  assert.equal((await d3.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['long'] }, concurrency: 1 })).status, 200);
+  await waitFor(async () => (await d3.api('/api/status')).json.active.length === 1);
+  const exited = new Promise((r) => d3.child.once('exit', r));
+  d3.child.kill('SIGINT');
+  await waitFor(() => d3.output().includes('Press Ctrl-C again within 5 seconds'));
+  await new Promise((r) => setTimeout(r, 500));
+  const s = (await d3.api('/api/status')).json;
+  assert.equal(s.running, true); assert.equal(s.active.length, 1); // still going after one Ctrl-C
+  d3.child.kill('SIGINT');
+  await exited;
+  assert.ok(!fs.existsSync(path.join(sb3.out, 'opus-low__long')), 'the ended run was kept');
+});

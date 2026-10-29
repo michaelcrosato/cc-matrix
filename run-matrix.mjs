@@ -5,8 +5,10 @@
 // each run. No dependencies; Node 18+.
 // Usually driven by the dashboard (node dashboard.mjs), but works on its own.
 //
-// Cost is only ever what the CLI itself reports (Claude Code, Grok). Codex, agy
-// and Muse don't report cost, so theirs stays blank; their tokens are a rough guide only.
+// costUsd is only ever what the CLI itself reports: Claude Code (at API list prices) and Grok (at its own,
+// lower rate). Every run also gets apiCostUsd, its tokens at the labs' public API list prices (PRICES), to
+// compare runs across CLIs. Codex and Grok print less than they use (subagents, /goal helpers): their
+// session logs fill that in (sessionLogs).
 //
 //   node run-matrix.mjs --dry-run
 //   node run-matrix.mjs -j 3 --pick opus:xhigh,opus:max --only testing=none,open
@@ -19,7 +21,9 @@
 //        --only key=a,b               keys: agent, provider, effort or a dimension (repeatable)
 //        --limit <n> --repeat <n> --timeout <min, 0 = none> --budget <usd>
 //        --dry-run [--json] --report --rerun-failed --smoke agent:effort [--smoke-goal]
-//        --reparse                    re-read tokens/cost from each run's saved agent.out (after parser changes)
+//        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
+//                                     logs (after parser or price changes)
+//        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -31,7 +35,7 @@ import { pathToFileURL } from 'node:url';
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, rerunFailed: false, smoke: null, smokeGoal: false };
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, rerunFailed: false, smoke: null, smokeGoal: false, control: false };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -51,6 +55,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--report') args.report = true;
   else if (a === '--reparse') args.reparse = true;
   else if (a === '--rerun-failed') args.rerunFailed = true;
+  else if (a === '--control') args.control = true;
   else { console.error(`Unknown flag: ${a}`); process.exit(1); }
 }
 
@@ -241,18 +246,19 @@ const providers = {
     const argv = ['-p'];
     const goal = goalMessage(run);
     if (goal) argv.push(goal); // short, so pass it as the argument like the docs show
-    argv.push('--output-format', 'json', '--model', agent.model);
+    // stream-json: every event, not just the result (tool calls, compactions, plan limits); it needs --verbose.
+    argv.push('--output-format', 'stream-json', '--verbose', '--model', agent.model);
     if (effort) argv.push('--effort', effort);
     // Always set Ultracode explicitly so a global setting can't leak into the comparison.
     argv.push('--settings', JSON.stringify({ ultracode: !!run.ultracode }));
     argv.push(...extra('claude'));
-    return { bin: binOf('claude'), argv, parse: parseClaude, promptInArgs: !!goal };
+    return { bin: binOf('claude'), argv, promptInArgs: !!goal };
   },
   codex(agent, effort) {
     const argv = ['exec', '--json', '-m', agent.model];
     if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
     argv.push(...extra('codex'), '-'); // '-' = read prompt from stdin
-    return { bin: binOf('codex'), argv, parse: parseCodex };
+    return { bin: binOf('codex'), argv };
   },
   grok(agent, effort, prompt, run, promptFile) {
     // A /goal command has to be the message itself; otherwise read the prompt from its file.
@@ -262,22 +268,22 @@ const providers = {
       '--output-format', 'streaming-messages-json', '--model', agent.model];
     if (effort) argv.push('--reasoning-effort', effort);
     argv.push(...extra('grok'));
-    return { bin: binOf('grok'), argv, parse: parseGrok, promptInArgs: true };
+    return { bin: binOf('grok'), argv, promptInArgs: true };
   },
   agy(agent, effort, prompt, run) {
     // agy -p reads neither stdin nor a file, so the prompt is the argument. Model IDs are
     // the base name (gemini-4-argon) with the effort separate; `agy models` lists both.
-    const argv = ['-p', goalMessage(run) ?? prompt, '--output-format', 'json', '--model', agent.model];
+    const argv = ['-p', goalMessage(run) ?? prompt, '--output-format', 'stream-json', '--model', agent.model];
     if (effort) argv.push('--effort', effort);
     argv.push(...extra('agy'));
-    return { bin: binOf('agy'), argv, parse: parseAgy, promptInArgs: true };
+    return { bin: binOf('agy'), argv, promptInArgs: true };
   },
   muse(agent, effort, prompt, run, promptFile) {
     const goal = goalMessage(run);
     const argv = ['exec', '--json', '--model', agent.model];
     if (effort) argv.push('--reasoning-effort', effort);
     argv.push(...extra('muse'), ...(goal ? [goal] : ['--prompt-file', promptFile]));
-    return { bin: binOf('muse'), argv, parse: parseMuse, promptInArgs: true };
+    return { bin: binOf('muse'), argv, promptInArgs: true };
   },
 };
 
@@ -317,14 +323,66 @@ function tokenTotals(m) {
 
 const lastJsonLine = (text) => text.trim().split('\n').filter((l) => l.startsWith('{')).pop();
 
+// Besides tokens and cost, each parser reports what its CLI's output shows of what the run did: model
+// requests (apiCalls), tool calls (toolCalls, and per tool in `tools`), failed tool calls (toolErrors),
+// context compactions, and the plan's usage limits as the run ended (`plan`, what /usage or /status shows).
+// `models` splits the tokens per model, which apiPrice() prices.
+const add = (map, k, n = 1) => { map[k] = (map[k] ?? 0) + n; };
+const total = (map) => Object.values(map).reduce((a, b) => a + b, 0);
+// One model's tokens in `models`; input counts cache reads and writes.
+const modelUse = (input, cached, cacheWrite, output, reasoning) => ({ uncachedInputTokens: input - cached - cacheWrite,
+  cacheReadTokens: cached, cacheWriteTokens: cacheWrite, outputTokens: output, reasoningTokens: reasoning });
+function addModel(models, id, u) {
+  const m = models[id] ??= { uncachedInputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: null };
+  for (const k of ['uncachedInputTokens', 'cacheReadTokens', 'cacheWriteTokens', 'outputTokens']) m[k] += u[k] ?? 0;
+  if (u.reasoningTokens != null) m.reasoningTokens = (m.reasoningTokens ?? 0) + u.reasoningTokens;
+  if (u.costUsd != null) m.costUsd = (m.costUsd ?? 0) + u.costUsd;
+}
+
+// One of the plan's limit windows: % used as the run ended (and as it started, when the CLI said) and when it resets.
+const planWindow = (name, usedPct, startPct, resetsMs) => ({ name, usedPct,
+  ...(startPct != null ? { startPct } : {}), ...(resetsMs ? { resetsAt: new Date(resetsMs).toISOString() } : {}) });
+const pctOf = (fraction) => fraction == null ? null : Math.round(fraction * 1000) / 10;
+const CLAUDE_WINDOWS = { five_hour: '5h', seven_day: 'week', seven_day_opus: 'week (Opus)', seven_day_sonnet: 'week (Sonnet)' };
+
+// Claude Code's rate_limit_event: how much of the subscription's 5-hour and weekly windows is used.
+function claudePlan(events) {
+  if (!events.length) return undefined;
+  const windows = (i) => i.unifiedWindows ?? (i.rateLimitType ? { [i.rateLimitType]: i } : {});
+  const first = windows(events[0]), last = windows(events.at(-1));
+  return { windows: Object.entries(last).map(([k, w]) => planWindow(CLAUDE_WINDOWS[k] ?? k, pctOf(w.utilization),
+    pctOf(first[k]?.utilization), w.resetsAt ? w.resetsAt * 1000 : null)) };
+}
+
+// Claude Code's stream-json, which Grok's streaming-messages-json copies: one event per line, then the
+// result line. Runs from before stream-json saved only the result line, so they have no tool counts.
+function readStream(text) {
+  const s = { tools: {}, ids: new Set(), results: [], toolErrors: 0, compactions: 0, limits: [] };
+  for (const l of text.split('\n')) {
+    if (!l.startsWith('{')) continue;
+    let e; try { e = JSON.parse(l); } catch { continue; }
+    const content = Array.isArray(e.message?.content) ? e.message.content : [];
+    if (e.type === 'assistant') { // a response arrives in several events, one per content block
+      if (e.message.id) s.ids.add(e.message.id);
+      for (const b of content) if (b.type === 'tool_use' || b.type === 'server_tool_use') add(s.tools, b.name);
+    } else if (e.type === 'user') s.toolErrors += content.filter((b) => b.type === 'tool_result' && b.is_error).length;
+    else if (e.type === 'system' && e.subtype === 'compact_boundary') s.compactions++;
+    else if (e.type === 'rate_limit_event' && e.rate_limit_info) s.limits.push(e.rate_limit_info);
+    else if (e.type === 'result') s.results.push(e);
+  }
+  return s;
+}
+
 function parseClaude(text) {
-  const line = lastJsonLine(text);
-  if (!line) return { isError: true };
-  const j = JSON.parse(line);
+  const s = readStream(text), j = s.results.at(-1);
+  if (!j) return { isError: true };
   return { reply: j.result, costUsd: j.total_cost_usd, costSource: j.total_cost_usd != null ? 'reported' : 'none',
-    ...usageTotals(j), turns: j.num_turns, apiMinutes: j.duration_api_ms ? j.duration_api_ms / 60000 : null,
-    // Each /goal round ends with a result; num_turns counts only the last one.
+    ...usageTotals(j), apiMinutes: j.duration_api_ms ? j.duration_api_ms / 60000 : null,
+    // Each /goal round ends with a result line, whose num_turns counts that round only.
+    turns: s.results.reduce((n, r) => n + (r.num_turns ?? 0), 0) || j.num_turns,
     rounds: j.result_index != null ? j.result_index + 1 : undefined, subagents: j.subagent_stats?.spawned,
+    ...(s.ids.size ? { apiCalls: s.ids.size, toolCalls: total(s.tools), tools: s.tools, toolErrors: s.toolErrors, compactions: s.compactions } : {}),
+    firstTokenMs: j.ttft_ms, plan: claudePlan(s.limits),
     isError: !!j.is_error, error: j.is_error && j.errors?.length ? j.errors.join('; ') : undefined, sessionId: j.session_id };
 }
 
@@ -335,26 +393,45 @@ function parseGrok(text) {
   return parseClaude(text);
 }
 
-// agy --output-format json: one object with status, response, error, num_turns and
-// usage {input_tokens, output_tokens, thinking_tokens, cache_read_tokens, total_tokens}. No cost.
-function parseAgy(text) {
-  const line = lastJsonLine(text);
-  if (!line) return { isError: true };
-  const j = JSON.parse(line), u = j.usage ?? {};
+// agy --output-format stream-json: an init line, a step_update per step (a model response with its usage,
+// or a tool call with its name) and a result line with status, response, error, num_turns and usage
+// {input_tokens, output_tokens, thinking_tokens, cache_read_tokens, total_tokens}. Runs from before saved
+// --output-format json: that result object alone. No cost.
+function parseAgy(text, agent = {}) {
+  const tools = {}, seen = new Set();
+  let j, model, calls = 0, toolErrors = 0, streamed = false;
+  for (const l of text.split('\n')) {
+    if (!l.startsWith('{')) continue;
+    let e; try { e = JSON.parse(l); } catch { continue; }
+    if (!e.event) { j = e; continue; } // --output-format json
+    streamed = true;
+    const st = e.step_update, key = st && `${st.conversation_id}:${st.step_index}`;
+    if (e.event === 'init') model = e.init?.model;
+    else if (e.event === 'result') j = e.result;
+    else if (st && st.state !== 'ACTIVE' && !seen.has(key)) { // a step's text streams in while ACTIVE; count it once, when it ends
+      seen.add(key);
+      if (st.step_type === 'agent_response' && st.usage) calls++;
+      else if (st.step_type === 'tool') { add(tools, st.tool_name ?? 'tool'); if (st.state !== 'DONE') toolErrors++; }
+    }
+  }
+  if (!j) return { isError: true };
   // input_tokens leaves out cache reads (and total_tokens is just input + output), so add them
-  // to count all input like the Claude Code and Grok figures do.
-  return { reply: j.response, costUsd: null, costSource: 'none', inputTokens: (u.input_tokens ?? 0) + (u.cache_read_tokens ?? 0),
+  // to count all input like the other CLIs do. output_tokens already includes thinking.
+  const u = j.usage ?? {}, cached = u.cache_read_tokens ?? 0, input = (u.input_tokens ?? 0) + cached;
+  return { reply: j.response, costUsd: null, costSource: 'none', inputTokens: input,
     cachedTokens: u.cache_read_tokens ?? null, outputTokens: u.output_tokens ?? 0, reasoningTokens: u.thinking_tokens ?? null,
-    turns: j.num_turns, isError: j.status !== 'SUCCESS', error: j.error || undefined,
-    sessionId: j.conversation_id || undefined };
+    turns: j.num_turns, models: { [model ?? agent.model ?? 'unknown']: modelUse(input, cached, 0, u.output_tokens ?? 0, u.thinking_tokens ?? null) },
+    ...(streamed ? { apiCalls: calls, toolCalls: total(tools), tools, toolErrors } : {}),
+    isError: j.status !== 'SUCCESS', error: j.error || undefined, sessionId: j.conversation_id || undefined };
 }
 
 // muse exec --json: JSON lines of runtime events. run.usage (one per run, cumulative) has the
-// tokens per model; run.terminal.<completed|failed|…> has the outcome and the final reply.
+// tokens per model, the model calls and the plan's allowance; tool.result one per tool call;
+// run.terminal.<completed|failed|…> the outcome and the final reply.
 // Muse reports how much of the plan's allowance is used, not a cost.
-function parseMuse(text) {
-  const usage = new Map();
-  let rootRun, terminal, sessionId;
+function parseMuse(text, agent = {}) {
+  const usage = new Map(), tools = {};
+  let rootRun, terminal, sessionId, toolErrors = 0;
   for (const l of text.split('\n')) {
     if (!l.startsWith('{')) continue;
     let e; try { e = JSON.parse(l); } catch { continue; }
@@ -362,41 +439,248 @@ function parseMuse(text) {
     if (e.stream?.kind === 'session') sessionId ??= e.stream.id;
     if (e.payload_type === 'session.run.linked') rootRun ??= runId;
     else if (e.payload_type === 'run.usage' && runId) usage.set(runId, p);
-    else if (e.payload_type?.startsWith('run.terminal.') && (!rootRun || runId === rootRun)) terminal = p;
+    else if (e.payload_type === 'tool.result') {
+      const f = p.correlation_facts ?? {};
+      add(tools, f.tool_name ?? 'tool');
+      if (f.outcome && f.outcome !== 'success') toolErrors++;
+    } else if (e.payload_type?.startsWith('run.terminal.') && (!rootRun || runId === rootRun)) terminal = p;
   }
   // Subagent runs report separately unless the main run already includes them.
-  const root = usage.get(rootRun);
+  const root = usage.get(rootRun), models = {};
   let input = 0, cached = 0, output = 0, reasoning = 0, calls = 0;
   for (const u of root?.children_included ? [root] : usage.values()) {
     calls += u.calls ?? 0;
     for (const m of u.models ?? []) { input += m.input_tokens ?? 0; cached += m.cached_tokens ?? 0;
-      output += m.output_tokens ?? 0; reasoning += m.reasoning_tokens ?? 0; }
+      output += m.output_tokens ?? 0; reasoning += m.reasoning_tokens ?? 0;
+      addModel(models, m.model ?? agent.model ?? 'unknown', modelUse(m.input_tokens ?? 0, m.cached_tokens ?? 0, 0, m.output_tokens ?? 0, m.reasoning_tokens ?? null)); }
   }
+  const a = (root ?? [...usage.values()].at(-1))?.allowance;
+  const plan = a && { tier: a.tier ?? undefined, windows: [['window', a.window], ['week', a.weekly]].filter(([, w]) => w)
+    .map(([name, w]) => planWindow(name, w.used_percent ?? null, null, w.resets_at_ms)) };
   return { reply: terminal?.text || undefined, costUsd: null, costSource: 'none', inputTokens: input,
-    cachedTokens: cached, outputTokens: output, reasoningTokens: reasoning, turns: calls,
+    cachedTokens: cached, outputTokens: output, reasoningTokens: reasoning, turns: calls, models,
+    apiCalls: calls, toolCalls: total(tools), tools, toolErrors, plan: plan || undefined,
     isError: terminal?.terminal !== 'completed', error: terminal?.reason || undefined, sessionId };
 }
 
-function parseCodex(text) {
-  let input = 0, cached = 0, output = 0, reasoning = 0, turns = 0, isError = false, sessionId, reply, error;
+// Codex items that aren't tool calls (the rest are command_execution, file_change, web_search, mcp_tool_call, …).
+const CODEX_NOT_TOOLS = new Set(['agent_message', 'reasoning', 'todo_list', 'error', 'user_message', 'sub_agent_activity']);
+
+// codex exec --json: the main thread only. usage.input_tokens includes the cached ones and output_tokens
+// the reasoning. Its subagents are added from Codex's session logs (codexLogs).
+function parseCodex(text, agent = {}) {
+  const tools = {};
+  let input = 0, cached = 0, cacheWrite = null, output = 0, reasoning = 0, turns = 0, toolErrors = 0, isError = false, sessionId, reply, error;
   for (const l of text.split('\n')) {
     let e; try { e = JSON.parse(l); } catch { continue; }
     if (e.type === 'thread.started') sessionId = e.thread_id;
     if (e.type === 'item.completed' && e.item?.type === 'agent_message') reply = e.item.text;
+    else if (e.type === 'item.completed' && e.item?.type && !CODEX_NOT_TOOLS.has(e.item.type)) {
+      add(tools, e.item.type);
+      if (e.item.status === 'failed') toolErrors++;
+    }
     if (e.type === 'turn.completed' && e.usage) {
       turns++; input += e.usage.input_tokens ?? 0; cached += e.usage.cached_input_tokens ?? 0;
       output += e.usage.output_tokens ?? 0; reasoning += e.usage.reasoning_output_tokens ?? 0;
+      if (e.usage.cache_write_input_tokens != null) cacheWrite = (cacheWrite ?? 0) + e.usage.cache_write_input_tokens;
     }
     // { type: 'error', message } or { type: 'turn.failed', error: { message } }, e.g. a usage limit
     if (e.type === 'turn.failed' || e.type === 'error') { isError = true; error = e.error?.message ?? e.message ?? error; }
   }
-  return { reply, costUsd: null, costSource: 'none', inputTokens: input, cachedTokens: cached,
-    outputTokens: output, reasoningTokens: reasoning, turns, isError, error, sessionId };
+  return { reply, costUsd: null, costSource: 'none', inputTokens: input, cachedTokens: cached, cacheWriteTokens: cacheWrite,
+    outputTokens: output, reasoningTokens: reasoning, turns, toolCalls: total(tools), tools, toolErrors,
+    models: { [agent.model ?? 'unknown']: modelUse(input, cached, cacheWrite ?? 0, output, reasoning) }, isError, error, sessionId };
+}
+
+// ------------------------------------------------------- session logs
+// Some CLIs print less than they record. Codex prints only its main thread's usage, though at high efforts
+// it spawns subagents that run as threads of their own; Grok's stream covers its main session only, while
+// its /goal loop also runs a planner, verifiers and a summarizer as sessions of their own. Both keep each
+// thread's or session's usage in their logs, so it's read from there and added: `helpers` has what the
+// CLI's own totals left out. Best effort: `sessionLog` says whether the log was read; without it the run
+// keeps what the CLI printed. Also from the logs: Codex's plan limits, request count and first-token time,
+// and Grok's request count and reasoning tokens.
+function sessionLogs(provider, m, ctx) {
+  const read = { codex: codexLogs, grok: grokLogs }[provider];
+  if (!read || !m.sessionId) return;
+  let x; try { x = read(m, ctx); } catch (e) { m.sessionLog = `unreadable: ${e.message}`; return; }
+  m.sessionLog = x ? 'read' : 'not found';
+  if (!x) return;
+  for (const [id, u] of Object.entries(x.models ?? {})) addModel(m.models ??= {}, id, u);
+  if (x.tools) {
+    for (const [k, n] of Object.entries(x.tools)) add(m.tools ??= {}, k, n);
+    m.toolErrors = (m.toolErrors ?? 0) + (x.toolErrors ?? 0); m.toolCalls = total(m.tools ?? {});
+  }
+  for (const k of ['apiCalls', 'subagents', 'compactions', 'firstTokenMs', 'plan', 'reasoningTokens']) if (x[k] != null) m[k] = x[k];
+  if (!x.helpers) return;
+  const h = m.helpers = x.helpers;
+  m.inputTokens = (m.inputTokens ?? 0) + h.inputTokens;
+  m.cachedTokens = (m.cachedTokens ?? 0) + h.cachedTokens;
+  if (h.cacheWriteTokens) m.cacheWriteTokens = (m.cacheWriteTokens ?? 0) + h.cacheWriteTokens;
+  m.outputTokens = (m.outputTokens ?? 0) + h.outputTokens;
+  m.reasoningTokens = (m.reasoningTokens ?? 0) + h.reasoningTokens;
+  if (h.costUsd != null && m.costUsd != null) m.costUsd += h.costUsd;
+}
+
+const json = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
+const sumOf = (list, k) => list.reduce((s, x) => s + (x[k] ?? 0), 0);
+function firstLine(file) {
+  const fd = fs.openSync(file, 'r');
+  try {
+    const buf = Buffer.alloc(1 << 20), n = fs.readSync(fd, buf, 0, buf.length, 0), s = buf.toString('utf8', 0, n);
+    return JSON.parse(s.slice(0, s.indexOf('\n') + 1 || undefined));
+  } catch { return null; } finally { fs.closeSync(fd); }
+}
+
+// Codex: one rollout file per thread, ~/.codex/sessions/YYYY/MM/DD/rollout-<local start time>-<thread id>.jsonl
+// (or $CODEX_HOME). A subagent's first line (session_meta) names its parent thread, and its file starts
+// with a copy of the history it was given, up to its own thread_settings_applied.
+const ROLLOUT = /^rollout-(\d{4})-(\d\d)-(\d\d)T(\d\d)-(\d\d)-(\d\d)-(.+)\.jsonl$/;
+const snakeCase = (s) => String(s ?? '').replace(/[A-Z]/g, (c, i) => (i ? '_' : '') + c.toLowerCase());
+const codexWindow = (min) => min === 300 ? '5h' : min === 10080 ? 'week' : min ? `${+(min / 60).toFixed(1)}h` : 'window';
+
+function codexLogs(m, { start, end, model }) {
+  const root = path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions'), files = [];
+  for (let t = start - 864e5; t <= end + 864e5; t += 864e5) {
+    const d = new Date(t), dir = path.join(root, String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+    for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) {
+      const x = f.match(ROLLOUT);
+      if (x) files.push({ file: path.join(dir, f), id: x[7], at: new Date(+x[1], x[2] - 1, +x[3], +x[4], +x[5], +x[6]).getTime() });
+    }
+  }
+  const main = files.find((f) => f.id === m.sessionId);
+  if (!main) return null;
+  // Subagents: threads started during the run whose parent is its main thread or one of its subagents.
+  const spawned = files.filter((f) => f !== main && f.at >= start - 60e3 && f.at <= end + 60e3)
+    .map((f) => ({ ...f, parent: firstLine(f.file)?.payload?.source?.subagent?.thread_spawn?.parent_thread_id })).filter((f) => f.parent);
+  const ids = new Set([main.id]), subs = [];
+  for (let grew = true; grew;) {
+    grew = false;
+    for (const f of spawned) if (!subs.includes(f) && ids.has(f.parent)) { subs.push(f); ids.add(f.id); grew = true; }
+  }
+  const scan = (f) => {
+    const r = { calls: 0, tools: {}, toolErrors: 0, compactions: 0, limits: [], usage: null, model: null, firstTokenMs: null };
+    const lines = fs.readFileSync(f.file, 'utf8').split('\n');
+    const own = f === main ? 0 : Math.max(0, lines.findIndex((l) => l.includes('"thread_settings_applied"') && l.includes(f.id)));
+    for (const l of lines.slice(own)) {
+      let e; try { e = JSON.parse(l); } catch { continue; }
+      const p = e.payload ?? {}, msg = e.type === 'event_msg' ? p.type : null;
+      if (e.type === 'token_usage_record') { if ((p.thread_id ?? f.id) === f.id) r.calls++; } // one per model request
+      else if (e.type === 'turn_context') r.model = p.model ?? r.model;
+      else if (e.type === 'compacted') r.compactions++;
+      else if (msg === 'token_count') { if (p.info?.total_token_usage) r.usage = p.info.total_token_usage; if (p.rate_limits) r.limits.push(p.rate_limits); }
+      else if (msg === 'task_complete') r.firstTokenMs ??= p.time_to_first_token_ms ?? null;
+      else if (msg === 'item_completed' && p.thread_id === f.id) {
+        const t = snakeCase(p.item?.type);
+        if (t && !CODEX_NOT_TOOLS.has(t)) { add(r.tools, t); if (p.item.status === 'failed') r.toolErrors++; }
+      }
+    }
+    return r;
+  };
+  const top = scan(main), h = { agents: subs.length, inputTokens: 0, cachedTokens: 0, cacheWriteTokens: 0, outputTokens: 0, reasoningTokens: 0, apiCalls: 0 };
+  const models = {}, tools = {};
+  let toolErrors = 0;
+  for (const f of subs) {
+    const s = scan(f), u = s.usage ?? {};
+    const use = modelUse(u.input_tokens ?? 0, u.cached_input_tokens ?? 0, u.cache_write_input_tokens ?? 0, u.output_tokens ?? 0, u.reasoning_output_tokens ?? 0);
+    addModel(models, s.model ?? model ?? 'unknown', use);
+    h.inputTokens += u.input_tokens ?? 0; h.cachedTokens += use.cacheReadTokens; h.cacheWriteTokens += use.cacheWriteTokens;
+    h.outputTokens += use.outputTokens; h.reasoningTokens += use.reasoningTokens; h.apiCalls += s.calls;
+    for (const [k, n] of Object.entries(s.tools)) add(tools, k, n);
+    toolErrors += s.toolErrors;
+  }
+  // rate_limits: the plan's primary and secondary windows (used_percent, window_minutes, resets_at in seconds).
+  const first = top.limits[0], last = top.limits.at(-1);
+  const plan = last && { tier: last.plan_type ?? undefined, windows: ['primary', 'secondary'].filter((k) => last[k]).map((k) =>
+    planWindow(codexWindow(last[k].window_minutes), last[k].used_percent ?? null, first[k]?.used_percent ?? null, last[k].resets_at ? last[k].resets_at * 1000 : null)) };
+  return { helpers: subs.length ? h : null, models, tools, toolErrors, subagents: subs.length, apiCalls: top.calls + h.apiCalls,
+    compactions: top.compactions, firstTokenMs: top.firstTokenMs, plan };
+}
+
+// Grok: ~/.grok/sessions/<url-encoded working folder>/<session id>/ (or $GROK_HOME) has usage.json (tokens,
+// model calls, cost in 1e-10 USD ticks); with /goal, subagents/<id>/meta.json names each helper's own
+// session folder beside it. The main usage.json can already include a helper (the planner), so what it has
+// beyond the stream's result line is matched to helpers, which then count once.
+function grokLogs(m, { cwd, model }) {
+  const root = path.join(process.env.GROK_HOME || path.join(os.homedir(), '.grok'), 'sessions');
+  let dir = path.join(root, encodeURIComponent(cwd), m.sessionId);
+  if (!fs.existsSync(dir)) dir = (fs.existsSync(root) ? fs.readdirSync(root) : []).map((d) => path.join(root, d, m.sessionId)).find((d) => fs.existsSync(d));
+  if (!dir) return null;
+  const main = json(path.join(dir, 'usage.json'))?.session, kids = [], subDir = path.join(dir, 'subagents');
+  for (const s of fs.existsSync(subDir) ? fs.readdirSync(subDir) : []) {
+    const u = json(path.join(path.dirname(dir), json(path.join(subDir, s, 'meta.json'))?.child_session_id ?? s, 'usage.json'))?.session;
+    if (u) kids.push(u);
+  }
+  const extra = (main?.inputTokens ?? 0) - (m.inputTokens ?? 0);
+  let inMain = [];
+  if (extra > 0 && kids.length <= 16) for (let mask = 1; mask < 1 << kids.length; mask++) {
+    const set = kids.filter((_, i) => mask & (1 << i));
+    if (sumOf(set, 'inputTokens') === extra) { inMain = set; break; }
+  }
+  const mainOnly = (k) => main?.[k] != null ? main[k] - sumOf(inMain, k) : null, models = {};
+  for (const k of kids) addModel(models, k.primaryModelId ?? model ?? 'unknown', { ...modelUse(k.inputTokens ?? 0, k.cachedReadTokens ?? 0,
+    k.cacheCreationTokens ?? 0, k.outputTokens ?? 0, k.reasoningTokens ?? null), costUsd: (k.costUsdTicks ?? 0) / 1e10 });
+  const h = { agents: kids.length, inputTokens: sumOf(kids, 'inputTokens'), cachedTokens: sumOf(kids, 'cachedReadTokens'),
+    cacheWriteTokens: sumOf(kids, 'cacheCreationTokens'), outputTokens: sumOf(kids, 'outputTokens'), reasoningTokens: sumOf(kids, 'reasoningTokens'),
+    apiCalls: sumOf(kids, 'modelCalls'), costUsd: sumOf(kids, 'costUsdTicks') / 1e10 };
+  const calls = mainOnly('modelCalls');
+  return { helpers: kids.length ? h : null, models, subagents: kids.length, reasoningTokens: mainOnly('reasoningTokens'),
+    apiCalls: calls != null ? calls + h.apiCalls : null };
+}
+
+// ------------------------------------------------------------- prices
+// Public API list prices, USD per million tokens, to put a comparable price on every run (apiCostUsd): what
+// its tokens would cost through the lab's own API at the standard tier and context length (no batch, priority
+// or long-context rates). Checked 2026-10-29 on the labs' pricing pages (Muse: Meta's rate card as quoted by
+// third parties). In a list, a price applies to runs started on or after its `from` date. Add or override
+// models in matrix.config.json under "prices", same shape.
+// Claude Code reports its own cost at these list prices, so for its runs that cost is used; the Claude rows
+// price Claude models run through agy. Grok reports a discounted cost (34% of these prices in Oct 2026).
+const PRICES = {
+  'claude-opus-5-5': { input: 4, cachedInput: 0.2, cacheWrite: 5, output: 20 },
+  'claude-sonnet-5-5': { input: 2, cachedInput: 0.2, cacheWrite: 2.5, output: 10 },
+  'claude-haiku-5-5': { input: 0.1, cachedInput: 0.01, cacheWrite: 0.125, output: 0.5 },
+  'gpt-6.1-sol': { input: 2, cachedInput: 0.1, cacheWrite: 2.5, output: 10 },
+  'gpt-6.1-terra': { input: 1, cachedInput: 0.05, cacheWrite: 1.25, output: 5 },
+  'grok-4.7': { input: 2, cachedInput: 0.5, output: 6 },
+  'gemini-4-argon': [{ input: 2, cachedInput: 0.1, output: 10 }, { from: '2026-12-01', input: 4, cachedInput: 0.2, output: 20 }],
+  'muse-wonder-1.0': { input: 4, cachedInput: 0.2, output: 20 },
+};
+const prices = { ...PRICES, ...cfg.prices };
+
+// A model's price on a day. CLIs report some models with a suffix (grok-4.7-build, gemini-4-argon-trial,
+// muse-wonder-1.0-contributor, or agy's effort): they're priced as the model.
+function priceFor(model, when) {
+  const id = [model, String(model).replace(/-(build|trial|contributor|preview|low|medium|high|xhigh|max)$/, '')].find((k) => prices[k]);
+  if (!id) return null;
+  const day = new Date(when ?? Date.now()).toISOString().slice(0, 10);
+  return [].concat(prices[id]).filter((p) => !p.from || p.from <= day).at(-1) ?? null;
+}
+
+// What a run's tokens cost at list prices: Claude Code's own figure, else tokens × price per model.
+// Models with no price are listed in unpricedModels.
+function apiPrice(m, provider, when) {
+  if (provider === 'claude' && m.costUsd != null) return { apiCostUsd: m.costUsd };
+  let usd = 0, priced = 0;
+  const unpriced = [];
+  for (const [id, u] of Object.entries(m.models ?? {})) {
+    const p = priceFor(id, when);
+    if (!p) { unpriced.push(id); continue; }
+    usd += (u.uncachedInputTokens * p.input + u.cacheReadTokens * (p.cachedInput ?? p.input)
+      + (u.cacheWriteTokens ?? 0) * (p.cacheWrite ?? p.input) + u.outputTokens * p.output) / 1e6;
+    priced++;
+  }
+  return { apiCostUsd: priced ? usd : null, ...(unpriced.length ? { unpricedModels: unpriced } : {}) };
 }
 
 // ------------------------------------------------------------------ run
-const children = new Set();
-let spent = 0, stopping = false, overBudget = false, done = 0, skipped = 0;
+// The agents running now, by run id: the process, when it started and its time-limit timer, so a
+// time limit changed mid-batch can reach them and one can be ended on request.
+const live = new Map();
+let spent = 0, stopping = false, overBudget = false, paused = false, done = 0, skipped = 0;
+// The batch loop (pool) sleeps until a run ends or a setting changes; wake() lets it check again.
+let wakeUp = null;
+function wake() { const w = wakeUp; wakeUp = null; w?.(); }
 
 // Kill the agent and everything it started (servers, browsers, subagents).
 function killTree(child) {
@@ -408,10 +692,39 @@ function killTree(child) {
 function stopAll(reason) {
   if (stopping) return;
   stopping = true;
-  console.log(`■ Stopping (${reason}): ending ${children.size} running agent(s)…`);
-  for (const c of children) killTree(c);
+  console.log(`■ Stopping (${reason}): ending ${live.size} running agent(s)…`);
+  for (const c of live.values()) killTree(c.child);
+  wake(); // a paused batch with nothing running has nothing else to wake it
 }
-process.on('SIGINT', () => stopAll('Ctrl-C'));
+
+// A model's own time limit wins over the batch's.
+const limitOf = (run) => +(run.agent.timeout || args.timeout || 0);
+// (Re)arm a running agent's time limit, counted from when it started: one already past it ends now.
+function setLimit(c, min) {
+  clearTimeout(c.timer); c.timer = null;
+  if (min > 0) c.timer = setTimeout(() => { c.err.write('\n[matrix] timed out\n'); killTree(c.child); },
+    Math.min(2 ** 31 - 1, Math.max(0, c.start + min * 60000 - Date.now())));
+}
+
+// End one running agent on request. 'requeue' puts its run back at the front of the queue to start
+// over; 'drop' leaves it out of this batch (it runs next time). Either way what it did so far is
+// thrown away: an agent can't be picked up where it left off with the same measurements.
+function endRun(id, how) {
+  const c = live.get(id);
+  if (!c || c.run.abort || c.child.exitCode !== null) return false; // gone, or finishing on its own
+  c.run.abort = how; killTree(c.child);
+  return true;
+}
+// Ctrl-C ends the running agents and throws their work away, so with agents running it asks to be pressed
+// again. Under the dashboard (--control) it's left to the dashboard, which asks the same and then stops the
+// batch itself: they share the terminal, so one Ctrl-C reaches both.
+let ctrlCAt = 0;
+process.on('SIGINT', () => {
+  if (args.control) return;
+  if (args.smoke || !live.size || Date.now() - ctrlCAt < 5000) return stopAll('Ctrl-C');
+  ctrlCAt = Date.now();
+  console.log(`\n${live.size} agent(s) running: press Ctrl-C again within 5 s to end them (what they've done so far is thrown away).`);
+});
 process.on('SIGTERM', () => stopAll('terminated'));
 // The dashboard asks us to stop by creating runs/.stop (works on every OS). A smoke
 // test runs beside batches, so it ignores that.
@@ -430,7 +743,7 @@ const lastLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim().s
 
 // Start the agent in dir/work, wait for it to exit (or hit `limit` minutes) and parse its output.
 async function spawnAgent(run, dir, prompt, limit) {
-  const { bin, argv, parse, promptInArgs } = providers[run.agent.provider](run.agent, run.effort, prompt, run, path.join(dir, 'prompt.md'));
+  const { bin, argv, promptInArgs } = providers[run.agent.provider](run.agent, run.effort, prompt, run, path.join(dir, 'prompt.md'));
   const outPath = path.join(dir, 'agent.out'), errPath = path.join(dir, 'agent.err');
   const out = fs.createWriteStream(outPath), err = fs.createWriteStream(errPath);
   const start = Date.now();
@@ -439,33 +752,34 @@ async function spawnAgent(run, dir, prompt, limit) {
     // On Windows, npm .cmd shims need a shell; quote args so prompts survive it.
     const a = isWin ? argv.map((x) => `"${String(x).replace(/"/g, '\\"')}"`) : argv;
     const child = spawn(bin, a, { cwd: path.join(dir, 'work'), shell: isWin, detached: !isWin, env: process.env });
-    children.add(child);
+    const c = { run, child, start, err, timer: null };
+    live.set(run.id, c);
     child.stdout.pipe(out); child.stderr.pipe(err);
     child.stdin.on('error', () => {});
     child.stdin.end(promptInArgs ? '' : prompt);
-    const timer = limit > 0 ? setTimeout(() => { err.write('\n[matrix] timed out\n'); killTree(child); }, limit * 60000) : null;
+    setLimit(c, limit);
     child.on('error', (e) => { err.write(`\n[matrix] ${e.message}\n`); });
-    child.on('close', (code) => { if (timer) clearTimeout(timer); children.delete(child); resolve(code); });
+    child.on('close', (code) => { clearTimeout(c.timer); live.delete(run.id); resolve(code); });
   });
   await Promise.all([new Promise((r) => out.end(r)), new Promise((r) => err.end(r))]);
 
   let metrics = {};
-  try { metrics = tokenTotals(parse(fs.readFileSync(outPath, 'utf8'), run.agent)); } catch (e) { metrics = { isError: true, parseError: e.message }; }
+  try { metrics = readMetrics(run.agent.provider, fs.readFileSync(outPath, 'utf8'), run.agent, { cwd: path.join(dir, 'work'), start, end: Date.now() }); }
+  catch (e) { metrics = { isError: true, parseError: e.message }; }
   metrics.replyChars = String(metrics.reply ?? '').trim().length;
   if ((exitCode !== 0 || metrics.isError) && !metrics.error)
     metrics.error = lastLine(errPath) || metrics.parseError || (exitCode == null ? 'killed' : `exit code ${exitCode}`);
   return { exitCode, metrics, start, bin, argv };
 }
 
+// Runs not done yet (pool skips the others first).
 async function runOne(run) {
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   const prev = prevRun(run);
-  if (prev && (prev.r.status === 'ok' || !args.rerunFailed)) {
-    skipped++; console.log(`· skip ${run.id} (already ${prev.r.status}${prev.dir !== run.id ? ` as ${prev.dir}` : ''})`); return;
-  }
   fs.rmSync(dir, { recursive: true, force: true });
   // A failed run being retried that was made before a dimension was added: the new attempt replaces it.
   if (prev && prev.dir !== run.id) fs.rmSync(path.join(outDir, prev.dir), { recursive: true, force: true });
+  if (prev) finishedRuns.delete(run.id); // its old result is gone, so it isn't done if it's requeued
   const work = path.join(dir, 'work');
   let prompt;
   try {
@@ -487,11 +801,12 @@ async function runOne(run) {
   }
 
   console.log(`▶ ${run.id}`);
-  const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, +(run.agent.timeout || args.timeout || 0));
+  const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, limitOf(run));
 
-  if (stopping) { // interrupted: throw it away so it runs fresh next time
+  if (stopping || run.abort) { // interrupted: throw it away so it runs fresh (later in this batch if requeued)
     fs.rmSync(dir, { recursive: true, force: true });
-    console.log(`■ ${run.id} stopped (discarded)`);
+    if (run.abort === 'requeue' && !stopping) { run.abort = null; pending.unshift(run); console.log(`↺ ${run.id} requeued (starts over)`); }
+    else console.log(`■ ${run.id} stopped (discarded)`);
     return;
   }
 
@@ -511,22 +826,34 @@ async function runOne(run) {
   writeReport();
 }
 
-// --reparse: refresh token and cost fields of finished runs from their saved agent.out (and the
-// TODO count from the saved game), leaving status, timing, other measurements and scores alone.
+// Everything measured from what a run's CLI printed: its parser, then what the CLI's session logs add
+// (sessionLogs), the token totals and the list-price estimate. ctx: the run's work folder and start/end times.
+const PARSERS = { claude: parseClaude, codex: parseCodex, grok: parseGrok, agy: parseAgy, muse: parseMuse };
+function readMetrics(provider, text, agent, ctx) {
+  const m = PARSERS[provider](text, agent);
+  sessionLogs(provider, m, { ...ctx, model: agent.model });
+  return Object.assign(tokenTotals(m), apiPrice(m, provider, ctx.start));
+}
+
+// --reparse: refresh token and cost fields of finished runs from their saved agent.out and the CLIs'
+// session logs (and the TODO count from the saved game), leaving status, timing, other measurements and
+// scores alone. A run whose session log was read before but is gone now keeps its figures.
 function reparseAll() {
-  const parsers = { claude: parseClaude, codex: parseCodex, grok: parseGrok, agy: parseAgy, muse: parseMuse };
-  const metricKeys = ['costUsd', 'costSource', 'inputTokens', 'cachedTokens', 'cacheWriteTokens', 'uncachedInputTokens',
-    'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents', 'replyChars', 'apiMinutes', 'models'];
+  const metricKeys = ['costUsd', 'costSource', 'apiCostUsd', 'unpricedModels', 'inputTokens', 'cachedTokens', 'cacheWriteTokens', 'uncachedInputTokens',
+    'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents', 'helpers', 'apiCalls', 'toolCalls', 'tools', 'toolErrors',
+    'compactions', 'firstTokenMs', 'plan', 'sessionLog', 'replyChars', 'apiMinutes', 'models'];
   if (!fs.existsSync(outDir)) return;
   let n = 0;
   for (const d of fs.readdirSync(outDir)) {
     const resFile = path.join(outDir, d, 'result.json'), outFile = path.join(outDir, d, 'agent.out');
     if (!fs.existsSync(resFile) || !fs.existsSync(outFile)) continue;
-    const r = JSON.parse(fs.readFileSync(resFile, 'utf8')), parse = parsers[r.provider];
-    if (!parse) continue;
-    let m; try { m = tokenTotals(parse(fs.readFileSync(outFile, 'utf8'), {})); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
+    const r = JSON.parse(fs.readFileSync(resFile, 'utf8'));
+    if (!PARSERS[r.provider]) continue;
+    let m; try { m = readMetrics(r.provider, fs.readFileSync(outFile, 'utf8'), { model: r.model },
+      { cwd: path.join(outDir, d, 'work'), start: Date.parse(r.startedAt), end: Date.parse(r.finishedAt) }); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
+    if (r.sessionLog === 'read' && m.sessionLog !== 'read') { console.log(`· ${d}: session log ${m.sessionLog ?? 'not found'} now; kept its figures`); continue; }
     m.replyChars = String(m.reply ?? '').trim().length;
-    for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k];
+    for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k]; else delete r[k];
     try { if (r.entry) r.todos = markers(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch {}
     fs.writeFileSync(resFile, JSON.stringify(r, null, 2)); n++;
   }
@@ -572,27 +899,112 @@ function interleave(list) {
   return out;
 }
 
-// Once the budget is spent, no new run starts; the ones already going finish, since what they've
-// spent so far would be thrown away otherwise.
+// Runs waiting to start, and the ones skipped as already done (turning Retry failed on mid-batch
+// brings the failed ones back).
+let pending = [];
+const skippedRuns = [];
+function skip(run) {
+  const prev = prevRun(run);
+  skipped++; skippedRuns.push(run);
+  console.log(`· skip ${run.id} (already ${prev.r.status}${prev.dir !== run.id ? ` as ${prev.dir}` : ''})`);
+}
+
+// Starts runs while there's room: fewer than --concurrency running, the run's CLI under --per-cli,
+// not paused, and the budget not spent. Each can change mid-batch (see control), so it's checked
+// again whenever a run ends or a setting changes. Lowering a limit never ends a running agent by
+// itself: no new one starts until there's room again. Once the budget is spent the ones already
+// going finish, since what they've spent so far would be thrown away otherwise.
 async function pool() {
-  const pending = interleave(queue), busy = {}, waiting = [];
-  const wakeAll = () => waiting.splice(0).forEach((w) => w());
-  const worker = async () => {
-    while (pending.length && !stopping && !overBudget) {
-      if (spent >= args.budget) {
+  pending = interleave(queue);
+  const busy = {}, jobs = new Set();
+  for (;;) {
+    while (!stopping) {
+      if (!overBudget && spent >= args.budget) {
         overBudget = true;
-        console.log(`■ Budget of $${args.budget} reached (spent ${fmtUsd(spent)}): no new runs start; ${children.size} still running will finish.`);
-        break;
+        console.log(`■ Budget of $${args.budget} reached (spent ${fmtUsd(spent)}): no new runs start; ${live.size} still running will finish.`);
       }
+      if (paused || overBudget || jobs.size >= Math.max(1, args.concurrency)) break;
       const i = pending.findIndex((r) => (busy[r.agent.provider] ?? 0) < args.perCli);
-      if (i < 0) { await new Promise((w) => waiting.push(w)); continue; } // every CLI left is at its limit
+      if (i < 0) break; // every CLI left is at its limit
       const [run] = pending.splice(i, 1), p = run.agent.provider;
+      if (isDone(run)) { skip(run); continue; }
       busy[p] = (busy[p] ?? 0) + 1;
-      try { await runOne(run); } finally { busy[p]--; wakeAll(); }
+      const job = runOne(run).catch((e) => { done++; console.log(`✘ ${run.id}  ${e.message}`); })
+        .finally(() => { busy[p]--; jobs.delete(job); wake(); });
+      jobs.add(job);
     }
-    wakeAll();
-  };
-  await Promise.all(Array.from({ length: Math.max(1, args.concurrency) }, worker));
+    sayState();
+    // Done once nothing runs and nothing more will start: the queue is empty, the batch was stopped
+    // or the budget is spent. A paused batch waits to be resumed (or stopped).
+    if (!jobs.size && (stopping || overBudget || !pending.length)) return;
+    await new Promise((r) => { wakeUp = r; });
+  }
+}
+
+// --control (the dashboard): changes to the running batch arrive as JSON lines on stdin, and its state
+// goes back as "@state {…}" lines, which the dashboard reads and keeps out of the log.
+//   { set: { concurrency, perCli, budget, timeout, rerunFailed, paused }, timeoutRunning,
+//     requeue: [run ids], drop: [run ids], skipCli: [providers] }
+// null (or 0) for perCli, budget or timeout means none. A new time limit is for runs that start from
+// now, and with timeoutRunning for the ones running too, counted from when each started.
+const shown = { perCli: (v) => v === Infinity ? 'none' : v, budget: (v) => v === Infinity ? 'none' : `$${v}`, timeout: (v) => v ? `${v} min` : 'none' };
+function control(msg) {
+  const s = msg.set ?? {}, was = { ...args }, also = (n, what) => n ? ` (${n} ${what})` : '';
+  // Runs being ended first, so the messages below count only the ones that keep going.
+  for (const id of msg.requeue ?? []) endRun(id, 'requeue');
+  for (const id of msg.drop ?? []) endRun(id, 'drop');
+  const going = [...live.values()].filter((c) => !c.run.abort).length;
+  if ('concurrency' in s) {
+    args.concurrency = Math.max(1, Math.floor(+s.concurrency) || 1);
+    console.log(`⚙ Parallel runs: ${was.concurrency} → ${args.concurrency}${also(going > args.concurrency && going,
+      `still running; no new one starts until fewer than ${args.concurrency} are`)}`);
+  }
+  if ('perCli' in s) {
+    args.perCli = +s.perCli >= 1 ? Math.floor(+s.perCli) : Infinity;
+    console.log(`⚙ Max per CLI: ${shown.perCli(was.perCli)} → ${shown.perCli(args.perCli)}`);
+  }
+  if ('budget' in s) {
+    args.budget = +s.budget > 0 ? +s.budget : Infinity;
+    const again = overBudget && spent < args.budget;
+    if (again) overBudget = false;
+    console.log(`⚙ Budget: ${shown.budget(was.budget)} → ${shown.budget(args.budget)} (spent ${fmtUsd(spent)})${again ? ': new runs start again' : ''}`);
+  }
+  if ('timeout' in s) {
+    args.timeout = +s.timeout > 0 ? +s.timeout : 0;
+    const mine = [...live.values()].filter((c) => !c.run.abort && !c.run.agent.timeout); // a model's own limit stays
+    if (msg.timeoutRunning) for (const c of mine) setLimit(c, limitOf(c.run));
+    console.log(`⚙ Time limit: ${shown.timeout(was.timeout)} → ${shown.timeout(args.timeout)}, ${msg.timeoutRunning && mine.length
+      ? `also for the ${mine.length} running` : 'for runs that start from now'}`);
+  }
+  if ('rerunFailed' in s && !!s.rerunFailed !== args.rerunFailed) {
+    args.rerunFailed = !!s.rerunFailed;
+    const back = args.rerunFailed ? skippedRuns.filter((r) => !isDone(r)) : [];
+    for (const r of back) { skippedRuns.splice(skippedRuns.indexOf(r), 1); skipped--; }
+    pending.push(...back);
+    console.log(`⚙ Retry failed: ${args.rerunFailed ? `on${also(back.length, 'skipped earlier are queued again')}` : 'off'}`);
+  }
+  if ('paused' in s && !!s.paused !== paused) {
+    paused = !!s.paused;
+    console.log(paused ? `⚙ Paused: no new runs start${also(going, 'still running')}` : '⚙ Resumed: new runs start again');
+  }
+  for (const p of msg.skipCli ?? []) {
+    const out = pending.filter((r) => r.agent.provider === p);
+    if (!out.length) continue;
+    pending = pending.filter((r) => r.agent.provider !== p);
+    console.log(`⚙ ${CLIS[p] ?? p}: ${out.filter((r) => !isDone(r)).length} queued run(s) left out of this batch (they run next time)`);
+  }
+  sayState(true); // the dashboard waits for this to answer the change
+  wake();
+}
+
+let lastState = '';
+function sayState(force) {
+  if (!args.control) return;
+  const fin = (v) => v === Infinity ? null : v, left = {};
+  for (const r of pending) if (!isDone(r)) left[r.agent.provider] = (left[r.agent.provider] ?? 0) + 1;
+  const s = JSON.stringify({ concurrency: args.concurrency, perCli: fin(args.perCli), budget: fin(args.budget), timeout: args.timeout || null,
+    rerunFailed: args.rerunFailed, paused, overBudget, spent, left });
+  if (s !== lastState || force) { lastState = s; console.log('@state ' + s); }
 }
 
 // --smoke agent:effort: one tiny task in a temp folder with the same command line and parser
@@ -648,7 +1060,16 @@ for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provi
 const already = queue.filter(isDone).length;
 console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
 if (queue.length > already) try { recordPromptVersion(); } catch (e) { console.log(`⚠ Prompt history not updated: ${e.message}`); }
+if (args.control) {
+  let buf = '';
+  process.stdin.setEncoding('utf8');
+  process.stdin.on('data', (d) => {
+    const lines = (buf + d).split('\n'); buf = lines.pop();
+    for (const l of lines) if (l.trim()) try { control(JSON.parse(l)); } catch (e) { console.log(`⚠ Setting change ignored: ${e.message}`); }
+  });
+}
 await pool();
+if (args.control) process.stdin.destroy(); // or it keeps the runner alive
 clearInterval(stopPoll);
 fs.rmSync(stopFile, { force: true });
 writeReport();
@@ -695,8 +1116,9 @@ function writeReport() {
   for (const r of rows) { const s = scores[r.id]; if (s && (!s.startedAt || s.startedAt === r.startedAt)) { const { startedAt, ...rest } = s; Object.assign(r, rest); } }
   // A run from before a dimension was added shows as the variant it counts as, like in the dashboard.
   for (const r of rows) for (const d of dims) r[d] ??= olderVariant(d);
-  const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource',
+  const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource', 'apiCostUsd',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
+    'apiCalls', 'toolCalls', 'toolErrors', 'compactions',
     'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt'];
   const cell = (v) => v == null ? '' : typeof v === 'number' ? +v.toFixed(4)
     : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
@@ -705,7 +1127,7 @@ function writeReport() {
 
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const href = (p) => esc(String(p).split('/').map(encodeURIComponent).join('/')); // a # ? or % in a game's title would break the link
-  const show = ['agent', 'effort', ...dims, 'status', 'delivered', 'wallMinutes', 'costUsd', 'outputTokens', 'kb', 'score'];
+  const show = ['agent', 'effort', ...dims, 'status', 'delivered', 'wallMinutes', 'costUsd', 'apiCostUsd', 'outputTokens', 'kb', 'score'];
   const html = `<!doctype html><meta charset="utf-8"><title>Matrix runs</title>
 <style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}table{border-collapse:collapse;width:100%}
 th,td{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left;white-space:nowrap}th{cursor:pointer;background:#f4f4f4;position:sticky;top:0}
@@ -713,7 +1135,7 @@ th,td{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left;white-space:n
 <h1>Matrix runs (${rows.length})</h1><p>Static copy. For scoring and comparisons, run <code>node dashboard.mjs</code>.</p>
 <table><thead><tr><th>play</th>${show.map((c) => `<th>${c}</th>`).join('')}<th>files</th></tr></thead><tbody>
 ${rows.map((r) => `<tr class="${esc(r.status)}"><td>${r.entry ? `<a href="${href(r.entry)}">▶</a>` : '—'}</td>${show.map((c) =>
-  `<td>${esc(typeof r[c] === 'number' ? +r[c].toFixed(c === 'costUsd' ? 2 : 1) : r[c])}</td>`).join('')}<td><a href="${href(r.id)}/prompt.md">prompt</a> · <a href="${href(r.id)}/reply.md">reply</a></td></tr>`).join('\n')}
+  `<td>${esc(typeof r[c] === 'number' ? +r[c].toFixed(/Usd$/.test(c) ? 2 : 1) : r[c])}</td>`).join('')}<td><a href="${href(r.id)}/prompt.md">prompt</a> · <a href="${href(r.id)}/reply.md">reply</a></td></tr>`).join('\n')}
 </tbody></table><script>
 document.querySelectorAll('th').forEach((th,i)=>th.onclick=()=>{const tb=th.closest('table').tBodies[0],rs=[...tb.rows],d=th.dataset.d=th.dataset.d==='a'?'d':'a';
 rs.sort((x,y)=>{const a=x.cells[i].innerText,b=y.cells[i].innerText,n=parseFloat(a)-parseFloat(b);return (isNaN(n)?a.localeCompare(b):n)*(d==='a'?1:-1)});rs.forEach(r=>tb.append(r))})

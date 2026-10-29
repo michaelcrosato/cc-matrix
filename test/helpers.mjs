@@ -20,7 +20,8 @@ export function sandbox({ agents, dimensions, template = 'Make a small game.\n\n
   const cfg = { templateFile: 'prompt.md', agents, dimensions, bins: { ...Object.fromEntries(CLIS.map((p) => [p, path.join(FAKE, p)])), ...bins }, ...extra };
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg, null, 2));
   const sb = { dir, config: path.join(dir, 'config.json'), out: path.join(dir, 'runs'), log: path.join(dir, 'fake.log') };
-  sb.env = { ...process.env, FAKE_LOG: sb.log, FAKE_SLEEP_MS: '20' };
+  // The fake codex and grok write their session logs here (and the runner reads them from here, not ~).
+  sb.env = { ...process.env, FAKE_LOG: sb.log, FAKE_SLEEP_MS: '20', CODEX_HOME: path.join(dir, 'codex-home'), GROK_HOME: path.join(dir, 'grok-home') };
   return sb;
 }
 export const cleanup = (sb) => fs.rmSync(sb.dir, { recursive: true, force: true });
