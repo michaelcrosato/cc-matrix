@@ -109,7 +109,29 @@ export function stepWorld(world, inputsById = {}, dt = 1 / 60, surfacesById = nu
   world.events = [];
   const slices = Math.max(1, Math.min(4, Math.round(dt / (1 / 60)) || 1));
   const h = dt / slices;
-  for (let i = 0; i < slices; i += 1) stepWorldOnce(world, inputsById, h, surfacesById);
+  // One sample covers the frame. A jump leaves that surface on the first slice.
+  const surfaces = surfacesById ? { ...surfacesById } : null;
+  const jumped = new Set();
+  const dodged = new Set();
+  const boosted = new Set();
+  for (let i = 0; i < slices; i += 1) {
+    stepWorldOnce(world, inputsById, h, surfaces);
+    for (const car of world.cars) {
+      if (car.didJump) jumped.add(car);
+      if (car.didDodge) dodged.add(car);
+      if (car.didBoost) boosted.add(car);
+      if (
+        surfaces &&
+        (car.driveState === 'air' || car.didJump) &&
+        Object.prototype.hasOwnProperty.call(surfaces, car.id)
+      ) {
+        surfaces[car.id] = null;
+      }
+    }
+  }
+  for (const car of jumped) car.didJump = true;
+  for (const car of dodged) car.didDodge = true;
+  for (const car of boosted) car.didBoost = true;
   return world;
 }
 

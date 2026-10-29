@@ -6,7 +6,7 @@
 <title>Arena Afterburn</title>
 <!--
 Source Information
-- Date: 2026-10-28 22:19
+- Date: 2026-10-28 22:31
 - Rocket League
 - Tech: Three.js R180 (0.180.0) WebGPURenderer and MeshToonNodeMaterial, Rapier 0.19.3 (@dimforge/rapier3d-compat), Web Audio API, Gamepad API (standard mapping), WebRTC data channels. No WebGL path.
 - Art Direction: stylized cel-shaded look. Quantized toon gradient lighting, ink outlines, flat team colors.
@@ -19,9 +19,9 @@ Source Information
 - Usage: unknown
 
 Testing Feedback
-- How many issues did testing catch? 4
-- How many would be considered critical issues / game breaking? 3
-- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena.
+- How many issues did testing catch? 5
+- How many would be considered critical issues / game breaking? 4
+- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena. Repeating that step at the match frame sizes 0.025s and 0.05s showed one floor sample was reused for every substep, so the jump stuck again and the next press stacked upward speed instead of dodging.
 - What was the least helpful test you ran? Checking that the gamepad and keyboard action objects merely share the same keys, which passes even if a binding feels wrong in a match.
 
 Engine Feedback
@@ -285,7 +285,7 @@ function stepAttract(state2, dt, inputActive, onTitle) {
 
 // src/credits.js
 var CREDITS = `Source Information
-- Date: 2026-10-28 22:19
+- Date: 2026-10-28 22:31
 - Rocket League
 - Tech: Three.js R180 (0.180.0) WebGPURenderer and MeshToonNodeMaterial, Rapier 0.19.3 (@dimforge/rapier3d-compat), Web Audio API, Gamepad API (standard mapping), WebRTC data channels. No WebGL path.
 - Art Direction: stylized cel-shaded look. Quantized toon gradient lighting, ink outlines, flat team colors.
@@ -298,9 +298,9 @@ var CREDITS = `Source Information
 - Usage: unknown
 
 Testing Feedback
-- How many issues did testing catch? 4
-- How many would be considered critical issues / game breaking? 3
-- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena.
+- How many issues did testing catch? 5
+- How many would be considered critical issues / game breaking? 4
+- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena. Repeating that step at the match frame sizes 0.025s and 0.05s showed one floor sample was reused for every substep, so the jump stuck again and the next press stacked upward speed instead of dodging.
 - What was the least helpful test you ran? Checking that the gamepad and keyboard action objects merely share the same keys, which passes even if a binding feels wrong in a match.
 
 Engine Feedback
@@ -2237,7 +2237,24 @@ function stepWorld(world, inputsById = {}, dt = 1 / 60, surfacesById = null) {
   world.events = [];
   const slices = Math.max(1, Math.min(4, Math.round(dt / (1 / 60)) || 1));
   const h = dt / slices;
-  for (let i = 0; i < slices; i += 1) stepWorldOnce(world, inputsById, h, surfacesById);
+  const surfaces = surfacesById ? { ...surfacesById } : null;
+  const jumped = /* @__PURE__ */ new Set();
+  const dodged = /* @__PURE__ */ new Set();
+  const boosted = /* @__PURE__ */ new Set();
+  for (let i = 0; i < slices; i += 1) {
+    stepWorldOnce(world, inputsById, h, surfaces);
+    for (const car of world.cars) {
+      if (car.didJump) jumped.add(car);
+      if (car.didDodge) dodged.add(car);
+      if (car.didBoost) boosted.add(car);
+      if (surfaces && (car.driveState === "air" || car.didJump) && Object.prototype.hasOwnProperty.call(surfaces, car.id)) {
+        surfaces[car.id] = null;
+      }
+    }
+  }
+  for (const car of jumped) car.didJump = true;
+  for (const car of dodged) car.didDodge = true;
+  for (const car of boosted) car.didBoost = true;
   return world;
 }
 function stepWorldOnce(world, inputsById, dt, surfacesById) {

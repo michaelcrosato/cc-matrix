@@ -210,6 +210,52 @@ test('sampled surfaces leave the floor for a dodge and keep a wall ride', async 
   }
 });
 
+test('a sampled jump dodges at the frame steps the match uses', async () => {
+  const physics = await createPhysics(RAPIER);
+  for (const dt of [0.025, 0.05]) {
+    const world = createWorld({ mode: '1v1', humans: 2, duration: 300 });
+    const car = world.cars[0];
+    car.pos.x = 0;
+    car.pos.y = CAR.half.y;
+    car.pos.z = -18;
+    car.yaw = 0;
+    car.boost = 40;
+    world.match.phase = 'playing';
+    world.match.countdown = 0;
+    world.match.banner = '';
+    physics.ensureCars(world.cars.length);
+    physics.follow(world.cars, world.ball, null);
+    physics.step(1 / 60);
+
+    function frame(inputs) {
+      const surfaces = physics.sampleWorld(world.cars);
+      stepWorld(world, inputs, dt, surfaces);
+      physics.follow(world.cars, world.ball, null);
+      physics.step(dt);
+      return surfaces;
+    }
+
+    const before = frame({ [car.id]: { jump: true } });
+    assert.ok(before[car.id] && before[car.id].y > 0.5, `dt ${dt} jump did not start from a floor sample`);
+    assert.equal(car.didJump, true, `dt ${dt} lost the jump`);
+    assert.equal(car.driveState, 'air', `dt ${dt} state ${car.driveState}`);
+    assert.equal(car.canDodge, true, `dt ${dt} cleared the dodge window`);
+    assert.ok(car.pos.y > 0.7, `dt ${dt} stuck near the floor, y=${car.pos.y}`);
+
+    frame({ [car.id]: {} });
+    assert.equal(car.driveState, 'air', `dt ${dt} release returned to ${car.driveState}`);
+    assert.equal(car.canDodge, true);
+
+    const vy = car.vel.y;
+    frame({ [car.id]: { jump: true, steer: 1 } });
+    assert.equal(car.didDodge, true, `dt ${dt} second press did not dodge`);
+    assert.equal(car.canDodge, false);
+    assert.ok(car.vel.x > 1, `dt ${dt} dodge vx=${car.vel.x}`);
+    assert.ok(car.vel.y < vy + 6, `dt ${dt} stacked a second ground jump, vy=${car.vel.y} from ${vy}`);
+    assert.ok(car.pos.y > 0.7, `dt ${dt} dodge ended on the floor, y=${car.pos.y}`);
+  }
+});
+
 test('a jump then a directional dodge spends the dodge', () => {
   const car = carAt();
   const ground = { surfaceNormal: { x: 0, y: 1, z: 0 } };
