@@ -111,6 +111,13 @@ dialog .dhead { display: flex; align-items: center; gap: 8px; padding: 10px 12px
 dialog .dhead strong { min-width: 0; overflow-wrap: anywhere; }
 dialog .dbody { padding: 16px; overflow: auto; max-height: calc(86vh - 56px); max-height: calc(86dvh - 56px); overscroll-behavior: contain; }
 dialog pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 0; font-size: 13px; }
+/* choose(): a dialog asking which of a few things to do */
+.choices { display: flex; flex-direction: column; gap: 8px; max-width: 560px; margin-top: 12px; }
+.choices .btn { flex-direction: column; align-items: flex-start; white-space: normal; text-align: left; padding: 8px 12px; }
+.choices .btn .hint { margin: 2px 0 0; color: inherit; opacity: .8; }
+.choices .btn.danger { border-color: var(--bad); } /* ends running agents */
+.tag button.icon { padding: 0 3px; font-size: 12px; line-height: 1.4; vertical-align: baseline; }
+@media (pointer: fine) { .tag button.icon { min-width: 0; min-height: 0; } }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; } @media (max-width: 900px) { .grid2 { grid-template-columns: 1fr; } }
 .grid2 > * { min-width: 0; }
 .hint { color: var(--muted); font-size: 12.5px; margin-top: 6px; }
@@ -708,7 +715,7 @@ function showSmoke(s) {
       check(c.file, 'Agent used its tools (it created smoke.txt)', c.file ? null : 'check the permission flags in Advanced'),
       check(c.reply, s.goal ? 'Final reply read' : 'Final reply read (asked for SMOKE-OK)'),
       check(c.tokens, 'Token usage read', `${fmtTok(s.inputTokens)} in · ${fmtTok(s.outputTokens)} out`),
-      h('div', { class: 'muted' }, `Cost: ${s.costUsd != null ? fmtUsd(s.costUsd) : 'this CLI doesn\'t report cost'} · took ${fmtSecs(s.seconds)} · ${new Date(s.at).toLocaleString()}`)) : null,
+      h('div', { class: 'muted' }, `Cost: ${s.costUsd != null ? fmtUsd(s.costUsd) : s.apiCostUsd != null ? `~${fmtUsd(s.apiCostUsd)} at API list prices (this CLI doesn't report cost)` : 'this CLI doesn\'t report cost'} · took ${fmtSecs(s.seconds)} · ${new Date(s.at).toLocaleString()}`)) : null,
     s.command ? [h('div', { class: 'muted' }, 'Command'), pre(s.command)] : null,
     s.reply ? [h('div', { class: 'muted' }, 'Reply'), pre(s.reply)] : null,
     s.errTail ? [h('div', { class: 'muted' }, 'stderr'), pre(s.errTail)] : null,
@@ -1077,6 +1084,8 @@ function renderRun() {
   const s = selection();
   const rerender = () => { saveSel(); renderRun(); };
   const running = !!status.running;
+  // While a batch runs, Options shows and changes its settings as they are now (see adjust).
+  const now = running ? status.state : null;
 
   // Summary + launch
   const summary = h('div', { class: 'card', key: 'summary' },
@@ -1087,6 +1096,8 @@ function renderRun() {
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per model+effort'), h('span', {}, `up to ${s.combos * s.repeat} runs`)),
       h('div', { class: 'launch' },
         h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
+        running && status.state ? h('button', { class: 'btn', onclick: togglePause, disabled: status.stopping,
+          title: status.state.paused ? 'Let new runs start again' : 'Hold the queue: no new runs start until you resume' }, status.state.paused ? '▶ Resume' : '⏸ Pause') : null,
         running
           ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
           : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))),
@@ -1117,21 +1128,33 @@ function renderRun() {
             h('button', { class: 'icon', title: `Untick every effort of ${a.id}`, onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, true)); rerender(); } }, 'none')] : null));
       }))))),
     h('div', { class: 'card' },
-      h('h2', {}, 'Options'),
+      h('h2', {}, now ? 'Options · this batch' : 'Options'),
+      now ? h('p', { class: 'sub' }, `A run that has started keeps its model, effort, prompt and time limit and runs to the end. These apply to the ${plural(queuedCount(), 'run')} not started yet; `
+        + 'each change asks first, and nothing running is ended unless you choose that. They stay for the next batch too.') : null,
       h('table', { class: 'opts' }, h('tbody', {},
         optRow('Parallel runs', 'concurrency', 'How many agents run at once. Runs take turns across CLIs, so parallel slots go to different services.'),
         optRow('Max per CLI', 'perCli', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit.'),
-        optRow('Repeat each', 'repeat', 'Run each combination this many times (to see variance)'),
-        optRow('Budget ($)', 'budget', 'Stop starting new runs after this much reported spend (runs already going finish). Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'),
-        optRow('Time limit (min)', 'timeout', 'Per run, unless the model has its own. Empty = no limit.'),
-        h('tr', {}, h('td', {}, 'Retry failed'), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: !!sel.opts.rerunFailed,
-          onchange: (e) => { sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before'))))))));
+        optRow('Repeat each', 'repeat', now ? 'Run each combination this many times. Fixed once a batch starts.' : 'Run each combination this many times (to see variance)'),
+        optRow('Budget ($)', 'budget', 'Stop starting new runs once this much is spent. Spend is counted as each run finishes (that\'s when the CLI reports it), so a run already going can take it past the budget, and a run ended early isn\'t counted. Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'
+          + (now ? ` Spent so far in this batch: ${fmtUsd(now.spent)}.` : '')),
+        optRow('Time limit (min)', 'timeout', 'Per run, unless the model has its own. Empty = no limit.'
+          + (now ? ' Runs going now keep theirs unless you choose otherwise when you change it.' : '')),
+        h('tr', {}, h('td', {}, 'Retry failed', reach('rerunFailed')), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: now ? !!now.rerunFailed : !!sel.opts.rerunFailed,
+          onchange: (e) => { if (now) return adjust('rerunFailed', e.target); sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before'))))))));
+  // While a batch runs, what a change to each setting reaches.
+  function reach(key) {
+    if (!now) return null;
+    const [text, title] = key === 'repeat' ? ['fixed', 'Set when the batch started']
+      : key === 'timeout' ? ['not started yet', 'Runs not started yet; the running ones too only if you choose that when you change it']
+      : ['not started yet', 'Runs not started yet; the running ones keep going as they are'];
+    return h('div', {}, h('span', { class: 'tag', title }, text));
+  }
   function optRow(label, key, hint) {
-    const whole = ['concurrency', 'repeat', 'perCli'].includes(key);
-    return h('tr', { key }, h('td', { style: 'white-space:nowrap' }, h('label', { for: 'opt-' + key }, label)),
+    const whole = ['concurrency', 'repeat', 'perCli'].includes(key), fixed = now && key === 'repeat';
+    return h('tr', { key }, h('td', { style: 'white-space:nowrap' }, h('label', { for: 'opt-' + key }, label), reach(key)),
       h('td', {}, h('input', { type: 'number', id: 'opt-' + key, min: whole ? 1 : 0, step: key === 'budget' ? 'any' : 1, inputmode: key === 'budget' ? 'decimal' : 'numeric',
-        value: sel.opts[key] ?? '', style: 'width:100px', placeholder: ['budget', 'timeout', 'perCli'].includes(key) ? 'none' : '',
-        onchange: (e) => { sel.opts[key] = e.target.value; rerender(); } }), h('div', { class: 'hint' }, hint)));
+        value: now && !fixed ? now[key] ?? '' : sel.opts[key] ?? '', disabled: fixed, style: 'width:100px', placeholder: ['budget', 'timeout', 'perCli'].includes(key) ? 'none' : '',
+        onchange: (e) => { if (now && !fixed) return adjust(key, e.target); sel.opts[key] = e.target.value; rerender(); } }), h('div', { class: 'hint' }, hint)));
   }
 
   // Dimensions
@@ -1156,11 +1179,16 @@ function liveCard() {
   const head = st.running
     ? `Running · ${st.finished} finished · ${st.active.length} in progress · started ${new Date(st.startedAt).toLocaleTimeString()}`
     : st.finishedAt ? `Last batch ended ${new Date(st.finishedAt).toLocaleString()} (${st.finished} finished)` : 'No batch started since the dashboard opened.';
+  // A running batch takes changes (see adjust): each run can be ended, to start over later or to leave out.
+  const ctl = st.running && st.state && !st.stopping;
   return h('div', { class: 'card', id: 'live', key: 'live' }, h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
+    st.running ? holding() : null,
     hb ? liveHealth(hb) : null,
     hb?.active.length ? h('div', { class: 'chips', style: 'margin-bottom:10px' }, hb.active.map((a) =>
       h('span', { class: 'tag' + (a.slow ? ' warn' : ''), key: a.id, style: 'white-space:normal; overflow-wrap:anywhere', title: a.usual ? `Running for ${fmtMin(a.mins)}; this setup usually takes ~${fmtMin(a.usual)}` : 'Running for' },
-        `${a.slow ? '⚠' : '▶'} ${a.id} · ${since(st.activeSince?.[a.id])}${a.usual ? ` of ~${fmtMin(a.usual)}` : ''}`))) : null,
+        `${a.slow ? '⚠' : '▶'} ${a.id} · ${since(st.activeSince?.[a.id])}${a.usual ? ` of ~${fmtMin(a.usual)}` : ''}`,
+        ctl ? [' ', h('button', { class: 'icon', title: 'End it now and start it over later in this batch', 'aria-label': `Restart ${a.id} later`, onclick: () => endActive(a.id, 'requeue') }, '↻'),
+          h('button', { class: 'icon', title: 'End it now and leave it out of this batch (it runs next time)', 'aria-label': `Stop ${a.id}`, onclick: () => endActive(a.id, 'drop') }, '✕')] : null))) : null,
     // The log is appended to in place (see poll), so a redraw keeps it and where you've scrolled it to.
     h('pre', { class: 'log mono', id: 'logpre', key: 'log', 'data-keep': '', tabindex: 0, role: 'log', 'aria-label': 'Batch log',
       onscroll: (e) => { const p = e.currentTarget; logFollow = p.scrollTop + p.clientHeight >= p.scrollHeight - 8; } }, logText));
@@ -1172,8 +1200,9 @@ function batchHealth() {
   const st = status; if (!st.startedAt || !cfg) return null;
   const t0 = Date.parse(st.startedAt), per = {}, alerts = [];
   const fin = results.filter((r) => Date.parse(r.finishedAt) >= t0).sort((a, b) => String(a.finishedAt).localeCompare(String(b.finishedAt)));
-  const cli = (p) => per[p] ??= { ok: 0, failed: 0, running: 0, streak: 0, last: null };
+  const cli = (p) => per[p] ??= { ok: 0, failed: 0, running: 0, left: 0, streak: 0, last: null };
   for (const r of fin) { const c = cli(r.provider); if (r.status === 'ok') { c.ok++; c.streak = 0; } else { c.failed++; c.streak++; c.last = r; } }
+  for (const [p, n] of Object.entries(st.state?.left ?? {})) cli(p).left = n; // not started yet
   const active = (st.active ?? []).map((id) => {
     const a = agentOfId(id), mins = (Date.now() - Date.parse(st.activeSince?.[id])) / 60000, usual = usualMinutes(id);
     if (a) cli(a.provider).running++;
@@ -1199,10 +1228,12 @@ function liveHealth(hb) {
       h('div', { class: 'bar grow', style: 'max-width:320px', title: `${st.finished} of ${hb.total} done` },
         h('span', { style: `width:${Math.min(100, Math.round(100 * st.finished / hb.total))}%` })),
       h('span', {}, `${st.finished} of ${hb.total} done`, st.running ? ` · ${hb.active.length} running · ${hb.left} to go` : '',
-        hb.eta ? ` · about ${fmtMin(hb.eta)} left at this pace` : '')) : null,
+        hb.eta && !st.state?.paused ? ` · about ${fmtMin(hb.eta)} left at this pace` : '')) : null,
     Object.keys(hb.per).length ? h('div', { class: 'chips' }, Object.entries(hb.per).map(([p, c]) =>
-      h('span', { class: 'tag' + (c.streak >= 3 ? ' bad' : ''), title: c.last ? `Latest failure: ${c.last.error ?? 'no message'}` : 'No failures this batch' },
-        `${PROVIDERS[p] ?? p}: ✔ ${c.ok}${c.failed ? ` · ✘ ${c.failed}` : ''}${c.running ? ` · ▶ ${c.running}` : ''}`))) : null,
+      h('span', { class: 'tag' + (c.streak >= 3 ? ' bad' : ''), key: p, title: c.last ? `Latest failure: ${c.last.error ?? 'no message'}` : 'No failures this batch' },
+        `${PROVIDERS[p] ?? p}: ✔ ${c.ok}${c.failed ? ` · ✘ ${c.failed}` : ''}${c.running ? ` · ▶ ${c.running}` : ''}${c.left ? ` · ${c.left} ${st.running ? 'queued' : 'not started'}` : ''}`,
+        c.left && st.running && st.state && !st.stopping ? [' ', h('button', { class: 'icon', title: `Leave ${PROVIDERS[p] ?? p}'s queued runs out of this batch (its running ones finish)`,
+          onclick: () => skipCli(p, c.left) }, 'skip rest')] : null))) : null,
     hb.alerts.length && st.running ? h('div', { class: 'warns', style: 'margin-top:8px' }, hb.alerts.map((a) => h('div', {}, a))) : null,
     hb.flagged.length ? h('div', { class: 'row', style: 'margin-top:8px' },
       h('span', { class: 'warn' }, `⚑ ${n(hb.flagged.length, 'finished run')} in this batch ${hb.flagged.length === 1 ? 'looks' : 'look'} off`),
@@ -1233,7 +1264,10 @@ async function start() {
   const picked = new Set(s.pick.map((k) => k.split(':')[0]));
   const unproven = cfg.agents.filter((a) => picked.has(a.id) && !hasWorked(a)).map((a) => a.id);
   const note = unproven.length ? `\n\nNot proven to work yet (no passing test or finished run): ${unproven.join(', ')}. Test checks one in about a minute.` : '';
-  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}, ${sel.opts.concurrency || 1} at a time${budget}?\n\nAgents run with permission prompts off.${note}`)) return;
+  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}, ${sel.opts.concurrency || 1} at a time${budget}?\n\nAgents run with permission prompts off.${note}\n\n`
+    + `Once a run starts, its model, effort, prompt and time limit are fixed and it runs to the end. While the batch runs you can still change `
+    + `Parallel runs, Max per CLI, Budget, Time limit and Retry failed, and pause it: changes apply to the runs not started yet. `
+    + `Nothing that's running is ended unless you confirm it.`)) return;
   try {
     await api('/api/run', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed,
       concurrency: sel.opts.concurrency, perCli: sel.opts.perCli, budget: sel.opts.budget, timeout: sel.opts.timeout });
@@ -1242,9 +1276,153 @@ async function start() {
   } catch (e) { alert(e.message); }
 }
 async function stop() {
-  if (!confirm('Stop the batch? Running agents are ended and their unfinished runs discarded (they run fresh next time). Finished runs are kept.')) return;
+  const n = status.active?.length ?? 0;
+  if (n && status.state) {
+    const how = await choose('Stop the batch', [`${n === 1 ? '1 run is' : `${n} runs are`} going now. Finished runs are kept either way.`],
+      [{ value: 'pause', primary: true, label: `Pause instead: let ${n === 1 ? 'it' : 'them'} finish`, hint: 'No new runs start and nothing is lost. Stop once they\'re done.' },
+       { value: 'stop', danger: true, label: `Stop now and end the ${n === 1 ? 'run' : `${n} runs`} going`, hint: `${lostWork(n)} ${n === 1 ? 'It runs' : 'They run'} from the beginning in the next batch.` }]);
+    if (how === 'pause') return tellBatch({ set: { paused: true } });
+    if (how !== 'stop') return;
+  } else if (!confirm(n ? `Stop the batch now?\n\n${n === 1 ? 'The run' : `The ${n} runs`} going ${n === 1 ? 'is' : 'are'} ended. ${lostWork(n)} Finished runs are kept.`
+    : 'Stop the batch? Nothing is running; the runs not started yet are left for the next batch.')) return;
   try { await api('/api/stop', 'POST', {}); } catch (e) { alert(e.message); }
   await poll();
+}
+
+// ------------------------------------------------- changing a running batch
+// Options (while a batch runs), Pause, a run's ↻ and ✕, and a CLI's "skip rest" all go to the runner,
+// which applies them at once (control() in run-matrix.mjs). A run that has started keeps what it started
+// with and runs to the end: every change asks first and applies to the runs not started yet, and ending a
+// running agent is always a separate choice that says what it costs. A run can't be frozen and picked up
+// where it left off (its time, tokens and cost would then describe two sessions), so an ended run starts over.
+async function tellBatch(msg) {
+  try { await api('/api/adjust', 'POST', msg, 15000); return true; }
+  catch (e) { alert(`Couldn't change the batch: ${e.message}`); return false; }
+  finally { poll(); }
+}
+// The runs going now, newest first: the ones to end first when there are too many.
+const activeNewest = () => (status.active ?? []).map((id) => ({ id, at: status.activeSince?.[id] ?? '', agent: agentOfId(id) }))
+  .sort((a, b) => b.at.localeCompare(a.at));
+const queuedCount = () => Object.values(status.state?.left ?? {}).reduce((a, b) => a + b, 0);
+// What ending running agents costs; every choice that does it says so.
+const lostWork = (k) => `What ${k === 1 ? 'it has' : 'they have'} done so far is thrown away, and what ${k === 1 ? 'it has' : 'they have'} spent `
+  + `isn't counted in Spent (the CLIs report cost when a run finishes), so starting over pays for it again.`;
+// The first line of every change: what it applies to.
+function scopeLine() {
+  const n = status.active?.length ?? 0;
+  return `Applies to the ${plural(queuedCount(), 'run')} not started yet.${n ? ` ${n === 1 ? 'The run going now keeps' : `The ${n} runs going now keep`} `
+    + `what ${n === 1 ? 'it' : 'they'} started with and run${n === 1 ? 's' : ''} to the end.` : ''}`;
+}
+
+// Asks which of a few things to do; resolves to the chosen option's value, or null if closed.
+function choose(title, lines, options) {
+  return new Promise((resolve) => {
+    let picked = null;
+    const pick = (v) => { picked = v; modal.close(); };
+    openModal(title, h('div', {}, lines.filter(Boolean).map((t) => h('p', { style: 'margin:0 0 8px' }, t)),
+      h('div', { class: 'choices' }, options.map((o) => h('button', { class: 'btn' + (o.primary ? ' primary' : '') + (o.danger ? ' danger' : ''), onclick: () => pick(o.value) },
+        h('span', {}, o.label), o.hint ? h('span', { class: 'hint' }, o.hint) : null)),
+        h('button', { class: 'btn', onclick: () => pick(null) }, 'Cancel'))));
+    modal.addEventListener('close', () => resolve(picked), { once: true });
+  });
+}
+
+// A setting changed in Options while a batch runs. Every change asks first, saying it's for the runs not
+// started yet. Lowering Parallel runs or Max per CLI below what's running offers, besides letting the
+// extra runs finish, ending the newest to start them over later; a time limit can also be applied to the
+// running ones. What's applied stays for the next batch too.
+const OPT_NAMES = { concurrency: 'Parallel runs', perCli: 'Max per CLI', budget: 'Budget', timeout: 'Time limit', rerunFailed: 'Retry failed' };
+async function adjust(key, input) {
+  const st = status.state ?? {}, active = activeNewest(), box = input.type === 'checkbox';
+  const cur = st[key] ?? null, revert = () => { if (box) input.checked = !!cur; else input.value = cur ?? ''; };
+  let v = box ? input.checked : input.value.trim() === '' ? null : +input.value;
+  if (!box && v != null && !(v >= 0)) { alert('Enter a number, or leave it empty for none.'); return revert(); }
+  if (['perCli', 'budget', 'timeout'].includes(key) && v === 0) v = null; // 0 = none, as when starting
+  if ((key === 'concurrency' || key === 'perCli') && v != null) v = Math.max(1, Math.floor(v));
+  if ((key === 'concurrency' && v == null) || v === cur) return revert();
+  const show = (x) => key === 'budget' ? (x == null ? 'none' : fmtUsd(x)) : key === 'timeout' ? (x ? `${x} min` : 'none')
+    : key === 'rerunFailed' ? (x ? 'on' : 'off') : x ?? 'none';
+  const msg = { set: { [key]: v } }, them = (k) => k === 1 ? 'it' : 'them';
+  const apply = { value: 'apply', primary: true, label: 'Apply to the runs not started yet' };
+  const endNewest = (ids) => ({ value: 'requeue', danger: true, ids, label: `End ${ids.length === 1 ? 'the newest' : `the ${ids.length} newest`} now and start ${them(ids.length)} over later`,
+    hint: `${ids.join(', ')}. ${lostWork(ids.length)}` });
+  let lines = [scopeLine()], opts = [apply];
+
+  if (key === 'concurrency' && active.length > v) {
+    const ids = active.slice(0, active.length - v).map((a) => a.id);
+    lines = [`${plural(active.length, 'run')} going now, ${ids.length} more than ${v}. No run is ended unless you choose it below.`];
+    opts = [{ value: 'apply', primary: true, label: 'Let them finish', hint: `No new run starts until fewer than ${v} are running.` }, endNewest(ids)];
+  }
+  if (key === 'perCli' && v != null) {
+    const over = [...groupBy(active.filter((a) => a.agent), (a) => a.agent.provider)].filter(([, l]) => l.length > v);
+    if (over.length) {
+      const ids = over.flatMap(([, l]) => l.slice(0, l.length - v).map((a) => a.id));
+      lines = [`${over.map(([p, l]) => `${PROVIDERS[p] ?? p} has ${l.length} running`).join(', ')}: more than ${v}. No run is ended unless you choose it below.`];
+      opts = [{ value: 'apply', primary: true, label: 'Let them finish', hint: `No new run of ${over.length === 1 ? 'that CLI' : 'those CLIs'} starts until fewer than ${v} are running.` }, endNewest(ids)];
+    }
+  }
+  if (key === 'timeout') {
+    const mins = (a) => (Date.now() - Date.parse(a.at)) / 60000;
+    const mine = active.filter((a) => !a.agent?.timeout), past = v == null ? [] : mine.filter((a) => mins(a) >= v);
+    const own = cfg.agents.filter((a) => a.timeout).map((a) => `${a.id} (${a.timeout} min)`);
+    lines.push(own.length ? `Models with a time limit of their own keep it: ${own.join(', ')}.` : null);
+    if (mine.length) opts.push({ value: 'all', danger: past.length > 0, label: `Also the ${plural(mine.length, 'run')} going now`, hint: past.length
+      ? `Counted from when each started, so ${past.map((a) => a.id).join(', ')} ${past.length === 1 ? 'has' : 'have'} already run longer: ${past.length === 1 ? 'it ends' : 'they end'} now `
+        + `and count${past.length === 1 ? 's' : ''} as failed (timed out). What ${past.length === 1 ? 'it has' : 'they have'} spent isn't counted in Spent.`
+      : `Counted from when each started; one that runs past it then ends as failed (timed out).` });
+  }
+  if (key === 'budget') {
+    const spent = st.spent ?? 0, going = active.length;
+    lines.push(`Spent so far in this batch: ${fmtUsd(spent)}. Spend is counted as each run finishes (that's when Claude Code and Grok report it; `
+      + `the other CLIs don't), so the budget never stops a run that's going, and one can take it past the budget. Runs ended early aren't counted.`,
+      v == null ? 'With no budget, new runs keep starting until the batch is done.'
+        : v <= spent ? `That's spent already, so no new runs start${going ? `; ${going === 1 ? 'the run going now finishes' : `the ${going} runs going now finish`}` : ' and the batch ends'}.`
+        : `New runs start while the reported spend is under ${fmtUsd(v)}${st.overBudget ? ', so they start again now' : ''}.`);
+  }
+  if (key === 'rerunFailed') lines.push(v ? 'Failed runs this batch skipped are queued again, and failed runs still in the queue will be retried.'
+    : 'Failed runs still in the queue are skipped from now.');
+  const how = await choose(`${OPT_NAMES[key]}: ${show(cur)} → ${show(v)}`, lines, opts);
+  if (!how) return revert();
+  if (how === 'requeue') msg.requeue = opts.find((o) => o.ids).ids;
+  if (how === 'all') msg.timeoutRunning = true;
+  if (!(await tellBatch(msg))) return revert();
+  sel.opts[key] = v ?? ''; saveSel();
+}
+
+async function togglePause() {
+  if (status.state?.paused) return tellBatch({ set: { paused: false } });
+  const active = activeNewest(), msg = { set: { paused: true } };
+  if (active.length) {
+    const k = active.length;
+    const how = await choose('Pause the batch', [`No new runs start until you resume. ${k === 1 ? '1 run is' : `${k} runs are`} going now.`,
+      'A running agent can\'t be frozen and picked up later where it left off, so pausing lets it finish unless you choose to end it.'],
+      [{ value: 'finish', primary: true, label: 'Let the running ones finish', hint: 'Nothing is lost; the batch waits for you once they\'re done.' },
+       { value: 'requeue', danger: true, label: `End ${k === 1 ? 'it' : `all ${k}`} now and start ${k === 1 ? 'it' : 'them'} over when you resume`, hint: lostWork(k) }]);
+    if (!how) return;
+    if (how === 'requeue') msg.requeue = active.map((a) => a.id);
+  }
+  await tellBatch(msg);
+}
+
+async function endActive(id, how) {
+  if (!confirm(`End ${id} now${how === 'requeue' ? ' and start it over later in this batch' : ' and leave it for the next batch'}?\n\n${lostWork(1)}`)) return;
+  await tellBatch({ [how]: [id] });
+}
+async function skipCli(p, left) {
+  if (!confirm(`Leave ${PROVIDERS[p] ?? p}'s ${plural(left, 'queued run')} out of this batch?\n\nIts running ones finish. The rest run in the next batch.`)) return;
+  await tellBatch({ skipCli: [p] });
+}
+
+// Why runs aren't starting right now, when they aren't.
+function holding() {
+  const s = status.state; if (!s) return null;
+  const n = status.active?.length ?? 0, left = Object.values(s.left ?? {}).reduce((a, b) => a + b, 0);
+  const going = n === 1 ? 'the run going now' : `the ${n} runs going now`;
+  const why = s.paused ? `⏸ Paused: no new runs start until you resume${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
+    : s.overBudget ? `Budget spent (${fmtUsd(s.spent)} of ${fmtUsd(s.budget)}): no new runs start${n ? `; ${going} finish${n === 1 ? 'es' : ''}. Raise the budget in Options to carry on` : ''}.`
+    : n > s.concurrency && left ? `${n} running, more than the ${s.concurrency} now allowed: no new run starts until fewer are running.`
+    : null;
+  return why ? h('p', { class: 'warns', style: 'margin:0 0 10px' }, why) : null;
 }
 
 // ---------------------------------------------------------------- RESULTS
@@ -1266,6 +1444,7 @@ const METRICS = {
   delivered: { label: 'Delivered a game', rate: true, get: (r) => r.delivered ? 1 : 0 },
   wallMinutes: { label: 'Time', short: 'time', log: true, fmt: fmtMin },
   costUsd: { label: 'Cost', short: 'cost', log: true, fmt: fmtUsd },
+  apiCostUsd: { label: 'API list price', short: 'list price', log: true, fmt: fmtUsd },
   outputTokens: { label: 'Output tokens', short: 'output', log: true, fmt: fmtTok },
   totalTokens: { label: 'Total tokens', short: 'tokens', log: true, fmt: fmtTok },
   kb: { label: 'Game size', short: 'size', log: true, fmt: fmtKb },
@@ -1526,7 +1705,7 @@ function renderInsights() {
 }
 
 function tilesCard(rows) {
-  const ok = rows.filter((r) => r.status === 'ok'), flags = runFlags(), costed = rows.filter((r) => r.costUsd != null);
+  const ok = rows.filter((r) => r.status === 'ok'), flags = runFlags(), costed = rows.filter((r) => r.costUsd != null), priced = rows.filter((r) => r.apiCostUsd != null);
   const scored = rows.filter((r) => r.score != null).length;
   const tile = (k, v, d) => h('div', { class: 'tile' }, h('span', { class: 'k' }, k), h('span', { class: 'v' }, v), d ? h('span', { class: 'd' }, d) : null);
   return h('div', { class: 'card', key: 'tiles' }, h('div', { class: 'tiles' },
@@ -1536,6 +1715,7 @@ function tilesCard(rows) {
     tile('Need a look', rows.filter((r) => flags.has(r.id) && !reviewed(r)).length.toLocaleString(), 'flagged, not reviewed yet'),
     tile('Scored', scored.toLocaleString(), `${pct(scored / rows.length)} of runs`),
     tile('Reported spend', fmtUsd(costed.reduce((s, r) => s + r.costUsd, 0)), costed.length < rows.length ? `${costed.length} of ${rows.length} runs report cost` : 'all runs report cost'),
+    tile('At API list prices', fmtUsd(priced.reduce((s, r) => s + r.apiCostUsd, 0)), priced.length < rows.length ? `${priced.length} of ${rows.length} runs priced` : 'every run\'s tokens'),
     tile('Median time', fmtMin(median(ok.map((r) => r.wallMinutes))), 'finished runs')));
 }
 
@@ -1785,11 +1965,11 @@ function renderResults() {
       h('span', { class: 'muted' }, 'Group by'),
       h('select', { 'aria-label': 'Group by', onchange: (e) => { rv.group = e.target.value; rerender(); } },
         groupFields.map((g) => h('option', { value: g, selected: rv.group === g }, fieldLabel(g))))),
-    h('p', { class: 'sub' }, 'Plain averages per group, everything else mixed in. Cost averages only runs whose CLI reported a cost (n shown). Score averages only scored runs.'),
+    h('p', { class: 'sub' }, 'Plain averages per group, everything else mixed in. Cost averages only runs whose CLI reported a cost (n shown); list price is every run\'s tokens at the labs\' public API prices. Score averages only scored runs.'),
     gRows.length ? h('div', { class: 'scroll' }, h('table', { class: 'pin' },
-      h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
+      h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg list price', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
       h('tbody', {}, gRows.map(([k, rs]) => {
-        const c = avg(rs, 'costUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
+        const c = avg(rs, 'costUsd'), lp = avg(rs, 'apiCostUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
         return h('tr', { key: k },
           h('td', {}, h('strong', {}, valLabel(rv.group, k))),
           h('td', { class: 'num' }, rs.length),
@@ -1798,6 +1978,7 @@ function renderResults() {
           h('td', { class: 'num', style: 'white-space:nowrap' }, c.n ? `${fmtUsd(c.v)}` : '—', c.n && c.n < rs.length ? h('span', { class: 'muted' }, ` (n=${c.n})`) : null),
           h('td', {}, c.v ? h('div', { class: 'bar', title: 'Relative avg cost' }, h('span', { style: `width:${Math.round(100 * c.v / maxCost)}%` })) : null),
           h('td', { class: 'num' }, c.n ? fmtUsd(sum(rs, 'costUsd')) : '—'),
+          h('td', { class: 'num', style: 'white-space:nowrap' }, lp.n ? fmtUsd(lp.v) : '—', lp.n && lp.n < rs.length ? h('span', { class: 'muted' }, ` (n=${lp.n})`) : null),
           h('td', { class: 'num' }, fmtTok(avg(rs, 'outputTokens').v)),
           h('td', { class: 'num', style: 'white-space:nowrap' }, sc.n ? fmt(sc.v, 1) : '—', sc.n ? h('span', { class: 'muted' }, ` (${sc.n})`) : null));
       })))) : h('p', { class: 'muted' }, 'No runs shown.'));
@@ -1808,7 +1989,7 @@ function renderResults() {
   const shownDims = dims.filter((d) => !same.includes(d));
   const cols = [
     ['', null], ['model', 'agent'], ['effort', 'effort'], ...shownDims.map((d) => [d, d]), ['status', 'status'],
-    ['time', 'wallMinutes', 1], ['cost', 'costUsd', 1], ['out tok', 'outputTokens', 1], ['KB', 'kb', 1],
+    ['time', 'wallMinutes', 1], ['cost', 'costUsd', 1], ['list $', 'apiCostUsd', 1], ['out tok', 'outputTokens', 1], ['KB', 'kb', 1],
     ['score', 'score', 1], ['notes', 'notes'], ['finished', 'finishedAt'], ['', null]];
   const sk = rv.sort.k, sd = rv.sort.d;
   const sorted = [...filtered].sort((a, b) => {
@@ -1848,6 +2029,7 @@ function renderResults() {
         err ? h('div', { class: 'hint hide-cards', style: 'margin:2px 0 0; min-width:220px; max-width:300px; white-space:normal', title: r.error }, err) : null),
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'time'), fmtMin(r.wallMinutes)),
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'cost'), r.costUsd != null ? fmtUsd(r.costUsd) : h('span', { class: 'muted', title: 'This CLI does not report cost' }, 'n/a')),
+      h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'list $'), r.apiCostUsd != null ? h('span', { title: 'Its tokens at the lab\'s public API list price' }, fmtUsd(r.apiCostUsd)) : '—'),
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'out'), fmtTok(r.outputTokens)),
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'KB'), r.kb ?? '—'),
       h('td', { class: 'scorecell' }, h('input', { type: 'number', min: 0, max: 10, step: 0.5, inputmode: 'decimal', class: 'score', value: r.score ?? '', placeholder: 'score', 'aria-label': `Score for ${r.id}`,
@@ -1976,6 +2158,14 @@ function updateBadge() {
 
 // Everything about one run: what it was, what it measured against what's usual for its setup, and why it's flagged.
 // It follows the run while open: a review saved elsewhere, or the run deleted, shows up here too.
+// The most used tools, and how many calls failed.
+const toolNote = (r) => r.tools ? [...Object.entries(r.tools).sort((a, b) => b[1] - a[1]).slice(0, 4).map(([k, n]) => `${k} ${n}`),
+  r.toolErrors ? `${r.toolErrors} failed` : ''].filter(Boolean).join(' · ') : '';
+// What the CLI's own totals left out and the runner added from its session logs (Codex subagents, Grok /goal helpers).
+const helperNote = (r) => r.helpers ? `+${fmtTok(r.helpers.inputTokens + r.helpers.outputTokens)} tokens${r.helpers.costUsd != null ? `, +${fmtUsd(r.helpers.costUsd)}` : ''} not in the CLI's own total` : '';
+// The plan's limit windows as the run ended, and where they stood when it started.
+const planText = (p) => p.windows.map((w) => `${w.name} ${w.usedPct ?? '?'}%`).join(' · ') || '—';
+const planNote = (p) => [p.tier, ...p.windows.filter((w) => w.startPct != null && w.startPct !== w.usedPct).map((w) => `${w.name} ${w.startPct}% at the start`)].filter(Boolean).join(' · ');
 function showRun(r) { openModal(r.id, runDetails(r), () => runDetails(results.find((x) => x.id === r.id) ?? { ...r, gone: true })); }
 function runDetails(r) {
   const fl = runFlags().get(r.id), fits = usualFits();
@@ -1998,17 +2188,25 @@ function runDetails(r) {
         line('Time', fmtMin(r.wallMinutes), usual('wallMinutes')),
         line('API time', r.apiMinutes != null ? fmtMin(r.apiMinutes) : null, r.apiMinutes && r.wallMinutes ? `${pct(r.apiMinutes / r.wallMinutes)} of the time` : ''),
         line('Cost', r.costUsd != null ? fmtUsd(r.costUsd) : null, r.costUsd != null ? usual('costUsd') : 'this CLI doesn\'t report cost'),
+        line('API list price', r.apiCostUsd != null ? fmtUsd(r.apiCostUsd) : null, [r.provider === 'claude' && r.costUsd != null ? 'Claude Code\'s own cost is at list price'
+          : r.apiCostUsd != null ? 'its tokens at the lab\'s public API price' : '', r.unpricedModels ? `no price for ${r.unpricedModels.join(', ')}` : ''].filter(Boolean).join(' · ')),
         line('Output tokens', tok('outputTokens'), [r.reasoningTokens != null ? `${fmtTok(r.reasoningTokens)} reasoning` : '', usual('outputTokens')].filter(Boolean).join(' · ')),
         line('Input tokens', tok('inputTokens'), r.inputTokens != null ? `${fmtTok(r.cachedTokens ?? 0)} cache read${r.cacheWriteTokens != null ? ` · ${fmtTok(r.cacheWriteTokens)} cache write` : ''}` : ''),
         line('Total tokens', tok('totalTokens')),
-        line('Turns', r.turns, r.rounds > 1 ? `in the last of ${r.rounds} /goal rounds` : ''),
-        line('Subagents', r.subagents))),
+        line('Turns', r.turns, r.rounds > 1 && r.apiCalls == null ? `in the last of ${r.rounds} /goal rounds` : r.rounds > 1 ? `in ${r.rounds} rounds` : ''),
+        line('Model requests', r.apiCalls != null ? fmtNum(r.apiCalls) : null),
+        line('Tool calls', r.toolCalls != null ? fmtNum(r.toolCalls) : null, toolNote(r)),
+        line('Compactions', r.compactions, r.compactions ? 'times the context was summarized to make room' : ''),
+        line('Subagents', r.subagents, helperNote(r)),
+        r.sessionLog && r.sessionLog !== 'read' ? line('Session log', r.sessionLog, 'so any subagents\' or /goal helpers\' usage isn\'t in these figures') : null)),
       h('table', {}, h('tbody', {},
         line('Game file', r.delivered ? fmtKb(r.kb) : 'none', r.delivered ? usual('kb') : ''),
         line('Lines', r.loc != null ? fmtNum(r.loc) : null, usual('loc')),
         line('Dev files', r.files),
         line('TODO / FIXME', r.todos),
         line('Reply', r.hasReply ? (r.replyChars ? `${fmtNum(r.replyChars)} characters` : 'yes') : 'none'),
+        line('Plan usage', r.plan ? planText(r.plan) : null, r.plan ? planNote(r.plan) : ''),
+        line('First token', r.firstTokenMs != null ? fmtSecs(r.firstTokenMs / 1000) : null),
         line('CLI version', r.cli),
         line('Prompt', promptLabel(r.promptVersion)),
         line('Started', when(r.startedAt)), line('Finished', when(r.finishedAt))))),
@@ -2148,8 +2346,10 @@ async function pollOnce() {
   catch { if (!offline) { offline = true; setPill(); } return; }
   const back = offline; offline = false;
   if (st.logTotal < logSince) { resetLog(); return pollOnce(); } // a new batch (or a restarted server) started a new log
+  // The batch's settings as they are now show in Options, so a change to them (from any tab) redraws.
+  const stateChanged = JSON.stringify(st.state ?? null) !== JSON.stringify(status.state ?? null);
   status = st;
-  let changed = back || wasRunning !== !!st.running;
+  let changed = back || stateChanged || wasRunning !== !!st.running;
   if (st.smokes) { smokes = st.smokes; changed = true; }
   if (st.rev?.smokes != null) rev.smokes = st.rev.smokes;
   if (st.log.length) {
