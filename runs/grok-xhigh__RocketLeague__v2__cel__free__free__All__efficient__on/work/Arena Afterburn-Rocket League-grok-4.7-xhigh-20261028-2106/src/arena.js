@@ -74,6 +74,8 @@ export function geometricSurface(car, arena = ARENA) {
 
 export function classifyNormal(normal) {
   if (!normal) return 'air';
+  const length = Math.hypot(normal.x, normal.y, normal.z);
+  if (length < 0.5) return 'air';
   if (normal.y > 0.72) return 'ground';
   if (normal.y < -0.72) return 'ceiling';
   return 'wall';

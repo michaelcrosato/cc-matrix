@@ -76,18 +76,27 @@ export async function createPhysics(RAPIER) {
     );
     if (!hit) return null;
     const n = hit.normal;
-    return { toi: hit.timeOfImpact, normal: { x: n.x, y: n.y, z: n.z } };
+    const length = Math.hypot(n.x, n.y, n.z);
+    if (length < 0.5) return null;
+    const facing = n.x * direction.x + n.y * direction.y + n.z * direction.z;
+    if (facing >= -0.2) return null;
+    return {
+      toi: hit.timeOfImpact,
+      normal: { x: n.x / length, y: n.y / length, z: n.z / length },
+    };
   }
 
   function sampleSurface(car, body) {
     const origin = { x: car.pos.x, y: car.pos.y, z: car.pos.z };
+    // Skin is shorter than the 0.12 jump separation, so the next sample misses the floor.
+    const skin = 0.1;
     const probes = [
-      [{ x: 0, y: -1, z: 0 }, CAR.half.y + 0.45],
-      [{ x: 0, y: 1, z: 0 }, CAR.half.y + 0.3],
-      [{ x: 1, y: 0, z: 0 }, CAR.half.x + 0.35],
-      [{ x: -1, y: 0, z: 0 }, CAR.half.x + 0.35],
-      [{ x: 0, y: 0, z: 1 }, CAR.half.z + 0.35],
-      [{ x: 0, y: 0, z: -1 }, CAR.half.z + 0.35],
+      [{ x: 0, y: -1, z: 0 }, CAR.half.y + skin],
+      [{ x: 0, y: 1, z: 0 }, CAR.half.y + skin],
+      [{ x: 1, y: 0, z: 0 }, CAR.half.x + skin],
+      [{ x: -1, y: 0, z: 0 }, CAR.half.x + skin],
+      [{ x: 0, y: 0, z: 1 }, CAR.half.z + skin],
+      [{ x: 0, y: 0, z: -1 }, CAR.half.z + skin],
     ];
     let best = null;
     for (const [direction, maxToi] of probes) {

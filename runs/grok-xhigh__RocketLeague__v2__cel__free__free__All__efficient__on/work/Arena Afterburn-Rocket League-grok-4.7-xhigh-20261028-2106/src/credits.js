@@ -1,5 +1,5 @@
 export const CREDITS = `Source Information
-- Date: 2026-10-28 21:57
+- Date: 2026-10-28 22:19
 - Rocket League
 - Tech: Three.js R180 (0.180.0) WebGPURenderer and MeshToonNodeMaterial, Rapier 0.19.3 (@dimforge/rapier3d-compat), Web Audio API, Gamepad API (standard mapping), WebRTC data channels. No WebGL path.
 - Art Direction: stylized cel-shaded look. Quantized toon gradient lighting, ink outlines, flat team colors.
@@ -12,9 +12,9 @@ export const CREDITS = `Source Information
 - Usage: unknown
 
 Testing Feedback
-- How many issues did testing catch? 2
-- How many would be considered critical issues / game breaking? 1
-- What was the most helpful test you ran? The headless launch that started a versus-AI match and read the WebGPU target back. It showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch.
+- How many issues did testing catch? 4
+- How many would be considered critical issues / game breaking? 3
+- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena.
 - What was the least helpful test you ran? Checking that the gamepad and keyboard action objects merely share the same keys, which passes even if a binding feels wrong in a match.
 
 Engine Feedback

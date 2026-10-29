@@ -6,7 +6,7 @@
 <title>Arena Afterburn</title>
 <!--
 Source Information
-- Date: 2026-10-28 21:57
+- Date: 2026-10-28 22:19
 - Rocket League
 - Tech: Three.js R180 (0.180.0) WebGPURenderer and MeshToonNodeMaterial, Rapier 0.19.3 (@dimforge/rapier3d-compat), Web Audio API, Gamepad API (standard mapping), WebRTC data channels. No WebGL path.
 - Art Direction: stylized cel-shaded look. Quantized toon gradient lighting, ink outlines, flat team colors.
@@ -19,9 +19,9 @@ Source Information
 - Usage: unknown
 
 Testing Feedback
-- How many issues did testing catch? 2
-- How many would be considered critical issues / game breaking? 1
-- What was the most helpful test you ran? The headless launch that started a versus-AI match and read the WebGPU target back. It showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch.
+- How many issues did testing catch? 4
+- How many would be considered critical issues / game breaking? 3
+- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena.
 - What was the least helpful test you ran? Checking that the gamepad and keyboard action objects merely share the same keys, which passes even if a binding feels wrong in a match.
 
 Engine Feedback
@@ -285,7 +285,7 @@ function stepAttract(state2, dt, inputActive, onTitle) {
 
 // src/credits.js
 var CREDITS = `Source Information
-- Date: 2026-10-28 21:57
+- Date: 2026-10-28 22:19
 - Rocket League
 - Tech: Three.js R180 (0.180.0) WebGPURenderer and MeshToonNodeMaterial, Rapier 0.19.3 (@dimforge/rapier3d-compat), Web Audio API, Gamepad API (standard mapping), WebRTC data channels. No WebGL path.
 - Art Direction: stylized cel-shaded look. Quantized toon gradient lighting, ink outlines, flat team colors.
@@ -298,9 +298,9 @@ var CREDITS = `Source Information
 - Usage: unknown
 
 Testing Feedback
-- How many issues did testing catch? 2
-- How many would be considered critical issues / game breaking? 1
-- What was the most helpful test you ran? The headless launch that started a versus-AI match and read the WebGPU target back. It showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch.
+- How many issues did testing catch? 4
+- How many would be considered critical issues / game breaking? 3
+- What was the most helpful test you ran? The headless launch showed the animation callback had been scheduled only once, so the match never advanced, and the first readback was only a sliver of the pitch. Stepping the match with the same Rapier surface samples the frame loop uses then showed a jump peak near y=0.67 snapped back onto the floor, so the second jump never dodged, and a boost ride on the +X wall drove the car out of the arena.
 - What was the least helpful test you ran? Checking that the gamepad and keyboard action objects merely share the same keys, which passes even if a binding feels wrong in a match.
 
 Engine Feedback
@@ -691,17 +691,25 @@ async function createPhysics(RAPIER) {
     );
     if (!hit) return null;
     const n = hit.normal;
-    return { toi: hit.timeOfImpact, normal: { x: n.x, y: n.y, z: n.z } };
+    const length = Math.hypot(n.x, n.y, n.z);
+    if (length < 0.5) return null;
+    const facing = n.x * direction.x + n.y * direction.y + n.z * direction.z;
+    if (facing >= -0.2) return null;
+    return {
+      toi: hit.timeOfImpact,
+      normal: { x: n.x / length, y: n.y / length, z: n.z / length }
+    };
   }
   function sampleSurface(car, body) {
     const origin = { x: car.pos.x, y: car.pos.y, z: car.pos.z };
+    const skin = 0.1;
     const probes = [
-      [{ x: 0, y: -1, z: 0 }, CAR.half.y + 0.45],
-      [{ x: 0, y: 1, z: 0 }, CAR.half.y + 0.3],
-      [{ x: 1, y: 0, z: 0 }, CAR.half.x + 0.35],
-      [{ x: -1, y: 0, z: 0 }, CAR.half.x + 0.35],
-      [{ x: 0, y: 0, z: 1 }, CAR.half.z + 0.35],
-      [{ x: 0, y: 0, z: -1 }, CAR.half.z + 0.35]
+      [{ x: 0, y: -1, z: 0 }, CAR.half.y + skin],
+      [{ x: 0, y: 1, z: 0 }, CAR.half.y + skin],
+      [{ x: 1, y: 0, z: 0 }, CAR.half.x + skin],
+      [{ x: -1, y: 0, z: 0 }, CAR.half.x + skin],
+      [{ x: 0, y: 0, z: 1 }, CAR.half.z + skin],
+      [{ x: 0, y: 0, z: -1 }, CAR.half.z + skin]
     ];
     let best = null;
     for (const [direction, maxToi] of probes) {
@@ -1522,6 +1530,8 @@ function geometricSurface(car, arena = ARENA) {
 }
 function classifyNormal(normal) {
   if (!normal) return "air";
+  const length = Math.hypot(normal.x, normal.y, normal.z);
+  if (length < 0.5) return "air";
   if (normal.y > 0.72) return "ground";
   if (normal.y < -0.72) return "ceiling";
   return "wall";
@@ -1940,6 +1950,33 @@ function applyPlanarDrive(car, input, dt, forward, right, grip) {
   const reverse = fwdSpeed < -1 ? -1 : 1;
   car.yaw = wrapAngle(car.yaw + input.steer * rate * reverse * dt);
 }
+function containCar(car) {
+  const h = CAR.half;
+  const hx = ARENA.width / 2;
+  const hz = ARENA.length / 2;
+  const maxX = hx - h.x;
+  const maxY = ARENA.height - h.y;
+  if (car.pos.x > maxX) {
+    car.pos.x = maxX;
+    if (car.vel.x > 0) car.vel.x = 0;
+  } else if (car.pos.x < -maxX) {
+    car.pos.x = -maxX;
+    if (car.vel.x < 0) car.vel.x = 0;
+  }
+  if (car.pos.y > maxY) {
+    car.pos.y = maxY;
+    if (car.vel.y > 0) car.vel.y = 0;
+  }
+  const inMouth = Math.abs(car.pos.x) < ARENA.goalWidth / 2 - h.x && car.pos.y < ARENA.goalHeight - h.y;
+  const maxZ = inMouth ? hz + ARENA.goalDepth - h.z : hz - h.z;
+  if (car.pos.z > maxZ) {
+    car.pos.z = maxZ;
+    if (car.vel.z > 0) car.vel.z = 0;
+  } else if (car.pos.z < -maxZ) {
+    car.pos.z = -maxZ;
+    if (car.vel.z < 0) car.vel.z = 0;
+  }
+}
 function stepCar(car, input = {}, dt, contacts) {
   car.didJump = false;
   car.didDodge = false;
@@ -2009,9 +2046,6 @@ function stepCar(car, input = {}, dt, contacts) {
         powerslide ? CAR.slideGrip : CAR.lateralGrip
       );
       car.vel.y += CAR.gravity * dt * (state2 === "ceiling" ? 0.05 : 0.2);
-      car.vel.x -= surface.x * 3 * dt;
-      car.vel.y -= surface.y * 3 * dt;
-      car.vel.z -= surface.z * 3 * dt;
       car.roll = clamp(car.roll + (-surface.x * 1.2 - car.roll) * Math.min(1, dt * 6), -1.25, 1.25);
       car.pitch = clamp(car.pitch + (surface.z * 1.1 - car.pitch) * Math.min(1, dt * 6), -1.1, 1.1);
     }
@@ -2096,6 +2130,7 @@ function stepCar(car, input = {}, dt, contacts) {
       car.dodgeTimer = 0;
     }
   }
+  containCar(car);
   const planar = Math.hypot(car.vel.x, car.vel.z);
   car.supersonic = planar >= CAR.supersonic;
   return car;

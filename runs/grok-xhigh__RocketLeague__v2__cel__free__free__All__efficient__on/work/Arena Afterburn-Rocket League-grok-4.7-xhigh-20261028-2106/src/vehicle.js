@@ -1,4 +1,4 @@
-import { BALL, CAR } from './constants.js';
+import { ARENA, BALL, CAR } from './constants.js';
 import { classifyNormal, geometricSurface } from './arena.js';
 import { carAxes, clamp, dot, localToWorld, worldToLocal, wrapAngle } from './math3.js';
 
@@ -185,6 +185,36 @@ function applyPlanarDrive(car, input, dt, forward, right, grip) {
   car.yaw = wrapAngle(car.yaw + input.steer * rate * reverse * dt);
 }
 
+/** Keep the center inside the arena. Goal mouths extend past the end line. */
+function containCar(car) {
+  const h = CAR.half;
+  const hx = ARENA.width / 2;
+  const hz = ARENA.length / 2;
+  const maxX = hx - h.x;
+  const maxY = ARENA.height - h.y;
+  if (car.pos.x > maxX) {
+    car.pos.x = maxX;
+    if (car.vel.x > 0) car.vel.x = 0;
+  } else if (car.pos.x < -maxX) {
+    car.pos.x = -maxX;
+    if (car.vel.x < 0) car.vel.x = 0;
+  }
+  if (car.pos.y > maxY) {
+    car.pos.y = maxY;
+    if (car.vel.y > 0) car.vel.y = 0;
+  }
+  const inMouth =
+    Math.abs(car.pos.x) < ARENA.goalWidth / 2 - h.x && car.pos.y < ARENA.goalHeight - h.y;
+  const maxZ = inMouth ? hz + ARENA.goalDepth - h.z : hz - h.z;
+  if (car.pos.z > maxZ) {
+    car.pos.z = maxZ;
+    if (car.vel.z > 0) car.vel.z = 0;
+  } else if (car.pos.z < -maxZ) {
+    car.pos.z = -maxZ;
+    if (car.vel.z < 0) car.vel.z = 0;
+  }
+}
+
 /**
  * One vehicle step. `contacts.surfaceNormal` forces a surface (null = air).
  * Omit `contacts` to use the arena geometry.
@@ -264,9 +294,6 @@ export function stepCar(car, input = {}, dt, contacts) {
         powerslide ? CAR.slideGrip : CAR.lateralGrip,
       );
       car.vel.y += CAR.gravity * dt * (state === 'ceiling' ? 0.05 : 0.2);
-      car.vel.x -= surface.x * 3 * dt;
-      car.vel.y -= surface.y * 3 * dt;
-      car.vel.z -= surface.z * 3 * dt;
       car.roll = clamp(car.roll + (-surface.x * 1.2 - car.roll) * Math.min(1, dt * 6), -1.25, 1.25);
       car.pitch = clamp(car.pitch + (surface.z * 1.1 - car.pitch) * Math.min(1, dt * 6), -1.1, 1.1);
     }
@@ -355,6 +382,8 @@ export function stepCar(car, input = {}, dt, contacts) {
       car.dodgeTimer = 0;
     }
   }
+
+  containCar(car);
 
   const planar = Math.hypot(car.vel.x, car.vel.z);
   car.supersonic = planar >= CAR.supersonic;

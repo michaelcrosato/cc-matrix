@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import RAPIER from '@dimforge/rapier3d-compat';
 import { ARENA, BALL, CAR, MATCH } from '../src/constants.js';
 import { carAxes } from '../src/math3.js';
 import { createMatch, onGoal, stepMatch } from '../src/match.js';
 import { createBall, resolveBallArena, stepBall } from '../src/ball.js';
+import { createPhysics } from '../src/physics.js';
 import { applyBoostPad, createCar, resolveCarContact, stepCar } from '../src/vehicle.js';
 import { createWorld, stepWorld } from '../src/world.js';
 
@@ -102,6 +104,110 @@ test('boost drains, a small pad is a partial refill, and a big pad fills the tan
   const big = carAt({ boost: 3 });
   applyBoostPad(big, 'big');
   assert.equal(big.boost, 100);
+});
+
+test('sampled surfaces leave the floor for a dodge and keep a wall ride', async () => {
+  const physics = await createPhysics(RAPIER);
+  const dt = 1 / 60;
+  const limitX = ARENA.width / 2 - CAR.half.x;
+
+  function boot(world) {
+    world.match.phase = 'playing';
+    world.match.countdown = 0;
+    world.match.banner = '';
+    physics.ensureCars(world.cars.length);
+    physics.follow(world.cars, world.ball, null);
+    physics.step(dt);
+  }
+
+  function frame(world, inputs) {
+    const surfaces = physics.sampleWorld(world.cars);
+    stepWorld(world, inputs, dt, surfaces);
+    physics.follow(world.cars, world.ball, null);
+    physics.step(dt);
+    return surfaces;
+  }
+
+  const jumper = createWorld({ mode: '1v1', humans: 2, duration: 300 });
+  const car = jumper.cars[0];
+  car.pos.x = 0;
+  car.pos.y = CAR.half.y;
+  car.pos.z = -18;
+  car.yaw = 0;
+  car.boost = 100;
+  boot(jumper);
+
+  frame(jumper, { [car.id]: { jump: true } });
+  assert.equal(car.didJump, true);
+  assert.equal(car.driveState, 'air');
+  assert.ok(car.pos.y > 0.6, `jump should clear the floor, y=${car.pos.y}`);
+
+  for (let i = 0; i < 5; i += 1) {
+    const surfaces = frame(jumper, { [car.id]: {} });
+    const normal = surfaces[car.id];
+    assert.equal(car.driveState, 'air', `frame ${i} snapped back to ${car.driveState}`);
+    assert.equal(car.canDodge, true);
+    assert.ok(!normal || normal.y < 0.5, `air sample still hit the floor: ${JSON.stringify(normal)}`);
+    assert.ok(car.pos.y > 0.75, `jump stuck near the floor, y=${car.pos.y}`);
+  }
+
+  frame(jumper, { [car.id]: { jump: true, steer: 1 } });
+  assert.equal(car.didDodge, true);
+  assert.equal(car.canDodge, false);
+  assert.ok(car.vel.x > 1, `dodge should add +X speed, got ${car.vel.x}`);
+  const yAfterDodge = car.pos.y;
+  assert.ok(yAfterDodge > 1, `dodge should stay airborne, y=${yAfterDodge}`);
+
+  let sawBoostHeight = car.pos.y;
+  for (let i = 0; i < 45; i += 1) {
+    const surfaces = frame(jumper, { [car.id]: { pitch: 1, boost: true } });
+    const normal = surfaces[car.id];
+    sawBoostHeight = Math.max(sawBoostHeight, car.pos.y);
+    if (car.pos.y < ARENA.height - CAR.half.y - 1) {
+      assert.ok(!normal || normal.y < 0.5, `nose-up boost was pulled to the floor: ${JSON.stringify(normal)}`);
+    }
+  }
+  assert.ok(car.didBoost, 'boost should fire in the air');
+  assert.ok(
+    sawBoostHeight > yAfterDodge + 1.5,
+    `nose-up boost should add height, peak ${sawBoostHeight} from ${yAfterDodge}`,
+  );
+
+  const rider = createWorld({ mode: '1v1', humans: 2, duration: 300 });
+  const wallCar = rider.cars[0];
+  wallCar.pos.x = limitX;
+  wallCar.pos.y = 8;
+  wallCar.pos.z = 35;
+  wallCar.yaw = 0;
+  wallCar.boost = 100;
+  boot(rider);
+  for (let i = 0; i < 100; i += 1) {
+    const surfaces = frame(rider, { [wallCar.id]: { throttle: 1, boost: true } });
+    const normal = surfaces[wallCar.id];
+    assert.equal(wallCar.driveState, 'wall', `along-wall frame ${i} became ${wallCar.driveState} at x=${wallCar.pos.x} y=${wallCar.pos.y}`);
+    assert.ok(wallCar.pos.x <= limitX + 1e-6, `along-wall left the arena, x=${wallCar.pos.x}`);
+    assert.ok(wallCar.pos.x > limitX - 0.35, `along-wall fell off the surface, x=${wallCar.pos.x}`);
+    assert.ok(normal && normal.x < -0.5, `along-wall normal ${JSON.stringify(normal)} at frame ${i}`);
+    assert.ok(wallCar.pos.x < 40, `along-wall exited, x=${wallCar.pos.x}`);
+  }
+
+  const press = createWorld({ mode: '1v1', humans: 2, duration: 300 });
+  const pressCar = press.cars[0];
+  pressCar.pos.x = limitX;
+  pressCar.pos.y = 8;
+  pressCar.pos.z = 0;
+  pressCar.yaw = -Math.PI / 2;
+  pressCar.boost = 100;
+  boot(press);
+  for (let i = 0; i < 100; i += 1) {
+    const surfaces = frame(press, { [pressCar.id]: { throttle: 1, boost: true } });
+    const normal = surfaces[pressCar.id];
+    assert.equal(pressCar.driveState, 'wall', `into-wall frame ${i} became ${pressCar.driveState} at x=${pressCar.pos.x}`);
+    assert.ok(pressCar.pos.x <= limitX + 1e-6, `into-wall left the arena, x=${pressCar.pos.x}`);
+    assert.ok(pressCar.pos.x > limitX - 0.35, `into-wall left the surface, x=${pressCar.pos.x}`);
+    assert.ok(normal && normal.x < -0.5 && Math.hypot(normal.x, normal.y, normal.z) > 0.5, `into-wall normal ${JSON.stringify(normal)}`);
+    assert.ok(pressCar.pos.x < 40, `into-wall exited toward x=62, x=${pressCar.pos.x}`);
+  }
 });
 
 test('a jump then a directional dodge spends the dodge', () => {
