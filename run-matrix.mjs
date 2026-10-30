@@ -506,6 +506,15 @@ function sessionLogs(provider, m, ctx) {
   let x; try { x = read(m, ctx); } catch (e) { m.sessionLog = `unreadable: ${e.message}`; return; }
   m.sessionLog = x ? 'read' : 'not found';
   if (!x) return;
+  // Codex prints a turn's usage when the turn ends, so a run stopped mid-turn (by the time limit, say) printed
+  // less than its log has for the main thread: the log's figures stand in for the printed ones then.
+  const main = x.main;
+  if (main && (main.input_tokens ?? 0) + (main.output_tokens ?? 0) > (m.inputTokens ?? 0) + (m.outputTokens ?? 0)) {
+    m.inputTokens = main.input_tokens ?? 0; m.cachedTokens = main.cached_input_tokens ?? 0;
+    m.cacheWriteTokens = main.cache_write_input_tokens ?? m.cacheWriteTokens;
+    m.outputTokens = main.output_tokens ?? 0; m.reasoningTokens = main.reasoning_output_tokens ?? 0;
+    m.models = { [ctx.model ?? 'unknown']: modelUse(m.inputTokens, m.cachedTokens, m.cacheWriteTokens ?? 0, m.outputTokens, m.reasoningTokens) };
+  }
   for (const [id, u] of Object.entries(x.models ?? {})) addModel(m.models ??= {}, id, u);
   if (x.tools) {
     for (const [k, n] of Object.entries(x.tools)) add(m.tools ??= {}, k, n);
@@ -594,7 +603,7 @@ function codexLogs(m, { start, end, model }) {
   const plan = last && { tier: last.plan_type ?? undefined, windows: ['primary', 'secondary'].filter((k) => last[k]).map((k) =>
     planWindow(codexWindow(last[k].window_minutes), last[k].used_percent ?? null, first[k]?.used_percent ?? null, last[k].resets_at ? last[k].resets_at * 1000 : null)) };
   return { helpers: subs.length ? h : null, models, tools, toolErrors, subagents: subs.length, apiCalls: top.calls + h.apiCalls,
-    compactions: top.compactions, firstTokenMs: top.firstTokenMs, plan };
+    compactions: top.compactions, firstTokenMs: top.firstTokenMs, plan, main: top.usage };
 }
 
 // Grok: ~/.grok/sessions/<url-encoded working folder>/<session id>/ (or $GROK_HOME) has usage.json (tokens,
@@ -702,7 +711,7 @@ const limitOf = (run) => +(run.agent.timeout || args.timeout || 0);
 // (Re)arm a running agent's time limit, counted from when it started: one already past it ends now.
 function setLimit(c, min) {
   clearTimeout(c.timer); c.timer = null;
-  if (min > 0) c.timer = setTimeout(() => { c.err.write('\n[matrix] timed out\n'); killTree(c.child); },
+  if (min > 0) c.timer = setTimeout(() => { c.timedOut = true; c.err.write('\n[matrix] timed out\n'); killTree(c.child); },
     Math.min(2 ** 31 - 1, Math.max(0, c.start + min * 60000 - Date.now())));
 }
 
@@ -747,6 +756,7 @@ async function spawnAgent(run, dir, prompt, limit) {
   const outPath = path.join(dir, 'agent.out'), errPath = path.join(dir, 'agent.err');
   const out = fs.createWriteStream(outPath), err = fs.createWriteStream(errPath);
   const start = Date.now();
+  let timedOut = false;
 
   const exitCode = await new Promise((resolve) => {
     // On Windows, npm .cmd shims need a shell; quote args so prompts survive it.
@@ -759,7 +769,7 @@ async function spawnAgent(run, dir, prompt, limit) {
     child.stdin.end(promptInArgs ? '' : prompt);
     setLimit(c, limit);
     child.on('error', (e) => { err.write(`\n[matrix] ${e.message}\n`); });
-    child.on('close', (code) => { clearTimeout(c.timer); live.delete(run.id); resolve(code); });
+    child.on('close', (code) => { clearTimeout(c.timer); live.delete(run.id); timedOut = !!c.timedOut; resolve(code); });
   });
   await Promise.all([new Promise((r) => out.end(r)), new Promise((r) => err.end(r))]);
 
@@ -767,6 +777,8 @@ async function spawnAgent(run, dir, prompt, limit) {
   try { metrics = readMetrics(run.agent.provider, fs.readFileSync(outPath, 'utf8'), run.agent, { cwd: path.join(dir, 'work'), start, end: Date.now() }); }
   catch (e) { metrics = { isError: true, parseError: e.message }; }
   metrics.replyChars = String(metrics.reply ?? '').trim().length;
+  // The time limit ending a run makes it a failure, also when the CLI exits 0 on being stopped (Codex does).
+  if (timedOut) metrics.isError = true;
   if ((exitCode !== 0 || metrics.isError) && !metrics.error)
     metrics.error = lastLine(errPath) || metrics.parseError || (exitCode == null ? 'killed' : `exit code ${exitCode}`);
   return { exitCode, metrics, start, bin, argv };
