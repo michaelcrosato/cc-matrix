@@ -1,0 +1,13 @@
+Built [Rumble Road Rebels](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-ultra__v7__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Rumble Road Rebels-Rock n Roll Racing-gpt-6.1-terra-ultra-20261029-0921.html>) and its [development folder](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-ultra__v7__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Rumble Road Rebels-Rock n Roll Racing-gpt-6.1-terra-ultra-20261029-0921/>). The HTML loads its libraries from CDNs and requires WebGPU.
+
+The demo includes a three-lap combat race, AI rivals, cannon fire, mines, pickups, boost, damage and respawns, controller-first menus, axis inversion, synthesized audio, and a looping attract mode. AI Hub uses parallel sessions; standalone rooms show remote cars and their positions, though weapon hits are resolved locally rather than synchronized between players.
+
+**Testing caught one critical startup issue**, which was fixed. The browser smoke test was the most helpful: it exercised attract mode, firing, pause, and axis inversion. Syntax checking was the least helpful. A mock simulation completed a three-lap AI race, and a mocked networking test covered room messages.
+
+A visual check remains outstanding: headless Chromium produced a white WebGPU canvas, including for an independent minimal Three.js scene. Real-GPU rendering, physical controllers, and cross-device WebRTC were not verified.
+
+**Source information:** Rock n’ Roll Racing; dated 2026-10-29 09:21. The game uses Three.js R180 WebGPU, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, and the AI Hub session protocol. Art is procedural cel-shaded 3D; animation is procedural and physics-driven. Music, effects, and gibberish voice are synthesized in code. Testing was lightweight, with performance targets out of scope. Environment: Codex CLI headless on Linux; browser unknown, with headless Chromium used for smoke testing. Model: OpenAI gpt-6.1-terra, reasoning effort ultra. Cost, token usage, and session-time estimates: unknown.
+
+**Engine feedback:** Three.js’s scene graph made the procedural world approachable. The startup error came from an incorrect assumption about callback initialization order. Racing rules, AI, and controls needed custom implementation. WebGPU integration and diagnosis were the hardest parts; clearer adapter and rendering diagnostics would be the most useful overhaul.
+
+**Prompt feedback:** The arcade inspiration and controller-first direction were useful. The breadth of “complete vertical slice” left some scope open to interpretation, and multiplayer interoperability was the hardest part. The most useful additional test would be a four-player session on real WebGPU devices with controllers.

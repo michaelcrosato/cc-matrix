@@ -195,6 +195,7 @@ function selectionArgs(sel = {}) {
   for (const [dim, ids] of Object.entries(sel.only ?? {})) a.push('--only', `${dim}=${ids.join(',')}`);
   if (sel.repeat > 1) a.push('--repeat', String(sel.repeat));
   if (sel.rerunFailed) a.push('--rerun-failed');
+  if (sel.resumeFailed) a.push('--resume-failed');
   return a;
 }
 
@@ -236,7 +237,7 @@ function adjustment(b) {
   if ('perCli' in s) { const n = num('perCli', 0); set.perCli = n >= 1 ? Math.floor(n) : null; }
   if ('budget' in s) set.budget = num('budget', 0) || null;
   if ('timeout' in s) set.timeout = num('timeout', 0) || null;
-  for (const k of ['rerunFailed', 'paused']) if (k in s) set[k] = !!s[k];
+  for (const k of ['rerunFailed', 'resumeFailed', 'paused']) if (k in s) set[k] = !!s[k];
   const ids = (x) => (Array.isArray(x) ? x : []).filter((id) => typeof id === 'string' && run.active.has(id));
   return { set, timeoutRunning: !!b.timeoutRunning, requeue: ids(b.requeue), drop: ids(b.drop),
     skipCli: (Array.isArray(b.skipCli) ? b.skipCli : []).filter((p) => typeof p === 'string' && /^\w+$/.test(p)) };
@@ -303,6 +304,21 @@ const SCORES = path.join(OUT, 'scores.json');
 const reviewOf = (scores, r) => { const s = scores[r.id]; if (!s || (s.startedAt && s.startedAt !== r.startedAt)) return {};
   const { startedAt, ...rest } = s; return rest; };
 
+// Whether Resume failed would carry on with this failed run's session instead of starting it over, as
+// canResume() in run-matrix.mjs decides before any time limit: a Claude Code run that got partway, in the
+// folder it ran in, whose session is still on disk (claudeTranscript is the same as there).
+function resumable(dir, r) {
+  return r.status !== 'ok' && r.provider === 'claude' && !!r.sessionId && r.outputTokens > 0 && path.basename(dir) === r.id
+    && !!claudeTranscript(r.sessionId, path.join(dir, 'work'));
+}
+function claudeTranscript(sessionId, cwd) {
+  const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude'), 'projects'), file = `${sessionId}.jsonl`;
+  const own = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, '-'), file);
+  if (fs.existsSync(own)) return own;
+  try { for (const d of fs.readdirSync(root)) if (fs.existsSync(path.join(root, d, file))) return path.join(root, d, file); } catch {}
+  return null;
+}
+
 function results() {
   const scores = readJSON(SCORES, {});
   const dims = readJSON(CONFIG, {}).dimensions ?? {};
@@ -313,6 +329,7 @@ function results() {
     const dir = path.join(OUT, d.name), r = readJSON(path.join(dir, 'result.json'), null);
     if (!r?.id) continue;
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
+    if (resumable(dir, r)) r.resumable = true;
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;
     // A run from before a dimension was added counts as its olderRuns variant (else its first), as in
@@ -394,7 +411,8 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(req, res, p.slice(6));
     if (p === '/api/audit' && m === 'GET') return send(res, 200, readJSON(AUDIT, null));
 
-    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true) });
+    // canResume: this server takes Resume failed (a page newer than its server hides it).
+    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true), canResume: true });
     if (p === '/api/config' && m === 'PUT') {
       const c = await body(req);
       if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });

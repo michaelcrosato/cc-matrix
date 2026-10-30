@@ -128,6 +128,27 @@ test('a batch from the page runs through the fake CLIs and reports progress', as
   assert.equal((await d.api('/api/run', 'POST', { pick: [] })).status, 200); // nothing ticked = nothing runs
 });
 
+test('Resume failed: the page hears which failed runs can carry on with their session, and a batch from it resumes them', async (t) => {
+  const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:limit' }, { id: 'b', text: 'FAKE:limit=start' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });
+  assert.equal(runner(s, []).status, 0); // both stop on the usage limit, one partway and one at once
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/config')).json.canResume, true);
+  const by = Object.fromEntries((await dd.api('/api/results')).json.map((r) => [r.id, r]));
+  assert.deepEqual([by['opus-low__a'].resumable, by['opus-low__b'].resumable], [true, undefined]);
+  const sel = { pick: ['opus:low'], only: { testing: ['a', 'b'] }, resumeFailed: true };
+  const pv = (await dd.api('/api/preview', 'POST', sel)).json;
+  assert.deepEqual([pv.alreadyDone, pv.resumes], [1, 1]);
+  assert.equal((await dd.api('/api/run', 'POST', sel)).status, 200);
+  const done = await waitFor(async () => { const x = (await dd.api('/api/status?since=0')).json; return !x.running && x.finishedAt ? x : null; });
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.equal(done.finished, 1);
+  assert.ok(done.log.some((l) => l.startsWith('✔ opus-low__a  resumed:')), done.log.join('\n'));
+  const a = (await dd.api('/api/results')).json.find((r) => r.id === 'opus-low__a');
+  assert.deepEqual([a.status, a.resumes, a.resumable], ['ok', 1, undefined]);
+});
+
 test('Test button: a smoke test runs and its result comes back', async () => {
   assert.equal((await d.api('/api/smoke', 'POST', { tests: [{ key: 'opus:low', goal: false }] })).status, 200);
   const s = await waitFor(async () => { const x = (await d.api('/api/status')).json.smokes?.['opus:low']; return x && !x.running ? x : null; });
@@ -190,7 +211,7 @@ test('a running batch takes changes: limits, pause and ending a run, checked fir
 
   const r = await d2.api('/api/adjust', 'POST', { set: { concurrency: 1, perCli: '', budget: 0, timeout: 30, paused: true }, requeue: ['opus-low__a', 'not-running'] });
   assert.equal(r.status, 200, r.text);
-  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 } });
+  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, resumeFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 } });
   const s = await waitFor(async () => { const x = (await d2.api('/api/status?since=0')).json; return x.active.length === 1 ? x : null; });
   assert.ok(s.log.some((l) => l.startsWith('↺ opus-low__a requeued')), s.log.join('\n'));
   assert.ok(s.log.some((l) => l.startsWith('⚙ Parallel runs: 2 → 1')));

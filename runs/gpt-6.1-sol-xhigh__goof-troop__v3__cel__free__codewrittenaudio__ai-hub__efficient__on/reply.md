@@ -1,0 +1,13 @@
+Created [**Goof Wanderers — single HTML**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-xhigh__v2__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Goof-Wanderers-Goof-Troop-gpt-6.1-sol-xhigh-20261029-0820.html).
+
+Five chapters, puzzles, throwing combat, grappling, a boss, solo AI, couch/online co-op, and looping attract mode. Requires WebGPU and internet for CDN dependencies.
+
+**Source Information:** 2026-10-29 09:31, America/Vancouver. Inspiration: *Goof Troop*. Three.js r180, WebGPU only, Rapier 0.19.3, Gamepad/Web Audio APIs, PeerJS 1.5.5, ai-hub protocol v1/client 1.3.0. Procedural cel-shaded art, hierarchical character rigs, and synthesized music, effects, and gibberish voices. Online uses shared-world ai-hub and WebRTC co-op. Environment: Codex CLI headless, Linux/WSL2; tested Chromium 153 under Xvfb; player browser unknown. Model: OpenAI gpt-6.1-sol, xhigh. Session approximately 70 minutes; API cost and token usage unknown.
+
+**Testing Feedback:** All **82 assertions passed**, covering mechanics, four-player and server-hosted ai-hub sessions, actual WebRTC, and controller/UI behavior. Network simulation used 70 ms latency, 25 ms jitter, and 4% packet loss. Testing caught seven issues, three blocking; review found five additional issues, two blocking. All were fixed. Most helpful: the four-player conformance harness. Least helpful: syntax checking, which missed a runtime API mismatch.
+
+**Engine Feedback:** TSL cel materials and Rapier contacts worked well. I initially guessed wrong about descriptor methods and material arrays. The main custom work was interactions, room progression, companion navigation, and networking. Prediction and room transitions were hardest. I’d overhaul implicit renderer fallback and add an official input/simulation scaffold independent of rendering.
+
+**Prompt Feedback:** The concrete packaging and controller requirements were especially useful. Demo duration and standalone signaling choice were unspecified. Integrating puzzles, AI, combat, and co-op was hardest. The most valuable additional test would be a complete four-device human playthrough using physical DualSense controllers.
+
+The HTML’s top comment and in-game credits include this information. [Development and test notes](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-xhigh__v2__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Goof-Wanderers-Goof-Troop-gpt-6.1-sol-xhigh-20261029-0820/README.md).

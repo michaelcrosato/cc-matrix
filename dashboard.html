@@ -506,9 +506,11 @@ let prompts = [];
 let ui = store.get('matrix.ui', { saveOpen: null, filtersOpen: false, auditFilter: { sev: '', area: '', status: '', unread: false } });
 const saveUi = () => store.set('matrix.ui', ui);
 const auditRead = new Set(store.get('matrix.auditRead', []));
-let sel = store.get('matrix.sel', { offPick: [], offOnly: {}, opts: { repeat: 1, concurrency: 2, perCli: '', budget: '', timeout: '', rerunFailed: false } });
+let sel = store.get('matrix.sel', { offPick: [], offOnly: {}, opts: { repeat: 1, concurrency: 2, perCli: '', budget: '', timeout: '', rerunFailed: false, resumeFailed: false } });
 let rv = store.get('matrix.results', { group: 'testing', filters: {}, q: '', sort: { k: 'finishedAt', d: -1 } });
 const saveSel = () => store.set('matrix.sel', sel);
+// Resume failed is ticked and the dashboard's server takes it (an older one, still running, doesn't).
+const resumeOn = () => !!(meta.canResume && sel.opts.resumeFailed);
 const saveRv = () => store.set('matrix.results', rv);
 let iv = store.get('matrix.insights', { range: 'all', filters: {}, group: 'agent+effort', metric: 'wallMinutes', showSeen: false, showAll: false });
 const saveIv = () => store.set('matrix.insights', iv);
@@ -884,7 +886,9 @@ function renderSetup() {
           h('button', { class: 'icon', title: 'Move up', 'aria-label': 'Move variant up', disabled: i === 0, onclick: () => { moveIn(vs, i, -1); changed(true); } }, '↑'),
           h('button', { class: 'icon', title: 'Move down', 'aria-label': 'Move variant down', disabled: i === vs.length - 1, onclick: () => { moveIn(vs, i, 1); changed(true); } }, '↓'),
           h('button', { class: 'icon', title: 'Remove', 'aria-label': 'Remove variant', onclick: () => { vs.splice(i, 1); changed(true); } }, '✕')))),
-      h('button', { class: 'btn', onclick: () => { vs.push({ id: 'v' + (vs.length + 1), text: '' }); changed(true); } }, '+ Add variant'));
+      h('div', { class: 'row' },
+        h('button', { class: 'btn', onclick: () => { vs.push({ id: 'v' + (vs.length + 1), text: '' }); changed(true); } }, '+ Add variant'),
+        h('button', { class: 'btn', title: 'Paste a list, one variant per line', onclick: () => bulkAdd(d, vs, changed) }, 'Bulk add…')));
   });
   cfg.bins ??= {}; cfg.extraArgs ??= {};
   morph($('#tab-setup'),
@@ -1055,14 +1059,18 @@ function selection() {
   const repeat = Math.max(1, +sel.opts.repeat || 1);
   const lists = Object.values(only), combos = lists.reduce((n, l) => n * l.length, 1);
   const count = pick.length * combos * repeat;
-  let done = 0, doneOld = 0; // doneOld: of those, made with an older prompt or a variant's old text
+  let done = 0, doneOld = 0, resume = 0; // doneOld: of those, made with an older prompt or a variant's old text
   if (count <= 50000) {
-    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || !sel.opts.rerunFailed).map((r) => [runKey(r), r]));
+    // Resume failed: failed runs that got partway carry on with their session (the server says which can).
+    const resumable = (r) => r.status !== 'ok' && r.resumable && resumeOn();
+    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || !(sel.opts.rerunFailed || resumable(r))).map((r) => [runKey(r), r]));
+    const resumes = new Set(results.filter(resumable).map(runKey));
     const walk = (i, acc, base) => {
       if (i === lists.length) {
         for (let r = 1; r <= repeat; r++) {
-          const d = doneRuns.get([base, ...acc, repeat > 1 ? `r${r}` : null].filter(Boolean).join('__'));
+          const key = [base, ...acc, repeat > 1 ? `r${r}` : null].filter(Boolean).join('__'), d = doneRuns.get(key);
           if (d) { done++; if (d.changed?.length || (d.promptVersion && meta.promptVersion && d.promptVersion !== meta.promptVersion)) doneOld++; }
+          else if (resumes.has(key)) resume++;
         }
         return;
       }
@@ -1070,7 +1078,7 @@ function selection() {
     };
     for (const k of pick) { const [a, e] = k.split(':'); walk(0, [], `${a}-${e}`); }
   }
-  return { pick, only, repeat, count, done, doneOld, combos };
+  return { pick, only, repeat, count, done, doneOld, resume, combos };
 }
 
 function chip(label, on, toggle, title, key) {
@@ -1093,6 +1101,8 @@ function renderRun() {
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Will run'), h('span', { class: 'big' }, (s.count - s.done).toLocaleString())),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Selected'), h('span', {}, `${s.count.toLocaleString()} combinations`)),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Already done'), h('span', {}, `${s.done.toLocaleString()} (skipped)`)),
+      s.resume ? h('div', { class: 'stat', title: 'Failed partway; they carry on with their session instead of starting over (Resume failed)' },
+        h('span', { class: 'label' }, 'Of those to run'), h('span', {}, `${s.resume.toLocaleString()} resume`)) : null,
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per model+effort'), h('span', {}, `up to ${s.combos * s.repeat} runs`)),
       h('div', { class: 'launch' },
         h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
@@ -1140,7 +1150,11 @@ function renderRun() {
         optRow('Time limit (min)', 'timeout', 'Per run, unless the model has its own. Empty = no limit.'
           + (now ? ' Runs going now keep theirs unless you choose otherwise when you change it.' : '')),
         h('tr', {}, h('td', {}, 'Retry failed', reach('rerunFailed')), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: now ? !!now.rerunFailed : !!sel.opts.rerunFailed,
-          onchange: (e) => { if (now) return adjust('rerunFailed', e.target); sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before'))))))));
+          onchange: (e) => { if (now) return adjust('rerunFailed', e.target); sel.opts.rerunFailed = e.target.checked; rerender(); } }), h('span', { class: 'muted' }, 'Re-run combinations that failed before')))),
+        meta.canResume ? h('tr', {}, h('td', {}, 'Resume failed', reach('resumeFailed')), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: now ? !!now.resumeFailed : !!sel.opts.resumeFailed,
+          onchange: (e) => { if (now) return adjust('resumeFailed', e.target); sel.opts.resumeFailed = e.target.checked; rerender(); } }),
+          h('span', { class: 'muted' }, 'Claude Code runs that failed partway (on a usage limit, say) carry on with their session instead of starting over, '
+            + 'work and all. Their time, tokens and cost add up across the sessions, and they\'re marked ⟳. Other failed runs start over only with Retry failed.')))) : null))));
   // While a batch runs, what a change to each setting reaches.
   function reach(key) {
     if (!now) return null;
@@ -1243,7 +1257,7 @@ function liveHealth(hb) {
 async function preview() {
   try {
     const s = selection();
-    const r = await api('/api/preview', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed });
+    const r = await api('/api/preview', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed, resumeFailed: resumeOn() });
     if (dirty()) r.note = 'Preview uses the saved setup. Save to include your latest edits.';
     openModal(`Preview · ${r.count} runs`, h('div', {},
       r.note ? h('p', { class: 'warns' }, r.note) : null,
@@ -1264,12 +1278,13 @@ async function start() {
   const picked = new Set(s.pick.map((k) => k.split(':')[0]));
   const unproven = cfg.agents.filter((a) => picked.has(a.id) && !hasWorked(a)).map((a) => a.id);
   const note = unproven.length ? `\n\nNot proven to work yet (no passing test or finished run): ${unproven.join(', ')}. Test checks one in about a minute.` : '';
-  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}, ${sel.opts.concurrency || 1} at a time${budget}?\n\nAgents run with permission prompts off.${note}\n\n`
+  const resumes = s.resume ? ` (${s.resume} of them resume their session where it stopped)` : '';
+  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}${resumes}, ${sel.opts.concurrency || 1} at a time${budget}?\n\nAgents run with permission prompts off.${note}\n\n`
     + `Once a run starts, its model, effort, prompt and time limit are fixed and it runs to the end. While the batch runs you can still change `
     + `Parallel runs, Max per CLI, Budget, Time limit and Retry failed, and pause it: changes apply to the runs not started yet. `
     + `Nothing that's running is ended unless you confirm it.`)) return;
   try {
-    await api('/api/run', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed,
+    await api('/api/run', 'POST', { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed, resumeFailed: resumeOn(),
       concurrency: sel.opts.concurrency, perCli: sel.opts.perCli, budget: sel.opts.budget, timeout: sel.opts.timeout });
     resetLog();
     await poll();
@@ -1331,7 +1346,7 @@ function choose(title, lines, options) {
 // started yet. Lowering Parallel runs or Max per CLI below what's running offers, besides letting the
 // extra runs finish, ending the newest to start them over later; a time limit can also be applied to the
 // running ones. What's applied stays for the next batch too.
-const OPT_NAMES = { concurrency: 'Parallel runs', perCli: 'Max per CLI', budget: 'Budget', timeout: 'Time limit', rerunFailed: 'Retry failed' };
+const OPT_NAMES = { concurrency: 'Parallel runs', perCli: 'Max per CLI', budget: 'Budget', timeout: 'Time limit', rerunFailed: 'Retry failed', resumeFailed: 'Resume failed' };
 async function adjust(key, input) {
   const st = status.state ?? {}, active = activeNewest(), box = input.type === 'checkbox';
   const cur = st[key] ?? null, revert = () => { if (box) input.checked = !!cur; else input.value = cur ?? ''; };
@@ -1341,7 +1356,7 @@ async function adjust(key, input) {
   if ((key === 'concurrency' || key === 'perCli') && v != null) v = Math.max(1, Math.floor(v));
   if ((key === 'concurrency' && v == null) || v === cur) return revert();
   const show = (x) => key === 'budget' ? (x == null ? 'none' : fmtUsd(x)) : key === 'timeout' ? (x ? `${x} min` : 'none')
-    : key === 'rerunFailed' ? (x ? 'on' : 'off') : x ?? 'none';
+    : box ? (x ? 'on' : 'off') : x ?? 'none';
   const msg = { set: { [key]: v } }, them = (k) => k === 1 ? 'it' : 'them';
   const apply = { value: 'apply', primary: true, label: 'Apply to the runs not started yet' };
   const endNewest = (ids) => ({ value: 'requeue', danger: true, ids, label: `End ${ids.length === 1 ? 'the newest' : `the ${ids.length} newest`} now and start ${them(ids.length)} over later`,
@@ -1381,6 +1396,8 @@ async function adjust(key, input) {
   }
   if (key === 'rerunFailed') lines.push(v ? 'Failed runs this batch skipped are queued again, and failed runs still in the queue will be retried.'
     : 'Failed runs still in the queue are skipped from now.');
+  if (key === 'resumeFailed') lines.push(v ? 'Failed Claude Code runs that got partway and that this batch skipped are queued again, and those still in the queue '
+    + 'carry on with their session instead of starting over.' : `Failed runs still in the queue ${st.rerunFailed ? 'start over (Retry failed is on)' : 'are skipped from now'}.`);
   const how = await choose(`${OPT_NAMES[key]}: ${show(cur)} → ${show(v)}`, lines, opts);
   if (!how) return revert();
   if (how === 'requeue') msg.requeue = opts.find((o) => o.ids).ids;
@@ -1463,7 +1480,8 @@ const fieldLabel = (f) => FIELD_LABEL[f] ?? f;
 const fieldVal = (r, f) => f === 'agent+effort' ? `${r.agent} · ${r.effort}` : String(r[f] ?? '');
 const valLabel = (f, v) => f === 'promptVersion' ? promptLabel(v) : f === 'provider' ? PROVIDERS[v] ?? v : v || '—';
 const runFields = () => cached('fields:' + Object.keys(cfg.dimensions), () => ['agent', 'provider', 'effort', 'ultracode',
-  ...Object.keys(cfg.dimensions), ...(results.some((r) => r.cli) ? ['cli'] : []), ...(results.some((r) => r.promptVersion) ? ['promptVersion'] : []), 'status']);
+  ...Object.keys(cfg.dimensions), ...(results.some((r) => r.cli) ? ['cli'] : []), ...(results.some((r) => r.promptVersion) ? ['promptVersion'] : []), 'status',
+  ...(results.some((r) => r.resumes) ? ['resumed'] : [])]);
 // Values in a useful order: models and variants as in Setup, efforts low to high, prompts oldest first.
 function sortVals(f, vals) {
   const agents = cfg.agents.map((a) => a.id), variants = cfg.dimensions[f]?.map((v) => v.id);
@@ -2023,7 +2041,7 @@ function renderResults() {
       h('td', { class: 'play' }, playLink(r)),
       h('td', { class: 'who', style: 'white-space:nowrap' }, r.agent), h('td', { class: 'eff', style: 'white-space:nowrap' }, r.effort),
       shownDims.map((d) => h('td', { class: 'dimcell', title: d }, h('span', { class: 'lbl' }, d), r[d] ?? '—')),
-      h('td', { class: 'st' }, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad'), title: r.error || '' }, r.status),
+      h('td', { class: 'st' }, h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad'), title: r.error || '' }, r.status), resumeTag(r),
         fl ? h('button', { class: 'tag ' + (fl.items[0].bad ? 'bad' : 'warn'), style: 'margin-left:4px',
           title: `${fl.items.map((i) => i.text).join('\n')}\n\nClick for details`, onclick: () => showRun(r) }, `⚑ ${fl.items[0].tag}${fl.items.length > 1 ? ` +${fl.items.length - 1}` : ''}`) : null,
         err ? h('div', { class: 'hint hide-cards', style: 'margin:2px 0 0; min-width:220px; max-width:300px; white-space:normal', title: r.error }, err) : null),
@@ -2058,7 +2076,7 @@ const playLink = (r) => r.entry ? h('a', { href: runUrl(r.entry), target: '_blan
 function compareCard(rows) {
   const c = rv.cmp ??= { f: 'agent+effort', a: '', b: '', by: '', matched: true };
   const fields = ['agent+effort', 'agent', 'effort', 'provider', 'ultracode', ...Object.keys(cfg.dimensions),
-    ...(rows.some((r) => r.cli) ? ['cli'] : []), ...(rows.some((r) => r.promptVersion) ? ['promptVersion'] : [])];
+    ...(rows.some((r) => r.cli) ? ['cli'] : []), ...(rows.some((r) => r.promptVersion) ? ['promptVersion'] : []), ...(rows.some((r) => r.resumes) ? ['resumed'] : [])];
   const valsOf = (f) => sortVals(f, [...new Set(rows.map((r) => fieldVal(r, f)))]);
   if (!fields.includes(c.f) || valsOf(c.f).length < 2) c.f = fields.find((f) => valsOf(f).length > 1) ?? 'agent+effort';
   const vals = valsOf(c.f);
@@ -2114,6 +2132,46 @@ async function showFile(id, name, title, error) {
 }
 // refresh, if given, rebuilds the content: the dialog then follows the data while it's open (see poll).
 let modalRefresh = null;
+// Bulk add: one variant per line, e.g. a list of 100 games for {{source}}. A line is the variant's text, and its
+// short name is made from it (Super Mario Kart → SuperMarioKart), or "short name | text" to pick the name. List
+// markers (1. - *) are dropped, as are blank lines, # comments and texts the dimension already has.
+const slugOf = (t) => t.normalize('NFKD').replace(/[̀-ͯ]/g, '').split(/[^A-Za-z0-9]+/).filter(Boolean)
+  .map((w) => w[0].toUpperCase() + w.slice(1)).join('').slice(0, 40);
+function parseBulk(text, vs) {
+  const ids = new Set(vs.map((v) => v.id)), texts = new Set(vs.map((v) => (v.text ?? '').trim().toLowerCase()));
+  const add = [], skipped = [];
+  for (let line of text.split(/\r?\n/)) {
+    line = line.trim().replace(/^(\d+[.)]|[-*•])\s+/, '');
+    if (!line || line.startsWith('#')) continue;
+    const m = line.match(/^([\w.-]+)\s*(?:\||\t)\s*(.+)$/);
+    const t = (m ? m[2] : line).trim();
+    if (texts.has(t.toLowerCase())) { skipped.push(t); continue; }
+    let id = m ? m[1] : slugOf(t) || `v${vs.length + add.length + 1}`, base = id;
+    for (let n = 2; ids.has(id); n++) id = `${base}-${n}`;
+    ids.add(id); texts.add(t.toLowerCase());
+    add.push({ id, text: t });
+  }
+  return { add, skipped };
+}
+function bulkAdd(d, vs, changed) {
+  let text = '';
+  const view = () => {
+    const { add, skipped } = parseBulk(text, vs);
+    return h('div', {},
+      h('p', { class: 'hint', style: 'margin-top:0' }, `One variant per line; each becomes the text for {{${d}}}, with a short name made from it. Write "short | text" to choose the short name. Numbering and bullets are dropped, and so are lines {{${d}}} already has.`),
+      h('textarea', { id: 'bulk-text', rows: 14, style: 'width:100%', value: text, placeholder: 'Rocket League\nMario Kart 64\nmk8 | Mario Kart 8 Deluxe', 'aria-label': `Variants for ${d}, one per line`,
+        oninput: (e) => { text = e.target.value; refreshModal(); } }),
+      h('p', { class: 'muted' }, `${plural(add.length, 'new variant')}${skipped.length ? ` · ${skipped.length} already there, skipped` : ''}`,
+        add.length ? `: ${add.slice(0, 6).map((v) => v.id).join(', ')}${add.length > 6 ? ', …' : ''}` : ''),
+      h('div', { class: 'row' },
+        h('button', { class: 'btn primary', disabled: !add.length, onclick: () => { vs.push(...add); modal.close(); changed(true); } }, add.length ? `Add ${plural(add.length, 'variant')}` : 'Add'),
+        h('button', { class: 'btn', onclick: () => modal.close() }, 'Cancel')),
+      add.length > 20 ? h('p', { class: 'hint' }, `Each variant multiplies the runs: ${add.length} more ${d}s × every model and effort and the other variants. The Run tab lets you tick just the ones to run.`) : null);
+  };
+  openModal(`Bulk add · {{${d}}}`, view(), view);
+  $('#bulk-text')?.focus();
+}
+
 function openModal(title, content, refresh) {
   $('#mtitle').textContent = title; $('#mbody').replaceChildren(content); modalRefresh = refresh ?? null;
   if (!modal.open) modal.showModal();
@@ -2122,12 +2180,20 @@ function openModal(title, content, refresh) {
 modal.addEventListener('close', () => { modalRefresh = null; });
 const refreshModal = () => { if (modal.open && modalRefresh) morph($('#mbody'), modalRefresh()); };
 
+// A resumed run (Resume failed) has each later session's output in agent.<n>.out and .err; its error is the last one's.
 const fileButtons = (r) => [
   h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
   h('button', { class: 'icon', title: 'Prompt sent', onclick: () => showFile(r.id, 'prompt.md', 'Prompt') }, 'prompt'),
   r.goal && r.goal !== 'off' ? h('button', { class: 'icon', title: 'The /goal message sent', onclick: () => showFile(r.id, 'goal.md', 'Goal') }, 'goal') : null,
-  h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, 'agent.err', 'Errors', r.error) }, 'log'),
-  h('button', { class: 'icon', title: 'Raw CLI output (agent.out), the end of it for long runs', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out')];
+  h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, r.parts?.length > 1 ? `agent.${r.parts.length}.err` : 'agent.err', 'Errors', r.error) }, 'log'),
+  h('button', { class: 'icon', title: 'Raw CLI output (agent.out), the end of it for long runs', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out'),
+  ...(r.parts ?? []).slice(1).map((p, i) => h('button', { class: 'icon', title: `Raw CLI output of resumed session ${i + 2} (agent.${i + 2}.out)`,
+    onclick: () => showFile(r.id, `agent.${i + 2}.out`, `Output ${i + 2}`) }, `out ${i + 2}`))];
+// ⟳ on a run that carried on with its session (Resume failed); "resumable" on a failed one that could.
+const resumeTag = (r) => r.resumes ? h('span', { class: 'tag', style: 'margin-left:4px', title: `Resumed ${r.resumes === 1 ? 'once' : `${r.resumes} times`}: `
+    + `${r.resumes + 1} sessions, whose time, tokens and cost are added up` }, `⟳${r.resumes > 1 ? ` ${r.resumes}` : ''}`)
+  : r.resumable && r.status !== 'ok' ? h('span', { class: 'tag', style: 'margin-left:4px',
+    title: 'Failed partway with its session still on disk: Resume failed (Run tab → Options) carries on with it instead of starting over' }, 'resumable') : null;
 
 // Score, notes and "looked at" all go to runs/scores.json; any of them counts as reviewed. Saved with
 // the run's startedAt, so a re-run of it starts unreviewed. Everything showing the run redraws.
@@ -2175,7 +2241,7 @@ function runDetails(r) {
   return h('div', {},
     r.gone ? h('p', { class: 'banner bad' }, 'This run has been deleted.') : null,
     h('div', { class: 'chips', style: 'margin-bottom:10px' },
-      h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad') }, r.status),
+      h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad') }, r.status), resumeTag(r),
       h('span', { class: 'tag' }, `${PROVIDERS[r.provider] ?? r.provider} · ${r.model ?? r.agent}`), h('span', { class: 'tag' }, `effort ${r.effort}`),
       Object.keys(cfg.dimensions).map((d) => d === GOAL_DIM && r.goalSkipped
         ? h('span', { class: 'tag', title: 'Codex has no headless /goal: this run got the same prompt without it' }, `${d}=${r[d]}* (no /goal)`)
@@ -2186,6 +2252,8 @@ function runDetails(r) {
     h('div', { class: 'grid2' },
       h('table', {}, h('tbody', {},
         line('Time', fmtMin(r.wallMinutes), usual('wallMinutes')),
+        r.parts?.length > 1 ? line('Sessions', r.parts.length, `resumed: ${r.parts.map((p, i) => `${i + 1}. ${fmtMin(p.wallMinutes)}${p.exitCode === 0 ? '' : ' (failed)'}`)
+          .join(' · ')}. Time, tokens and cost are all of them together.`) : null,
         line('API time', r.apiMinutes != null ? fmtMin(r.apiMinutes) : null, r.apiMinutes && r.wallMinutes ? `${pct(r.apiMinutes / r.wallMinutes)} of the time` : ''),
         line('Cost', r.costUsd != null ? fmtUsd(r.costUsd) : null, r.costUsd != null ? usual('costUsd') : 'this CLI doesn\'t report cost'),
         line('API list price', r.apiCostUsd != null ? fmtUsd(r.apiCostUsd) : null, [r.provider === 'claude' && r.costUsd != null ? 'Claude Code\'s own cost is at list price'
@@ -2308,7 +2376,7 @@ function renderAudit() {
 // ------------------------------------------------------------------- data
 async function loadSetup() {
   const c = await api('/api/config');
-  meta = { path: c.path, outDir: c.outDir, platform: c.platform };
+  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume };
   cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
@@ -2321,6 +2389,7 @@ async function loadResults() {
   for (const r of rows) {
     r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
     if (r.cliVersion) r.cli = `${SHORT[r.provider] ?? r.provider} ${r.cliVersion}`; // versions only compare within a CLI
+    r.resumed = r.resumes ? 'yes' : 'no'; // a field to filter and compare by (Resume failed)
   }
   results = rows; cache = {}; updateBadge();
 }

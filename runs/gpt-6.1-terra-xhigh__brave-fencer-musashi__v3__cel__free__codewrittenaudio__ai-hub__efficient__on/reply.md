@@ -1,0 +1,13 @@
+Created [Brave Whisker Mew-sashi](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v19__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Brave-Whisker-Mew-sashi-Brave-Fencer-Musashi-gpt-6.1-terra-xhigh-20261029-0939.html>). The single HTML file loads its versioned libraries from a CDN. Development files are in the matching subfolder.
+
+The demo includes a rescue quest, sword combat, a copied Spark ability, a boss, a ten-second attract mode, standalone two-controller couch co-op, and [AI Hub](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) side-by-side sessions. Standalone online multiplayer is not included. Keyboard controls are WASD or arrows to move, Space to jump, J to slash, hold K to copy, L to cast, E to talk or dodge, and Escape for settings.
+
+The two-player AI Hub harness passed all 20 reported checks. Headless gameplay checks also exercised movement, damage, rescues, casting, the boss result, and settings. **Visual quality and physical-controller play remain unverified:** headless Chrome initialized WebGPU but could not display its compositor surface, and the hub harness skipped its gamepad check.
+
+**Source information:** 2026-10-29 09:39; inspired by *Brave Fencer Musashi*. Three.js r180, WebGPU only, Rapier 0.19.3, Web Audio, Gamepad API, and AI Hub Session Protocol v1. The art is cel-shaded; animation is procedural; music, effects, and gibberish voices are synthesized in code. Environment: Codex CLI headless, Linux; browser originally unknown, with Chrome 154 used for testing. Model: OpenAI gpt-6.1-terra, xhigh reasoning. Usage and cost: unknown.
+
+**Testing feedback:** Testing caught two issues: blocked attract-mode audio and a blank headless WebGPU surface. The latter was game-breaking in the test environment; whether it occurs on a normal hardware display is unknown. The gameplay and hub checks were most useful; the headless screenshot was least useful because the compositor failed.
+
+**Engine feedback:** Three.js made procedural scene construction approachable. WebGPU support and headless rendering required investigation, and the quest, combat, animation, and controller systems had to be built for the game. Headless WebGPU validation was the hardest part. I would overhaul renderer diagnostics and make initialization and material-migration errors clearer.
+
+**Prompt feedback:** The source reference and controller-first direction were especially useful. Standalone multiplayer transport was unspecified, so I chose couch co-op. The hardest part was making a cohesive action-adventure slice in one file. The most valuable additional test would be a full playthrough on a WebGPU display with a DualSense controller.

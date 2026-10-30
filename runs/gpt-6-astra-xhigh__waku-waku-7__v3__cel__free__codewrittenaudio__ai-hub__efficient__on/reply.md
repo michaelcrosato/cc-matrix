@@ -1,0 +1,13 @@
+Created **[Waku Waku Lucky — single-file game](/home/micha/dev/cc-matrix/runs/gpt-6-astra-xhigh__v11__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Waku-Waku-Lucky-Waku-Waku-7-gpt-6-astra-xhigh-20261029-1116.html)**.
+
+Includes seven fighters, a boss, three arenas, arcade progression, 13 dojo lessons, local/online multiplayer, and attract mode. Serve over HTTPS or localhost; WebGPU and internet access for CDN dependencies are required.
+
+**Source Information:** Date: 2026-10-29 11:58, America/Vancouver. Source: Waku Waku 7. Tech: Three.js R180, WebGPU only, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, AI Hub client 1.3.0. Art: original cel-shaded 3D. Animation: procedural articulated rigs and pose blending. Audio: code-composed music, synthesized effects and gibberish voices. Online: private rooms and AI Hub versus sessions. Environment: Codex CLI, headless Linux; user browser unknown. Model: OpenAI gpt-6-astra, reasoning xhigh. Session: approximately 42 minutes; API cost and tokens unknown.
+
+**Testing Feedback:** Found and fixed 13 issues, including three affecting core controls or combo/lesson completion. Combat, controller navigation, arcade completion, WebGPU visuals, five AI Hub scenarios, and a two-browser PeerJS connection passed. Network tests suppressed drawing after initialization; visuals were tested separately. Most helpful: fixed-step combat assertions and the hub harness. Least helpful: the initial blank capture from an incompatible browser configuration. Physical controllers across independent networks remain untested.
+
+**Engine Feedback:** Toon materials and scene graphs worked well. Headless capture configuration caused the main difficulty. The essential custom work was combat timing, input buffering, and network synchronization. Coordinating physics, animation, and authority was hardest. I would overhaul implicit renderer fallback and add a documented strict-WebGPU option.
+
+**Prompt Feedback:** The source identity and controller-first requirements gave clear direction. “All features” was the ambiguous part; this implementation provides a complete seven-fighter vertical slice. Combining polished combat and two network transports in one HTML file was hardest. The next useful test would be four physical DualSense controllers across separate networks at 250 ms latency.
+
+These details are also embedded in Credits and the opening HTML comment.

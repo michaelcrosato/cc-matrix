@@ -1,0 +1,1 @@
+/goal Read TASK.md in the current folder and complete the task it describes. Done when: the bundled single .html file exists in this folder's root, every feature in TASK.md is implemented with no TODOs, placeholders or stubs, and your final reply contains the Source Information, Engine Feedback and Prompt Feedback sections.

@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
-import { sandbox, cleanup, runner, result, callFor, RUNNER, waitFor } from './helpers.mjs';
+import { sandbox, cleanup, runner, result, calls, callFor, RUNNER, waitFor } from './helpers.mjs';
 
 const one = { testing: [{ id: 'a', text: 'variant A' }] };
 
@@ -230,6 +230,87 @@ test('retrying a failed run from before a dimension was added replaces it', (t) 
   assert.equal(r.status, 0, r.all);
   assert.equal(result(sb, 'opus-low__a__free').status, 'ok');
   assert.ok(!fs.existsSync(path.join(sb.out, 'opus-low__a')));
+});
+
+test('--resume-failed: a Claude run that stopped partway carries on with its session, and its parts add up', (t) => {
+  const sb = sandbox({ template: 'Build it. {{testing}}', agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }],
+    dimensions: { testing: [{ id: 'a', text: 'FAKE:limit' }, { id: 'b', text: 'FAKE:limit=start' }], goal: [{ id: 'on', text: 'the game file exists.' }] } });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  const id = 'opus-low__a__on', dir = path.join(sb.out, id), first = result(sb, id);
+  assert.equal(first.status, 'failed');
+  assert.match(first.error, /hit your 5-hour limit/); // the limit's own message, not "exit code 1"
+  assert.equal(first.outputTokens, 660);
+  assert.equal(result(sb, 'opus-low__b__on').outputTokens, 0);
+
+  // Only the one that got partway resumes, and only with time left of its limit.
+  let dry = JSON.parse(runner(sb, ['--dry-run', '--json', '--resume-failed']).stdout.trim());
+  assert.deepEqual([dry.alreadyDone, dry.resumes], [1, 1]);
+  dry = JSON.parse(runner(sb, ['--dry-run', '--json', '--resume-failed', '--timeout', '0.0001']).stdout.trim());
+  assert.deepEqual([dry.alreadyDone, dry.resumes], [2, 0]);
+
+  const r = runner(sb, ['--resume-failed']);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /Of those, 1 failed partway and resume their session/);
+  assert.match(r.all, /▶ opus-low__a__on {2}\(resuming its session, part 2\)/);
+  assert.match(r.all, /· skip opus-low__b__on \(already failed\)/);
+  // The same session, sent its /goal again, in the same folder: the work from before is still there.
+  const c = calls(sb).filter((x) => x.cwd === path.join(dir, 'work')).pop();
+  assert.deepEqual(c.argv.slice(0, 4), ['-p', fs.readFileSync(path.join(dir, 'goal.md'), 'utf8').trim(), '--resume', 'fake-session']);
+  const x = result(sb, id);
+  assert.equal(x.status, 'ok');
+  assert.ok(fs.existsSync(path.join(dir, 'work', 'src', 'partial.js')) && x.delivered);
+  assert.match(fs.readFileSync(path.join(dir, 'agent.out'), 'utf8'), /5-hour limit/);
+  assert.match(fs.readFileSync(path.join(dir, 'reply.md'), 'utf8'), /Source Information/);
+  assert.deepEqual([x.resumes, x.parts.length, x.startedAt, x.promptVersion], [1, 2, first.startedAt, first.promptVersion]);
+  assert.ok(Math.abs(x.wallMinutes - x.parts[0].wallMinutes - x.parts[1].wallMinutes) < 1e-9);
+  // Resumed, Claude Code reports the session's totals so far; each part counts once, so the run's cost is
+  // what the session cost in the end.
+  const sum = (o) => [o.costUsd, o.outputTokens, o.inputTokens, o.turns, o.toolCalls, o.toolErrors, o.compactions, o.apiCalls, o.subagents].map((v) => +v.toFixed(6));
+  const expected = [0.085, 1320, 22030, 8, 4, 2, 2, 4, 2];
+  assert.deepEqual(sum(x), expected);
+  assert.deepEqual(x.tools, { Read: 2, Edit: 2 });
+  assert.equal(+x.models['claude-opus-5-5'].costUsd.toFixed(6), 0.08);
+  assert.equal(+x.apiMinutes.toFixed(6), 0.05);
+  assert.equal(x.firstTokenMs, 900);
+
+  // --reparse reads each part again, with what its session had used before.
+  fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({ ...x, costUsd: 1, outputTokens: 1 }));
+  assert.match(runner(sb, ['--reparse']).stdout, /Reparsed 2 run/);
+  assert.deepEqual(sum(result(sb, id)), expected);
+
+  // With Retry failed too, one that can't resume starts over.
+  const again = runner(sb, ['--resume-failed', '--rerun-failed']);
+  assert.match(again.all, /^▶ opus-low__b__on$/m);
+  assert.equal(calls(sb).filter((y) => y.cwd === path.join(sb.out, 'opus-low__b__on', 'work')).pop().argv.includes('--resume'), false);
+  assert.match(again.all, /· skip opus-low__a__on \(already ok\)/);
+});
+
+test('a resumed run ended mid-way stays as it was; Resume failed turned on mid-batch queues the ones skipped earlier', async (t) => {
+  const sb = sandbox({ agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }], dimensions: { testing: [{ id: 'a', text: 'FAKE:limit FAKE:sleep=1500' }, { id: 's', text: 'FAKE:sleep=1200' }],
+    goal: [{ id: 'on', text: 'done.' }] } });
+  t.after(() => cleanup(sb));
+  const id = 'opus-low__a__on', res = path.join(sb.out, id, 'result.json');
+  assert.equal(runner(sb, ['--only', 'testing=a']).status, 0);
+  const before = fs.readFileSync(res, 'utf8');
+
+  const c = controlled(sb, ['--resume-failed', '--only', 'testing=a']);
+  await waitFor(() => c.out.includes(`▶ ${id}`));
+  c.send({ drop: [id] });
+  assert.equal(await c.exit, 0, c.out);
+  assert.match(c.out, /■ opus-low__a__on stopped \(this part discarded; it can be resumed again\)/);
+  assert.equal(fs.readFileSync(res, 'utf8'), before);
+  assert.ok(!fs.existsSync(path.join(sb.out, id, 'agent.2.out')));
+
+  const d = controlled(sb, ['-j', '1']);
+  await waitFor(() => d.out.includes('▶ opus-low__s__on'));
+  assert.match(d.out, /· skip opus-low__a__on \(already failed\)/);
+  d.send({ set: { resumeFailed: true } });
+  assert.equal(await d.exit, 0, d.out);
+  assert.match(d.out, /⚙ Resume failed: on \(1 skipped earlier are queued again\)/);
+  assert.equal(d.state().resumeFailed, true);
+  const x = result(sb, id);
+  assert.deepEqual([x.status, x.resumes], ['ok', 1]);
 });
 
 test('the prompt gets its version number when a batch first runs it: edits between batches make one version', (t) => {

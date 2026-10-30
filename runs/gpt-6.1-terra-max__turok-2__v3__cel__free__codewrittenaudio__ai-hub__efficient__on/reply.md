@@ -1,0 +1,13 @@
+[Play Razorclaw: Seeds of Ruin](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-max__v5__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Razorclaw-Seeds-of-Ruin-Turok-2-Seeds-of-Evil-gpt-6.1-terra-max-20261029-0851.html>)
+
+The demo includes an objective-based hunt, three weapons, checkpoints, a boss encounter, controller-first menus, axis inversion settings, and a looping attract mode. Up to four players can compete in separate copies of the hunt through [AI Hub](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) or a standalone room. The HTML opens directly from disk and requires a WebGPU-capable browser and internet access for its downloaded libraries.
+
+The editable sources and [level design notes](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-max__v5__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Razorclaw-Seeds-of-Ruin-Turok-2-Seeds-of-Evil-gpt-6.1-terra-max-20261029-0851/LEVEL_DESIGN.md>) are in the requested subfolder.
+
+**Source Information.** Date: 2026-10-29 08:51. Source: *Turok 2: Seeds of Evil*. Tech: Three.js r180 with WebGPU only, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, and AI Hub session client 1.3.0. The art uses procedural cel-shaded 3D; animation uses procedural joints, motion and particles; music, effects and gibberish voice are synthesized in code. Testing was lightweight, with no FPS targets. Environment: Codex CLI headless on Linux, tested with Chrome 154. Model: OpenAI gpt-6.1-terra, reasoning effort max. API cost and token count are unknown; session time was about 19 minutes.
+
+**Testing Feedback.** Browser testing caught two issues; implementation review found seven more. None were classified as game-breaking. The most helpful test exercised the objectives, controller fire, gate and boss. The least helpful was the syntax-only check. Gameplay, attract mode, touch-only messaging, a two-player standalone room, and the two-player AI Hub conformance checks passed.
+
+**Engine Feedback.** Three.js’s composable scene graph was the strongest part. The first headless WebGPU capture required different Vulkan settings, and a toon-material option produced warnings. The most important custom work was the combat and objective loop; coordinating rendering, physics, input and sessions was the hardest part. I would improve WebGPU diagnostics and add an explicit WebGPU-only renderer option.
+
+**Prompt Feedback.** The creative reference and controller-first direction were clear. Standalone multiplayer’s form was open to interpretation, so the demo uses side-by-side score racing. The hardest part was fitting the hunt and both online paths into one page. The most valuable additional test would be a four-player remote playthrough with physical DualSense controllers.

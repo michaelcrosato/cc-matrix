@@ -21,6 +21,8 @@
 //        --only key=a,b               keys: agent, provider, effort or a dimension (repeatable)
 //        --limit <n> --repeat <n> --timeout <min, 0 = none> --budget <usd>
 //        --dry-run [--json] --report --rerun-failed --smoke agent:effort [--smoke-goal]
+//        --resume-failed              a failed Claude Code run that got partway continues its session instead of
+//                                     starting over (canResume); with --rerun-failed the others start over
 //        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
 //                                     logs (after parser or price changes)
 //        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
@@ -35,7 +37,7 @@ import { pathToFileURL } from 'node:url';
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, rerunFailed: false, smoke: null, smokeGoal: false, control: false };
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -55,6 +57,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--report') args.report = true;
   else if (a === '--reparse') args.reparse = true;
   else if (a === '--rerun-failed') args.rerunFailed = true;
+  else if (a === '--resume-failed') args.resumeFailed = true;
   else if (a === '--control') args.control = true;
   else { console.error(`Unknown flag: ${a}`); process.exit(1); }
 }
@@ -211,20 +214,42 @@ function prevRun(run) {
   }
   return finishedRuns.get(run.id) ?? null;
 }
-const isDone = (run) => { const p = prevRun(run); return !!p && (p.r.status === 'ok' || !args.rerunFailed); };
+// --resume-failed: a failed run that got partway continues its CLI session where it stopped instead of
+// starting over (resumeOne). Claude Code only (`claude -p --resume`). It needs the same folder and model,
+// output already made (one that failed on its first request, like on a usage limit, just starts over),
+// its session still on disk and, with a time limit, time left of it.
+const RESUMABLE = new Set(['claude']);
+function canResume(run, p = prevRun(run)) {
+  const r = p?.r;
+  if (!args.resumeFailed || !r || r.status === 'ok' || !RESUMABLE.has(run.agent.provider) || p.dir !== run.id) return false;
+  if (!r.sessionId || !(r.outputTokens > 0) || r.model !== run.agent.model) return false;
+  const limit = +(run.agent.timeout || args.timeout || 0);
+  if (limit && (r.wallMinutes ?? 0) >= limit) return false;
+  return !!claudeTranscript(r.sessionId, path.join(outDir, p.dir, 'work'));
+}
+// Claude Code keeps each session as <config dir>/projects/<its folder, every other character a dash>/<id>.jsonl
+// (a long folder name is shortened, so it's also looked for in the others).
+function claudeTranscript(sessionId, cwd) {
+  const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude'), 'projects'), file = `${sessionId}.jsonl`;
+  const own = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, '-'), file);
+  if (fs.existsSync(own)) return own;
+  try { for (const d of fs.readdirSync(root)) if (fs.existsSync(path.join(root, d, file))) return path.join(root, d, file); } catch {}
+  return null;
+}
+const isDone = (run) => { const p = prevRun(run); return !!p && (p.r.status === 'ok' || !(args.rerunFailed || canResume(run, p))); };
 
 if (args.dryRun) {
-  const byAgent = {};
+  const byAgent = {}, resuming = queue.filter((r) => canResume(r));
   for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
   let sample = '', error = null;
   try { if (queue[0]) { sample = buildPrompt(queue[0]); const g = goalMessage(queue[0]);
     if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; } } catch (e) { error = e.message; }
   if (args.json) {
-    console.log(JSON.stringify({ count: queue.length, byAgent, alreadyDone: queue.filter(isDone).length,
+    console.log(JSON.stringify({ count: queue.length, byAgent, alreadyDone: queue.filter(isDone).length, resumes: resuming.length,
       ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf) }));
   } else {
     console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
-    for (const r of queue) console.log('  ' + r.id);
+    for (const r of queue) console.log('  ' + r.id + (resuming.includes(r) ? '  (resumes)' : ''));
     if (error) console.log(`\nPrompt error: ${error}`);
     else if (queue[0]) console.log(`\n--- sample prompt (${queue[0].id}) ---\n${sample}`);
   }
@@ -244,8 +269,10 @@ const extra = (p) => cfg.extraArgs?.[p] ?? DEFAULT_EXTRA[p] ?? [];
 const providers = {
   claude(agent, effort, prompt, run) {
     const argv = ['-p'];
-    const goal = goalMessage(run);
+    // Resuming (resumeOne): the same session, sent its /goal again or told to carry on.
+    const goal = run.resume?.message ?? goalMessage(run);
     if (goal) argv.push(goal); // short, so pass it as the argument like the docs show
+    if (run.resume) argv.push('--resume', run.resume.sessionId);
     // stream-json: every event, not just the result (tool calls, compactions, plan limits); it needs --verbose.
     argv.push('--output-format', 'stream-json', '--verbose', '--model', agent.model);
     if (effort) argv.push('--effort', effort);
@@ -373,8 +400,23 @@ function readStream(text) {
   return s;
 }
 
-function parseClaude(text) {
-  const s = readStream(text), j = s.results.at(-1);
+// A resumed session's result counts the whole session so far: Claude Code restores the cost-state its
+// transcript saved as the last part ended (cost, API time, tokens per model). `since` is that state, taken
+// off so a part counts only itself (the stream's own events and num_turns are this part's already).
+function minusSince(j, since) {
+  if (!j || !since) return j;
+  const modelUsage = {};
+  for (const [id, m] of Object.entries(j.modelUsage ?? {})) {
+    const b = since.modelUsage?.[id] ?? {};
+    const u = Object.fromEntries(Object.entries(m).map(([k, v]) => [k, typeof v === 'number' && typeof b[k] === 'number' ? v - b[k] : v]));
+    if (u.inputTokens || u.outputTokens || u.cacheReadInputTokens || u.cacheCreationInputTokens) modelUsage[id] = u;
+  }
+  return { ...j, modelUsage, total_cost_usd: j.total_cost_usd == null ? null : j.total_cost_usd - (since.totalCostUSD ?? 0),
+    duration_api_ms: j.duration_api_ms == null ? null : j.duration_api_ms - (since.totalAPIDuration ?? 0) };
+}
+
+function parseClaude(text, agent, ctx) {
+  const s = readStream(text), j = minusSince(s.results.at(-1), ctx?.since);
   if (!j) return { isError: true };
   return { reply: j.result, costUsd: j.total_cost_usd, costSource: j.total_cost_usd != null ? 'reported' : 'none',
     ...usageTotals(j), apiMinutes: j.duration_api_ms ? j.duration_api_ms / 60000 : null,
@@ -383,7 +425,8 @@ function parseClaude(text) {
     rounds: j.result_index != null ? j.result_index + 1 : undefined, subagents: j.subagent_stats?.spawned,
     ...(s.ids.size ? { apiCalls: s.ids.size, toolCalls: total(s.tools), tools: s.tools, toolErrors: s.toolErrors, compactions: s.compactions } : {}),
     firstTokenMs: j.ttft_ms, plan: claudePlan(s.limits),
-    isError: !!j.is_error, error: j.is_error && j.errors?.length ? j.errors.join('; ') : undefined, sessionId: j.session_id };
+    // A usage limit ends with is_error and its message as the result, without `errors`.
+    isError: !!j.is_error, error: !j.is_error ? undefined : j.errors?.length ? j.errors.join('; ') : j.result || undefined, sessionId: j.session_id };
 }
 
 // Grok's stream ends with Claude Code's result line, or {"type":"error","message"} if it couldn't start.
@@ -750,10 +793,11 @@ function prepare(run, dir, prompt) {
 
 const lastLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').pop().trim().slice(0, 500); } catch { return ''; } };
 
-// Start the agent in dir/work, wait for it to exit (or hit `limit` minutes) and parse its output.
-async function spawnAgent(run, dir, prompt, limit) {
+// Start the agent in dir/work, wait for it to exit (or hit `limit` minutes) and parse its output. A resumed
+// run's later parts write their own output files (partFile) and say what the session had used before (since).
+async function spawnAgent(run, dir, prompt, limit, part = 0, since = null) {
   const { bin, argv, promptInArgs } = providers[run.agent.provider](run.agent, run.effort, prompt, run, path.join(dir, 'prompt.md'));
-  const outPath = path.join(dir, 'agent.out'), errPath = path.join(dir, 'agent.err');
+  const outPath = path.join(dir, partFile(part, 'out')), errPath = path.join(dir, partFile(part, 'err'));
   const out = fs.createWriteStream(outPath), err = fs.createWriteStream(errPath);
   const start = Date.now();
   let timedOut = false;
@@ -774,7 +818,7 @@ async function spawnAgent(run, dir, prompt, limit) {
   await Promise.all([new Promise((r) => out.end(r)), new Promise((r) => err.end(r))]);
 
   let metrics = {};
-  try { metrics = readMetrics(run.agent.provider, fs.readFileSync(outPath, 'utf8'), run.agent, { cwd: path.join(dir, 'work'), start, end: Date.now() }); }
+  try { metrics = readMetrics(run.agent.provider, fs.readFileSync(outPath, 'utf8'), run.agent, { cwd: path.join(dir, 'work'), start, end: Date.now(), since }); }
   catch (e) { metrics = { isError: true, parseError: e.message }; }
   metrics.replyChars = String(metrics.reply ?? '').trim().length;
   // The time limit ending a run makes it a failure, also when the CLI exits 0 on being stopped (Codex does).
@@ -788,6 +832,7 @@ async function spawnAgent(run, dir, prompt, limit) {
 async function runOne(run) {
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   const prev = prevRun(run);
+  if (canResume(run, prev)) return resumeOne(run, prev);
   fs.rmSync(dir, { recursive: true, force: true });
   // A failed run being retried that was made before a dimension was added: the new attempt replaces it.
   if (prev && prev.dir !== run.id) fs.rmSync(path.join(outDir, prev.dir), { recursive: true, force: true });
@@ -838,11 +883,94 @@ async function runOne(run) {
   writeReport();
 }
 
+// A resumed run's output: the first part's in agent.out and agent.err, part n's in agent.<n>.out and .err.
+const partFile = (i, ext) => i ? `agent.${i + 1}.${ext}` : `agent.${ext}`;
+// Sent to a resumed session that had no /goal (one with a /goal gets it again, from goal.md).
+const RESUME_MESSAGE = 'Your session stopped before the task was finished. Continue where you left off and complete it.';
+
+// --resume-failed: carry on with a failed run's session (see canResume) instead of starting over. Its folder
+// stays as it is, work and all, and the new part's output goes to agent.<n>.out. The result adds up every
+// part and keeps what the run was made with (prompt, variants, CLI version) and when it first started;
+// `parts` lists each part's times and `resumes` counts them. Ended mid-way (Stop, ↻, ✕), the new part is
+// thrown away and the run stays as it was, so it can be resumed again.
+async function resumeOne(run, prev) {
+  const dir = path.join(outDir, prev.dir), work = path.join(dir, 'work'), r = prev.r;
+  const parts = r.parts ?? [{ startedAt: r.startedAt, finishedAt: r.finishedAt, wallMinutes: r.wallMinutes, exitCode: r.exitCode, cliVersion: r.cliVersion }];
+  const n = parts.length, since = claudeCostState(claudeTranscript(r.sessionId, work));
+  let message = RESUME_MESSAGE;
+  try { message = fs.readFileSync(path.join(dir, 'goal.md'), 'utf8').trim() || message; } catch {}
+  // The time limit counts every part, so this one gets what's left (canResume checked there's some).
+  const limit = limitOf(run) && limitOf(run) - (r.wallMinutes ?? 0);
+
+  console.log(`▶ ${run.id}  (resuming its session, part ${n + 1})`);
+  run.resume = { sessionId: r.sessionId, message };
+  const { exitCode, metrics, start } = await spawnAgent(run, dir, '', limit, n, since);
+  run.resume = null;
+
+  if (stopping || run.abort) {
+    for (const ext of ['out', 'err']) fs.rmSync(path.join(dir, partFile(n, ext)), { force: true });
+    if (run.abort === 'requeue' && !stopping) { run.abort = null; pending.unshift(run); console.log(`↺ ${run.id} requeued (resumes again)`); }
+    else console.log(`■ ${run.id} stopped (this part discarded; it can be resumed again)`);
+    return;
+  }
+
+  const end = Date.now(), part = { startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(),
+    wallMinutes: (end - start) / 60000, exitCode, cliVersion: cliVersions[run.agent.provider], ...(since ? { since } : {}) };
+  // The earlier parts' figures are the old result's, so they add up even if their output is gone.
+  const m = combineParts([r, metrics]);
+  if (metrics.reply) fs.writeFileSync(path.join(dir, 'reply.md'), metrics.reply);
+  delete m.reply;
+  if (!metrics.reply) m.replyChars = r.replyChars; // reply.md is still the earlier one
+  const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed', all = [...parts, part];
+  const result = { id: r.id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
+    variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode,
+    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measureOutput(work),
+    startedAt: r.startedAt, finishedAt: part.finishedAt, resumes: n, parts: all };
+  fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(result, null, 2));
+  finishedRuns.set(run.id, { r: result, dir: prev.dir });
+  spent += metrics.costUsd ?? 0; done++;
+  console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
+    `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok`);
+  writeReport();
+}
+
+// The cost-state Claude Code saved in a session's transcript as its last part ended (see minusSince), or null.
+function claudeCostState(file) {
+  let last = null;
+  try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) if (l.includes('"type":"cost-state"')) last = l; } catch {}
+  if (!last) return null;
+  const keep = ['inputTokens', 'outputTokens', 'thinkingTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens', 'costUSD'];
+  try {
+    const c = JSON.parse(last);
+    return { totalCostUSD: c.totalCostUSD ?? 0, totalAPIDuration: c.totalAPIDuration ?? 0, modelUsage: Object.fromEntries(Object.entries(c.modelUsage ?? {})
+      .map(([id, u]) => [id, Object.fromEntries(keep.filter((k) => u[k] != null).map((k) => [k, u[k]]))])) };
+  } catch { return null; }
+}
+
+// A resumed run's figures, its parts' added up: tokens, cost, time and counts. The reply, outcome, session
+// and plan usage are the last part's, the first token the first part's.
+const SUMMED = ['costUsd', 'apiCostUsd', 'inputTokens', 'cachedTokens', 'cacheWriteTokens', 'uncachedInputTokens', 'outputTokens',
+  'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents', 'apiCalls', 'toolCalls', 'toolErrors', 'compactions', 'apiMinutes'];
+function combineParts(ms) {
+  if (ms.length < 2) return ms[0];
+  const m = { ...ms.at(-1), firstTokenMs: ms[0].firstTokenMs }, tools = {}, models = {};
+  for (const k of SUMMED) { const vs = ms.map((x) => x[k]).filter((v) => v != null); m[k] = vs.length ? vs.reduce((a, b) => a + b, 0) : undefined; }
+  for (const x of ms) {
+    for (const [k, c] of Object.entries(x.tools ?? {})) add(tools, k, c);
+    for (const [id, u] of Object.entries(x.models ?? {})) addModel(models, id, u);
+  }
+  const unpriced = [...new Set(ms.flatMap((x) => x.unpricedModels ?? []))];
+  Object.assign(m, { tools: Object.keys(tools).length ? tools : undefined, models: Object.keys(models).length ? models : undefined,
+    unpricedModels: unpriced.length ? unpriced : undefined });
+  if (ms.some((x) => x.costSource === 'reported')) m.costSource = 'reported';
+  return m;
+}
+
 // Everything measured from what a run's CLI printed: its parser, then what the CLI's session logs add
 // (sessionLogs), the token totals and the list-price estimate. ctx: the run's work folder and start/end times.
 const PARSERS = { claude: parseClaude, codex: parseCodex, grok: parseGrok, agy: parseAgy, muse: parseMuse };
 function readMetrics(provider, text, agent, ctx) {
-  const m = PARSERS[provider](text, agent);
+  const m = PARSERS[provider](text, agent, ctx);
   sessionLogs(provider, m, { ...ctx, model: agent.model });
   return Object.assign(tokenTotals(m), apiPrice(m, provider, ctx.start));
 }
@@ -861,11 +989,15 @@ function reparseAll() {
     if (!fs.existsSync(resFile) || !fs.existsSync(outFile)) continue;
     const r = JSON.parse(fs.readFileSync(resFile, 'utf8'));
     if (!PARSERS[r.provider]) continue;
-    let m; try { m = readMetrics(r.provider, fs.readFileSync(outFile, 'utf8'), { model: r.model },
-      { cwd: path.join(outDir, d, 'work'), start: Date.parse(r.startedAt), end: Date.parse(r.finishedAt) }); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
+    // A resumed run: each part from its own output, with what its session had used before (see resumeOne).
+    const parts = r.parts ?? [{ startedAt: r.startedAt, finishedAt: r.finishedAt }];
+    let ms; try { ms = parts.map((p, i) => readMetrics(r.provider, fs.readFileSync(path.join(outDir, d, partFile(i, 'out')), 'utf8'), { model: r.model },
+      { cwd: path.join(outDir, d, 'work'), start: Date.parse(p.startedAt), end: Date.parse(p.finishedAt), since: p.since })); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
+    const m = combineParts(ms);
     if (r.sessionLog === 'read' && m.sessionLog !== 'read') { console.log(`· ${d}: session log ${m.sessionLog ?? 'not found'} now; kept its figures`); continue; }
-    m.replyChars = String(m.reply ?? '').trim().length;
+    m.replyChars = String(ms.findLast((x) => x.reply)?.reply ?? '').trim().length;
     for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k]; else delete r[k];
+    if (r.status !== 'ok' && m.error) r.error = m.error; // e.g. Claude Code's usage limit, which was "exit code 1" before
     try { if (r.entry) r.todos = markers(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch {}
     fs.writeFileSync(resFile, JSON.stringify(r, null, 2)); n++;
   }
@@ -955,7 +1087,7 @@ async function pool() {
 
 // --control (the dashboard): changes to the running batch arrive as JSON lines on stdin, and its state
 // goes back as "@state {…}" lines, which the dashboard reads and keeps out of the log.
-//   { set: { concurrency, perCli, budget, timeout, rerunFailed, paused }, timeoutRunning,
+//   { set: { concurrency, perCli, budget, timeout, rerunFailed, resumeFailed, paused }, timeoutRunning,
 //     requeue: [run ids], drop: [run ids], skipCli: [providers] }
 // null (or 0) for perCli, budget or timeout means none. A new time limit is for runs that start from
 // now, and with timeoutRunning for the ones running too, counted from when each started.
@@ -988,12 +1120,13 @@ function control(msg) {
     console.log(`⚙ Time limit: ${shown.timeout(was.timeout)} → ${shown.timeout(args.timeout)}, ${msg.timeoutRunning && mine.length
       ? `also for the ${mine.length} running` : 'for runs that start from now'}`);
   }
-  if ('rerunFailed' in s && !!s.rerunFailed !== args.rerunFailed) {
-    args.rerunFailed = !!s.rerunFailed;
-    const back = args.rerunFailed ? skippedRuns.filter((r) => !isDone(r)) : [];
+  for (const [k, name] of [['rerunFailed', 'Retry failed'], ['resumeFailed', 'Resume failed']]) {
+    if (!(k in s) || !!s[k] === args[k]) continue;
+    args[k] = !!s[k];
+    const back = args[k] ? skippedRuns.filter((r) => !isDone(r)) : [];
     for (const r of back) { skippedRuns.splice(skippedRuns.indexOf(r), 1); skipped--; }
     pending.push(...back);
-    console.log(`⚙ Retry failed: ${args.rerunFailed ? `on${also(back.length, 'skipped earlier are queued again')}` : 'off'}`);
+    console.log(`⚙ ${name}: ${args[k] ? `on${also(back.length, 'skipped earlier are queued again')}` : 'off'}`);
   }
   if ('paused' in s && !!s.paused !== paused) {
     paused = !!s.paused;
@@ -1015,7 +1148,7 @@ function sayState(force) {
   const fin = (v) => v === Infinity ? null : v, left = {};
   for (const r of pending) if (!isDone(r)) left[r.agent.provider] = (left[r.agent.provider] ?? 0) + 1;
   const s = JSON.stringify({ concurrency: args.concurrency, perCli: fin(args.perCli), budget: fin(args.budget), timeout: args.timeout || null,
-    rerunFailed: args.rerunFailed, paused, overBudget, spent, left });
+    rerunFailed: args.rerunFailed, resumeFailed: args.resumeFailed, paused, overBudget, spent, left });
   if (s !== lastState || force) { lastState = s; console.log('@state ' + s); }
 }
 
@@ -1071,6 +1204,8 @@ for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provi
 // The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
 const already = queue.filter(isDone).length;
 console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
+const resuming = queue.filter((r) => canResume(r)).length;
+if (resuming) console.log(`Of those, ${resuming} failed partway and resume their session where it stopped (Resume failed).`);
 if (queue.length > already) try { recordPromptVersion(); } catch (e) { console.log(`⚠ Prompt history not updated: ${e.message}`); }
 if (args.control) {
   let buf = '';

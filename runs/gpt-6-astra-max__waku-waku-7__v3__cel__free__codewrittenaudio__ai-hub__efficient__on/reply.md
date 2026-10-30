@@ -1,0 +1,1 @@
+The visual foundation is in place: an ink-outlined cast, animated festival spectators, floating islands, and three arena palettes. I’m now connecting the combat rules to the training lessons and story circuit, so every major mechanic can be learned and exercised inside the demo.

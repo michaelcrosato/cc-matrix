@@ -1,0 +1,13 @@
+Created [Rocket Joust](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-ultra__RocketLeague__v2__cel__free__free__All__efficient__on/work/Rocket Joust-SOURCE-gpt-6.1-terra-ultra-20261029-0017.html>), with development files in the matching subfolder. It includes local split-screen play for up to four, bots, boost, jumps, scoring, overtime, an attract mode, controller settings, and peer-to-peer online play.
+
+**The visual result still needs a real-browser playtest.** Headless Chrome ran the simulation and HUD, but its WebGPU surface failed and produced a blank canvas, so I could not verify rendering or declare the demo fully tested. Online transport passed a three-guest local connection test; connections across different networks remain unverified and may fail behind restrictive NATs without a TURN relay.
+
+**Source information:** 2026-10-29 00:17; source: Rocket League. Built with Three.js r180 WebGPU, Rapier 0.19.3, Web Audio, Gamepad API, WebRTC, HTML, CSS and JavaScript. The art is procedural and cel-shaded; animation uses physics-driven and procedural transforms. Audio uses synthesized effects, with no music or voice. Online signaling uses manually exchanged codes and STUN, with no matchmaking. Testing was lightweight and headless on Linux with Chrome; the environment was Codex CLI, and the model was OpenAI gpt-6.1-terra with ultra reasoning. Usage and cost estimates are unknown.
+
+**Testing feedback:** Two gameplay issues were caught and fixed: mismatched boost-pad positions and a bot deadlock at midfield. Zero critical issues were confirmed, though the unresolved WebGPU rendering test prevents a complete assessment. The most helpful tests were the Rapier match simulation and three-guest connection checks; the least helpful was the static syntax check.
+
+**Engine feedback:** Three.js made the procedural scene straightforward to compose. WebGPU headless compatibility required investigation; the main custom work was car handling and match rules. Coordinating physics, split views and networking was the hardest part. I would overhaul initialization diagnostics and make WebGPU compatibility errors clearer.
+
+**Prompt feedback:** The controller-first and attract-mode requirements gave the slice a clear direction. “All modes that make sense” left the expected mode list open to interpretation. The hardest part was assembling the multiplayer slice in one portable HTML file. The most valuable additional test would be a four-controller, four-peer playtest on real devices.
+
+Automatic command review rejected deletion of the temporary Chrome test profiles because the cleanup used an `rm -f`-style command. Those profiles remain in the development folder.

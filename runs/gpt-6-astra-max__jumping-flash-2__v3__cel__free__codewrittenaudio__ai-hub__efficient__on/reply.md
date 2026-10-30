@@ -1,0 +1,13 @@
+Built **[Hopping Stardust!](./Hopping-Stardust-Jumping-Flash-2-gpt-6-astra-max-20261029-0942.html)** — a self-contained **3.07 MiB HTML game**, including four rescues, triple jumps, combat, a boss, attract mode, and multiplayer.
+
+[Build instructions and development notes](./Hopping-Stardust-Jumping-Flash-2-gpt-6-astra-max-20261029-0942/README.md). Open the HTML in a WebGPU-enabled browser; solo play works offline.
+
+**Source information:** Date: 2026-10-29 09:42, America/Vancouver. Inspiration: *Jumping Flash! 2*. Tech: Three.js r180, WebGPU only, Rapier 0.19.3, Gamepad API, Web Audio API, PeerJS 1.5.5, AI Hub Protocol v1, esbuild 0.28.2. Art: procedural cel shading and outlined geometry. Animation: hierarchical transforms, particles, camera springs, and physics. Audio: generated music, effects, and gibberish voices. Online: AI Hub parallel competition and standalone WebRTC score rooms. Environment: Codex CLI, headless Linux; tested with Chrome 154; user browser unknown. Model: OpenAI gpt-6-astra, reasoning max. Usage: approximately 50 minutes; API cost and token totals unknown.
+
+**Testing feedback:** Lightweight testing passed 26 gameplay/input checks, three hub scenarios, standalone networking checks, and offline loading. Seven findings resolved: five visual/timing issues and two test-environment issues. Zero confirmed game-breaking game defects. Most helpful: WebGPU screenshots and projectile-to-boss progression checks. Least helpful: syntax-only bundling. Physical controllers and four remote devices remain unverified.
+
+**Engine feedback:** The scene graph and Rapier contacts worked well. Headless graphics configuration and the renderer’s [automatic fallback](https://raw.githubusercontent.com/mrdoob/three.js/r180/src/renderers/webgpu/WebGPURenderer.js) required attention. The main custom work was traversal, camera behavior, combat, and missions. Readable airborne landings were hardest. I would overhaul fallback configuration and add an integrated WebGPU, physics, and controller reference project.
+
+**Prompt feedback:** The source, controller focus, and concrete delivery requirements gave clear direction. Multiplayer’s relationship to the single-player inspiration needed interpretation; I chose parallel score competition. The hardest requirement was completing both network paths alongside the full game. One additional test would be a complete four-player run across different networks using physical DualSense controllers.
+
+Source information and feedback are also included in **About/Credits** and the HTML’s opening comment.

@@ -114,6 +114,20 @@ try:
         check('run details show list price, requests, tools, subagents and plan usage',
               all(x in txt for x in ['Model requests', 'command_execution 3', 'not in the CLI\'s own total', 'Plan usage', '5h 12%', 'week 41%', 'pro']), txt[:400])
         page.keyboard.press('Escape'); page.wait_for_timeout(200)
+        # Setup: bulk add a pasted list of games to {{source}} (numbered, a chosen short name, a duplicate, a comment)
+        page.goto(base + '/#setup'); page.wait_for_selector('text=Bulk add…')
+        page.locator('.card', has=page.locator('.tag', has_text='{{source}}')).get_by_role('button', name='Bulk add…').click()
+        page.wait_for_selector('#bulk-text')
+        games = '\n'.join(['# my list', '1. Super Mario Kart', '2) F-Zero X', '- mk8 | Mario Kart 8 Deluxe', 'A kart racer', ''] + [f'Game {i}' for i in range(100)])
+        page.locator('#bulk-text').type(games[:60], delay=5); page.locator('#bulk-text').fill(games); page.wait_for_timeout(300)
+        focused = page.evaluate("document.activeElement.id")
+        page.get_by_role('button', name='Add 103 variants').click(); page.wait_for_timeout(200)
+        page.keyboard.press('Control+s'); page.wait_for_timeout(800)
+        src = [v['id'] for v in json.load(open(conf))['dimensions']['source']]
+        check('bulk add: 103 games pasted at once, names made from the text, duplicates skipped, typing keeps focus',
+              focused == 'bulk-text' and len(src) == 104 and src[1:4] == ['SuperMarioKart', 'FZeroX', 'mk8'] and src[-1] == 'Game99', f'{focused} {len(src)} {src[:5]}')
+        c = json.load(open(conf)); c['dimensions']['source'] = c['dimensions']['source'][:1]; json.dump(c, open(conf, 'w'), indent=2); page.wait_for_timeout(2500)
+        page.goto(base + '/#run'); page.wait_for_selector('#tab-run.on > *')
         # a batch from the Run tab: the log follows its end, the pill shows progress
         many = [{'id': f'm{i}', 'text': f'FAKE:sleep=150 m{i}'} for i in range(30)]
         c = json.load(open(conf)); c['dimensions']['testing'] += many; json.dump(c, open(conf, 'w'), indent=2)

@@ -1,0 +1,923 @@
+<!--
+Source Information
+- Date: 2026-10-29 05:07
+- Source: Final Soldier (PC Engine vertical-scrolling shooter, Star Soldier lineage)
+- Tech: Three.js 0.180.0 WebGPURenderer (WebGPU, no fallback), Rapier @dimforge/rapier3d-compat 0.19.3 physics, Gamepad API, Web Audio API, AI Hub Session Protocol v1 (session.js 1.3.0, parallel mode), BroadcastChannel Squad Link
+- Art Direction: Stylized cel-shaded (MeshToonMaterial + gradient map + inverted-hull outlines, saturated arcade palette)
+- Animation: Procedural code animation (banking, bob, spin, boss articulation, particle bursts); no skeletal assets
+- Audio: Code-written chiptune music sequencer + synthesized SFX + Animalese/Simlish gibberish voice (formant blip synthesis)
+- Online: AI Hub parallel sessions (progress/result) + local 2P co-op + BroadcastChannel Squad Link for standalone tabs
+- Testing: Lightweight (syntax check + headless Chrome load smoke)
+- Environment: Muse Code CLI (headless); Linux; browser unknown
+- Model: Meta, muse-wonder-1.0, reasoning effort max
+- Usage: unknown
+Testing Feedback: see in-game About screen.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/*! aihub-session 1.3.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.3.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="parallel">
+<meta name="hub:session-minutes" content="4">
+<meta name="hub:session-goal" content="Highest score before the flagship falls">
+<meta name="hub:session-howto" content="Left stick move, Cross fire, Circle bomb, R1 dash">
+<meta name="hub:webgpu" content="required">
+<link rel="icon" href="data:,">
+<title>Crystal Commando</title>
+<style>
+:root{--ink:#0b1026;--paper:#fff7e6;--cyan:#37e6ff;--pink:#ff4d7e;--gold:#ffd23f;--violet:#7c5cff}
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow:hidden;background:#070a1c;font-family:"Segoe UI",system-ui,sans-serif;color:var(--paper)}
+#app{position:fixed;inset:0}#gl{position:absolute;inset:0;width:100%;height:100%;display:block}
+button{font:inherit;cursor:pointer}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:radial-gradient(ellipse at 50% 35%,rgba(28,32,84,.88),rgba(5,6,20,.96));z-index:20;text-align:center;padding:24px}
+.hidden{display:none!important}
+.logo{font-size:clamp(44px,8vw,92px);font-weight:900;letter-spacing:.04em;line-height:.95;color:#fff;text-shadow:0 4px 0 var(--violet),0 10px 0 #141736,0 0 34px rgba(55,230,255,.65);text-transform:uppercase}
+.logo em{font-style:normal;color:var(--cyan)}
+.sub{font-size:clamp(16px,2.4vw,24px);color:var(--gold);font-weight:700;letter-spacing:.14em;text-transform:uppercase}
+.menu{display:flex;flex-direction:column;gap:10px;min-width:min(520px,88vw)}
+.mi{font-size:clamp(20px,3vw,30px);font-weight:800;padding:14px 28px;border:4px solid #fff;background:#1b2050;color:#fff;border-radius:14px;text-transform:uppercase;letter-spacing:.06em}
+.mi.sel{background:var(--pink);transform:scale(1.04);box-shadow:0 0 0 4px var(--gold),0 12px 28px rgba(0,0,0,.5)}
+.hint{font-size:17px;color:#c9d4ff;max-width:760px;line-height:1.5}
+.small{font-size:14px;color:#9fb0e8}
+.card{background:#13173d;border:3px solid #fff;border-radius:16px;padding:20px 26px;max-width:860px;max-height:72vh;overflow:auto;text-align:left;font-size:18px;line-height:1.55}
+.card h2{margin-top:0;color:var(--cyan)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px}
+@media(max-width:700px){.grid{grid-template-columns:1fr}}
+#hud{position:absolute;inset:0;pointer-events:none;z-index:10;font-weight:800}
+#hudTop{position:absolute;top:0;left:0;right:0;display:flex;justify-content:space-between;padding:14px 20px;font-size:clamp(16px,2.4vw,26px);text-shadow:2px 2px 0 #000}
+#hudBot{position:absolute;bottom:0;left:0;right:0;display:flex;justify-content:space-between;align-items:flex-end;padding:14px 20px;font-size:clamp(14px,2vw,20px);text-shadow:2px 2px 0 #000}
+.bar{width:min(340px,34vw);height:18px;border:3px solid #fff;background:#222;border-radius:8px;overflow:hidden}
+.bar>i{display:block;height:100%;background:linear-gradient(90deg,#37e6ff,#7c5cff)}
+#bossBar>i{background:linear-gradient(90deg,#ff4d7e,#ffd23f)}
+#announce{position:absolute;top:16%;left:0;right:0;text-align:center;font-size:clamp(24px,4.5vw,52px);font-weight:900;color:var(--gold);text-shadow:3px 3px 0 #000,0 0 24px rgba(255,210,63,.7);text-transform:uppercase}
+#draftCards{display:flex;gap:16px;flex-wrap:wrap;justify-content:center}
+.dcard{width:250px;background:#1b2050;border:4px solid #fff;border-radius:16px;padding:18px;color:#fff}
+.dcard.sel{border-color:var(--gold);background:#3a1660;transform:scale(1.05)}
+.dcard h3{color:var(--cyan);margin:6px 0}
+.setrow{display:flex;justify-content:space-between;gap:24px;padding:10px 4px;border-bottom:1px solid #39408a;font-size:20px}
+input[type=range]{width:180px}
+.kbd{background:#fff;color:#111;border-radius:6px;padding:1px 8px;font-weight:900}
+#touchGate{position:absolute;inset:0;z-index:60;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;background:#070a1c;text-align:center;padding:24px}
+#errBox{position:absolute;inset:auto 16px 16px 16px;z-index:80;background:#5b0f22;border:3px solid #fff;border-radius:12px;padding:14px 18px;font-size:16px}
+#padToast{position:absolute;bottom:86px;left:50%;transform:translateX(-50%);z-index:30;background:#13173d;border:3px solid #fff;border-radius:999px;padding:8px 20px;font-size:17px;font-weight:700}
+</style>
+</head>
+<body>
+<div id="app">
+<canvas id="gl" width="1280" height="720"></canvas>
+<div id="hud" class="hidden">
+  <div id="hudTop"><div id="scoreBox">SCORE 0</div><div id="stageBox">STAGE 1 — ORBITAL DAWN</div><div id="hiBox">HI 0</div></div>
+  <div id="announce"></div>
+  <div id="hudBot">
+    <div><div id="livesBox">◆◆◆</div><div id="weaponBox">VULCAN Lv1</div><div class="bar"><i id="dashBar" style="width:100%"></i></div></div>
+    <div style="text-align:right"><div id="bombBox">BOMB ●●●</div><div id="chainBox">CHAIN x1</div><div id="bossWrap" class="hidden"><div>FLAGSHIP CORE</div><div class="bar" id="bossBar"><i style="width:100%"></i></div></div></div>
+  </div>
+</div>
+<div id="titleScr" class="overlay">
+  <div class="logo">Crystal<br><em>Commando</em></div>
+  <div class="sub">The last crystal sings — answer it!</div>
+  <div class="menu" id="titleMenu"></div>
+  <div class="hint">✦ Cross / Enter — confirm &nbsp;·&nbsp; D-Pad / Left stick — choose &nbsp;·&nbsp; Options / Esc — settings ✦<br>Leave this screen alone and a brave little demo pilot will show you the ropes.</div>
+  <div class="small" id="titleFoot">Three.js WebGPU · Rapier physics · AI Hub ready · Local co-op: press P or Pad 2 any button in flight</div>
+</div>
+<div id="briefScr" class="overlay hidden"><div class="card">
+  <h2>★ Mission Briefing — Operation Crystal Dawn ★</h2>
+  <p><b>Year 2391.</b> The Bloom Armada has stolen the Star Crystal, the heart that keeps every colony sky blue. Without it, the dawn simply… forgets to arrive.</p>
+  <p>You are <b>Captain Kira Vale</b>, last pilot of the Crystal Commando. Your ship, the <i>Paper Comet</i>, is small, brave, and held together with hope and excellent rivets.</p>
+  <p>Fly north. Break the Armada. Bring the morning back. And Kira — do try to keep the crystal in one piece this time. Mostly one piece. Several large pieces are also acceptable.</p>
+  <p><b>Your kit:</b> 4 crystal weapons (Vulcan, Laser, Wave, Missile) · Force pods · Dash · Bombs · Upgrade drafts between waves.</p>
+</div><button class="mi sel" id="briefGo">▶ Launch — Cross / Enter</button></div>
+<div id="linkScr" class="overlay hidden"><div class="card">
+  <h2>Squad Link — play with a friend in another tab</h2>
+  <p>Both pilots open this file, pick the <b>same room code</b>, one taps <b>Host</b>, the other <b>Join</b>. Your ships meet as friendly ghosts: fly together, share the sky, chase your own scores. (In an AI Hub session, the hub runs the party instead — this menu steps aside.)</p>
+  <p>Room code: <b id="linkCode" style="font-size:28px;color:#ffd23f">CRYSTAL-7</b></p>
+  <p id="linkStatus">Not linked. Keyboard: type a new code, H hosts, J joins.</p>
+</div><div class="menu"><button class="mi" data-link="new">New code</button><button class="mi" data-link="host">Host room</button><button class="mi" data-link="join">Join room</button><button class="mi" data-link="back">Back</button></div></div>
+<div id="howScr" class="overlay hidden"><div class="card">
+  <h2>How to Fly</h2>
+  <div class="grid">
+    <div>Move — Left stick / D-Pad / WASD / Arrows</div><div>Fire (hold) — Cross (✕) / Z / J / Space</div>
+    <div>Bomb — Circle (○) / X / K</div><div>Dash (brief shield) — R1 / Shift / L</div>
+    <div>Focus (slow, tight fire) — L1 / C</div><div>Swap weapon — Square/Triangle / Q / E</div>
+    <div>Pause + Settings — Options / Esc / P</div><div>P2 join in flight — Pad 2 any button / T</div>
+    <div>Draft pick — Left / Right + Cross</div><div>Menus — D-Pad + Cross, Circle backs out</div>
+  </div>
+  <p>Graze enemy shots to build your <b>Chain</b>. Catch <b>P</b> crystals to power up, <b>B</b> for bombs, hearts to mend. Between waves, pick 1 of 3 upgrades. Clear the flagship to win!</p>
+</div><button class="mi sel" id="howBack">Back — Circle / Esc</button></div>
+<div id="setScr" class="overlay hidden"><div class="card" style="min-width:min(640px,92vw)">
+  <h2>Settings</h2>
+  <div class="setrow"><span>Music volume</span><input type="range" id="setMusic" min="0" max="100" value="70"></div>
+  <div class="setrow"><span>Sound volume</span><input type="range" id="setSfx" min="0" max="100" value="80"></div>
+  <div class="setrow"><span>Invert horizontal (stick X)</span><button class="mi" id="setInvX" style="font-size:18px;padding:6px 18px">OFF</button></div>
+  <div class="setrow"><span>Invert vertical (stick Y)</span><button class="mi" id="setInvY" style="font-size:18px;padding:6px 18px">OFF</button></div>
+  <div class="setrow"><span>Controller rumble</span><button class="mi" id="setRumble" style="font-size:18px;padding:6px 18px">ON</button></div>
+  <div class="setrow"><span>Picture detail (shadows)</span><button class="mi" id="setQuality" style="font-size:18px;padding:6px 18px">HIGH</button></div>
+  <p class="small">Stick feeling off? Flip the two Invert switches — about one pad in ten reports an axis backwards. Changes apply at once and are remembered on this device (never inside an AI Hub session round).</p>
+</div><div class="menu"><button class="mi sel" id="setResume">Resume</button><button class="mi" id="setRestart">Restart stage</button><button class="mi" id="setQuit">Quit to title</button></div></div>
+<div id="draftScr" class="overlay hidden" style="background:rgba(5,6,20,.72)"><div class="sub">★ Supply Drop — pick one ★</div><div id="draftCards"></div><div class="hint">◀ ▶ choose · Cross / Enter take it · the fleet waits for no one (well, just this once, it waits)</div></div>
+<div id="overScr" class="overlay hidden"><div class="logo" style="font-size:clamp(38px,6vw,64px)">Signal<br><em>Lost</em></div><p class="hint" id="overText">The Paper Comet drifts home on autopilot. Kira is fine. Kira is always fine. The crystal, however, sends its regards.</p><div class="menu"><button class="mi sel" id="overRetry">Fly again</button><button class="mi" id="overTitle">Title</button></div></div>
+<div id="winScr" class="overlay hidden"><div class="logo" style="font-size:clamp(38px,6vw,64px)">Dawn<br><em>Delivered!</em></div><p class="hint" id="winText">The Star Crystal blooms. Somewhere below, a million windows blink awake. “Told you,” says Kira, to nobody, grinning. “Mostly one piece.”</p><div class="menu"><button class="mi sel" id="winRetry">Fly again</button><button class="mi" id="winTitle">Title</button></div></div>
+<div id="aboutScr" class="overlay hidden"><div class="card">
+  <h2>About / Credits</h2>
+  <p><b>Crystal Commando</b> — an original spiritual successor to <i>Final Soldier</i>. Built as a complete vertical slice: one stage, two bosses, four weapons, upgrade drafts, local co-op, Squad Link, AI Hub sessions, attract demo.</p>
+  <p>Date: 2026-10-29 05:07 · Tech: Three.js 0.180.0 WebGPURenderer (WebGPU, no fallback), Rapier 0.19.3, Gamepad API, Web Audio · Art: cel-shaded toon materials with ink outlines · Animation: procedural code animation · Audio: code-written chiptune + synthesized effects + gibberish voice · Online: AI Hub Session Protocol v1 parallel + BroadcastChannel · Testing: lightweight syntax + headless load checks · Environment: Muse Code CLI (headless), Linux, browser unknown · Model: Meta muse-wonder-1.0 (max) · Usage: unknown.</p>
+  <p>Testing feedback — Issues caught: counted in the delivery note. Most helpful test: headless load of the exact file. Least helpful: static text search (it cannot hear a wrong note or see a black screen).</p>
+  <p>Made with code, courage, and an irresponsible number of particles. No soldiers were finalized in the making of this game.</p>
+</div><button class="mi sel" id="aboutBack">Back</button></div>
+<div id="touchGate" class="hidden"><div class="logo" style="font-size:44px">Crystal<br><em>Commando</em></div><p class="hint">Controller or keyboard required.<br>Pair a pad or plug in a keyboard — this sky has no touch sticks, by design.</p><button class="mi sel" id="touchSettings">Settings</button></div>
+<div id="padToast" class="hidden">🎮 Controller connected</div>
+<div id="errBox" class="hidden"></div>
+</div>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.min.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.min.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.min.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","@dimforge/rapier3d-compat":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm"}}</script>
+<script type="module">
+import * as THREE from 'three/webgpu';
+import RAPIER from '@dimforge/rapier3d-compat';
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)), lerp=(a,b,t)=>a+(b-a)*t;
+const SETTINGS_KEY='crystal-commando-settings';
+let settings={music:70,sfx:80,invX:false,invY:false,rumble:true,quality:'HIGH'};
+try{const s=JSON.parse(localStorage.getItem(SETTINGS_KEY)||'null'); if(s) settings={...settings,...s};}catch(e){}
+function saveSettings(){try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));}catch(e){}}
+let sceneName='boot', settingsOpen=false, simTime=0, lastInput={x:0,y:0,fire:false};
+window.addEventListener('error',e=>{const b=$('errBox'); b.textContent='⚠ '+(e.message||'Something hiccuped — the fleet has been notified.'); b.classList.remove('hidden');});
+/* ============ AUDIO: code-written music, SFX, gibberish voice ============ */
+const AudioX={
+ ctx:null,master:null,musicGain:null,sfxGain:null,step:0,nextNote:0,mode:'title',
+ init(){ if(this.ctx) { if(this.ctx.state==='suspended') this.ctx.resume(); return; }
+  const C=window.AudioContext||window.webkitAudioContext; if(!C) return;
+  this.ctx=new C(); this.master=this.ctx.createGain(); this.master.gain.value=.9; this.master.connect(this.ctx.destination);
+  this.musicGain=this.ctx.createGain(); this.musicGain.connect(this.master); this.sfxGain=this.ctx.createGain(); this.sfxGain.connect(this.master); this.applyVol(); this.nextNote=this.ctx.currentTime+.1; },
+ applyVol(){ if(!this.ctx) return; this.musicGain.gain.value=(settings.music/100)*.5; this.sfxGain.gain.value=(settings.sfx/100)*.8; },
+ tone(f,t0,d,type='square',vol=.2,dest,slide=0){ if(!this.ctx) return; const o=this.ctx.createOscillator(),g=this.ctx.createGain(); o.type=type; o.frequency.setValueAtTime(f,t0); if(slide) o.frequency.exponentialRampToValueAtTime(Math.max(30,f+slide),t0+d); g.gain.setValueAtTime(vol,t0); g.gain.exponentialRampToValueAtTime(.001,t0+d); o.connect(g); g.connect(dest||this.sfxGain); o.start(t0); o.stop(t0+d+.02); },
+ noise(t0,d,vol=.2,fc=1200){ if(!this.ctx) return; const len=Math.max(1,(d*this.ctx.sampleRate)|0), buf=this.ctx.createBuffer(1,len,this.ctx.sampleRate), ch=buf.getChannelData(0); for(let i=0;i<len;i++) ch[i]=Math.random()*2-1; const s=this.ctx.createBufferSource(); s.buffer=buf; const f=this.ctx.createBiquadFilter(); f.type='bandpass'; f.frequency.value=fc; const g=this.ctx.createGain(); g.gain.setValueAtTime(vol,t0); g.gain.exponentialRampToValueAtTime(.001,t0+d); s.connect(f); f.connect(g); g.connect(this.sfxGain); s.start(t0); },
+ shoot(){ if(!this.ctx) return; this.tone(880+Math.random()*120,this.ctx.currentTime,.07,'square',.06); },
+ eshoot(){ if(!this.ctx) return; this.tone(320,this.ctx.currentTime,.09,'sawtooth',.05); },
+ boom(big){ if(!this.ctx) return; const t=this.ctx.currentTime; this.noise(t,big?.5:.25,big?.5:.3,big?400:900); this.tone(big?90:140,t,big?.5:.25,'sine',.4,null,-60); },
+ pickup(){ if(!this.ctx) return; const t=this.ctx.currentTime; this.tone(660,t,.08,'square',.12); this.tone(990,t+.07,.12,'square',.12); },
+ hurt(){ if(!this.ctx) return; const t=this.ctx.currentTime; this.tone(220,t,.2,'sawtooth',.25,null,-140); this.noise(t,.2,.25,700); },
+ dashS(){ if(!this.ctx) return; this.noise(this.ctx.currentTime,.18,.15,2400); },
+ bombS(){ if(!this.ctx) return; const t=this.ctx.currentTime; this.noise(t,.7,.6,300); this.tone(60,t,.7,'sine',.6,null,-20); },
+ ui(){ if(!this.ctx) return; this.tone(520,this.ctx.currentTime,.06,'square',.1); },
+ ok(){ if(!this.ctx) return; const t=this.ctx.currentTime; this.tone(523,t,.08,'square',.12); this.tone(784,t+.07,.14,'square',.12); },
+ speak(text,base=300){ if(!this.ctx) return; /* Animalese/Simlish gibberish: one formant blip per syllable-ish char */
+  let t=this.ctx.currentTime+.02; const vow={a:420,e:520,i:640,o:380,u:300};
+  for(const raw of String(text).toLowerCase()){ if(raw===' '){t+=.07; continue;} if(!/[a-z]/.test(raw)) continue;
+   const f=(vow[raw]||base)*(0.85+Math.random()*.4), d=.055+Math.random()*.05;
+   const o=this.ctx.createOscillator(), o2=this.ctx.createOscillator(), g=this.ctx.createGain(), fl=this.ctx.createBiquadFilter();
+   o.type='sawtooth'; o.frequency.value=f; o2.type='square'; o2.frequency.value=f*2.02; fl.type='bandpass'; fl.frequency.value=f*3; fl.Q.value=4;
+   g.gain.setValueAtTime(.0001,t); g.gain.exponentialRampToValueAtTime(.14,t+.015); g.gain.exponentialRampToValueAtTime(.001,t+d);
+   o.connect(fl); o2.connect(fl); fl.connect(g); g.connect(this.sfxGain); o.start(t); o2.start(t); o.stop(t+d+.02); o2.stop(t+d+.02); t+=d*.82; } },
+ tick(){ if(!this.ctx) return; const spb=60/142/2; /* 142bpm 8th notes */
+  while(this.nextNote < this.ctx.currentTime+.18){ const s=this.step, t=this.nextNote;
+   const bass=[0,0,7,0, 5,5,12,10, 0,0,7,0, 3,5,7,10][s%16], root=this.mode==='boss'?55:65.41;
+   const bf=root*Math.pow(2,bass/12); this.tone(bf,t,spb*.9,'triangle',.30,this.musicGain);
+   if(s%2===0) this.tone(bf*2,t,spb*.5,'square',.05,this.musicGain);
+   const leadScale=[0,3,5,7,10,12,15,12]; const bossMode=this.mode==='boss';
+   if(this.mode!=='title'||s%2===0){ const lf=(bossMode?440:523.25)*Math.pow(2,leadScale[(s* (bossMode?3:1))%8]/12); if(s%4!==3) this.tone(lf,t,spb*.8,'square',.045,this.musicGain); }
+   if(s%4===2){ const len=(spb*this.ctx.sampleRate)|0, buf=this.ctx.createBuffer(1,len,this.ctx.sampleRate), ch=buf.getChannelData(0); for(let i=0;i<len;i++) ch[i]=(Math.random()*2-1)*(1-i/len); const src=this.ctx.createBufferSource(); src.buffer=buf; const hp=this.ctx.createBiquadFilter(); hp.type='highpass'; hp.frequency.value=6000; const g=this.ctx.createGain(); g.gain.value=.06; src.connect(hp); hp.connect(g); g.connect(this.musicGain); src.start(t); }
+   this.step++; this.nextNote+=spb; } }
+};
+/* ============ INPUT: Gamepad API first, keyboard mapped to same model ============ */
+const keys=new Set(); let padPrev=[], padPrev2=[], anyInputAt=performance.now(), attractWanted=false;
+addEventListener('keydown',e=>{ if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault(); keys.add(e.code); anyInputAt=performance.now(); AudioX.init(); if(attractOn) exitAttract(); });
+addEventListener('keyup',e=>keys.delete(e.code));
+addEventListener('pointerdown',()=>{ anyInputAt=performance.now(); AudioX.init(); if(attractOn) exitAttract(); });
+addEventListener('gamepadconnected',e=>{ const t=$('padToast'); t.textContent='🎮 Controller connected — '+String(e.gamepad.id).slice(0,28); t.classList.remove('hidden'); setTimeout(()=>t.classList.add('hidden'),2600); });
+function padState(idx){ const pads=navigator.getGamepads?navigator.getGamepads():[]; const p=pads&&pads[idx]; if(!p) return null;
+ let x=p.axes[0]||0, y=p.axes[1]||0; if(Math.abs(x)<.18) x=0; if(Math.abs(y)<.18) y=0;
+ if(p.buttons[14]&&p.buttons[14].pressed) x=-1; if(p.buttons[15]&&p.buttons[15].pressed) x=1; if(p.buttons[12]&&p.buttons[12].pressed) y=-1; if(p.buttons[13]&&p.buttons[13].pressed) y=1;
+ if(settings.invX) x=-x; if(settings.invY) y=-y;
+ const b=i=>!!(p.buttons[i]&&p.buttons[i].pressed);
+ return {x,y,fire:b(0),bomb:b(1),swap:b(2),swap2:b(3),l1:b(4),dash:b(5),focus:b(4),options:b(9),create:b(8),raw:p}; }
+function edges(cur,prev){ const e={}; for(const k in cur) if(typeof cur[k]==='boolean') e[k]=cur[k]&&!prev[k]; return e; }
+let prevInput={};
+function readInput(){ const p=padState(0)||{x:0,y:0,fire:false,bomb:false,swap:false,swap2:false,dash:false,focus:false,options:false};
+ let x=p.x, y=p.y; if(keys.has('ArrowLeft')||keys.has('KeyA')) x=-1; if(keys.has('ArrowRight')||keys.has('KeyD')) x=1; if(keys.has('ArrowUp')||keys.has('KeyW')) y=-1; if(keys.has('ArrowDown')||keys.has('KeyS')) y=1;
+ const inp={x,y,fire:p.fire||keys.has('KeyZ')||keys.has('KeyJ')||keys.has('Space'),bomb:p.bomb||keys.has('KeyX')||keys.has('KeyK'),swap:p.swap||keys.has('KeyQ'),swap2:p.swap2||keys.has('KeyE'),dash:p.dash||keys.has('ShiftLeft')||keys.has('ShiftRight')||keys.has('KeyL'),focus:p.focus||keys.has('KeyC'),options:p.options||keys.has('Escape')||keys.has('KeyP')};
+ inp.edge=edges(inp,prevInput); prevInput={...inp}; if(inp.x||inp.y||inp.fire) { anyInputAt=performance.now(); }
+ lastInput={x:inp.x,y:-inp.y,fire:inp.fire}; return inp; }
+function readP2(){ const p=padState(1); let join=false; if(p&&(p.fire||p.bomb||p.dash)) join=true; if(keys.has('KeyT')) join=true;
+ if(!p) return {x:0,y:0,fire:false,join};
+ let x=p.x,y=p.y; return {x,y,fire:p.fire,bomb:p.bomb,join}; }
+function rumble(dur=.12,strong=.5,weak=.3){ if(!settings.rumble) return; try{ const pads=navigator.getGamepads(); const p=pads&&pads[0]; if(p&&p.vibrationActuator) p.vibrationActuator.playEffect('dual-rumble',{duration:dur*1000,strongMagnitude:strong,weakMagnitude:weak}); }catch(e){} }
+/* ============ THREE WebGPU + RAPIER WORLD ============ */
+let renderer,scene,camera,world,eventQueue,gradientMap;
+let playerMesh,p2Mesh,remoteMesh,bossMesh=null, pods=[], bgGroup, spires;
+const enemies=[], pBullets=[], eBullets=[], pickups=[], parts=[];
+const colliderMap=new Map(); let shake=0, scrollY=0;
+const WEAPONS=['VULCAN','LASER','WAVE','MISSILE'];
+const G={run:false,over:false,won:false,time:0,score:0,hi:+(localStorage.getItem('cc-hi')||0),lives:3,bombs:3,weapon:0,power:1,chain:1,chainT:0,graze:0,kills:0,dashCd:0,invuln:0,fireCd:0,boss:null,midDone:false,finalDone:false,draftAt:[42,92],draftDone:[],upgrades:{engine:0,shield:0,magnet:0,podPower:0},spawnIdx:0,p2:{active:false,lives:3,score:0,x:3,y:-9,fireCd:0},attract:false,hubEnded:false,resultSent:false};
+let attractOn=false;
+function toon(color,emissive=0x000000,ei=0){ return new THREE.MeshToonMaterial({color,gradientMap,emissive,emissiveIntensity:ei}); }
+function outlined(mesh,scale=1.09){ const o=new THREE.Mesh(mesh.geometry,new THREE.MeshBasicMaterial({color:0x0a0a18,side:THREE.BackSide})); o.scale.setScalar(scale); mesh.add(o); return mesh; }
+function box(w,h,d,color,x=0,y=0,z=0,ol=true){ const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),toon(color)); m.position.set(x,y,z); if(ol) outlined(m); m.castShadow=true; return m; }
+function cone(r,h,color,x=0,y=0,z=0){ const m=new THREE.Mesh(new THREE.ConeGeometry(r,h,6),toon(color)); m.position.set(x,y,z); outlined(m); m.castShadow=true; return m; }
+function buildShip(color){ const g=new THREE.Group();
+ const body=box(1.1,.55,2.0,color,0,0,0); g.add(body); const nose=cone(.42,1.1,0xffd23f,0,0,1.45); nose.rotation.x=Math.PI/2; g.add(nose);
+ const wl=box(1.5,.22,.8,0x37e6ff,-.85,0,-.3), wr=wl.clone(); wr.position.x=.85; g.add(wl,wr);
+ const fin=box(.18,.8,.7,0xff4d7e,0,.45,-.8); g.add(fin);
+ const can=box(.55,.4,.7,0xbffcff,0,.32,.25); g.add(can);
+ const eng=new THREE.Mesh(new THREE.CylinderGeometry(.22,.32,.4,8),toon(0xff9f1c,0xff6a00,.9)); eng.rotation.x=Math.PI/2; eng.position.set(0,0,-1.15); g.add(eng); g.userData.eng=eng; return g; }
+function buildDrone(color=0xff5a5a){ const g=new THREE.Group(); const b=box(1.2,.5,1.2,color); g.add(b); const eye=box(.5,.3,.2,0xffe66d,0,0,.65); g.add(eye); const r=cone(.3,.8,0x8d99ff,0,-.5,0); g.add(r); return g; }
+async function initGraphics(){ if(!navigator.gpu) throw new Error('WebGPU is required for this mission (no fallback). Please open in a WebGPU browser.');
+ renderer=new THREE.WebGPURenderer({canvas:$('gl'),antialias:true,powerPreference:'high-performance'}); await renderer.init();
+ renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(innerWidth,innerHeight); renderer.shadowMap.enabled=settings.quality==='HIGH'; renderer.toneMapping=THREE.NeutralToneMapping;
+ scene=new THREE.Scene(); scene.background=new THREE.Color(0x0a1030); scene.fog=new THREE.Fog(0x0a1030,34,78);
+ camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,200); camera.position.set(0,-19,15); camera.lookAt(0,2,0);
+ const tones=new Uint8Array([90,150,210,255]); gradientMap=new THREE.DataTexture(tones,4,1,THREE.RedFormat); gradientMap.minFilter=gradientMap.magFilter=THREE.NearestFilter; gradientMap.needsUpdate=true;
+ scene.add(new THREE.AmbientLight(0x8899ff,.9)); const key=new THREE.DirectionalLight(0xfff2cc,2.6); key.position.set(6,-8,18); key.castShadow=settings.quality==='HIGH'; key.shadow.mapSize.set(2048,2048); scene.add(key);
+ const rim=new THREE.DirectionalLight(0x37e6ff,1.4); rim.position.set(-8,10,8); scene.add(rim);
+ bgGroup=new THREE.Group(); scene.add(bgGroup);
+ const sea=new THREE.Mesh(new THREE.PlaneGeometry(90,140),toon(0x14306e)); sea.rotation.x=0; sea.position.z=-3.2; bgGroup.add(sea);
+ const grid=new THREE.GridHelper(90,45,0x37e6ff,0x24408a); grid.rotation.x=Math.PI/2; grid.position.z=-3.0; bgGroup.add(grid);
+ const starGeo=new THREE.SphereGeometry(.09,6,6); const starMat=new THREE.MeshBasicMaterial({color:0xcfe9ff});
+ const stars=new THREE.InstancedMesh(starGeo,starMat,260); const d=new THREE.Object3D(); for(let i=0;i<260;i++){ d.position.set((Math.random()-.5)*70,(Math.random()-.5)*90,-2.6+Math.random()*1.2); d.updateMatrix(); stars.setMatrixAt(i,d.matrix); } bgGroup.add(stars); bgGroup.userData.stars=stars;
+ spires=new THREE.InstancedMesh(new THREE.ConeGeometry(.9,5,5),toon(0x2a6cff),70); spires.castShadow=true; const dd=new THREE.Object3D(); for(let i=0;i<70;i++){ const side=i%2?1:-1; dd.position.set(side*(11+Math.random()*16),(Math.random()-.5)*90,-.5); dd.rotation.z=side*.25; dd.updateMatrix(); spires.setMatrixAt(i,dd.matrix); } scene.add(spires);
+ playerMesh=buildShip(0x37e6ff); scene.add(playerMesh); p2Mesh=buildShip(0xffd23f); p2Mesh.visible=false; scene.add(p2Mesh); remoteMesh=buildShip(0x7cff6b); remoteMesh.visible=false; scene.add(remoteMesh);
+ for(let i=0;i<2;i++){ const pod=buildDrone(0xffd23f); pod.scale.setScalar(.55); scene.add(pod); pods.push(pod); }
+ addEventListener('resize',()=>{ camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth,innerHeight); });
+ await RAPIER.init(); world=new RAPIER.World({x:0,y:0,z:0}); eventQueue=new RAPIER.EventQueue(true);
+ const wallDesc=RAPIER.ColliderDesc.cuboid(.5,30,.5).setTranslation(-10.5,0,0); world.createCollider(wallDesc); const w2=RAPIER.ColliderDesc.cuboid(.5,30,.5).setTranslation(10.5,0,0); world.createCollider(w2);
+ makeBody(playerMesh,0, -9,.55,true); if(p2Mesh) makeBody(p2Mesh,3,-9,.55,true);
+}
+function makeBody(mesh,x,y,r,kinematic){ const desc=kinematic?RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x,y,0):RAPIER.RigidBodyDesc.dynamic().setTranslation(x,y,0).setLinearDamping(1.5).setGravityScale(0).lockRotations();
+ const body=world.createRigidBody(desc); const col=world.createCollider(RAPIER.ColliderDesc.ball(r).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),body); mesh.userData.body=body; mesh.userData.col=col; colliderMap.set(col.handle,{mesh}); return body; }
+function syncMesh(e){ if(e.body){ const t=e.body.translation(); e.mesh.position.set(t.x,t.y,0);} }
+function burst(pos,color,n=14,big=false){ for(let i=0;i<n;i++){ const m=new THREE.Mesh(new THREE.SphereGeometry(big?.16:.09,6,6),new THREE.MeshBasicMaterial({color})); m.position.copy(pos); scene.add(m); parts.push({m,vx:(Math.random()-.5)*10,vy:(Math.random()-.5)*10,vz:Math.random()*6,life:.5+Math.random()*.4}); } }
+/* ============ ENTITIES ============ */
+function spawnEnemy(kind,x,y){ let mesh,hp,score; if(kind==='weaver'){ mesh=buildDrone(0xff8c42); hp=3; score=200; } else if(kind==='diver'){ mesh=buildDrone(0xff4d7e); hp=2; score=150; } else if(kind==='carrier'){ mesh=new THREE.Group(); const h=box(2.6,.7,2.2,0x5a6cff); mesh.add(h); mesh.add(box(1,.6,1,0xffd23f,0,.5,0)); hp=14; score=800; } else if(kind==='elite'){ mesh=buildShip(0xff5a5a); mesh.rotation.z=Math.PI; hp=10; score=600; } else { mesh=buildDrone(0xff5a5a); hp=2; score=100; }
+ scene.add(mesh); const body=makeBody(mesh,x,y,kind==='carrier'?1.2:.65,false); const e={kind,mesh,body:mesh.userData.body,col:mesh.userData.col,hp,maxHp:hp,score,t:Math.random()*6,fireT:1+Math.random()*1.5,dead:false}; enemies.push(e); colliderMap.set(e.col.handle,{enemy:e}); return e; }
+function spawnBoss(final){ const g=new THREE.Group(); const hull=box(final?7:5.4,1.2,final?4.2:3.2,final?0x7c2cff:0xff3355); g.add(hull);
+ for(let i=-1;i<=1;i++) g.add(box(1.1,.8,1.6,0xffd23f,i*2,0,1.2)); const core=box(1.6,1,1.6,0x37e6ff,0,.4,0); g.add(core); g.userData.core=core;
+ const wingL=box(3,.4,2,0x334, -3.4,0,-.6); g.add(wingL); const wingR=wingL.clone(); wingR.position.x=3.4; g.add(wingR);
+ scene.add(g); bossMesh=g; const body=makeBody(g,0,11.5,final?2.4:1.8,false);
+ const boss={kind:final?'final':'mid',mesh:g,body:g.userData.body,col:g.userData.col,hp:final?420:180,maxHp:final?420:180,score:final?10000:5000,t:0,fireT:1,phase:0,dead:false,final}; enemies.push(boss); colliderMap.set(boss.col.handle,{enemy:boss}); G.boss=boss; $('bossWrap').classList.remove('hidden'); AudioX.mode='boss'; announce(final?'⚠ FINAL FLAGSHIP — BLOOM CROWN ⚠':'⚠ WARNING — IRON BLOSSOM ⚠'); AudioX.speak(final?'Final flagship ahead hold on':'Warning big blossom ahead',260); return boss; }
+function spawnBullet(x,y,vx,vy,friendly,dmg=1,kind='std'){ const colHex=friendly?(kind==='laser'?0x7cfffa:kind==='wave'?0xff9ff3:0xffe66d):0xff6b9d;
+ const m=new THREE.Mesh(new THREE.SphereGeometry(friendly?.16:.2,8,8),new THREE.MeshBasicMaterial({color:colHex})); m.position.set(x,y,.3); scene.add(m);
+ const body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x,y,0)); const col=world.createCollider(RAPIER.ColliderDesc.ball(.22).setSensor(true).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),body);
+ const b={m,body,col,vx,vy,friendly,dmg,kind,life:2.2,dead:false}; (friendly?pBullets:eBullets).push(b); colliderMap.set(col.handle,{bullet:b}); return b; }
+function spawnPickup(x,y,kind){ const colors={P:0x37e6ff,B:0xff9f1c,H:0xff4d7e}; const m=new THREE.Group(); const c=new THREE.Mesh(new THREE.OctahedronGeometry(.5),toon(colors[kind]||0xffffff,colors[kind]||0, .35)); outlined(c); m.add(c); m.position.set(x,y,.4); scene.add(m); pickups.push({m,kind,t:0}); }
+function announce(txt,ms=2200){ const a=$('announce'); a.textContent=txt; a.style.opacity=1; clearTimeout(announce._t); announce._t=setTimeout(()=>a.style.opacity=0,ms); }
+const WAVES=[]; (function(){ let t=2; const rows=[[ 'drone',-6],['drone',-2],['drone',2],['drone',6]];
+ for(let w=0;w<6;w++){ for(const [k,x] of rows) WAVES.push({t,k,x:x+(w%2?1:-1)}); t+=4.5; WAVES.push({t,k:'weaver',x:-4}); WAVES.push({t:t+.4,k:'weaver',x:4}); t+=4; if(w%2===0){WAVES.push({t,k:'carrier',x:0}); t+=3;} WAVES.push({t,k:'diver',x:-6}); WAVES.push({t,k:'diver',x:6}); t+=3.5; }
+ WAVES.push({t:58,k:'midboss',x:0}); let t2=66; for(let w=0;w<5;w++){ for(let i=0;i<4;i++) WAVES.push({t:t2+i*.5,k:i%2?'weaver':'drone',x:-6+i*4}); t2+=5; WAVES.push({t:t2,k:'elite',x:(w%2?5:-5)}); t2+=4; if(w%2) {WAVES.push({t:t2,k:'carrier',x:2}); t2+=3;} }
+ WAVES.push({t:118,k:'finalboss',x:0}); WAVES.sort((a,b)=>a.t-b.t); })();
+function addScore(n){ G.score+=n*Math.max(1,G.chain|0); if(window.AIHub&&AIHub.active) AIHub.progress({score:G.score+(G.p2.active?G.p2.score:0),label:(G.boss?'BOSS':'Wave '+(1+Math.floor(G.time/30)))}); }
+function killEnemy(e){ if(e.dead) return; e.dead=true; G.kills++; addScore(e.score); burst(e.mesh.position,0xffb03a,e.kind==='carrier'||e.kind==='mid'||e.kind==='final'?30:12,!!e.final); AudioX.boom(!!e.final); shake=Math.min(1,shake+(e.final?.8:.25)); rumble(.15,.5,.4);
+ if(e.final){ G.finalDone=true; G.won=true; } if(e.kind==='mid') G.midDone=true;
+ if(e.kind!=='mid'&&!e.final&&Math.random()<.28) spawnPickup(e.mesh.position.x,e.mesh.position.y,Math.random()<.6?'P':(Math.random()<.5?'B':'H'));
+ if(e.final||e.kind==='mid') $('bossWrap').classList.add('hidden'); if(G.boss===e) G.boss=null; }
+function hurtPlayer(isP2){ if(attractOn) return; if(!isP2&&G.invuln>0) return; AudioX.hurt(); rumble(.3,.9,.7); shake=.7; burst(playerMesh.position,0xff4d7e,18);
+ if(isP2){ G.p2.lives--; if(G.p2.lives<=0){ G.p2.active=false; p2Mesh.visible=false; } return; }
+ if(G.upgrades.shield>0){ G.upgrades.shield--; G.invuln=1.2; announce('SHIELD POPPED!'); return; }
+ G.lives--; G.power=Math.max(1,G.power-1); G.chain=1; G.invuln=2;
+ if(G.lives<=0&&!G.p2.active){ gameOver(); } else if(G.lives<=0){ announce('KIRA DOWN — P2, BRING US HOME!'); playerMesh.visible=false; } }
+function gameOver(){ if(G.over) return; G.over=true; G.run=false; AudioX.mode='title'; saveHi(); show('over'); sceneName='over'; reportResult(); AudioX.speak('Signal lost come back pilot',240); }
+function victory(){ if(G.won&&G.run){ G.run=false; saveHi(); show('win'); sceneName='win'; $('winText').textContent='The Star Crystal blooms (score '+G.score+'). Somewhere below, a million windows blink awake. “Told you,” says Kira, grinning. “Mostly one piece.”'; reportResult(true); AudioX.speak('Dawn delivered brilliant flying',340); AudioX.mode='title'; } }
+function saveHi(){ if(G.score>G.hi){ G.hi=G.score; try{localStorage.setItem('cc-hi',String(G.hi));}catch(e){} } }
+function reportResult(won){ if(!(window.AIHub&&AIHub.active)||G.resultSent) return; G.resultSent=true; try{ AIHub.result({score:G.score+(G.p2.active?G.p2.score:0),stats:{kills:G.kills,graze:G.graze,chain:'x'+G.chain},awards:G.kills>40?[{title:'Bloom Breaker',detail:G.kills+' kills'}]:[]}); }catch(e){} }
+/* ============ GAME FLOW / UI ============ */
+const screens={title:$('titleScr'),brief:$('briefScr'),how:$('howScr'),link:$('linkScr'),set:$('setScr'),draft:$('draftScr'),over:$('overScr'),win:$('winScr'),about:$('aboutScr')};
+function show(name){ for(const k in screens) screens[k].classList.toggle('hidden',k!==name); $('hud').classList.toggle('hidden',!(name===null||name==='draft')); if(name) sceneName=name; }
+function hideAll(){ for(const k in screens) screens[k].classList.add('hidden'); }
+const MENU=[['▶ Start Mission','start'],['How to Fly','how'],['Squad Link (2 tabs)','link'],['Settings','set'],['About / Credits','about']];
+let menuIdx=0;
+function renderMenu(){ const m=$('titleMenu'); m.innerHTML=''; MENU.forEach((it,i)=>{ const b=document.createElement('button'); b.className='mi'+(i===menuIdx?' sel':''); b.textContent=it[0]; b.onclick=()=>{ menuIdx=i; AudioX.init(); menuGo(); }; m.appendChild(b); }); }
+function menuGo(){ AudioX.ok(); const a=MENU[menuIdx][1]; if(a==='start'){ show('brief'); sceneName='brief'; AudioX.speak('Operation crystal dawn good luck kira',330); } else if(a==='how') show('how'); else if(a==='link') show('link'); else if(a==='set') openSettings('title'); else if(a==='about') show('about'); }
+function openSettings(from){ settingsOpen=true; window._setFrom=from; $('setMusic').value=settings.music; $('setSfx').value=settings.sfx; syncSetBtns(); show('set'); sceneName='menu'; }
+function syncSetBtns(){ $('setInvX').textContent=settings.invX?'ON':'OFF'; $('setInvY').textContent=settings.invY?'ON':'OFF'; $('setRumble').textContent=settings.rumble?'ON':'OFF'; $('setQuality').textContent=settings.quality; }
+function closeSettings(){ settingsOpen=false; saveSettings(); if(window._setFrom==='title'||sceneName==='menu'&&!G.run){ show(G.run?null:'title'); if(!G.run) sceneName='title'; } else { hideAll(); $('hud').classList.remove('hidden'); sceneName='play'; } }
+function startRun(attract=false){ for(const e of enemies){ try{world.removeRigidBody(e.body);}catch(_){} scene.remove(e.mesh); } enemies.length=0;
+ for(const b of [...pBullets,...eBullets]){ try{world.removeRigidBody(b.body);}catch(_){} scene.remove(b.m); } pBullets.length=eBullets.length=0;
+ for(const p of pickups) scene.remove(p.m); pickups.length=0;
+ Object.assign(G,{run:true,over:false,won:false,time:0,score:0,lives:3,bombs:3,weapon:0,power:1,chain:1,chainT:0,graze:0,kills:0,dashCd:0,invuln:1.5,fireCd:0,boss:null,midDone:false,finalDone:false,draftDone:[],spawnIdx:0,resultSent:false,upgrades:{engine:0,shield:0,magnet:0,podPower:0}}); G.p2.active=false; p2Mesh.visible=false; playerMesh.visible=true;
+ playerMesh.userData.body.setTranslation({x:0,y:-9,z:0},true); hideAll(); $('hud').classList.remove('hidden'); $('bossWrap').classList.add('hidden'); sceneName='play'; AudioX.mode='play'; attractOn=attract; G.attract=attract;
+ announce(attract?'★ DEMO PILOT — WATCH & LEARN ★':'STAGE 1 — ORBITAL DAWN'); if(!attract) AudioX.speak('Crystal dawn lets bring the morning back',330); updateHud(); }
+function updateHud(){ $('scoreBox').textContent='SCORE '+(G.score+(G.p2.active?G.p2.score:0)); $('hiBox').textContent='HI '+Math.max(G.hi,G.score); $('livesBox').textContent='HULL '+'◆'.repeat(Math.max(0,G.lives))+(G.upgrades.shield?'  🛡':'')+(G.p2.active?'  P2 ◆'.repeat(Math.max(0,G.p2.lives)):''); $('weaponBox').textContent=WEAPONS[G.weapon]+' Lv'+G.power+(G.p2.active?' · CO-OP':''); $('bombBox').textContent='BOMB '+'●'.repeat(Math.max(0,G.bombs)); $('chainBox').textContent='CHAIN x'+(G.chain|0)+'  GRAZE '+G.graze; $('dashBar').style.width=(100-(G.dashCd/2.2*100))+'%'; if(G.boss) $('bossBar').firstElementChild.style.width=(100*G.boss.hp/G.boss.maxHp)+'%'; }
+const DRAFTS=[{t:'⚡ Swift Engine',d:'Move 18% faster, dash recharges quicker.',f:()=>G.upgrades.engine++},{t:'🛡 Aegis Plating',d:'Gain 2 shield charges that eat hits.',f:()=>G.upgrades.shield+=2},{t:'🧲 Crystal Magnet',d:'Pickups drift toward you from afar.',f:()=>G.upgrades.magnet++},{t:'💠 Pod Amplifier',d:'Force pods fire faster, +damage.',f:()=>G.upgrades.podPower++},{t:'💣 Bomb Cache',d:'+2 bombs, right now. Boom responsibly.',f:()=>G.bombs+=2},{t:'❤ Field Repairs',d:'+1 hull. Kira patches it with tape and optimism.',f:()=>G.lives++}];
+let draftIdx=0, draftChoices=[];
+function openDraft(){ draftChoices=[...DRAFTS].sort(()=>Math.random()-.5).slice(0,3); draftIdx=0; const c=$('draftCards'); c.innerHTML=''; draftChoices.forEach((d,i)=>{ const el=document.createElement('div'); el.className='dcard'+(i===0?' sel':''); el.innerHTML='<h3>'+d.t+'</h3><p>'+d.d+'</p>'; el.onclick=()=>{ draftIdx=i; pickDraft(); }; c.appendChild(el); }); show('draft'); sceneName='draft'; AudioX.speak('Supply drop choose wisely',320); }
+function pickDraft(){ draftChoices[draftIdx].f(); AudioX.ok(); G.draftDone.push(G.time); hideAll(); $('hud').classList.remove('hidden'); sceneName='play'; announce(draftChoices[draftIdx].t+' INSTALLED!'); updateHud(); }
+function exitAttract(){ if(!attractOn) return; attractOn=false; G.attract=false; G.run=false; show('title'); sceneName='title'; anyInputAt=performance.now(); }
+function aiInput(){ let tx=0,ty=-6; let best=null,bd=1e9; for(const e of enemies){ const d=Math.abs(e.mesh.position.x-playerMesh.position.x)+Math.abs(e.mesh.position.y-playerMesh.position.y); if(d<bd){bd=d;best=e;} }
+ if(best) tx=best.mesh.position.x; for(const b of eBullets){ if(Math.abs(b.m.position.x-playerMesh.position.x)<1.2&&b.m.position.y>playerMesh.position.y&&b.m.position.y-playerMesh.position.y<4) tx+= (b.m.position.x>playerMesh.position.x?-2:2); }
+ const px=playerMesh.position.x, py=playerMesh.position.y; return {x:clamp((tx-px)*.8,-1,1),y:clamp((ty-py)*.5,-1,1),fire:true,bomb:false,swap:false,swap2:false,dash:Math.random()<.005,focus:false,options:false,edge:{}}; }
+/* ============ COMBAT ============ */
+let curFocus=false;
+function fireWeapon(px,py,isP2){ const w=G.weapon, lv=G.power, focus=curFocus; const spread=focus?.04:.12;
+ if(w===0){ for(let i=0;i<lv;i++){ const off=(i-(lv-1)/2); spawnBullet(px+off*.35,py+1,off*spread*22,30,true,1,'std'); } }
+ else if(w===1){ spawnBullet(px,py+1,0,38,true,2,'laser'); if(lv>=3) { spawnBullet(px-.5,py+.6,0,38,true,1,'laser'); spawnBullet(px+.5,py+.6,0,38,true,1,'laser'); } }
+ else if(w===2){ const n=3+lv; for(let i=0;i<n;i++){ const a=(i/(n-1)-.5)*(focus?.5:1.15); spawnBullet(px,py+1,Math.sin(a)*24,Math.cos(a)*26,true,1,'wave'); } }
+ else { spawnBullet(px,py+1,0,22,true,2,'std'); if(lv>=2) spawnBullet(px-.6,py, -3,20,true,1,'std'); if(lv>=2) spawnBullet(px+.6,py, 3,20,true,1,'std'); }
+ AudioX.shoot(); }
+function doBomb(){ if(G.bombs<=0||attractOn&&false) return; if(!attractOn){ if(G.bombs<=0) return; G.bombs--; } AudioX.bombS(); shake=1; rumble(.4,1,.8);
+ for(const e of [...enemies]){ e.hp-= (e.final||e.kind==='mid')?25:999; if(e.hp<=0) killEnemy(e); }
+ for(const b of eBullets) b.dead=true; burst(playerMesh.position,0xffd23f,40,true); announce('CRYSTAL BOMB!'); updateHud(); }
+function stepPlay(dt,inp){ curFocus=!!inp.focus; G.time+=dt; simTime+=dt; G.fireCd-=dt; G.dashCd=Math.max(0,G.dashCd-dt*(1+G.upgrades.engine*.3)); G.invuln=Math.max(0,G.invuln-dt); G.chainT-=dt; if(G.chainT<=0) G.chain=Math.max(1,G.chain-.02);
+ // waves + drafts + boss triggers
+ while(G.spawnIdx<WAVES.length&&WAVES[G.spawnIdx].t<=G.time){ const w=WAVES[G.spawnIdx++]; if(w.k==='midboss') spawnBoss(false); else if(w.k==='finalboss') spawnBoss(true); else spawnEnemy(w.k,w.x,14); }
+ for(const t of G.draftAt) if(G.time>=t&&!G.draftDone.includes(t)&&!G.draftDone.some(d=>Math.abs(d-t)<2)){ G.draftDone.push(t); openDraft(); return; }
+ // player move (Rapier kinematic body)
+ const speed=(inp.focus?5.5:10.5)*(1+G.upgrades.engine*.18); const pb=playerMesh.userData.body; const pt=pb.translation();
+ let nx=clamp(pt.x+inp.x*speed*dt,-9.4,9.4), ny=clamp(pt.y+(-inp.y)*speed*dt,-11.5,12);
+ if(inp.edge&&inp.edge.dash&&G.dashCd<=0){ G.dashCd=2.2; G.invuln=Math.max(G.invuln,.45); nx=clamp(nx+inp.x*3.2,-9.4,9.4); ny=clamp(ny+(-inp.y)*3.2,-11.5,12); AudioX.dashS(); burst(playerMesh.position,0x37e6ff,8); }
+ pb.setNextKinematicTranslation({x:nx,y:ny,z:0}); playerMesh.position.set(nx,ny,0); playerMesh.rotation.z=lerp(playerMesh.rotation.z,-inp.x*.45, .18); playerMesh.rotation.x=Math.sin(G.time*3)*.04;
+ if(inp.edge&&(inp.edge.swap||inp.edge.swap2)){ G.weapon=(G.weapon+(inp.edge.swap?3:1))%4; AudioX.ui(); announce(WEAPONS[G.weapon]+' ONLINE'); }
+ if(inp.edge&&inp.edge.bomb) doBomb();
+ if(inp.fire&&G.fireCd<=0&&G.lives>0){ G.fireCd=G.weapon===1?.09:.13; fireWeapon(nx,ny,false);
+  pods.forEach((pod,i)=>{ pod.position.set(nx+(i?1.5:-1.5),ny-.4,.2); if(G.power>=2) spawnBullet(pod.position.x,pod.position.y+.6,0,30,true,G.upgrades.podPower?2:1,'std'); }); }
+ pods.forEach((pod,i)=>{ if(G.power<2){ pod.visible=false; } else { pod.visible=true; if(!(inp.fire&&G.fireCd<=0)) pod.position.set(nx+(i?1.5:-1.5),ny-.4+Math.sin(G.time*4+i)*.15,.2); pod.rotation.y+=dt*3; } });
+ // homing for missiles
+ if(G.weapon===3) for(const b of pBullets){ let best=null,bd=1e9; for(const e of enemies){ const d=(e.mesh.position.x-b.m.position.x)**2+(e.mesh.position.y-b.m.position.y)**2; if(d<bd){bd=d;best=e;} } if(best){ const dx=best.mesh.position.x-b.m.position.x, dy=best.mesh.position.y-b.m.position.y, m=Math.hypot(dx,dy)||1; b.vx=lerp(b.vx,dx/m*24,.08); b.vy=lerp(b.vy,dy/m*24,.08); } }
+ // P2 local co-op
+ const p2i=readP2(); if(!G.p2.active&&p2i.join&&!attractOn){ G.p2.active=true; G.p2.lives=3; G.p2.x=nx+3; p2Mesh.visible=true; p2Mesh.userData.body.setTranslation({x:G.p2.x,y:ny,z:0},true); announce('P2 JOINED — WELCOME, CO-PILOT!'); AudioX.speak('Copilot aboard lets fly',360); }
+ if(G.p2.active){ G.p2.fireCd-=dt; const b2=p2Mesh.userData.body; const t2=b2.translation(); const mx=clamp(t2.x+p2i.x*10*dt,-9.4,9.4), my=clamp(t2.y+(-p2i.y)*10*dt,-11.5,12); b2.setNextKinematicTranslation({x:mx,y:my,z:0}); p2Mesh.position.set(mx,my,0); if(p2i.fire&&G.p2.fireCd<=0){ G.p2.fireCd=.14; spawnBullet(mx,my+1,0,30,true,1,'std'); AudioX.shoot(); } }
+ // enemies via Rapier velocities
+ for(const e of enemies){ if(e.dead) continue; e.t+=dt; const p=e.mesh.position; let vx=0,vy=-2.2;
+  if(e.kind==='weaver'){ vx=Math.sin(e.t*2.4)*3.2; vy=-2.6; } if(e.kind==='diver'){ vy=-5.2; vx=clamp((playerMesh.position.x-p.x)*.6,-2,2); } if(e.kind==='carrier'){ vy=p.y>8?-1.2:0; vx=Math.sin(e.t*.7)*1.2; } if(e.kind==='elite'){ vy=p.y>6?-2:Math.sin(e.t)*1.5; vx=Math.sin(e.t*1.4)*3.6; }
+  if(e.kind==='mid'||e.kind==='final'){ const targetY=8.5; vy=clamp((targetY-p.y)*1.5,-2,2); vx=Math.sin(e.t*.55)*(e.final?4.4:3.2); e.phase=Math.floor(e.t/6)%3; }
+  e.body.setLinvel({x:vx,y:vy,z:0},true);
+  e.fireT-=dt; if(e.fireT<=0&&p.y<13&&p.y>-10){ e.fireT=e.kind==='carrier'?1.4:(e.final?0.55:e.kind==='mid'?.7:1.6+Math.random());
+   const dx=playerMesh.position.x-p.x, dy=playerMesh.position.y-p.y, m=Math.hypot(dx,dy)||1;
+   if(e.final||e.kind==='mid'){ const n=e.phase===0?7:e.phase===1?3:11; for(let i=0;i<n;i++){ const a=(i/n)*Math.PI*2+e.t; if(e.phase!==1||i===1) spawnBullet(p.x,p.y-1,Math.cos(a)*(e.phase===2?7:5),Math.sin(a)*(e.phase===2?7:5)-2,false,1); } if(e.phase===1){ spawnBullet(p.x,p.y-1,dx/m*9,dy/m*9,false,1); } }
+   else spawnBullet(p.x,p.y-.8,dx/m*7.5,dy/m*7.5,false,1); AudioX.eshoot(); }
+  if(p.y<-13&&e.kind!=='mid'&&!e.final) e.dead=true; }
+ // bullets kinematic step
+ for(const arr of [pBullets,eBullets]) for(const b of arr){ if(b.dead) continue; b.life-=dt; const t=b.body.translation(); const nx2=t.x+b.vx*dt, ny2=t.y+b.vy*dt; b.body.setNextKinematicTranslation({x:nx2,y:ny2,z:0}); b.m.position.set(nx2,ny2,.3); if(b.life<=0||ny2>17||ny2<-14||Math.abs(nx2)>13) b.dead=true; }
+ // graze
+ for(const b of eBullets){ if(b.dead) continue; const d=Math.hypot(b.m.position.x-playerMesh.position.x,b.m.position.y-playerMesh.position.y); if(d<1.15&&d>.45&&!b.grazed){ b.grazed=true; G.graze++; G.chain=Math.min(9,G.chain+.5); G.chainT=4; addScore(25); } }
+ // pickups
+ for(const pk of pickups){ pk.t+=dt; pk.m.position.y-=2.4*dt; pk.m.rotation.y+=dt*4; if(G.upgrades.magnet&&Math.hypot(pk.m.position.x-playerMesh.position.x,pk.m.position.y-playerMesh.position.y)<4.5){ pk.m.position.x+= (playerMesh.position.x-pk.m.position.x)*dt*3; pk.m.position.y+= (playerMesh.position.y-pk.m.position.y)*dt*3; }
+  if(Math.hypot(pk.m.position.x-playerMesh.position.x,pk.m.position.y-playerMesh.position.y)<1){ pk.dead=true; AudioX.pickup(); if(pk.kind==='P'){ G.power=Math.min(5,G.power+1); announce('POWER UP! '+WEAPONS[G.weapon]+' Lv'+G.power); } if(pk.kind==='B'){ G.bombs++; announce('+1 BOMB'); } if(pk.kind==='H'){ G.lives=Math.min(5,G.lives+1); announce('+1 HULL'); } addScore(50); updateHud(); } if(pk.m.position.y<-13) pk.dead=true; }
+ // physics + collisions
+ world.step(eventQueue); drainCollisions();
+ for(const e of enemies) syncMesh(e);
+ // particles
+ for(const pt2 of parts){ pt2.life-=dt; pt2.m.position.x+=pt2.vx*dt; pt2.m.position.y+=pt2.vy*dt; pt2.m.position.z+=pt2.vz*dt; pt2.m.scale.setScalar(Math.max(.01,pt2.life)); }
+ cleanup(); scrollBg(dt); updateHud();
+ if(G.won) victory(); if(G.time>4&&G.lives<=0&&!G.p2.active&&!G.over) gameOver(); }
+function drainCollisions(){ const queued=[]; eventQueue.drainCollisionEvents((h1,h2,started)=>{ if(started) queued.push([h1,h2]); });
+ for(const [h1,h2] of queued){ const a=colliderMap.get(h1), b=colliderMap.get(h2); if(!a||!b) continue;
+  const bullet=(a.bullet||b.bullet), enemy=(a.enemy||b.enemy), meshEnt=(a.mesh||b.mesh);
+  if(bullet&&enemy&&bullet.friendly&&!bullet.dead&&!enemy.dead){ bullet.dead=true; enemy.hp-=bullet.dmg; burst(bullet.m.position,0xffe66d,4); if(enemy.hp<=0) killEnemy(enemy); }
+  else if(bullet&&meshEnt&&!bullet.friendly&&!bullet.dead){ bullet.dead=true; const isP2=meshEnt.mesh===p2Mesh; if(meshEnt.mesh===playerMesh||isP2) hurtPlayer(isP2); }
+  else if(enemy&&meshEnt&&!enemy.dead){ if(meshEnt.mesh===playerMesh) { hurtPlayer(false); enemy.hp-=3; if(enemy.hp<=0) killEnemy(enemy); } if(meshEnt.mesh===p2Mesh){ hurtPlayer(true); enemy.hp-=3; if(enemy.hp<=0) killEnemy(enemy); } } } }
+function cleanup(){ for(let i=enemies.length-1;i>=0;i--){ const e=enemies[i]; if(e.dead){ try{world.removeRigidBody(e.body);}catch(_){} colliderMap.delete(e.col.handle); scene.remove(e.mesh); enemies.splice(i,1); if(G.boss===e) G.boss=null; } }
+ for(const arr of [pBullets,eBullets]) for(let i=arr.length-1;i>=0;i--){ const b=arr[i]; if(b.dead){ try{world.removeRigidBody(b.body);}catch(_){} colliderMap.delete(b.col.handle); scene.remove(b.m); arr.splice(i,1); } }
+ for(let i=pickups.length-1;i>=0;i--) if(pickups[i].dead){ scene.remove(pickups[i].m); pickups.splice(i,1); }
+ for(let i=parts.length-1;i>=0;i--) if(parts[i].life<=0){ scene.remove(parts[i].m); parts.splice(i,1); } }
+function scrollBg(dt){ scrollY+=dt*3; bgGroup.position.y=-(scrollY%6); if(spires) spires.position.y=-(scrollY%18); camera.position.x=Math.sin(simTime*.3)*.6+(shake?(Math.random()-.5)*shake*.7:0); camera.position.y=-19+(shake?(Math.random()-.5)*shake*.5:0); camera.lookAt(camera.position.x*.4,2,0); shake=Math.max(0,shake-dt*1.8); }
+/* ============ MENUS / SETTINGS / LINK WIRING ============ */
+$('briefGo').onclick=()=>{ AudioX.init(); AudioX.ok(); startRun(false); };
+$('howBack').onclick=()=>show('title'); $('aboutBack').onclick=()=>show('title');
+$('overRetry').onclick=()=>startRun(false); $('winRetry').onclick=()=>startRun(false);
+$('overTitle').onclick=()=>{ show('title'); sceneName='title'; }; $('winTitle').onclick=()=>{ show('title'); sceneName='title'; };
+$('setResume').onclick=()=>closeSettings(); $('setQuit').onclick=()=>{ settingsOpen=false; G.run=false; show('title'); sceneName='title'; AudioX.mode='title'; };
+$('setRestart').onclick=()=>{ settingsOpen=false; startRun(false); };
+$('touchSettings').onclick=()=>openSettings('title');
+$('setMusic').oninput=e=>{ settings.music=+e.target.value; AudioX.applyVol(); saveSettings(); };
+$('setSfx').oninput=e=>{ settings.sfx=+e.target.value; AudioX.applyVol(); saveSettings(); };
+$('setInvX').onclick=()=>{ settings.invX=!settings.invX; syncSetBtns(); saveSettings(); AudioX.ui(); };
+$('setInvY').onclick=()=>{ settings.invY=!settings.invY; syncSetBtns(); saveSettings(); AudioX.ui(); };
+$('setRumble').onclick=()=>{ settings.rumble=!settings.rumble; syncSetBtns(); saveSettings(); rumble(.15,.6,.4); };
+$('setQuality').onclick=()=>{ settings.quality=settings.quality==='HIGH'?'LOW':'HIGH'; syncSetBtns(); saveSettings(); if(renderer){ renderer.shadowMap.enabled=settings.quality==='HIGH'; } AudioX.ui(); };
+let linkChan=null, linkCode='CRYSTAL-7', linkSendT=0;
+function setLinkStatus(t){ $('linkStatus').textContent=t; $('linkCode').textContent=linkCode; }
+document.querySelectorAll('[data-link]').forEach(b=>b.onclick=()=>{ AudioX.init(); const a=b.dataset.link;
+ if(a==='new'){ linkCode='CRYSTAL-'+Math.floor(1+Math.random()*89); setLinkStatus('New code ready — share it with your co-pilot.'); }
+ if(a==='back'){ show('title'); }
+ if(a==='host'||a==='join'){ try{ if(linkChan) linkChan.close(); linkChan=new BroadcastChannel('crystal-commando-'+linkCode); linkChan.onmessage=ev=>{ const d=ev.data; if(d&&d.t==='ship'){ remoteMesh.visible=true; remoteMesh.position.set(d.x,d.y,.1); remoteMesh.rotation.z=d.rz||0; clearTimeout(linkChan._off); linkChan._off=setTimeout(()=>remoteMesh.visible=false,2500); } if(d&&d.t==='hello') setLinkStatus('Co-pilot linked! Fly together — press Start Mission.'); }; linkChan.postMessage({t:'hello'}); setLinkStatus((a==='host'?'Hosting ':'Joined ')+linkCode+' — open Start Mission in both tabs and fly!'); }catch(e){ setLinkStatus('Squad Link needs two tabs in the same browser.'); } } });
+/* ============ AI HUB (parallel) + PROBE ============ */
+let hubInfo=null;
+function hubSetup(){ if(!window.AIHub) return;
+ AIHub.probe(()=>({scene:settingsOpen?'menu':(sceneName==='play'?'play':sceneName==='title'?'title':sceneName==='over'||sceneName==='win'?'over':'ready'),menu:settingsOpen,world:simTime,input:{x:lastInput.x,y:lastInput.y,fire:!!lastInput.fire}}));
+ if(!AIHub.active) return;
+ AIHub.connect({mode:'parallel',seats:[1,4]}).then(async info=>{ hubInfo=info; if(!info) { show('title'); return; }
+  await bootPromise; startRun(false); G.run=false; sceneName='ready'; announce('SQUAD READY — DAWN IN 3… 2… 1…');
+  AIHub.on('time-up',()=>{ if(!G.resultSent) reportResult(); });
+  AIHub.on('end',()=>{ G.hubEnded=true; G.run=false; if(AudioX.ctx) AudioX.mode='title'; });
+  AIHub.ready(); }).catch(()=>show('title')); }
+/* ============ MAIN LOOP ============ */
+let lastTs=0, bootPromise=null;
+function frame(ts){ requestAnimationFrame(frame); const dt=Math.min(.033,(ts-lastTs)/1000||.016); lastTs=ts; try{
+ AudioX.tick();
+ if(!renderer||!scene||!camera) return;
+ const inp=readInput();
+ // attract trigger: 10s idle on title
+ if(sceneName==='title'&&!settingsOpen&&performance.now()-anyInputAt>10000&&!attractOn&&!(window.AIHub&&AIHub.active)){ startRun(true); }
+ if(sceneName==='title'&&inp.edge&&(inp.edge.fire)){ menuGo(); }
+ else if(sceneName==='title'){ const yEdge=(inp.y!==0&&frame._py===0)||(inp.y<0&&frame._py>0)||(inp.y>0&&frame._py<0); if((yEdge&&inp.y<0)||(inp.edge&&inp.edge.swap)) { menuIdx=(menuIdx+MENU.length-1)%MENU.length; renderMenu(); AudioX.ui(); } if((yEdge&&inp.y>0)||(inp.edge&&inp.edge.swap2)){ menuIdx=(menuIdx+1)%MENU.length; renderMenu(); AudioX.ui(); } }
+ frame._py=inp.y;
+ if(inp.edge&&inp.edge.options){ if(settingsOpen) closeSettings(); else if(sceneName==='play'||sceneName==='title'||sceneName==='draft') openSettings(sceneName==='play'?'play':'title'); }
+ if(sceneName==='brief'&&inp.edge&&inp.edge.fire) startRun(false);
+ if((sceneName==='how'||sceneName==='about'||sceneName==='link')&&inp.edge&&inp.edge.bomb){ show('title'); }
+ if(sceneName==='draft'){ const xEdge=inp.x!==0&&(frame._px===0||frame._px===undefined); if(xEdge&&inp.x<0) draftIdx=(draftIdx+2)%3; if(xEdge&&inp.x>0) draftIdx=(draftIdx+1)%3; [...$('draftCards').children].forEach((c,i)=>c.classList.toggle('sel',i===draftIdx)); if(inp.edge&&inp.edge.fire) pickDraft(); }
+ frame._px=inp.x;
+ if((sceneName==='over')&&inp.edge&&inp.edge.fire) startRun(false);
+ if((sceneName==='win')&&inp.edge&&inp.edge.fire) startRun(false);
+ if(window.AIHub&&AIHub.active&&hubInfo&&sceneName==='ready'&&AIHub.time()>=0){ G.run=true; sceneName='play'; hideAll(); $('hud').classList.remove('hidden'); }
+ const hubWaiting=window.AIHub&&AIHub.active&&hubInfo&&AIHub.time()<0;
+ if(G.run&&sceneName==='play'&&!settingsOpen&&!hubWaiting&&!G.hubEnded){ const useInp=attractOn?aiInput():inp; stepPlay(dt,useInp); }
+ else if(sceneName==='title'||sceneName==='brief'){ simTime+=dt; scrollBg(dt); if(playerMesh){ playerMesh.position.set(Math.sin(simTime*.6)*3,-6+Math.sin(simTime*1.3)*.5,0); playerMesh.rotation.z=Math.cos(simTime*.6)*.25; } }
+ // squad link send
+ if(linkChan&&G.run&&sceneName==='play'){ linkSendT-=dt; if(linkSendT<=0){ linkSendT=.066; linkChan.postMessage({t:'ship',x:playerMesh.position.x,y:playerMesh.position.y,rz:playerMesh.rotation.z}); } }
+ if(playerMesh&&playerMesh.userData.eng) playerMesh.userData.eng.scale.y=1+Math.sin(simTime*22)*.25;
+ renderer.renderAsync(scene,camera).catch(e=>console.warn('render',e));
+ }catch(err){ const b=$('errBox'); b.textContent='⚠ '+err.message; b.classList.remove('hidden'); console.error(err); } }
+/* ============ BOOT ============ */
+async function boot(){ renderMenu(); syncSetBtns();
+ const touchOnly=('ontouchstart' in window)&&navigator.maxTouchPoints>0&&!Object.keys(navigator.getGamepads?{}:{}).length&&matchMedia('(pointer:coarse)').matches;
+ // Touch-only gate: only when coarse pointer and no fine pointer; keyboard users keep a fine pointer or can press keys to dismiss via settings.
+ if(matchMedia('(pointer:coarse)').matches&&!matchMedia('(pointer:fine)').matches){ $('touchGate').classList.remove('hidden'); $('titleScr').classList.add('hidden'); }
+ try{ await initGraphics(); }catch(e){ const b=$('errBox'); b.textContent='⚠ '+e.message; b.classList.remove('hidden'); if(window.AIHub&&AIHub.active) AIHub.fail(e.message); show('title'); return; }
+ sceneName='title'; show('title'); anyInputAt=performance.now(); hubSetup(); }
+bootPromise=boot(); requestAnimationFrame(frame);
+</script>
+</body>
+</html>
+

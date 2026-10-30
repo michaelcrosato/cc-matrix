@@ -1,0 +1,13 @@
+[Download **SiN Override**](./SiN-Override-SiN-gpt-6-astra-ultra-20261029-1000.html) — single HTML file with the complete mission, controller interface, attract mode, checkpoints, synthesized audio, and multiplayer score attack.
+
+Requires internet access and WebGPU on HTTPS or localhost. [Launch instructions and development guide](./SiN-Override-SiN-gpt-6-astra-ultra-20261029-1000/README.md).
+
+**Source Information:** Date: 2026-10-29 10:29, America/Vancouver. Inspiration: SiN. Title randomly selected from 50 candidates. Stack: Three.js R180, WebGPU only, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, AI Hub Session Protocol v1. Art: procedural cel-shaded comic noir. Animation: articulated rigs, weapon motion, particles. Audio: original synthesized music, effects, and gibberish voices. Online: 1–4-player parallel score attack through AI Hub or standalone WebRTC. Environment: Codex CLI, headless Linux; deployment browser unknown. Model: OpenAI gpt-6-astra, ultra. Usage: approximately 28 minutes; API cost and tokens unknown.
+
+**Testing Feedback:** Mission regression, audio, and real two-browser networking passed. Hub checks passed **24/24 in three scenarios**, with drawing suppressed only in test responses. Testing exposed **one critical rendering blocker here**: available WebGPU configurations failed even with a minimal cube; its cause is unknown. Consequently, rendered gameplay remains unverified. The mission regression was most helpful; repeated full-scene software-GPU attempts were least helpful. Testing remained functional, without FPS targets.
+
+**Engine Feedback:** Three.js scene composition and Rapier’s controller worked well. I initially expected software WebGPU validation to work. The largest custom component was the FPS gameplay and mission layer; asynchronous GPU diagnosis was hardest. I would overhaul automatic fallback behavior and add a supported headless diagnostic runner with clearer device-error reporting.
+
+**Prompt Feedback:** The explicit controller, audio, attract-mode, and packaging requirements were useful. “ALL features” left the demo boundary ambiguous; multiplayer uses the hub’s documented parallel mode. Integrating combat, progression, menus, and networking was hardest. The most valuable additional test would be a complete hardware-WebGPU playthrough with a physical DualSense, followed by a two-device round.
+
+This information is also embedded in the game’s credits and opening HTML comment.

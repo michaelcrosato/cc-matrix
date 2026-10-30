@@ -1,0 +1,13 @@
+Created [Crunch Time Derby — single HTML](</home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra__v13__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Crunch-Time-Derby-Destruction-Derby-2-gpt-6.1-sol-ultra-20261029-0757.html>).
+
+Includes three events, three cars, championship progression, directional damage, pickups, attract mode, synthesized audio, and multiplayer. Open in a WebGPU-capable browser with internet access.
+
+**Source Information:** Date: 2026-10-29 08:36 America/Vancouver. Inspiration: Destruction Derby 2. Stack: Three.js r180, WebGPU only, Rapier 0.19.3, Gamepad API, Web Audio, JavaScript; esbuild 0.28.2 packaging. Art: procedural cel shading and ink outlines. Animation: rigid-body motion, animated wheels, panel deformation and particles. Audio: original synthesized music, effects and gibberish announcer. Online: AI Hub Session v1/client 1.3.0 and standalone four-player PeerJS 1.5.5 WebRTC rooms. Environment: Codex CLI headless, Linux/WSL2, Chrome 154.0.8037.57. Model: OpenAI gpt-6.1-sol, ultra reasoning. Session: approximately 39 minutes; API cost and token totals unknown.
+
+**Testing Feedback:** Corrected 12 issues, including one critical guest-finish bug. Passed 13 gameplay checks, 12 emulated-controller checks, 69 hub checks, live WebRTC exchange, audio analysis, and four GPU visual captures. Most helpful: the hub lifecycle harness under latency and packet loss. Least helpful: syntax-only checks. WSL screenshots required GPU pixel readback; physical DualSense testing remains unverified.
+
+**Engine Feedback:** Liked TSL’s cel-shading workflow and Rapier’s collision response. Initially guessed the older Rapier distribution filename. The largest custom systems were vehicle handling, damage/scoring, AI and multiplayer synchronization. Responsive steering during authoritative collisions was hardest. I would overhaul implicit WebGL fallback and add a first-party arcade vehicle/network starter.
+
+**Prompt Feedback:** The source inspiration and complete-slice requirements were useful. The online link needed interpretation as a session contract with a separate standalone transport. Combining three events, controller UX and synchronized multiplayer was hardest. The most valuable additional test would use physical DualSense controllers and two players on separate consumer networks.
+
+These reports are also included in About/Credits and the top HTML comment.

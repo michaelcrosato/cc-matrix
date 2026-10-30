@@ -1,0 +1,5421 @@
+<!doctype html>
+<!-- 
+Source Information
+  Date: 2026-10-29 10:48 (America/Vancouver). Requested filename stamp: 2026-10-29 09:40.
+  Source: Baldur’s Gate. Title: Bard’s Late, selected with node:crypto.randomInt from 50 original title candidates.
+  Tech: Three.js r180 (0.180.0), WebGPU only with fallback explicitly disabled; Rapier 3D 0.19.3; Gamepad API; Web Audio API; HTML, CSS, JavaScript; PeerJS 1.5.5; AI Hub Session Protocol v1, client 1.3.0.
+  Art Direction: original procedural cel-shaded geometry, ink silhouettes, low-poly architecture, copper and turquoise palette, original vector portraits.
+  Animation: procedural skeletal-style group posing, walk cycles, attack gestures, floating crystals, wind, water, particles, camera interpolation.
+  Audio: code-written adaptive lute-like arpeggios and bass, synthesized bells and combat effects, formant-filtered gibberish voice acting. No sampled music or recorded dialogue.
+  Online: 1–4-player parallel expeditions through ai-hub; standalone PeerJS/WebRTC room-code expeditions. No chat, voice communication, or custom player names.
+  Testing allowed: efficient, lightweight smoke tests and targeted gameplay / integration checks; no FPS targets or optimization work.
+  Testing allowed: efficient, lightweight smoke tests and targeted gameplay / integration checks. Performed: rendered WebGPU screenshots; 38 gameplay checks, 72 official hub-harness checks across three scenarios, and five real two-client WebRTC checks. No FPS targets, performance benchmark, or optimization pass.
+  Environment: Codex CLI (headless); Linux (Ubuntu / WSL2 per workstation instructions). Tested browser: Google Chrome 154.0.8037.57; visual checks under Xvfb with WebGPU on SwiftShader/Vulkan. The eventual player’s browser is unknown.
+  Usage: estimated API cost unknown; total tokens unknown; session time unknown until completion.
+  Usage: estimated API cost unknown; total tokens and token breakdown unknown; elapsed session approximately 67 minutes. No API usage telemetry was available.
+
+Testing Feedback
+  Issues caught during testing and implementation review: seven game implementation issues, all fixed. Browser GPU-presentation setup failures and test-script defects are excluded from this count.
+  Critical / potentially game-breaking: one. Brief controller presses could be missed when input polling depended on slow rendering; simulation and input now run independently from drawing.
+  Other fixes: unsupported toon-material option, negative initial frame delta after long initialization, oversized character heads, standalone expedition deadline processing while a menu is open, and accidental second actions when exiting attract mode. Final visual review also fixed a long class label wrapping into a party health label.
+  Most helpful test: the official ai-hub harness with an emulated standard gamepad; it exposed the input issue and verified readiness, clock, progress, results, settings, and departure behavior.
+  Least helpful test: syntax-only checks. They caught no gameplay or rendering problems, though they remain useful build guards.
+  Results: 38 targeted gameplay assertions passed, including all three endings, actual combat actions, wet-lightning chains, fire, shove, rescue, camp, shrine, loot, save/load, and an unaccelerated attract loop. All 72 official hub assertions passed (one player, two players, and host departure). All five standalone two-client WebRTC assertions passed. Three additional touch-only and missing-WebGPU checks passed (118 assertions total).
+  Limits: gameplay tests use rapid positioning and isolated state setup; combat tests restore party health to exercise action resolution. These are not a full human balance playthrough. No physical DualSense / television test or separate-device cross-NAT test was performed. One upstream Rapier initialization deprecation warning remains; no JavaScript runtime errors were observed in the successful gameplay runs.
+
+Engine Feedback
+  Liked most: Three.js scene composition and node-based materials made the procedural cel-shaded world straightforward to assemble, and Rapier supplied useful character sweeps and dynamic props.
+  Got stuck or guessed wrong: MeshToonNodeMaterial in r180 does not accept flatShading. I removed that option and used faceted geometry. Headless WebGPU screenshots also required matching the compositor and Dawn to the same Vulkan/SwiftShader adapter under Xvfb.
+  Most important custom system: the party action economy and the common dialogue, quest, save-state, inventory, progression, and controller UI layer.
+  Hardest part: keeping rendering, fixed-step physics, game time, input, modal interfaces, and multiplayer clocks independent without losing a state transition.
+  Would remove or overhaul: implicit WebGL fallback in WebGPURenderer when an application explicitly requires WebGPU. The pinned build disables that fallback.
+  Would change: add a public strict-WebGPU option with clear adapter/device diagnostics and a documented headless screenshot recipe.
+
+Prompt Feedback
+  Liked most: the controller-first requirement, attract mode, procedural audio, and exact single-file deployment target made the intended experience concrete.
+  Confusing: feature-complete spiritual successor is open-ended. This deliverable interprets it as one complete original adventure with reusable systems, rather than every feature across the source franchise. Multiplayer is explicitly parallel expeditions.
+  Hardest: combining branching RPG state, meaningful tactical interactions, original art and audio, and both multiplayer contexts into a portable single-file demo.
+  One additional test: a complete living-room playthrough on a physical DualSense, alongside another player on a separate network, checking legibility, controller feel, and cross-NAT room connectivity.
+ -->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/*! aihub-session 1.3.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.3.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#152c30">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23152c30'/%3E%3Ctext x='7' y='25' font-size='27' fill='%23e5bd77'%3E♮%3C/text%3E%3C/svg%3E">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="parallel">
+<meta name="hub:session-minutes" content="8">
+<meta name="hub:session-goal" content="Save the ward and earn the most renown">
+<meta name="hub:session-howto" content="Stick/WASD move; Cross/Enter act; Square/Q skill; Options/Esc settings">
+<meta name="hub:players" content="1-4">
+<meta name="hub:webgpu" content="required">
+<title>Bard’s Late — The Thirteenth Bell</title>
+<style>@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600;700&family=DM+Sans:wght@400;500;600;700&display=swap');
+:root{--ink:#101f25;--deep:#13262b;--gold:#e5bd77;--paper:#f3e6cb;--muted:#b8bdb0;--mint:#9ed5c1;--red:#cf7666;--font:'DM Sans',system-ui,sans-serif;--serif:'Cormorant Garamond',Georgia,serif;font-family:var(--font);color:var(--paper);font-size:clamp(14px,1.22vw,20px)}*{box-sizing:border-box}body{margin:0;background:#152c30;overflow:hidden;user-select:none}button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible{outline:2px solid var(--gold);outline-offset:4px}button:disabled{opacity:.35;cursor:default}button{border:none;background:none}#viewport,#viewport canvas,.vignette,.grain,#boot,#title,#hud{position:absolute;inset:0;width:100%;height:100%}#viewport canvas{display:block}.vignette{background:radial-gradient(ellipse at 53% 43%,transparent 46%,#10222975 100%);pointer-events:none}.grain{opacity:.035;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.78' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='white' filter='url(%23n)' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}.hidden{display:none!important}.eyebrow{font-size:.64rem;letter-spacing:.23em;font-weight:600;color:var(--gold);display:flex;align-items:center;gap:1.1rem}.line{width:2.4rem;height:1px;background:var(--gold)}h1,h2,h3,p{margin:0}h1,h2,h3{font-family:var(--serif);font-weight:500}#boot{z-index:60;display:flex;align-items:center;justify-content:center;flex-direction:column;background:radial-gradient(circle at center,#284444,#101e24);gap:1.2rem}#boot h1{font-size:5rem}#boot p{color:var(--muted)}.sigil{font-size:4rem;color:var(--gold)}.loading-track{height:2px;width:11rem;background:#ffffff18;overflow:hidden}.loading-track i{display:block;width:40%;height:2px;background:var(--gold);animation:loading 1.5s infinite ease-in-out}@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}#title{background:linear-gradient(90deg,#102329f2 0%,#102329d9 23%,#1023294d 52%,transparent 77%);z-index:5}.title-top{position:absolute;top:4.3%;left:4.4%;right:4.4%;display:flex;align-items:center;gap:1.3rem}.brandmark{font-family:var(--serif);font-size:1.7rem;letter-spacing:-.12em}.brandmark i{font-size:.58rem;margin-left:1rem;color:var(--gold)}.edition{font-size:.56rem;letter-spacing:.22em;color:#e2dfcd9c}.small-button{margin-left:auto;border:1px solid #d6c89a55;width:2.6rem;height:2.6rem;border-radius:50%;font-size:1.2rem;backdrop-filter:blur(8px)}.small-button:hover{background:#e5bd7725}.title-content{position:absolute;top:19%;left:8.2%;width:40%}.title-content h1{font-size:clamp(85px,9.3vw,166px);line-height:.78;margin:1.8rem 0 1.3rem;letter-spacing:-.055em;font-weight:500;text-shadow:0 3px 30px #0003}.title-content h1 em{font-weight:400;color:var(--gold)}.title-dot{color:var(--gold)}.tagline{font-size:1rem;line-height:1.7;color:#d5d8c8;margin:1.2rem 0 1.7rem}.menu-list{display:flex;flex-direction:column;gap:.22rem;width:18rem}.menu-list button{text-align:left;font-size:.9rem;padding:.75rem 1.05rem;border:1px solid transparent;color:#cdd5ca;position:relative;transition:.15s}.menu-list button.selected,.menu-list button:hover{color:var(--paper);border-color:#d7b67a70;background:linear-gradient(90deg,#d7b67a25,#d7b67a06);padding-left:1.4rem}.menu-list button.selected:before{content:'◆';font-size:.45rem;position:absolute;left:-1rem;top:1.1rem;color:var(--gold)}.menu-list button .menu-arrow{float:right;color:var(--gold)}.menu-list button.primary{border-color:#d7b67a70;color:var(--gold)}.menu-caption{font-size:.6rem;margin-top:1rem;color:#a2b4af;display:flex;align-items:center;gap:.6rem}.button-glyph{font-family:var(--font);display:inline-grid;place-items:center;border:1px solid #d2d9cd70;border-radius:50%;width:1.3rem;height:1.3rem;font-size:.8rem}.faint{opacity:.4}.title-chapter{position:absolute;right:5.5%;bottom:15%;text-align:right;max-width:22rem;text-shadow:0 2px 8px #172426}.title-chapter>span{font-size:.58rem;letter-spacing:.2em;color:var(--gold)}.title-chapter>div{font-family:var(--serif);font-size:1.6rem;line-height:1.2;margin-top:.65rem}.title-chapter em{color:#e8d7b8}.title-bottom{position:absolute;bottom:4%;left:4.4%;right:4.4%;font-size:.51rem;letter-spacing:.18em;display:flex;justify-content:space-between;color:#c5cec4a8;border-top:1px solid #d3cfaa30;padding-top:1.1rem}.title-bottom i{color:var(--gold);margin:0 .5rem}#hud{pointer-events:none;z-index:4}#hud button{pointer-events:auto}.game-top{position:absolute;top:3%;left:3%;right:3%;display:flex;align-items:flex-start;justify-content:space-between}.location{background:linear-gradient(90deg,#15282bd9,transparent);padding:.7rem 3rem 1rem 1rem;border-left:2px solid var(--gold)}.location .eyebrow{font-size:.57rem}.location h2{font-size:2.25rem;line-height:1.3}.location #questBrief{font-size:.71rem;color:#d5dcca;max-width:26rem}.top-center{position:absolute;left:50%;transform:translateX(-50%);text-align:center;margin-top:1rem;white-space:nowrap}#phaseTag{font-size:.59rem;letter-spacing:.18em;padding:.6rem 1.6rem;border-top:1px solid #dfc38370;border-bottom:1px solid #dfc38370;background:#132a30ba;color:var(--gold)}#roundHint{font-size:.63rem;margin-top:1rem;color:var(--paper);text-shadow:0 1px 4px #000}.map-stack{text-align:center}.map-frame{position:relative;width:8rem;height:8rem;border:1px solid #d5ba7a9c;border-radius:50%;padding:.35rem;background:#10272ade;box-shadow:0 0 0 5px #14282b60,0 8px 25px #10212777}.map-frame canvas{width:100%;height:100%;border-radius:50%}.north{position:absolute;top:-.8rem;left:calc(50% - .4rem);color:var(--gold);font-size:.65rem;background:#193338;padding:0 .2rem}.map-caption{margin-top:.65rem;font-size:.61rem;color:var(--paper)}.map-caption i{color:var(--gold);margin:0 .5rem}#party{position:absolute;top:31%;left:2.8%;display:flex;flex-direction:column;gap:.65rem}.party-card{width:12rem;height:4.2rem;display:flex;text-align:left;align-items:center;gap:.7rem;padding:0 .8rem 0 0;border:1px solid #b4c2ad44;background:linear-gradient(90deg,#11262deb,#11262d95);position:relative}.party-card.active{border-color:var(--gold);box-shadow:0 0 0 2px #e5bd7720}.party-card.down{opacity:.5}.portrait{width:3.9rem;height:4rem;flex-shrink:0;overflow:hidden;background:#375052}.portrait svg{width:100%;height:100%;display:block}.party-text{flex:1}.party-text h3{font-size:1.15rem;font-weight:600;line-height:1.1}.party-text small{display:block;font-size:.49rem;letter-spacing:.08em;color:#bdc8b7;margin:.12rem 0 .35rem}.hpbar{height:4px;width:100%;background:#ffffff22}.hpbar i{display:block;height:100%;background:var(--mint);transition:width .2s}.hp-label{font-size:.5rem;color:#c7d6c3;margin-top:.24rem;display:flex;justify-content:space-between}.ap-dot{color:var(--gold);letter-spacing:.12em}.party-key{position:absolute;left:-.6rem;top:calc(50% - .5rem);font-size:.55rem;background:var(--deep);color:var(--gold);padding:.15rem;border:1px solid #a89166}.status-icons{position:absolute;right:.3rem;top:-.45rem;background:var(--deep);color:var(--gold);font-size:.5rem}#abilities{position:absolute;bottom:6.4%;left:50%;transform:translateX(-50%);display:flex;gap:.45rem;padding:.5rem;border:1px solid #d4ba7b65;background:#12262de8;box-shadow:0 8px 32px #07151d70;backdrop-filter:blur(12px)}.ability{width:6rem;height:4.7rem;display:flex;align-items:center;justify-content:center;flex-direction:column;border:1px solid #aec0ac2a;background:linear-gradient(140deg,#6e806a24,#102a3011);gap:.2rem;position:relative}.ability:hover,.ability.selected{border-color:var(--gold);background:#e5bd7720}.ability .glyph{font-family:var(--serif);font-size:1.55rem;line-height:1}.ability .name{font-size:.57rem;white-space:nowrap}.ability .bind{position:absolute;top:-.15rem;left:.2rem;color:var(--gold);font-size:.6rem}.ability .cost{font-size:.42rem;color:#aebfb6;letter-spacing:.04em}.ability.dim{opacity:.45}#controls{position:absolute;bottom:2%;left:3%;right:3%;display:flex;justify-content:center;gap:1.8rem;font-size:.57rem;color:#d2dbcf;text-shadow:0 1px 5px #001b1c}#controls b{font-weight:500;color:var(--gold);margin-right:.35rem}#interaction{position:absolute;bottom:23%;left:50%;transform:translateX(-50%);background:#15292fee;border:1px solid #dcbb7b7a;padding:.6rem 1.3rem;font-size:.8rem;display:flex;align-items:center;gap:.7rem;white-space:nowrap}#toast{position:absolute;top:22%;left:50%;transform:translateX(-50%);text-align:center;font-size:.85rem;color:var(--gold);text-shadow:0 2px 8px #000;transition:opacity .3s;max-width:35rem}#banter{position:absolute;left:50%;bottom:23%;transform:translateX(-50%);max-width:37rem;width:max-content;text-align:center;padding:.8rem 1.3rem;background:#13272ce8;border-left:2px solid var(--gold);font-family:var(--serif);font-size:1.18rem}#banter b{font:600 .56rem var(--font);color:var(--gold);letter-spacing:.08em;display:block;margin-bottom:.25rem}#combatLog{position:absolute;bottom:11%;right:3%;width:15rem;font-size:.58rem;line-height:1.6;text-align:right;text-shadow:0 1px 4px #000}#combatLog div{margin-top:.3rem;padding:.1rem .4rem;background:linear-gradient(90deg,transparent,#14272b99)}#targetPanel{position:absolute;top:16%;left:50%;transform:translateX(-50%);width:14rem;text-align:center;background:#15292cdf;border:1px solid #d4b98266;padding:.5rem .8rem}#targetPanel h3{font-size:1.1rem}#targetPanel small{font-size:.57rem;color:var(--muted)}#targetPanel .hpbar{margin:.35rem 0;height:3px}#targetPanel .hpbar i{background:var(--red)}.world-label{position:absolute;transform:translate(-50%,-100%);font-size:.56rem;letter-spacing:.04em;white-space:nowrap;text-align:center;filter:drop-shadow(0 2px 3px #00191b)}.world-label .quest-pin{color:var(--gold);font-size:1.2rem;display:block}.world-label b{background:#132c30cc;padding:.2rem .5rem;font-weight:500}.world-label.enemy b{color:#f4b0a1}.floater{position:absolute;pointer-events:none;font-family:var(--serif);font-weight:700;font-size:1.7rem;text-shadow:0 2px 4px #14262e;transform:translate(-50%,-50%)}#dialogue{z-index:12;position:absolute;bottom:4%;left:13%;right:8%;background:linear-gradient(120deg,#172d32fc,#14242afb);border:1px solid #cba86a91;box-shadow:0 20px 80px #081a1db3;padding:1.65rem 2rem 1.3rem;display:grid;grid-template-columns:8rem 1fr;gap:1.6rem}.dialog-portrait{width:8rem;height:10rem;align-self:start;border:1px solid #c9ac7566;position:relative}.dialog-portrait svg{width:100%;height:100%}.dialog-portrait .sigil{position:absolute;bottom:-.7rem;left:3.3rem;font-size:1rem;background:var(--deep);padding:.2rem}.dialog-speaker{font-family:var(--serif);font-size:1.9rem;color:var(--gold)}.dialog-role{font-size:.52rem;letter-spacing:.18em;color:#a6b8ad;margin-bottom:.8rem}.dialog-text{font-family:var(--serif);font-size:1.3rem;line-height:1.4;max-width:55rem;color:#e9e1cb}.dialog-choices{display:flex;flex-direction:column;gap:.35rem;margin-top:1rem}.dialog-choice{text-align:left;padding:.55rem .8rem;border:1px solid #a5bda722;font-size:.8rem;line-height:1.4}.dialog-choice.selected,.dialog-choice:hover{background:#dfbc7020;border-color:#d9b778a1;color:var(--gold)}.dialog-choice span{color:var(--mint);font-size:.66rem}.dialog-foot{font-size:.5rem;color:#adbfad;margin-top:.7rem;letter-spacing:.06em}.roll-result{display:flex;align-items:center;gap:1rem;margin:.9rem 0}.die{border:1px solid var(--gold);transform:rotate(45deg);width:3rem;height:3rem;display:grid;place-items:center;background:#e6bf7917}.die b{transform:rotate(-45deg);font-family:var(--serif);font-size:1.5rem}.roll-note{font-size:.7rem;color:var(--mint)}#modalShade{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;background:#071b22aa;backdrop-filter:blur(12px)}#modal{max-height:88vh;overflow:auto;width:min(52rem,88vw);padding:2rem 2.5rem;background:linear-gradient(150deg,#223b3e,#13272d 70%);border:1px solid #cdb27a85;box-shadow:0 24px 100px #061b1fb3;scrollbar-width:thin;scrollbar-color:#9b8f64 #193038}#modal h2{font-size:2.9rem;color:var(--paper);line-height:1.1;margin:.4rem 0 1.1rem}#modal p{font-size:.9rem;line-height:1.6;color:#c4d2c5;margin:.7rem 0}.modal-footer{margin-top:1.4rem;padding-top:1rem;border-top:1px solid #a6bb9e33;font-size:.6rem;color:#afc2b3;display:flex;justify-content:space-between;gap:1rem}.modal-actions{display:flex;flex-direction:column;gap:.45rem;margin-top:1.2rem}.panel-button{padding:.85rem 1rem;border:1px solid #b8c1a844;background:#29414566;text-align:left;display:flex;justify-content:space-between;gap:1rem;font-size:.84rem;align-items:center}.panel-button small{color:var(--gold);font-size:.7rem}.panel-button.selected,.panel-button:hover{border-color:var(--gold);background:#dbb7781e}.tabs{display:flex;gap:.5rem;margin:1rem 0;flex-wrap:wrap}.tabs button{padding:.5rem .9rem;border:1px solid #b8c1a844;font-size:.7rem}.tabs .selected{background:#d4b87a22;border-color:var(--gold);color:var(--gold)}.detail-card{background:#0f222650;border:1px solid #c2b98b33;padding:1.2rem;margin:.7rem 0}.detail-card h3{font-size:1.5rem;color:var(--gold)}.detail-card p{font-size:.83rem}.detail-card small{color:var(--mint);font-size:.65rem}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:1rem}.stat-row{display:flex;justify-content:space-between;gap:1rem;line-height:1.8;font-size:.78rem;border-bottom:1px solid #c4bb8e1f;padding:.3rem 0}.stat-row b{color:var(--gold);font-weight:500}.help-grid{display:grid;grid-template-columns:1fr 1fr;gap:.65rem 2rem}.help-grid div{font-size:.77rem;color:#c4d0c4;padding:.5rem 0;border-bottom:1px solid #b1c4ae26}.help-grid b{display:block;color:var(--gold);font-size:.65rem;margin-bottom:.3rem}.credit-section{margin:1rem 0}.credit-section h3{font-size:1.4rem;color:var(--gold)}.credit-section p,.credit-section li{font-size:.72rem;line-height:1.65;color:#c5d0c1}.credit-section ul{padding-left:1.2rem}#attractBanner{position:absolute;bottom:0;left:0;right:0;z-index:20;background:#102b31ec;border-top:1px solid #dcbb7959;padding:.8rem 2rem;display:flex;align-items:center;justify-content:center;gap:1.2rem;font-size:.65rem;letter-spacing:.12em;color:var(--gold)}#attractBanner b{font-weight:400;color:#b5c8bb;font-size:.6rem;letter-spacing:.03em}#attractBanner>span:last-child{position:absolute;right:3%;color:var(--paper);letter-spacing:0}.live-dot{background:var(--gold);width:.4rem;height:.4rem;border-radius:50%;animation:pulse 2s infinite}@keyframes pulse{50%{opacity:.35}}#touchNotice{z-index:55;position:absolute;inset:0;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:1rem;background:#142b32ee;text-align:center}#touchNotice b{font-family:var(--serif);font-size:2.5rem}#touchNotice button{border:1px solid var(--gold);padding:.8rem 2rem}.room-code{font-family:var(--serif);font-size:3rem;letter-spacing:.28em;color:var(--gold);margin:.7rem 0}.keypad{display:grid;grid-template-columns:repeat(3,1fr);gap:.5rem}.keypad button{justify-content:center}.score-line{display:flex;justify-content:space-between;font-size:.75rem;padding:.5rem;border-bottom:1px solid #aabb9a30}.score-line b{color:var(--gold)}#onlineBoard{position:absolute;right:3%;top:33%;width:12rem;background:#142a30db;border:1px solid #d4b77b55;padding:.6rem}.ending-title{font-family:var(--serif);font-size:3rem;color:var(--gold);text-align:center}.ending-seal{font-family:var(--serif);font-size:4rem;text-align:center;color:var(--gold)}.hint-box{border-left:2px solid var(--gold);background:#d9b6740d;padding:.7rem 1rem;font-size:.75rem;color:#ced7c7;margin:1rem 0}.warning{color:#edb1a1!important}.loot-line{font-size:.85rem;color:var(--mint);padding:.5rem 0} @media(max-aspect-ratio:1/1){.title-content{width:70%;left:8%;top:21%}.title-chapter{display:none}.title-content h1{font-size:6rem}.game-top .location{max-width:60%;padding-right:1rem}.top-center{top:11rem}.map-frame{width:6rem;height:6rem}#party{top:38%;left:2%}.party-card{width:9.5rem}#abilities{bottom:8%;max-width:96%;gap:.2rem;padding:.3rem}.ability{width:4rem}#controls{gap:.7rem;flex-wrap:wrap;font-size:.53rem}#dialogue{left:4%;right:4%;grid-template-columns:1fr;padding:1.2rem;max-height:83%;overflow:auto}.dialog-portrait{display:none}.dialog-text{font-size:1.2rem}#modal{padding:1.4rem}.two-col{grid-template-columns:1fr}.edition{font-size:.45rem}.title-bottom{font-size:.44rem}#combatLog{display:none}}@media(max-height:650px){:root{font-size:14px}.title-content{top:16%}.title-content h1{font-size:6.5rem}.tagline{margin:.8rem 0}.menu-list button{padding:.52rem 1rem}.title-content .menu-caption{margin-top:.7rem}.title-chapter{bottom:18%}#dialogue{bottom:3%;max-height:90%;overflow:auto}.party-card{height:3.6rem}.portrait{height:3.4rem;width:3.4rem}#abilities{bottom:8%}.ability{height:3.8rem}#controls{bottom:2%}.location h2{font-size:1.8rem}}
+
+/* Legible action and dialogue labels at television distance. */
+.menu-list button{font-size:1rem}.dialog-choice{font-size:1rem;padding:.65rem .8rem}.panel-button{font-size:1rem}.hp-label{font-size:.65rem}.party-text small{font-size:.55rem}.ability .name{font-size:.75rem}.ability .cost{font-size:.56rem}.ability .bind{font-size:.7rem}.ability .glyph svg{width:1.7rem;height:1.7rem;display:block}.ability .glyph{color:var(--gold);margin:.12rem 0}.ability{height:5.2rem}.ability .name{line-height:1.25}#roundHint{font-size:.78rem}#controls{font-size:.66rem}#combatLog{font-size:.68rem}.dialog-foot{font-size:.61rem}.modal-footer{font-size:.7rem}.hp-label .ap-dot{font-size:.7rem}
+
+.party-text{min-width:0}.party-text small{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"}}</script>
+</head>
+<body>
+<div id="viewport"></div><div class="vignette"></div><div class="grain"></div>
+<div id="boot"><div class="sigil">♮</div><div class="eyebrow">A TALE WORTH BEING LATE FOR</div><h1>Bard’s Late</h1><p id="loadText">Lighting the last lanterns…</p><div class="loading-track"><i></i></div></div>
+<div id="title" class="hidden">
+ <div class="title-top"><span class="brandmark">BL <i>◆</i></span><span class="edition">AN ORIGINAL PARTY ROLEPLAYING ADVENTURE</span><button class="small-button" data-act="settings" aria-label="Settings">☷</button></div>
+ <div class="title-content"><div class="eyebrow"><span class="line"></span> THE THIRTEENTH BELL</div><h1>Bard’s<br><em>Late</em><span class="title-dot">.</span></h1><p class="tagline">Every city has a debt.<br>This one has come due.</p><div id="titleButtons" class="menu-list"></div><div class="menu-caption"><span class="button-glyph">✕</span> Choose your story <span class="faint"> · </span> <span id="inputLabel">Controller ready</span></div></div>
+ <div class="title-chapter"><span>01 / THE BORROWED NIGHT</span><div>Some doors should stay closed.<br><em>Unfortunately, yours is late.</em></div></div>
+ <div class="title-bottom"><span>THREE COMPANIONS. ONE TERRIBLE BARGAIN.</span><span>WEBGPU <i>◆</i> VERTICAL SLICE</span></div>
+</div>
+<div id="hud" class="hidden">
+ <header class="game-top"><div class="location"><div class="eyebrow">THE BORROWED NIGHT <span id="chapterNum">I</span></div><h2 id="locationName">Lantern Quay</h2><div id="questBrief">Speak to the woman by the lantern.</div></div><div class="top-center"><span id="phaseTag">EXPLORATION</span><div id="roundHint"></div></div><div class="map-stack"><div class="map-frame"><canvas id="minimap" width="180" height="180"></canvas><span class="north">N</span></div><div class="map-caption"><span id="goldCount">42</span> <i>✦</i> <span id="renownCount">0 renown</span></div></div></header>
+ <div id="party"></div><div id="worldLabels"></div><div id="floaters"></div>
+ <div id="targetPanel" class="hidden"></div><div id="interaction" class="hidden"></div>
+ <div id="toast"></div><div id="banter" class="hidden"></div>
+ <div id="combatLog"></div><div id="abilities"></div>
+ <footer id="controls"><span><b>LS / WASD</b> Move</span><span><b>L1 R1 / Z C</b> Companion</span><span><b>▤ / J</b> Journal</span><span><b>☷ / Esc</b> Settings</span></footer>
+ <div id="onlineBoard" class="hidden"></div>
+</div>
+<div id="attractBanner" class="hidden"><span class="live-dot"></span> TALES FROM THE QUAY <b>AI demonstration</b><span>Any input to return</span></div>
+<div id="dialogue" class="hidden"></div>
+<div id="modalShade" class="hidden"><section id="modal" role="dialog" aria-modal="true"></section></div>
+<div id="touchNotice" class="hidden"><b>Controller or keyboard required</b><span>Connect a controller to begin your journey.</span><button data-act="settings">Settings</button></div>
+<script type="module">import * as THREE from 'three/webgpu';
+import * as TSL from 'three/tsl';
+import RAPIER from 'rapier';
+const CREDITS={"Source Information":["Date: 2026-10-29 10:48 (America/Vancouver). Requested filename stamp: 2026-10-29 09:40.","Source: Baldur’s Gate. Title: Bard’s Late, selected with node:crypto.randomInt from 50 original title candidates.","Tech: Three.js r180 (0.180.0), WebGPU only with fallback explicitly disabled; Rapier 3D 0.19.3; Gamepad API; Web Audio API; HTML, CSS, JavaScript; PeerJS 1.5.5; AI Hub Session Protocol v1, client 1.3.0.","Art Direction: original procedural cel-shaded geometry, ink silhouettes, low-poly architecture, copper and turquoise palette, original vector portraits.","Animation: procedural skeletal-style group posing, walk cycles, attack gestures, floating crystals, wind, water, particles, camera interpolation.","Audio: code-written adaptive lute-like arpeggios and bass, synthesized bells and combat effects, formant-filtered gibberish voice acting. No sampled music or recorded dialogue.","Online: 1–4-player parallel expeditions through ai-hub; standalone PeerJS/WebRTC room-code expeditions. No chat, voice communication, or custom player names.","Testing allowed: efficient, lightweight smoke tests and targeted gameplay / integration checks; no FPS targets or optimization work.","Testing allowed: efficient, lightweight smoke tests and targeted gameplay / integration checks. Performed: rendered WebGPU screenshots; 38 gameplay checks, 72 official hub-harness checks across three scenarios, and five real two-client WebRTC checks. No FPS targets, performance benchmark, or optimization pass.","Environment: Codex CLI (headless); Linux (Ubuntu / WSL2 per workstation instructions). Tested browser: Google Chrome 154.0.8037.57; visual checks under Xvfb with WebGPU on SwiftShader/Vulkan. The eventual player’s browser is unknown.","Usage: estimated API cost unknown; total tokens unknown; session time unknown until completion.","Usage: estimated API cost unknown; total tokens and token breakdown unknown; elapsed session approximately 67 minutes. No API usage telemetry was available."],"Testing Feedback":["Issues caught during testing and implementation review: seven game implementation issues, all fixed. Browser GPU-presentation setup failures and test-script defects are excluded from this count.","Critical / potentially game-breaking: one. Brief controller presses could be missed when input polling depended on slow rendering; simulation and input now run independently from drawing.","Other fixes: unsupported toon-material option, negative initial frame delta after long initialization, oversized character heads, standalone expedition deadline processing while a menu is open, and accidental second actions when exiting attract mode. Final visual review also fixed a long class label wrapping into a party health label.","Most helpful test: the official ai-hub harness with an emulated standard gamepad; it exposed the input issue and verified readiness, clock, progress, results, settings, and departure behavior.","Least helpful test: syntax-only checks. They caught no gameplay or rendering problems, though they remain useful build guards.","Results: 38 targeted gameplay assertions passed, including all three endings, actual combat actions, wet-lightning chains, fire, shove, rescue, camp, shrine, loot, save/load, and an unaccelerated attract loop. All 72 official hub assertions passed (one player, two players, and host departure). All five standalone two-client WebRTC assertions passed. Three additional touch-only and missing-WebGPU checks passed (118 assertions total).","Limits: gameplay tests use rapid positioning and isolated state setup; combat tests restore party health to exercise action resolution. These are not a full human balance playthrough. No physical DualSense / television test or separate-device cross-NAT test was performed. One upstream Rapier initialization deprecation warning remains; no JavaScript runtime errors were observed in the successful gameplay runs."],"Engine Feedback":["Liked most: Three.js scene composition and node-based materials made the procedural cel-shaded world straightforward to assemble, and Rapier supplied useful character sweeps and dynamic props.","Got stuck or guessed wrong: MeshToonNodeMaterial in r180 does not accept flatShading. I removed that option and used faceted geometry. Headless WebGPU screenshots also required matching the compositor and Dawn to the same Vulkan/SwiftShader adapter under Xvfb.","Most important custom system: the party action economy and the common dialogue, quest, save-state, inventory, progression, and controller UI layer.","Hardest part: keeping rendering, fixed-step physics, game time, input, modal interfaces, and multiplayer clocks independent without losing a state transition.","Would remove or overhaul: implicit WebGL fallback in WebGPURenderer when an application explicitly requires WebGPU. The pinned build disables that fallback.","Would change: add a public strict-WebGPU option with clear adapter/device diagnostics and a documented headless screenshot recipe."],"Prompt Feedback":["Liked most: the controller-first requirement, attract mode, procedural audio, and exact single-file deployment target made the intended experience concrete.","Confusing: feature-complete spiritual successor is open-ended. This deliverable interprets it as one complete original adventure with reusable systems, rather than every feature across the source franchise. Multiplayer is explicitly parallel expeditions.","Hardest: combining branching RPG state, meaningful tactical interactions, original art and audio, and both multiplayer contexts into a portable single-file demo.","One additional test: a complete living-room playthrough on a physical DualSense, alongside another player on a separate network, checking legibility, controller feel, and cross-NAT room connectivity."]};
+const GAME_TITLE = "Bard’s Late";
+const HEROES = [
+	{
+		id: "rowan",
+		name: "Rowan",
+		role: "bard",
+		className: "Oathless bard",
+		color: 0xa56950,
+		hair: 0x493327,
+		skin: 0xd5a675,
+		maxHp: 34,
+		def: 12,
+		power: 6,
+		special: "Discord",
+		specialGlyph: "♬",
+		specialDesc:
+			"A cutting refrain. 3–8 thunder damage to all foes within 5 m of your target. Exposes them for one round.",
+		range: 2.3,
+		bonus: 5,
+	},
+	{
+		id: "mira",
+		name: "Mira",
+		role: "rogue",
+		className: "Knife & conscience",
+		color: 0x477e77,
+		hair: 0x282e32,
+		skin: 0xb77d58,
+		maxHp: 29,
+		def: 14,
+		power: 7,
+		special: "Nightfall",
+		specialGlyph: "⟡",
+		specialDesc:
+			"A thrown shadowblade. 7–12 damage at 10 m; +4 against an exposed enemy. Teleports you behind the target.",
+		range: 2.5,
+		bonus: 4,
+	},
+	{
+		id: "orrin",
+		name: "Orrin",
+		role: "mage",
+		className: "Unlicensed arcanist",
+		color: 0x72798f,
+		hair: 0xd5d1b3,
+		skin: 0xd3b48b,
+		maxHp: 26,
+		def: 11,
+		power: 5,
+		special: "Stormglass",
+		specialGlyph: "ϟ",
+		specialDesc:
+			"7–11 lightning damage at 11 m. Wet enemies take +5; the arc jumps to nearby wet enemies.",
+		range: 9,
+		bonus: 3,
+	},
+];
+const ITEMS = {
+	sword: {
+		name: "Notched rapier",
+		slot: "Weapon",
+		desc: "A blade which has outlived three owners and most of its warranty.",
+		power: 0,
+		price: 0,
+	},
+	rapier: {
+		name: "Duellist’s promise",
+		slot: "Weapon",
+		desc: "+3 damage to every attack. Promises are easier to keep when they have a point.",
+		power: 3,
+		price: 38,
+	},
+	charm: {
+		name: "Ferryman’s token",
+		slot: "Charm",
+		desc: "+2 to all dialogue checks. A little kindness travels further than a loud prayer.",
+		charm: 2,
+		price: 28,
+	},
+	coat: {
+		name: "Marshweave coat",
+		slot: "Armour",
+		desc: "+2 defence for the whole party. Woven by people intimately acquainted with sharp things.",
+		def: 2,
+		price: 32,
+	},
+	salve: {
+		name: "Healing draught",
+		slot: "Consumable",
+		desc: "Restore 16 health to the selected companion. Uses a bonus action in combat.",
+		price: 12,
+	},
+	oil: {
+		name: "Ember flask",
+		slot: "Consumable",
+		desc: "Throw fire at the selected enemy. 8 damage in a 3 m area, plus a burning surface. Uses one action.",
+		price: 16,
+	},
+};
+const JOURNAL = [
+	{
+		id: "bell",
+		name: "The Thirteenth Bell",
+		tag: "MAIN THREAD",
+		text: "Bellemere has borrowed the same night for thirty years. At the thirteenth bell, its creditor will come to collect. Nera believes you can open the northern gate and reach the bell before the final stroke.",
+	},
+	{
+		id: "ferry",
+		name: "A man overboard",
+		tag: "A SMALL KINDNESS",
+		text: "The ferryman Tovin is held in a cage beside the Crooked Note. The debt collectors have taken his boat, his freedom, and—most offensively—his supper.",
+	},
+	{
+		id: "runes",
+		name: "What the river remembers",
+		tag: "LORE & RIDDLE",
+		text: "An old inscription reads: “First came the river. Then we raised a lantern. Last, we rang the bell.” The three stones beyond the gate remember the order.",
+	},
+];
+const NPCS = [
+	{
+		id: "nera",
+		name: "Nera Vale",
+		role: "bard",
+		className: "Keeper of borrowed hours",
+		x: 3,
+		z: 11,
+		color: 0xc0a05e,
+		hair: 0xb5b9a1,
+		skin: 0xc29b78,
+	},
+	{
+		id: "vell",
+		name: "Captain Vell",
+		role: "guard",
+		className: "Collector of unpaid mornings",
+		x: 0,
+		z: -2,
+		color: 0x8b5f4f,
+		hair: 0x3b3330,
+		skin: 0xb88a66,
+	},
+	{
+		id: "tovin",
+		name: "Tovin",
+		role: "bard",
+		className: "Ferryman, briefly ashore",
+		x: -9,
+		z: -11.5,
+		color: 0x668b70,
+		hair: 0x4a4036,
+		skin: 0xc99870,
+	},
+	{
+		id: "merchant",
+		name: "Auntie Fen",
+		role: "bard",
+		className: "Proprietor of useful regrets",
+		x: 11,
+		z: 4,
+		color: 0xa87949,
+		hair: 0xd7cab2,
+		skin: 0xc0a17a,
+	},
+	{
+		id: "witness",
+		name: "The Bellkeeper",
+		role: "mage",
+		className: "A creditor with impeccable manners",
+		x: 0,
+		z: -43,
+		color: 0x798d87,
+		hair: 0xdadbb9,
+		skin: 0xa6c7b7,
+	},
+];
+const INTERACTABLES = [
+	{ id: "chest", name: "A stubborn strongbox", x: -10, z: 17, icon: "◇" },
+	{ id: "shrine", name: "The river’s shrine", x: 17, z: 10, icon: "✧" },
+	{ id: "camp", name: "A moment by the fire", x: -16, z: -13, icon: "♨" },
+	{ id: "book", name: "Weathered inscription", x: 9, z: -11, icon: "▤" },
+	{ id: "gate", name: "The borrowed gate", x: 0, z: -27, icon: "⚿" },
+	{ id: "riverRune", name: "River stone", x: -10, z: -36, icon: "≈" },
+	{ id: "lanternRune", name: "Lantern stone", x: 10, z: -36, icon: "☼" },
+	{ id: "bellRune", name: "Bell stone", x: 0, z: -40, icon: "♮" },
+];
+const ENDINGS = {
+	mercy: {
+		title: "A morning of your own",
+		sub: "THE DEBT IS FORGIVEN",
+		text: "You give the bell a name it has not heard in thirty years. Not creditor. Not king. Father.\n\nThe Bellkeeper remembers. Across the ward, stolen hours slip from their ledgers and find their way home. Nera grows older between one breath and the next. She is smiling.\n\nTovin’s boat leaves at dawn. For once, you are on time.",
+	},
+	bargain: {
+		title: "The price of tomorrow",
+		sub: "THE BARGAIN IS REMADE",
+		text: "You promise the Bellkeeper a song every dawn, for as long as the city remembers how to sing. It is a foolish bargain. Fortunately, you are something of an authority on those.\n\nThe gate opens. The ward wakes. Somewhere behind you, Mira begins drafting the verses in case you forget.\n\nYour first performance is tomorrow. Do try not to be late.",
+	},
+	shatter: {
+		title: "No more borrowed nights",
+		sub: "THE BELL IS BROKEN",
+		text: "The last note dies in the water. The ward is free, though freedom leaves a silence no song quite fills.\n\nOrrin gathers a fragment of the bell. “For research,” he says. Mira makes him turn out his other pockets.\n\nBy morning, the city has begun to argue about whose idea it was. A healthy sign, all things considered.",
+	},
+};
+function portrait(id) {
+	const p = {
+		rowan: ["#9e6549", "#d2a273", "#382e2a", "#b79b71"],
+		mira: ["#36756f", "#b97e57", "#253e3d", "#89b9a0"],
+		orrin: ["#6e7892", "#d4b68b", "#d5c9ac", "#999fb3"],
+		nera: ["#a68d56", "#c3a07c", "#c2c2a3", "#d1bc80"],
+		vell: ["#885746", "#b18766", "#44382f", "#9f9274"],
+		tovin: ["#66806a", "#bd936c", "#584638", "#b4bd8e"],
+		merchant: ["#a77948", "#cca57e", "#dfd3a8", "#d0a25b"],
+		witness: ["#668d87", "#a8c5af", "#d6dbbd", "#a4dbc9"],
+	}[id] || ["#6a8070", "#c0a17b", "#47514a", "#c4bd8d"];
+	const [coat, skin, hair, bg] = p;
+	const mage = id === "orrin" || id === "witness",
+		rogue = id === "mira";
+	return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 150" aria-hidden="true"><defs><linearGradient id="bg-${id}" x2="1" y2="1"><stop stop-color="${bg}"/><stop offset="1" stop-color="#203d3d"/></linearGradient></defs><path fill="url(#bg-${id})" d="M0 0h120v150H0z"/><path fill="#e9d1a8" opacity=".16" d="M65 0L120 45 0 118 0 75z"/><circle cx="63" cy="66" r="44" fill="none" stroke="#ecce8a" opacity=".32"/><path fill="${coat}" stroke="#243333" stroke-width="3" d="M8 150l9-40 27-16h34l29 17 10 39z"/><path fill="#203438" d="M48 92h26l13 58H36z"/><path fill="${skin}" stroke="#283738" stroke-width="2" d="M44 88l5 17 12 10 14-13 3-19z"/><path fill="${skin}" stroke="#273632" stroke-width="2" d="M36 41l12-13 29 2 14 22-7 31-15 15-18-3-13-18z"/><path fill="${hair}" d="M32 64l-1-29L48 19l25-1 21 21-4 24-9-20-20-9-20 13-1 17z"/><path fill="#000" opacity=".1" d="M67 36l18 18-7 27-11 13 13-1 10-17 2-26-13-19z"/><path fill="#253432" d="M43 59l11-2 3 3-12 2zm24-2l11 1 2 3-13-1z"/><path fill="none" stroke="#744f3e" stroke-width="2" d="M61 61l-4 13 8 1m-12 8l15 1"/><path fill="${coat}" stroke="#233734" stroke-width="2" d="M42 101l-9 25 21-4 6-7zm36 0l11 27-24-6-5-7z"/>${mage ? `<path fill="${coat}" stroke="#25383b" stroke-width="3" d="M15 46l24-15L59 0l9 21 29 20 12 10-50-7z"/><path fill="${hair}" d="M42 78l15 12 15-5 9-8-5 29-16 12-12-15z"/>` : rogue ? `<path fill="${coat}" stroke="#253b39" stroke-width="3" d="M25 91l3-54 17-21 31 1 24 25-7 52-9-24 3-19-20-23-22 15-7 29z"/>` : `<path fill="${hair}" d="M39 48l9-17 20 2 20 12-4-20-23-13-20 13z"/>`}<circle cx="64" cy="126" r="5" fill="#dfba77"/><path stroke="#dfba77" stroke-width="2" d="M22 140l17-22m59 22l-16-22"/></svg>`;
+}
+
+class Soundscape {
+	constructor() {
+		this.ctx = null;
+		this.volume = 0.55;
+		this.music = 0.6;
+		this.effects = 0.8;
+		this.voice = 0.65;
+		this.next = 0;
+		this.beat = 0;
+		this.stopped = false;
+		this.lastStep = 0;
+		this.voices = [];
+	}
+	init() {
+		if (this.stopped) return;
+		try {
+			if (!this.ctx) {
+				this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+				this.master = this.ctx.createGain();
+				this.master.gain.value = this.volume;
+				this.master.connect(this.ctx.destination);
+				this.musicBus = this.ctx.createGain();
+				this.musicBus.gain.value = this.music * 0.35;
+				this.musicBus.connect(this.master);
+				this.sfxBus = this.ctx.createGain();
+				this.sfxBus.gain.value = this.effects;
+				this.sfxBus.connect(this.master);
+				this.voiceBus = this.ctx.createGain();
+				this.voiceBus.gain.value = this.voice;
+				this.voiceBus.connect(this.master);
+				this.noise = this.ctx.createBuffer(
+					1,
+					this.ctx.sampleRate,
+					this.ctx.sampleRate,
+				);
+				const d = this.noise.getChannelData(0);
+				let seed = 19;
+				for (let i = 0; i < d.length; i++) {
+					seed = (seed * 1664525 + 1013904223) >>> 0;
+					d[i] = seed / 2147483648 - 1;
+				}
+				this.next = this.ctx.currentTime + 0.1;
+			}
+			if (this.ctx.state === "suspended") this.ctx.resume().catch(() => {});
+		} catch {}
+	}
+	set() {
+		if (!this.ctx) return;
+		const t = this.ctx.currentTime;
+		this.master.gain.setTargetAtTime(this.stopped ? 0 : this.volume, t, 0.1);
+		this.musicBus.gain.setTargetAtTime(this.music * 0.35, t, 0.1);
+		this.sfxBus.gain.setTargetAtTime(this.effects, t, 0.1);
+		this.voiceBus.gain.setTargetAtTime(this.voice, t, 0.1);
+	}
+	tone(
+		freq,
+		dur = 0.3,
+		type = "sine",
+		gain = 0.2,
+		when = 0,
+		bus = this.sfxBus,
+		end = null,
+	) {
+		if (!this.ctx || this.stopped) return;
+		const t = when || this.ctx.currentTime;
+		const o = this.ctx.createOscillator(),
+			a = this.ctx.createGain();
+		o.type = type;
+		o.frequency.setValueAtTime(freq, t);
+		if (end) o.frequency.exponentialRampToValueAtTime(end, t + dur);
+		a.gain.setValueAtTime(0.001, t);
+		a.gain.exponentialRampToValueAtTime(Math.max(0.002, gain), t + 0.008);
+		a.gain.exponentialRampToValueAtTime(0.001, t + dur);
+		o.connect(a);
+		a.connect(bus);
+		o.start(t);
+		o.stop(t + dur + 0.02);
+		o.onended = () => {
+			o.disconnect();
+			a.disconnect();
+		};
+	}
+	hiss(dur = 0.2, gain = 0.1, freq = 1200) {
+		if (!this.ctx || this.stopped) return;
+		const t = this.ctx.currentTime,
+			n = this.ctx.createBufferSource(),
+			f = this.ctx.createBiquadFilter(),
+			a = this.ctx.createGain();
+		n.buffer = this.noise;
+		f.type = "bandpass";
+		f.frequency.value = freq;
+		f.Q.value = 0.6;
+		a.gain.setValueAtTime(gain, t);
+		a.gain.exponentialRampToValueAtTime(0.001, t + dur);
+		n.connect(f);
+		f.connect(a);
+		a.connect(this.sfxBus);
+		n.start(t);
+		n.stop(t + dur);
+		n.onended = () => {
+			n.disconnect();
+			f.disconnect();
+			a.disconnect();
+		};
+	}
+	sfx(name) {
+		if (!this.ctx || this.stopped) return;
+		const t = this.ctx.currentTime;
+		switch (name) {
+			case "click":
+				this.tone(660, 0.07, "triangle", 0.07);
+				break;
+			case "hit":
+				this.hiss(0.15, 0.22, 850);
+				this.tone(140, 0.17, "triangle", 0.25, 0, this.sfxBus, 48);
+				break;
+			case "sword":
+				this.hiss(0.13, 0.16, 4200);
+				this.tone(520, 0.14, "triangle", 0.11, 0, this.sfxBus, 180);
+				break;
+			case "magic":
+				for (let i = 0; i < 4; i++)
+					this.tone(330 * Math.pow(1.5, i), 0.45, "sine", 0.12, t + i * 0.045);
+				this.hiss(0.3, 0.1, 3300);
+				break;
+			case "heal":
+				[392, 494, 587, 784].forEach((n, i) =>
+					this.tone(n, 0.7, "sine", 0.12, t + i * 0.1),
+				);
+				break;
+			case "roll":
+				for (let i = 0; i < 5; i++)
+					this.tone(300 + i * 60, 0.06, "square", 0.025, t + i * 0.08);
+				break;
+			case "coin":
+				this.tone(1319, 0.18, "sine", 0.15);
+				this.tone(1976, 0.25, "sine", 0.1, t + 0.08);
+				break;
+			case "fire":
+				this.hiss(0.6, 0.4, 600);
+				this.tone(75, 0.4, "sawtooth", 0.16, 0, this.sfxBus, 30);
+				break;
+			case "bell":
+				[196, 393, 587, 819].forEach((n, i) =>
+					this.tone(n, 3.4 - i * 0.4, "sine", 0.16 / (i + 1), t + i * 0.003),
+				);
+				break;
+			case "down":
+				this.tone(220, 0.5, "triangle", 0.2, 0, this.sfxBus, 60);
+				break;
+			case "step":
+				if (t - this.lastStep > 0.24) {
+					this.hiss(0.07, 0.035, 500);
+					this.lastStep = t;
+				}
+				break;
+			case "win":
+				[293.66, 369.99, 440, 587.33].forEach((n, i) =>
+					this.tone(n, 1.2, "triangle", 0.1, t + i * 0.2),
+				);
+				break;
+			case "fail":
+				this.tone(147, 0.7, "triangle", 0.13, 0, this.sfxBus, 98);
+				break;
+		}
+	}
+	speak(text, pitch = 1) {
+		if (!this.ctx || this.stopped || this.voice <= 0) return;
+		this.stopVoice();
+		const t = this.ctx.currentTime;
+		let seed = text.length * 91;
+		for (let i = 0; i < Math.min(27, Math.ceil(text.length / 6)); i++) {
+			seed = (seed * 1664525 + 1013904223) >>> 0;
+			const vowel = seed % 5;
+			const at = t + i * 0.095 + (i % 7 === 0 ? 0.065 : 0),
+				dur = 0.065 + (seed % 30) / 1000;
+			const o = this.ctx.createOscillator(),
+				f = this.ctx.createBiquadFilter(),
+				a = this.ctx.createGain();
+			o.type = "sawtooth";
+			o.frequency.setValueAtTime((150 + (seed % 95)) * pitch, at);
+			o.frequency.linearRampToValueAtTime(
+				(190 + (seed % 65)) * pitch,
+				at + dur,
+			);
+			f.type = "bandpass";
+			f.frequency.value = [650, 1400, 900, 480, 1100][vowel];
+			f.Q.value = 5;
+			a.gain.setValueAtTime(0.001, at);
+			a.gain.linearRampToValueAtTime(0.1, at + 0.012);
+			a.gain.exponentialRampToValueAtTime(0.001, at + dur);
+			o.connect(f);
+			f.connect(a);
+			a.connect(this.voiceBus);
+			o.start(at);
+			o.stop(at + dur + 0.02);
+			this.voices.push(o);
+			o.onended = () => {
+				o.disconnect();
+				f.disconnect();
+				a.disconnect();
+			};
+		}
+	}
+	stopVoice() {
+		for (const o of this.voices) {
+			try {
+				o.stop();
+			} catch {}
+		}
+		this.voices = [];
+	}
+	update(combat = false) {
+		if (!this.ctx || this.ctx.state !== "running" || this.stopped) return;
+		const now = this.ctx.currentTime;
+		if (this.next < now - 0.3) this.next = now + 0.02;
+		const step = combat ? 0.26 : 0.38;
+		const scale = [0, 3, 7, 10, 12, 10, 7, 3, 0, 5, 8, 12, 15, 12, 8, 5];
+		while (this.next < now + 0.15) {
+			const i = this.beat % 32,
+				chord = this.beat % 64 < 32 ? 146.83 : 130.81;
+			const n = scale[this.beat % 16];
+			if (i % 2 === 0 || combat)
+				this.tone(
+					chord * Math.pow(2, n / 12),
+					0.7,
+					"triangle",
+					0.16,
+					this.next,
+					this.musicBus,
+				);
+			if (i % 8 === 0) {
+				this.tone(chord / 2, step * 7.7, "sine", 0.2, this.next, this.musicBus);
+				this.tone(chord * 2, step * 7, "sine", 0.035, this.next, this.musicBus);
+			}
+			if (combat && i % 2 === 0)
+				this.tone(
+					i % 4 ? 83 : 55,
+					0.17,
+					"sine",
+					0.26,
+					this.next,
+					this.musicBus,
+					35,
+				);
+			this.beat++;
+			this.next += step;
+		}
+	}
+	stop() {
+		this.stopped = true;
+		this.stopVoice();
+		this.set();
+	}
+}
+const audio = new Soundscape();
+
+const V3 = THREE.Vector3;
+const palette = {
+	ink: 0x172c33,
+	stone: 0xa8b5a2,
+	light: 0xd1d2af,
+	roof: 0x98543e,
+	roofLight: 0xc17646,
+	wood: 0x614d3b,
+	plaster: 0xdfc99a,
+	teal: 0x417e79,
+	gold: 0xe6bb68,
+	grass: 0x6e8b69,
+	leaf: 0xd59a51,
+	red: 0xac5950,
+	water: 0x367b83,
+};
+let renderer,
+	scene,
+	camera,
+	physics,
+	controller,
+	worldRoot,
+	water,
+	gateDoor,
+	bell,
+	skyTime = 0;
+const materials = new Map(),
+	animated = [],
+	props = [],
+	decorative = [],
+	entityViews = new Map(),
+	worldEffects = [];
+const cameraFocus = new V3(1, 0, 5),
+	cameraTarget = new V3(1, 0, 5);
+let cameraYaw = 0.52,
+	cameraZoom = 28;
+const geom = {
+	box: new THREE.BoxGeometry(1, 1, 1),
+	sphere: new THREE.IcosahedronGeometry(1, 1),
+	cylinder: new THREE.CylinderGeometry(1, 1, 1, 8),
+	cone: new THREE.ConeGeometry(1, 1, 6),
+};
+function mat(color, glow = 0) {
+	const key = color + ":" + glow;
+	if (!materials.has(key)) {
+		const m = new THREE.MeshToonNodeMaterial({ color });
+		if (glow) {
+			m.emissive = new THREE.Color(color);
+			m.emissiveIntensity = glow;
+		}
+		materials.set(key, m);
+	}
+	return materials.get(key);
+}
+const outlineMat = new THREE.MeshBasicNodeMaterial({
+	color: palette.ink,
+	side: THREE.BackSide,
+});
+function mesh(g, color, parent = worldRoot, outline = false) {
+	const m = new THREE.Mesh(g, mat(color));
+	m.castShadow = true;
+	m.receiveShadow = true;
+	parent.add(m);
+	if (outline) {
+		const o = new THREE.Mesh(g, outlineMat);
+		o.scale.setScalar(1.035);
+		m.add(o);
+	}
+	return m;
+}
+function box(x, y, z, sx, sy, sz, c, parent = worldRoot, outline = false) {
+	const m = mesh(geom.box, c, parent, outline);
+	m.position.set(x, y, z);
+	m.scale.set(sx, sy, sz);
+	return m;
+}
+function cyl(x, y, z, r, h, c, parent = worldRoot, segments = 8, rTop = r) {
+	const m = mesh(new THREE.CylinderGeometry(rTop, r, h, segments), c, parent);
+	m.position.set(x, y, z);
+	return m;
+}
+function orb(x, y, z, r, c, parent = worldRoot) {
+	const m = mesh(geom.sphere, c, parent, true);
+	m.position.set(x, y, z);
+	m.scale.setScalar(r);
+	return m;
+}
+function staticBox(x, y, z, w, h, d) {
+	const c = physics.createCollider(
+		RAPIER.ColliderDesc.cuboid(w / 2, h / 2, d / 2).setTranslation(x, y, z),
+	);
+	return c;
+}
+function seeded(seed) {
+	return () => {
+		seed |= 0;
+		seed = (seed + 0x6d2b79f5) | 0;
+		let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+		t ^= t + Math.imul(t ^ (t >>> 7), 61 | t);
+		return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+	};
+}
+const artRandom = seeded(63029);
+function ar(a, b) {
+	return a + (b - a) * artRandom();
+}
+function stoneArch(x, z, w = 8, h = 9, parent = worldRoot) {
+	for (const sign of [-1, 1]) {
+		box(
+			x + sign * (w / 2 + 0.6),
+			h / 2,
+			z,
+			1.2,
+			h,
+			1.8,
+			palette.light,
+			parent,
+			true,
+		);
+		box(x + sign * (w / 2 + 0.6), 0.4, z, 1.6, 0.8, 2.2, palette.stone, parent);
+		for (let y = 1.3; y < h; y += 1.3)
+			box(
+				x + sign * (w / 2 + 0.6),
+				y,
+				z,
+				0.04,
+				0.06,
+				1.85,
+				palette.wood,
+				parent,
+			);
+	}
+	for (let i = 0; i < 9; i++) {
+		let a = (Math.PI * i) / 8;
+		let m = box(
+			x + (Math.cos(a) * w) / 2,
+			h + Math.sin(a) * w * 0.35,
+			z,
+			1.5,
+			1.5,
+			1.9,
+			i % 2 ? palette.light : palette.stone,
+			parent,
+			true,
+		);
+		m.rotation.z = a - Math.PI / 2;
+	}
+}
+function roof(x, y, z, w, d, h, c = palette.roof, parent = worldRoot) {
+	const shape = new THREE.Shape();
+	shape.moveTo(-w / 2, 0);
+	shape.lineTo(0, h);
+	shape.lineTo(w / 2, 0);
+	shape.closePath();
+	const g = new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: false });
+	const m = mesh(g, c, parent, true);
+	m.position.set(x, y, z - d / 2);
+	for (let row = 0; row < 5; row++) {
+		const yy = (row * h) / 5;
+		const half = (w / 2) * (1 - row / 5);
+		box(
+			x,
+			y + yy + 0.06,
+			z,
+			half * 2 + 0.12,
+			0.08,
+			d + 0.05,
+			row % 2 ? palette.roofLight : palette.roof,
+			parent,
+		);
+	}
+	return m;
+}
+function building(x, z, w, d, h, c = palette.plaster) {
+	const g = new THREE.Group();
+	g.position.set(x, 0, z);
+	worldRoot.add(g);
+	box(0, h / 2, 0, w, h, d, c, g, true);
+	box(0, 0.35, 0, w + 0.3, 0.7, d + 0.3, palette.stone, g);
+	for (const xx of [-w / 2 + 0.15, 0, w / 2 - 0.15])
+		box(xx, h / 2, d / 2 + 0.03, 0.17, h, 0.2, palette.wood, g);
+	for (const yy of [h * 0.45, h - 0.12])
+		box(0, yy, d / 2 + 0.08, w, 0.17, 0.22, palette.wood, g);
+	roof(0, h, 0, w + 1, d + 1, h * 0.43, palette.roof, g);
+	box(0, 1.3, d / 2 + 0.15, 1.3, 2.6, 0.15, palette.wood, g, true);
+	box(0, 2.8, d / 2 + 0.18, 1.6, 0.2, 0.2, palette.gold, g);
+	for (const xx of [-w * 0.29, w * 0.29]) {
+		box(xx, h * 0.64, d / 2 + 0.15, 0.95, 1.35, 0.15, palette.ink, g);
+		box(xx, h * 0.64, d / 2 + 0.24, 0.7, 1.07, 0.1, 0xdba95d, g);
+		box(xx, h * 0.64, d / 2 + 0.3, 0.06, 1.1, 0.06, palette.wood, g);
+		box(xx, h * 0.64, d / 2 + 0.3, 0.75, 0.06, 0.06, palette.wood, g);
+	}
+	box(w * 0.27, h + 1, 0, 0.9, 3, 0.9, palette.stone, g, true);
+	staticBox(x, h / 2, z, w, h, d);
+	return g;
+}
+function tree(x, z, scale = 1, color = palette.leaf) {
+	const g = new THREE.Group();
+	g.position.set(x, 0, z);
+	g.scale.setScalar(scale);
+	worldRoot.add(g);
+	cyl(0, 2, 0, 0.23, 4, palette.wood, g, 6, 0.14);
+	for (let i = 0; i < 5; i++) {
+		const a = i * 2.4;
+		const b = box(
+			Math.cos(a) * 0.5,
+			3.1 + ar(-0.4, 0.5),
+			Math.sin(a) * 0.5,
+			0.15,
+			2,
+			0.15,
+			palette.wood,
+			g,
+		);
+		b.rotation.z = Math.cos(a) * 0.6;
+		b.rotation.x = Math.sin(a) * 0.6;
+		orb(
+			Math.cos(a) * 1,
+			4.2 + ar(-0.5, 0.5),
+			Math.sin(a),
+			1.4 + ar(0, 0.4),
+			i % 2 ? color : 0xbc8545,
+			g,
+		);
+	}
+	orb(0, 5.3, 0, 1.5, color, g);
+	staticBox(x, 1.7 * scale, z, 0.6 * scale, 3.4 * scale, 0.6 * scale);
+	animated.push({ type: "tree", g, seed: ar(0, 10) });
+}
+function lamp(x, z, h = 4) {
+	cyl(x, h / 2, z, 0.09, h, palette.ink);
+	box(x, h, z, 0.85, 0.12, 0.85, palette.ink);
+	box(x, h - 0.45, z, 0.45, 0.85, 0.45, palette.gold);
+	const glow = orb(x, h - 0.4, z, 0.18, 0xffd58d);
+	glow.material = mat(0xffc975, 1.5);
+	for (const i of [-1, 1])
+		for (const j of [-1, 1])
+			box(x + i * 0.25, h - 0.4, z + j * 0.25, 0.05, 0.8, 0.05, palette.wood);
+	cyl(x, 0.1, z, 0.28, 0.2, palette.stone);
+	const l = new THREE.PointLight(0xffc679, 8, 7, 2);
+	l.position.set(x, h - 0.4, z);
+	worldRoot.add(l);
+	animated.push({ type: "light", g: l, seed: ar(0, 10) });
+}
+function banner(x, y, z, c = palette.teal) {
+	box(x, y + 1.6, z, 0.11, 4, 0.11, palette.wood);
+	box(x + 0.6, y + 2.3, z, 1.3, 0.08, 0.12, palette.gold);
+	const m = box(x + 0.63, y + 1.3, z, 1.15, 2, 0.035, c);
+	box(x + 0.63, y + 1.25, z + 0.025, 0.12, 1.4, 0.04, palette.gold);
+	const o = orb(x, y + 3.5, z, 0.15, palette.gold);
+	animated.push({ type: "flag", g: m, seed: ar(0, 10) });
+}
+function barrel(x, z, explosive = false) {
+	const g = new THREE.Group();
+	worldRoot.add(g);
+	cyl(0, 0.6, 0, 0.48, 1.2, explosive ? 0x9d523e : palette.wood, g, 10, 0.43);
+	for (const y of [0.18, 0.97]) cyl(0, y, 0, 0.5, 0.12, palette.ink, g, 10);
+	if (explosive) {
+		const mark = box(0, 0.64, 0.44, 0.28, 0.28, 0.03, palette.gold, g);
+		mark.rotation.z = Math.PI / 4;
+	}
+	g.position.set(x, 0, z);
+	const body = physics.createRigidBody(
+		RAPIER.RigidBodyDesc.dynamic()
+			.setTranslation(x, 0.6, z)
+			.setLinearDamping(0.8)
+			.setAngularDamping(0.8),
+	);
+	physics.createCollider(
+		RAPIER.ColliderDesc.cylinder(0.6, 0.46).setMass(3).setFriction(0.8),
+		body,
+	);
+	const p = { g, body, explosive, spent: false, x, z };
+	props.push(p);
+	return p;
+}
+function crystal(x, z, c = 0x69d7cf, h = 2) {
+	const g = new THREE.Group();
+	g.position.set(x, 0, z);
+	worldRoot.add(g);
+	cyl(0, 0.15, 0, 1.1, 0.3, palette.stone, g, 6);
+	const m = mesh(new THREE.OctahedronGeometry(0.7), c, g, true);
+	m.position.y = h;
+	m.scale.y = 1.7;
+	m.material = mat(c, 0.4);
+	animated.push({ type: "crystal", g: m, seed: ar(0, 10), y: h });
+	return g;
+}
+function makeTerrain() {
+	box(0, -1.7, 6, 46, 3.3, 42, 0x576f68);
+	box(0, -0.1, 6, 45, 0.4, 41, palette.grass);
+	staticBox(0, -0.35, 6, 45, 0.7, 41);
+	box(0, -1.7, -39, 44, 3.3, 20, 0x566960);
+	box(0, -0.1, -39, 43, 0.4, 19, 0x909b81);
+	staticBox(0, -0.35, -39, 43, 0.7, 19);
+	box(0, -0.05, -22, 9, 0.5, 16, palette.stone);
+	staticBox(0, -0.3, -22, 9, 0.6, 16);
+	for (const sign of [-1, 1]) {
+		for (let z = -28; z <= -16; z += 2) {
+			box(sign * 4.35, 0.55, z, 0.55, 1.2, 1.7, palette.light, worldRoot);
+			box(sign * 4.35, 1.2, z, 0.7, 0.18, 1.9, palette.stone);
+		}
+		for (const z of [-27, -18]) {
+			box(sign * 4.4, 1.1, z, 1, 2.3, 1, palette.stone);
+			orb(sign * 4.4, 2.5, z, 0.42, palette.gold);
+		}
+	}
+	for (let z = -13; z < 24; z += 1.15)
+		for (let x = -4.8; x < 5; x += 1.16) {
+			let xx = x + (Math.floor(z) % 2) * 0.35;
+			const m = box(
+				xx,
+				0.14,
+				z,
+				1.03,
+				0.16,
+				1.04,
+				artRandom() > 0.35 ? 0xb6b596 : 0x989e86,
+			);
+			m.rotation.y = ar(-0.035, 0.035);
+		}
+	for (let z = -47; z < -29; z += 1.3)
+		for (let x = -7; x < 8; x += 1.3)
+			box(
+				x,
+				0.14,
+				z,
+				1.18,
+				0.15,
+				1.18,
+				artRandom() > 0.5 ? 0xa5ad95 : 0x8e9f8b,
+			);
+	for (let z = -28; z < -15; z += 1.1)
+		for (let x = -3.8; x < 4; x += 1.1)
+			box(x, 0.24, z, 1, 0.12, 1, artRandom() > 0.4 ? 0xb7bb9d : 0x9fae9c);
+	for (let x = -19; x <= 20; x += 1.3)
+		for (const z of [9, -10])
+			box(x, 0.12, z, 1.14, 0.15, 1.6, artRandom() > 0.5 ? 0xa5aa8b : 0xb5b596);
+	const wg = new THREE.PlaneGeometry(240, 240, 1, 1);
+	const wm = new THREE.MeshBasicNodeMaterial({ color: palette.water });
+	wm.colorNode = TSL.mix(
+		TSL.color(0x2e6977),
+		TSL.color(0x479a9b),
+		TSL.sin(
+			TSL.positionWorld.x
+				.mul(0.45)
+				.add(TSL.positionWorld.z.mul(0.8))
+				.add(TSL.time.mul(0.55)),
+		)
+			.mul(0.12)
+			.add(0.4),
+	);
+	water = new THREE.Mesh(wg, wm);
+	water.rotation.x = -Math.PI / 2;
+	water.position.y = -1.15;
+	scene.add(water);
+	for (let i = 0; i < 85; i++) {
+		let x = ar(-65, 65),
+			z = ar(-65, 45);
+		if (
+			Math.abs(x) < 24 &&
+			z > -50 &&
+			z < 28 &&
+			!(z < -15 && z > -29 && Math.abs(x) > 5)
+		)
+			continue;
+		const m = box(x, -1.08, z, ar(0.5, 3), 0.025, 0.07, 0x78b7b2);
+		animated.push({ type: "wave", g: m, seed: ar(0, 10) });
+	}
+	for (const x of [-22, 22])
+		for (let z = -13; z < 26; z += 3) {
+			box(x, 0.4, z, 0.6, 0.8, 2.7, palette.stone);
+			if (z % 2) box(x, 0.9, z, 0.8, 0.3, 0.8, palette.light);
+		}
+	for (let i = 0; i < 22; i++) {
+		const x = ar(-21, 21),
+			z = ar(-12, 24);
+		if (Math.abs(x) < 6) continue;
+		const m = box(x, 0.2, z, ar(0.35, 1.1), 0.25, ar(0.3, 0.8), 0x9d9c7d);
+		m.rotation.y = ar(0, 3);
+	}
+}
+function makeWorld() {
+	makeTerrain();
+	building(-14, 12, 7, 7, 5.8);
+	building(14, 17, 7, 6, 6.2, 0xcabb8d);
+	building(-15, -3, 9, 8, 7.5, 0xd2bd90);
+	building(14, -6, 8, 8, 6.7, 0xb3c3a5);
+	building(-20, 23, 5, 5, 5);
+	building(20, 1, 4, 6, 7);
+	building(-17, -40, 6, 9, 7, 0x95a58b);
+	building(17, -41, 6, 8, 8, 0xb6b58f);
+	// The Crooked Note: striped market canopy, hanging sign, tables.
+	box(-9.1, 4.2, 1.9, 3.2, 0.18, 0.15, palette.wood);
+	box(-8.2, 3.5, 1.9, 2.2, 1.2, 0.18, palette.teal, worldRoot, true);
+	box(-8.2, 3.5, 2.02, 0.18, 0.7, 0.05, palette.gold);
+	for (let i = 0; i < 6; i++) {
+		const aw = box(
+			12 + i * 0.75,
+			2.8,
+			1,
+			0.76,
+			0.12,
+			3,
+			i % 2 ? palette.plaster : palette.teal,
+		);
+		aw.rotation.x = 0.15;
+	}
+	for (const x of [12, 15.8]) cyl(x, 1.4, 2.5, 0.07, 2.8, palette.wood);
+	box(14, 1.1, 2, 4, 0.2, 1.5, palette.wood);
+	for (let i = 0; i < 9; i++)
+		orb(12.4 + i * 0.35, 1.35, 2.1, 0.2, i % 3 ? 0xb65742 : 0xe3ba56);
+	for (const [x, z, s] of [
+		[-20, 3, 1.25],
+		[-9, 21, 0.9],
+		[19, 24, 1.2],
+		[20, -12, 1.1],
+		[-19, -13, 0.8],
+		[10, -14, 0.75],
+		[-19, -33, 0.8],
+		[19, -32, 0.75],
+	])
+		tree(x, z, s);
+	for (const [x, z] of [
+		[-5, 19],
+		[5, 7],
+		[-5, -7],
+		[5, -15],
+		[-5, -28],
+		[5, -32],
+		[-11, -43],
+		[11, -43],
+	])
+		lamp(x, z);
+	for (const [x, z] of [
+		[-6, 18],
+		[8, 4],
+		[-9, -11],
+		[-7, -31],
+		[7, -31],
+		[-9, -44],
+		[9, -44],
+	])
+		banner(x, 0, z);
+	for (const [x, z, e] of [
+		[-7, 3, false],
+		[-6, 4, true],
+		[8, -6, true],
+		[9, -7, false],
+		[-10, 16, false],
+		[7, 19, false],
+		[-7, -36, true],
+		[7, -40, true],
+	])
+		barrel(x, z, e);
+	// Loot and lore are physical objects in the world.
+	const chest = new THREE.Group();
+	chest.position.set(-10, 0.2, 17);
+	worldRoot.add(chest);
+	box(0, 0.4, 0, 1.3, 0.8, 0.85, palette.wood, chest, true);
+	box(0, 0.85, 0, 1.35, 0.15, 0.9, palette.roof, chest, true);
+	for (const x of [-0.45, 0.45])
+		box(x, 0.48, 0.44, 0.12, 0.85, 0.06, palette.gold, chest);
+	box(0, 0.6, 0.48, 0.22, 0.24, 0.07, palette.gold, chest);
+	cyl(9, 0.6, -11, 0.4, 1.2, palette.stone);
+	const tablet = box(9, 1.25, -11, 1.7, 0.16, 1.1, palette.light);
+	tablet.rotation.x = 0.2;
+	for (let i = 0; i < 4; i++)
+		box(9, 1.37, -11.35 + i * 0.2, 1.25 - i * 0.15, 0.025, 0.04, palette.wood);
+	// A quay, moored skiff and rope bollards.
+	for (let z = 9; z < 20; z += 0.6)
+		box(25, -0.25, z, 7, 0.24, 0.5, palette.wood);
+	for (const x of [23, 27])
+		for (const z of [10, 18]) cyl(x, -0.2, z, 0.15, 2.7, palette.wood);
+	const boat = new THREE.Group();
+	boat.position.set(29, -0.6, 14);
+	worldRoot.add(boat);
+	const hull = mesh(
+		new THREE.SphereGeometry(1, 8, 4),
+		palette.wood,
+		boat,
+		true,
+	);
+	hull.scale.set(1.4, 0.7, 3.8);
+	box(0, 0.3, 0, 2, 0.15, 4, palette.ink, boat);
+	for (const z of [-1.6, 0, 1.6])
+		box(0, 0.5, z, 2.2, 0.12, 0.3, palette.plaster, boat);
+	animated.push({ type: "boat", g: boat, seed: 2 });
+	// Northward walls and the colossal bell gate.
+	for (const sign of [-1, 1]) {
+		const x = sign * 8.3;
+		cyl(x, 5.5, -30, 3.5, 11, palette.stone, worldRoot, 10);
+		cyl(x, 11.2, -30, 3.85, 0.6, palette.light, worldRoot, 10);
+		cyl(x, 12, -30, 3.8, 1.2, palette.stone, worldRoot, 10);
+		for (let i = 0; i < 10; i++) {
+			let a = (i * Math.PI) / 5;
+			box(
+				x + Math.sin(a) * 3.5,
+				12.9,
+				-30 + Math.cos(a) * 3.5,
+				0.8,
+				1.2,
+				0.8,
+				palette.light,
+			);
+		}
+		cyl(x, 14.8, -30, 3.65, 3.5, palette.roof, worldRoot, 10, 0);
+		orb(x, 16.7, -30, 0.3, palette.gold);
+		staticBox(x, 5, -30, 6, 10, 5);
+		box(sign * 17, 3.5, -30, 12, 7, 2.4, palette.stone);
+		for (let xx = 12; xx < 23; xx += 1.7)
+			box(sign * xx, 7.5, -30, 0.9, 1.3, 2.6, palette.light);
+		staticBox(sign * 17, 3.5, -30, 12, 7, 2.4);
+	}
+	stoneArch(0, -30, 8, 7.7);
+	box(0, 11.6, -30, 10, 1.2, 2.4, palette.stone);
+	const gateGroup = new THREE.Group();
+	gateGroup.position.set(0, 0, -30);
+	worldRoot.add(gateGroup);
+	for (let x = -3.6; x < 4; x += 0.6)
+		box(x, 3.7, 0, 0.12, 7.4, 0.14, palette.ink, gateGroup);
+	for (const y of [0.5, 2.5, 4.5, 6.5])
+		box(0, y, 0, 8, 0.14, 0.2, palette.ink, gateGroup);
+	gateDoor = { g: gateGroup, c: staticBox(0, 3, -30, 8, 6, 0.4) };
+	// A shrine to an unnamed river and the final bell dais.
+	for (let i = 0; i < 3; i++)
+		cyl(
+			0,
+			0.2 + i * 0.22,
+			-44,
+			4.8 - i * 0.5,
+			0.3,
+			palette.stone,
+			worldRoot,
+			12,
+		);
+	stoneArch(0, -45, 5, 7);
+	cyl(0, 7.9, -45, 0.13, 2.5, palette.gold);
+	bell = new THREE.Group();
+	bell.position.set(0, 6, -45);
+	worldRoot.add(bell);
+	cyl(0, 0, 0, 1.7, 2.6, palette.gold, bell, 12, 0.7);
+	cyl(0, -1.32, 0, 1.9, 0.25, 0xa1733f, bell, 12);
+	orb(0, -1.6, 0, 0.33, palette.ink, bell);
+	const halo = mesh(new THREE.TorusGeometry(3.1, 0.045, 5, 72), 0x8ed5c8);
+	halo.position.set(0, 6, -45);
+	halo.material = mat(0x9bded0, 0.6);
+	animated.push({ type: "halo", g: halo });
+	for (const [x, z, c] of [
+		[-10, -36, 0x77bcb4],
+		[10, -36, 0xe3aa58],
+		[0, -40, 0xc48dce],
+	])
+		crystal(x, z, c);
+	const shrine = crystal(17, 10, 0x9bd7bd, 1.8);
+	cyl(17, 0.1, 10, 2.4, 0.2, palette.light);
+	for (let i = 0; i < 7; i++) {
+		const a = (i * 6.28) / 7;
+		orb(
+			17 + Math.sin(a) * 1.6,
+			0.3,
+			10 + Math.cos(a) * 1.6,
+			0.18,
+			palette.gold,
+		);
+	}
+	// Prison cage and a camp fire.
+	for (const x of [-10.5, -7.5])
+		for (const z of [-13, -10]) box(x, 1.7, z, 0.13, 3.4, 0.13, palette.ink);
+	for (let x = -10.5; x <= -7.5; x += 0.5) {
+		box(x, 1.7, -10, 0.08, 3.4, 0.08, palette.ink);
+		box(x, 1.7, -13, 0.08, 3.4, 0.08, palette.ink);
+	}
+	box(-9, 3.5, -11.5, 3.3, 0.2, 3.3, palette.wood);
+	for (let i = 0; i < 7; i++) {
+		let a = (i * 6.28) / 7;
+		orb(
+			-16 + Math.sin(a) * 1.1,
+			0.2,
+			-13 + Math.cos(a) * 1.1,
+			0.34,
+			palette.stone,
+		);
+	}
+	const flame = mesh(new THREE.ConeGeometry(0.55, 1.8, 6), 0xf6bd61);
+	flame.position.set(-16, 0.9, -13);
+	flame.material = mat(0xf4ad4d, 1.2);
+	animated.push({ type: "fire", g: flame, seed: 0 });
+	cyl(-16, 0.18, -13, 0.8, 0.25, palette.wood);
+	const campLight = new THREE.PointLight(0xffaa55, 12, 8, 2);
+	campLight.position.set(-16, 2, -13);
+	worldRoot.add(campLight);
+	// Silhouettes across the estuary.
+	for (let i = 0; i < 23; i++) {
+		let x = -60 + i * 5.7;
+		let h = ar(6, 16);
+		box(x, h / 2 - 3, -64, ar(3, 5), h, ar(4, 9), 0x698a86);
+		if (i % 3 === 0) cyl(x, h - 1, -64, 2.9, 5, 0x567b7a, worldRoot, 6, 0);
+	}
+	// Ground flowers, reeds, fallen leaves, moss and glints.
+	for (let i = 0; i < 135; i++) {
+		let x = ar(-21, 21),
+			z = ar(-14, 25);
+		if (Math.abs(x) < 6 || Math.abs(z - 9) < 1.3 || Math.abs(z + 10) < 1.3)
+			continue;
+		if (i % 3 === 0) {
+			let m = mesh(
+				new THREE.ConeGeometry(0.18, 0.6, 3),
+				i % 2 ? 0x809875 : 0xa8ad71,
+			);
+			m.position.set(x, 0.35, z);
+		} else {
+			let m = box(x, 0.18, z, 0.2, 0.025, 0.3, i % 2 ? 0xce994c : 0xa1ad6e);
+			m.rotation.y = ar(0, 6);
+		}
+	}
+	for (let i = 0; i < 32; i++) {
+		let m = orb(ar(-22, 22), ar(1, 9), ar(-48, 26), 0.035, 0xe6ca8e);
+		m.material = mat(0xe6ca8e, 0.8);
+		animated.push({
+			type: "mote",
+			g: m,
+			seed: ar(0, 100),
+			base: m.position.clone(),
+		});
+	}
+}
+function makeCharacter(e) {
+	const g = new THREE.Group();
+	g.position.set(e.x, 0, e.z);
+	worldRoot.add(g);
+	const color = e.color || palette.red;
+	const root = new THREE.Group();
+	g.add(root);
+	const skin = e.kind === "wraith" ? 0x80bdad : e.skin || 0xd6ac7c;
+	const dark = e.hair || 0x433b32;
+	const cloak = mesh(new THREE.ConeGeometry(0.57, 1.4, 6), color, root, true);
+	cloak.position.set(0, 0.95, -0.07);
+	cloak.scale.z = 0.7;
+	cloak.rotation.y = Math.PI / 6;
+	const torso = box(0, 1.2, 0, 0.65, 0.7, 0.4, color, root, true);
+	box(0, 0.88, 0.05, 0.7, 0.15, 0.45, palette.wood, root);
+	box(0, 0.88, 0.29, 0.16, 0.18, 0.07, palette.gold, root);
+	const head = orb(0, 1.92, 0, 0.33, skin, root);
+	head.scale.multiply(new V3(0.9, 1.08, 0.9));
+	const hair = orb(0, 2.08, -0.05, 0.33, dark, root);
+	hair.scale.y *= 0.7;
+	const nose = box(0, 1.89, 0.32, 0.1, 0.13, 0.15, skin, root);
+	for (const x of [-0.12, 0.12])
+		box(x, 1.98, 0.283, 0.055, 0.065, 0.05, palette.ink, root);
+	const arms = [],
+		legs = [];
+	for (const s of [-1, 1]) {
+		let p = new THREE.Group();
+		p.position.set(s * 0.43, 1.5, 0);
+		root.add(p);
+		box(0, -0.28, 0, 0.23, 0.62, 0.25, color, p, true);
+		orb(0, -0.6, 0, 0.13, skin, p);
+		arms.push(p);
+		let l = new THREE.Group();
+		l.position.set(s * 0.2, 0.65, 0);
+		root.add(l);
+		box(0, -0.25, 0, 0.22, 0.5, 0.23, palette.ink, l);
+		box(0, -0.5, 0.1, 0.26, 0.25, 0.42, palette.wood, l, true);
+		legs.push(l);
+	}
+	if (e.role === "mage" || e.kind === "wraith") {
+		const staff = box(0, -0.25, 0.1, 0.08, 1.9, 0.08, palette.wood, arms[1]);
+		orb(0, 0.75, 0.1, 0.21, 0x8cdddc, arms[1]).material = mat(0x91e7dc, 0.8);
+		if (e.role === "mage") {
+			const hat = mesh(new THREE.ConeGeometry(0.5, 0.8, 7), color, root, true);
+			hat.position.y = 2.55;
+			hat.rotation.z = -0.16;
+			cyl(0, 2.2, 0, 0.56, 0.07, color, root, 9);
+		}
+	} else if (e.role === "rogue") {
+		box(0.05, -0.56, 0.23, 0.09, 0.58, 0.05, 0xc5d9c8, arms[1]);
+		box(0.05, -0.3, 0.23, 0.3, 0.07, 0.08, palette.gold, arms[1]);
+		const hood = orb(0, 2.03, -0.12, 0.4, color, root);
+		hood.scale.z *= 0.8;
+	} else {
+		const blade = box(0, -0.95, 0.1, 0.12, 1.05, 0.08, 0xd5e0c7, arms[1]);
+		blade.rotation.x = -0.15;
+		box(0, -0.43, 0.1, 0.43, 0.09, 0.15, palette.gold, arms[1]);
+		const shield = mesh(
+			new THREE.CylinderGeometry(0.4, 0.4, 0.14, 6),
+			color,
+			arms[0],
+			true,
+		);
+		shield.rotation.x = Math.PI / 2;
+		shield.position.set(-0.08, -0.28, 0.15);
+		orb(-0.08, -0.28, 0.26, 0.12, palette.gold, arms[0]);
+	}
+	const ring = new THREE.Mesh(
+		new THREE.RingGeometry(0.66, 0.73, 40),
+		new THREE.MeshBasicNodeMaterial({
+			color: e.team === "party" ? 0xc9dc9f : 0xd47a65,
+			side: THREE.DoubleSide,
+			transparent: true,
+			opacity: 0.85,
+			depthWrite: false,
+		}),
+	);
+	ring.rotation.x = -Math.PI / 2;
+	ring.position.y = 0.27;
+	g.add(ring);
+	const blob = new THREE.Mesh(
+		new THREE.CircleGeometry(0.55, 16),
+		new THREE.MeshBasicNodeMaterial({
+			color: 0x162d32,
+			transparent: true,
+			opacity: 0.3,
+			depthWrite: false,
+		}),
+	);
+	blob.rotation.x = -Math.PI / 2;
+	blob.position.y = 0.23;
+	g.add(blob);
+	if (e.kind === "boss") {
+		g.scale.setScalar(1.65);
+		cyl(0, 2.35, 0, 0.37, 0.3, palette.gold, root, 7);
+		for (let i = 0; i < 5; i++) {
+			const a = (i * 6.28) / 5;
+			box(
+				Math.sin(a) * 0.32,
+				2.62,
+				Math.cos(a) * 0.32,
+				0.09,
+				0.4,
+				0.09,
+				palette.gold,
+				root,
+			);
+		}
+	}
+	const body = physics.createRigidBody(
+		RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(e.x, 1.1, e.z),
+	);
+	const collider = physics.createCollider(
+		RAPIER.ColliderDesc.capsule(0.55, 0.32).setCollisionGroups(0x00020001),
+		body,
+	);
+	const view = {
+		g,
+		root,
+		arms,
+		legs,
+		ring,
+		body,
+		collider,
+		walk: 0,
+		phase: ar(0, 6),
+	};
+	entityViews.set(e.id, view);
+	return view;
+}
+function removeEntityView(id) {
+	const v = entityViews.get(id);
+	if (!v) return;
+	physics.removeRigidBody(v.body);
+	worldRoot.remove(v.g);
+	entityViews.delete(id);
+}
+function moveEntity(e, dx, dz, dt, noclip = false) {
+	const v = entityViews.get(e.id);
+	if (!v) return 0;
+	const len = Math.hypot(dx, dz);
+	if (len < 0.001) {
+		e.moving = false;
+		return 0;
+	}
+	const from = { x: e.x, z: e.z };
+	if (noclip) {
+		e.x += dx;
+		e.z += dz;
+	} else {
+		controller.computeColliderMovement(
+			v.collider,
+			{ x: dx, y: -0.15, z: dz },
+			RAPIER.QueryFilterFlags.EXCLUDE_KINEMATIC,
+		);
+		const delta = controller.computedMovement();
+		e.x += delta.x;
+		e.z += delta.z;
+		const region = e.z >= -14.5 ? 22 : e.z <= -29 ? 21 : 3.8;
+		e.x = THREE.MathUtils.clamp(e.x, -region, region);
+		e.z = THREE.MathUtils.clamp(e.z, -48, 25);
+	}
+	e.facing = Math.atan2(dx, dz);
+	e.moving = true;
+	v.body.setNextKinematicTranslation({ x: e.x, y: 1.1, z: e.z });
+	return Math.hypot(e.x - from.x, e.z - from.z);
+}
+function warp(e, x, z) {
+	e.x = x;
+	e.z = z;
+	const v = entityViews.get(e.id);
+	if (v) {
+		v.body.setTranslation({ x, y: 1.1, z }, true);
+		v.body.setNextKinematicTranslation({ x, y: 1.1, z });
+		v.g.position.set(x, 0, z);
+	}
+}
+function effect(x, z, color = palette.gold, type = "burst", count = 15) {
+	for (let i = 0; i < count; i++) {
+		const m = mesh(i % 3 ? geom.sphere : geom.box, color);
+		m.scale.setScalar(type === "heal" ? 0.1 : 0.08 + Math.random() * 0.1);
+		m.position.set(x, 1 + Math.random(), z);
+		m.material = mat(color, 0.5);
+		worldEffects.push({
+			m,
+			life: 0.6 + Math.random() * 0.7,
+			max: 1.3,
+			v: new V3(
+				(Math.random() - 0.5) * 4,
+				type === "heal" ? 2 : Math.random() * 4,
+				(Math.random() - 0.5) * 4,
+			),
+		});
+	}
+	if (type === "burst" || type === "shock") {
+		const r = new THREE.Mesh(
+			new THREE.RingGeometry(0.5, 0.6, 40),
+			new THREE.MeshBasicNodeMaterial({
+				color,
+				side: THREE.DoubleSide,
+				transparent: true,
+				depthWrite: false,
+			}),
+		);
+		r.rotation.x = -Math.PI / 2;
+		r.position.set(x, 0.4, z);
+		worldRoot.add(r);
+		worldEffects.push({ m: r, life: 0.6, max: 0.6, ring: true });
+	}
+}
+function beam(a, b, color) {
+	const start = new V3(a.x, 1.5, a.z),
+		end = new V3(b.x, 1.4, b.z),
+		len = start.distanceTo(end);
+	const m = new THREE.Mesh(
+		new THREE.CylinderGeometry(0.045, 0.08, len, 5),
+		mat(color, 1),
+	);
+	m.position.copy(start).add(end).multiplyScalar(0.5);
+	m.quaternion.setFromUnitVectors(new V3(0, 1, 0), end.sub(start).normalize());
+	worldRoot.add(m);
+	worldEffects.push({ m, life: 0.22, max: 0.22 });
+}
+function surfaceView(s) {
+	const m = new THREE.Mesh(
+		new THREE.CircleGeometry(s.r, 40),
+		new THREE.MeshBasicNodeMaterial({
+			color:
+				s.type === "fire" ? 0xe0933f : s.type === "wet" ? 0x77ccce : 0x92dabe,
+			transparent: true,
+			opacity: 0.35,
+			side: THREE.DoubleSide,
+			depthWrite: false,
+		}),
+	);
+	m.rotation.x = -Math.PI / 2;
+	m.position.set(s.x, 0.29, s.z);
+	worldRoot.add(m);
+	s.view = m;
+}
+function syncViews(dt, time) {
+	for (const e of allEntities()) {
+		const v = entityViews.get(e.id);
+		if (!v) continue;
+		v.g.position.set(e.x, 0, e.z);
+		v.g.visible = e.visible !== false;
+		const dead = e.hp <= 0;
+		v.root.rotation.z = THREE.MathUtils.lerp(
+			v.root.rotation.z,
+			dead ? -1.45 : 0,
+			Math.min(1, dt * 8),
+		);
+		v.root.position.y = dead ? 0.2 : Math.sin(time * 2 + v.phase) * 0.035;
+		const diff = Math.atan2(
+			Math.sin((e.facing || 0) - v.g.rotation.y),
+			Math.cos((e.facing || 0) - v.g.rotation.y),
+		);
+		v.g.rotation.y += diff * Math.min(1, dt * 12);
+		v.walk = THREE.MathUtils.lerp(
+			v.walk,
+			e.moving && !dead ? 1 : 0,
+			Math.min(1, dt * 9),
+		);
+		const sway = Math.sin(time * 10 + v.phase) * v.walk;
+		v.legs[0].rotation.x = sway * 0.65;
+		v.legs[1].rotation.x = -sway * 0.65;
+		v.arms[0].rotation.x = -sway * 0.45;
+		v.arms[1].rotation.x =
+			sway * 0.45 + (e.swing > 0 ? -Math.sin(e.swing * 12) * 1.3 : 0);
+		if (e.swing > 0) e.swing -= dt;
+		v.ring.visible =
+			!dead && (e.id === selectedHero()?.id || e.id === targetEnemy()?.id);
+		v.ring.rotation.z = time * 0.25;
+		v.ring.scale.setScalar(e.id === targetEnemy()?.id ? 1.4 : 1);
+		v.ring.material.color.setHex(e.team === "party" ? palette.gold : 0xed8f73);
+	}
+	for (const p of props) {
+		if (p.spent) continue;
+		const t = p.body.translation();
+		p.g.position.set(t.x, t.y - 0.6, t.z);
+		const r = p.body.rotation();
+		p.g.quaternion.set(r.x, r.y, r.z, r.w);
+	}
+	for (const a of animated) {
+		const t = time + a.seed;
+		switch (a.type) {
+			case "tree":
+				a.g.rotation.z = Math.sin(t * 0.6) * 0.012;
+				break;
+			case "flag":
+				a.g.rotation.y = Math.sin(t * 2) * 0.15;
+				break;
+			case "light":
+				a.g.intensity = 7 + Math.sin(t * 7);
+				break;
+			case "crystal":
+				a.g.rotation.y = time * 0.4;
+				a.g.position.y = a.y + Math.sin(t * 2) * 0.18;
+				break;
+			case "boat":
+				a.g.rotation.z = Math.sin(t * 0.8) * 0.04;
+				a.g.position.y = -0.6 + Math.sin(t) * 0.07;
+				break;
+			case "halo":
+				a.g.rotation.z = time * 0.1;
+				break;
+			case "fire":
+				a.g.scale.set(
+					1 + Math.sin(t * 12) * 0.1,
+					1 + Math.sin(t * 9) * 0.16,
+					1,
+				);
+				break;
+			case "mote":
+				a.g.position.set(
+					a.base.x + Math.sin(t * 0.3),
+					a.base.y + Math.sin(t * 0.6) * 0.5,
+					a.base.z + Math.cos(t * 0.3),
+				);
+				break;
+			case "wave":
+				a.g.position.x += Math.sin(t * 0.4) * dt * 0.15;
+				break;
+		}
+	}
+	for (let i = worldEffects.length - 1; i >= 0; i--) {
+		const f = worldEffects[i];
+		f.life -= dt;
+		if (f.life <= 0) {
+			worldRoot.remove(f.m);
+			if (f.m.material.transparent) f.m.material.dispose();
+			worldEffects.splice(i, 1);
+			continue;
+		}
+		if (f.v) {
+			f.m.position.addScaledVector(f.v, dt);
+			f.v.y -= dt * 3;
+			f.m.scale.multiplyScalar(1 - dt * 0.8);
+		}
+		if (f.ring) {
+			f.m.scale.addScalar(dt * 8);
+			f.m.material.opacity = f.life / f.max;
+		}
+	}
+	if (gateDoor)
+		gateDoor.g.position.y = THREE.MathUtils.lerp(
+			gateDoor.g.position.y,
+			S.flags.gate ? 8 : 0,
+			dt * 2,
+		);
+	if (bell)
+		bell.rotation.z = Math.sin(time * 1.5) * (S.flags.ending ? 0.12 : 0.025);
+}
+function updateCamera(dt, title = false) {
+	if (title) {
+		cameraTarget.set(-6, 3, -18);
+		cameraFocus.copy(cameraTarget);
+		cameraZoom = 42;
+		cameraYaw = 0.55 + Math.sin(skyTime * 0.055) * 0.06;
+	} else {
+		const e = selectedHero();
+		if (e) cameraTarget.set(e.x, 0, e.z - 2);
+	}
+	cameraFocus.lerp(cameraTarget, Math.min(1, dt * 4));
+	const aspect = innerWidth / innerHeight;
+	camera.left = (-cameraZoom * aspect) / 2;
+	camera.right = (cameraZoom * aspect) / 2;
+	camera.top = cameraZoom / 2;
+	camera.bottom = -cameraZoom / 2;
+	camera.updateProjectionMatrix();
+	const offset = new V3(Math.sin(cameraYaw) * 38, 39, Math.cos(cameraYaw) * 38);
+	camera.position.copy(cameraFocus).add(offset);
+	camera.lookAt(cameraFocus);
+}
+function project(x, y, z) {
+	const p = new V3(x, y, z).project(camera);
+	return {
+		x: (p.x * 0.5 + 0.5) * innerWidth,
+		y: (-0.5 * p.y + 0.5) * innerHeight,
+		visible: p.z < 1 && Math.abs(p.x) < 1.2 && Math.abs(p.y) < 1.2,
+	};
+}
+async function initEngine() {
+	if (!navigator.gpu)
+		throw new Error(
+			"This adventure requires WebGPU. Use a WebGPU-capable browser on HTTPS or localhost.",
+		);
+	const adapter = await navigator.gpu.requestAdapter();
+	if (!adapter)
+		throw new Error(
+			"No WebGPU adapter is available. Enable hardware acceleration and restart your browser.",
+		);
+	renderer = new THREE.WebGPURenderer({ antialias: true, alpha: false });
+	renderer._getFallback = null;
+	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+	renderer.setSize(innerWidth, innerHeight);
+	renderer.shadowMap.enabled = true;
+	renderer.shadowMap.type = THREE.PCFShadowMap;
+	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+	renderer.toneMappingExposure = 1.25;
+	await renderer.init();
+	if (!renderer.backend.isWebGPUBackend)
+		throw new Error("WebGPU is required; renderer fallback is disabled.");
+	renderer.backend.device.lost.then((info) => {
+		if (info.reason !== "destroyed") {
+			gpuLost = true;
+			S.mode = "over";
+			audio.stop();
+			AIHub.fail("WebGPU device lost: " + info.message);
+			openModal("error", {
+				message: "The WebGPU device was lost. Reload to restore the adventure.",
+			});
+		}
+	});
+	document.getElementById("viewport").appendChild(renderer.domElement);
+	scene = new THREE.Scene();
+	scene.background = new THREE.Color(0x82a59e);
+	scene.fog = new THREE.Fog(0x82a59e, 65, 155);
+	camera = new THREE.OrthographicCamera(-20, 20, 15, -15, 0.1, 230);
+	const hemi = new THREE.HemisphereLight(0xcbe2d2, 0x59695c, 2.1);
+	scene.add(hemi);
+	const sun = new THREE.DirectionalLight(0xffdfa7, 3.2);
+	sun.position.set(-22, 40, 18);
+	sun.castShadow = true;
+	sun.shadow.mapSize.set(2048, 2048);
+	sun.shadow.camera.left = -48;
+	sun.shadow.camera.right = 48;
+	sun.shadow.camera.top = 48;
+	sun.shadow.camera.bottom = -48;
+	sun.shadow.camera.far = 120;
+	sun.shadow.bias = -0.001;
+	sun.shadow.normalBias = 0.08;
+	sun.target.position.set(0, 0, -13);
+	scene.add(sun, sun.target);
+	const fill = new THREE.DirectionalLight(0x8ecbc7, 0.75);
+	fill.position.set(20, 10, -25);
+	scene.add(fill);
+	await RAPIER.init();
+	physics = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+	controller = physics.createCharacterController(0.025);
+	controller.enableAutostep(0.4, 0.2, true);
+	controller.enableSnapToGround(0.3);
+	worldRoot = new THREE.Group();
+	scene.add(worldRoot);
+	makeWorld();
+	addEventListener("resize", () => {
+		renderer.setSize(innerWidth, innerHeight);
+		updateCamera(1, S.mode === "title");
+	});
+}
+
+const $ = (id) => document.getElementById(id);
+const SAVE_KEY = "bards-late-v1",
+	SETTINGS_KEY = "bards-late-settings-v1";
+const settings = {
+	invertX: false,
+	invertY: false,
+	music: 60,
+	effects: 80,
+	voice: 65,
+	volume: 55,
+	autoEnd: false,
+	cameraShake: true,
+};
+try {
+	Object.assign(
+		settings,
+		JSON.parse(localStorage.getItem(SETTINGS_KEY) || "{}"),
+	);
+} catch {}
+let S = {
+	mode: "title",
+	flags: {},
+	party: [],
+	npcs: [],
+	enemies: [],
+	surfaces: [],
+	selected: 0,
+	target: 0,
+	combat: null,
+	time: 0,
+	score: 0,
+	gold: 42,
+	inventory: { salve: 4, oil: 2 },
+	gear: { weapon: "sword", armour: null, charm: null },
+	bag: ["sword"],
+	level: 1,
+	xp: 0,
+	log: [],
+	visited: [],
+	attract: false,
+	dialogue: null,
+	modal: null,
+	dead: false,
+	hubStopped: false,
+	started: false,
+	stats: { kills: 0, checks: 0, kindness: 0 },
+	runeSequence: [],
+	seed: 13013,
+};
+let gameRng = seeded(13013),
+	lastInput = performance.now(),
+	nowTime = 0,
+	toastUntil = 0,
+	banterUntil = 0,
+	lastHud = 0,
+	attractTime = 0,
+	attractStep = -1,
+	saveStamp = 0,
+	hubInfo = null,
+	hubReadyGesture = false;
+const input = { x: 0, y: 0, fire: false, skill: false, moveX: 0, moveZ: 0 };
+let initialized = false,
+	frameCount = 0;
+function selectedHero() {
+	return S.party[S.selected] || S.party[0];
+}
+function targetEnemy() {
+	const list = liveEnemies();
+	return list[S.target % Math.max(1, list.length)] || null;
+}
+function allEntities() {
+	return [...S.party, ...S.npcs, ...S.enemies];
+}
+function liveEnemies() {
+	return S.enemies.filter(
+		(e) =>
+			e.hp > 0 &&
+			e.visible !== false &&
+			(!S.combat || S.combat.ids.includes(e.id)),
+	);
+}
+function dist(a, b) {
+	return Math.hypot(a.x - b.x, a.z - b.z);
+}
+function dice(n = 20) {
+	return 1 + Math.floor(gameRng() * n);
+}
+function log(text) {
+	S.log.push(text);
+	if (S.log.length > 40) S.log.shift();
+}
+function toast(text, seconds = 3) {
+	$("toast").textContent = text;
+	toastUntil = nowTime + seconds;
+	$("toast").style.opacity = 1;
+}
+function banter(who, text, seconds = 5) {
+	$("banter").innerHTML = `<b>${escapeHTML(who)}</b>${escapeHTML(text)}`;
+	$("banter").classList.remove("hidden");
+	banterUntil = nowTime + seconds;
+	audio.speak(text, who === "Orrin" ? 0.8 : who === "Mira" ? 1.3 : 1);
+}
+function gain(amount, reason) {
+	S.score += amount;
+	toast(`${reason}  ·  +${amount} renown`);
+	reportProgress();
+}
+function gainXP(n) {
+	S.xp += n;
+	if (S.xp >= 120 && S.level === 1) {
+		S.level = 2;
+		for (const h of S.party) {
+			h.maxHp += 6;
+			h.hp = Math.min(h.maxHp, h.hp + 6);
+			h.power += 1;
+		}
+		toast("LEVEL II  ·  +6 vitality, +1 damage for every companion", 5);
+		audio.sfx("win");
+		S.flags.levelChoice = false;
+	}
+}
+function newRun({
+	attract = false,
+	seed = 13013,
+	load = null,
+	trial = false,
+} = {}) {
+	for (const id of [...entityViews.keys()]) removeEntityView(id);
+	for (const s of S.surfaces || []) if (s.view) worldRoot.remove(s.view);
+	S = {
+		mode: "play",
+		flags: {},
+		party: HEROES.map((h, i) => ({
+			...h,
+			x: i === 0 ? 0 : i === 1 ? -1.4 : 1.4,
+			z: i === 0 ? 17 : 19,
+			hp: h.maxHp,
+			team: "party",
+			ap: 1,
+			bonusAction: 1,
+			move: 7,
+			status: {},
+			facing: Math.PI,
+		})),
+		npcs: NPCS.map((n) => ({
+			...n,
+			hp: 99,
+			maxHp: 99,
+			team: "neutral",
+			visible: n.id !== "witness",
+			status: {},
+		})),
+		enemies: [],
+		surfaces: [],
+		selected: 0,
+		target: 0,
+		combat: null,
+		time: 0,
+		score: 0,
+		gold: 42,
+		inventory: { salve: 4, oil: 2 },
+		gear: { weapon: "sword", armour: null, charm: null },
+		bag: ["sword"],
+		level: 1,
+		xp: 0,
+		log: [],
+		visited: [],
+		attract,
+		dialogue: null,
+		modal: null,
+		dead: false,
+		hubStopped: false,
+		started: true,
+		stats: { kills: 0, checks: 0, kindness: 0 },
+		runeSequence: [],
+		seed,
+		trial,
+	};
+	gameRng = seeded(seed);
+	if (load) {
+		for (const k of [
+			"flags",
+			"party",
+			"npcs",
+			"enemies",
+			"selected",
+			"time",
+			"score",
+			"gold",
+			"inventory",
+			"gear",
+			"bag",
+			"level",
+			"xp",
+			"visited",
+			"stats",
+			"runeSequence",
+			"seed",
+		])
+			if (load[k] !== undefined) S[k] = load[k];
+		gameRng = seeded(load.rngSeed || seed);
+		S.party.forEach((h) => {
+			h.ap = 1;
+			h.bonusAction = 1;
+			h.move = 7;
+			h.status = h.status || {};
+		});
+	}
+	allEntities().forEach(makeCharacter);
+	if (!load) spawnGroup("dock");
+	gateDoor.c.setSensor(!!S.flags.gate);
+	gateDoor.g.position.y = S.flags.gate ? 8 : 0;
+	for (const p of props) {
+		p.spent = false;
+		p.g.visible = true;
+		p.body.setTranslation({ x: p.x, y: 0.6, z: p.z }, true);
+		p.body.setRotation({ x: 0, y: 0, z: 0, w: 1 }, true);
+		p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+		p.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+	}
+	addSurface(0, -4, 4, "wet", 999);
+	addSurface(-6, -36, 2.8, "wet", 999);
+	$("title").classList.add("hidden");
+	$("hud").classList.remove("hidden");
+	$("dialogue").classList.add("hidden");
+	$("modalShade").classList.add("hidden");
+	$("attractBanner").classList.toggle("hidden", !attract);
+	$("banter").classList.add("hidden");
+	cameraZoom = 26;
+	cameraYaw = 0.52;
+	cameraFocus.set(selectedHero().x, 0, selectedHero().z);
+	attractTime = 0;
+	attractStep = -1;
+	if (!attract && !hubInfo && !trial && !load) {
+		showPrologue();
+	} else if (!load) {
+		toast(
+			attract
+				? "THE BORROWED NIGHT  ·  A tale in motion"
+				: "Find Nera at the lantern. Your story begins here.",
+			4,
+		);
+	}
+	updateHUD(true);
+	log("The party arrives at Lantern Quay.");
+}
+function spawnGroup(group) {
+	if (S.enemies.some((e) => e.group === group)) return;
+	let defs = [];
+	if (group === "dock")
+		defs = [
+			[-7, -8, "Hollow dockhand", 22, "guard"],
+			[-12, -7, "Drowned collector", 20, "wraith"],
+		];
+	if (group === "toll")
+		defs = [
+			[-1, -2, "Captain Vell", 30, "guard"],
+			[-3, -4, "Tollblade", 22, "rogue"],
+			[3, -4, "Ledger mage", 20, "wraith"],
+		];
+	if (group === "court")
+		defs = [
+			[-4, -35, "Bellbound sentinel", 28, "guard"],
+			[5, -37, "Hourless cantor", 24, "wraith"],
+		];
+	if (group === "boss")
+		defs = [
+			[0, -43, "The Bellkeeper", 78, "boss"],
+			[-5, -43, "Borrowed hour", 17, "wraith"],
+			[5, -43, "Borrowed hour", 17, "wraith"],
+		];
+	defs.forEach((d, i) => {
+		const e = {
+			id: group + i,
+			group,
+			x: d[0],
+			z: d[1],
+			name: d[2],
+			hp: d[3],
+			maxHp: d[3],
+			kind: d[4],
+			role: d[4] === "wraith" ? "mage" : d[4],
+			team: "enemy",
+			color:
+				d[4] === "wraith" ? 0x5e8e83 : group === "boss" ? 0x727f75 : 0x9e6451,
+			def: group === "boss" ? 13 : 11,
+			power: group === "boss" ? 7 : 4,
+			status: {},
+			facing: 0,
+			visible: true,
+		};
+		S.enemies.push(e);
+		makeCharacter(e);
+	});
+}
+function showPrologue() {
+	openModal("prologue", { title: "You are thirteen bells late." });
+}
+function saveGame(silent = false) {
+	if (
+		S.attract ||
+		hubInfo ||
+		net?.active ||
+		!S.started ||
+		S.combat ||
+		S.dialogue ||
+		S.mode === "over"
+	) {
+		if (!silent) toast("Find a quiet moment before writing your chronicle.");
+		return false;
+	}
+	try {
+		const data = { version: 1 };
+		for (const k of [
+			"flags",
+			"party",
+			"npcs",
+			"enemies",
+			"selected",
+			"time",
+			"score",
+			"gold",
+			"inventory",
+			"gear",
+			"bag",
+			"level",
+			"xp",
+			"visited",
+			"stats",
+			"runeSequence",
+			"seed",
+		])
+			data[k] = S[k];
+		data.rngSeed = Math.floor(gameRng() * 4294967295);
+		localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+		if (!silent) toast("Chronicle saved");
+		saveStamp = S.time;
+		return true;
+	} catch {
+		if (!silent) toast("The browser could not save your chronicle.");
+		return false;
+	}
+}
+function hasSave() {
+	try {
+		return !!JSON.parse(localStorage.getItem(SAVE_KEY) || "null")?.party;
+	} catch {
+		return false;
+	}
+}
+function loadGame() {
+	try {
+		const data = JSON.parse(localStorage.getItem(SAVE_KEY));
+		if (!data?.party || data.version !== 1) throw 0;
+		newRun({ load: data });
+		toast("Your chronicle continues.");
+	} catch {
+		toast("No readable chronicle was found.");
+		showTitle();
+	}
+}
+function showTitle() {
+	if (hubInfo) return;
+	closeModal();
+	S.mode = "title";
+	S.attract = false;
+	S.dialogue = null;
+	$("dialogue").classList.add("hidden");
+	$("hud").classList.add("hidden");
+	$("attractBanner").classList.add("hidden");
+	$("title").classList.remove("hidden");
+	$("banter").classList.add("hidden");
+	audio.stopVoice();
+	lastInput = performance.now();
+	renderTitle();
+}
+function addSurface(x, z, r, type, rounds = 2) {
+	const s = { x, z, r, type, rounds };
+	S.surfaces.push(s);
+	surfaceView(s);
+}
+function updateStatuses() {
+	for (const e of [...S.party, ...S.enemies]) {
+		if (e.hp <= 0) continue;
+		for (const s of S.surfaces)
+			if (dist(e, s) < s.r) {
+				if (s.type === "wet") e.status.wet = 2;
+				if (s.type === "fire") {
+					e.status.burning = 2;
+					delete e.status.wet;
+				}
+			}
+	}
+}
+function startCombat(group) {
+	if (S.combat || S.mode !== "play") return;
+	spawnGroup(group);
+	const ids = S.enemies
+		.filter((e) => e.group === group && e.hp > 0)
+		.map((e) => e.id);
+	if (!ids.length) return;
+	S.combat = { group, ids, round: 1, phase: "party", queue: [], wait: 0 };
+	S.target = 0;
+	for (const h of S.party) {
+		h.ap = 1;
+		h.bonusAction = 1;
+		h.move = 7;
+		delete h.status.guarding;
+	}
+	if (group === "toll") S.npcs.find((n) => n.id === "vell").visible = false;
+	toast("TACTICAL ENCOUNTER  ·  Your party acts first", 4);
+	audio.sfx("bell");
+	log("Initiative: the party takes the first turn.");
+	if (!S.flags.combatHelp && !S.attract) {
+		S.flags.combatHelp = true;
+		openModal("combatHelp");
+	}
+	updateHUD(true);
+}
+function weaponPower() {
+	return ITEMS[S.gear.weapon]?.power || 0;
+}
+function hit(e, n, type = "physical", source = null) {
+	if (e.hp <= 0) return;
+	let amount = n;
+	if (e.team === "party" && e.status.guarding) amount = Math.ceil(n / 2);
+	if (e.team === "party" && S.attract) amount = 0;
+	e.hp = Math.max(0, e.hp - amount);
+	floater(e, amount ? `−${amount}` : "GUARDED", amount ? "#f1b093" : "#c4dfa8");
+	effect(e.x, e.z, type === "magic" ? 0x9bddcd : 0xd69b6d, "hit", 7);
+	if (e.team === "party" && settings.cameraShake) shake = 0.18;
+	if (e.hp === 0) {
+		audio.sfx("down");
+		log(`${e.name} falls.`);
+		if (e.team === "enemy") {
+			S.stats.kills++;
+			S.score += 25;
+			gainXP(30);
+			if (source?.id === "mira") S.score += 5;
+		} else if (S.party.every((h) => h.hp <= 0)) {
+			defeat();
+			return;
+		} else if (selectedHero().hp <= 0) selectHero(1);
+	} else audio.sfx("hit");
+	reportProgress();
+}
+function heal(e, n) {
+	if (e.hp <= 0 && S.combat) n = Math.min(n, 10);
+	const amount = Math.min(e.maxHp - e.hp, n);
+	e.hp += amount;
+	floater(e, `+${amount}`, "#b4e8c2");
+	effect(e.x, e.z, 0x9ddeae, "heal", 12);
+	audio.sfx("heal");
+}
+function selectHero(dir) {
+	for (let n = 0; n < 3; n++) {
+		S.selected = (S.selected + dir + 3) % 3;
+		if (S.party[S.selected].hp > 0) break;
+	}
+	S.target = 0;
+	audio.sfx("click");
+	updateHUD(true);
+}
+function cycleTarget(dir = 1) {
+	if (!S.combat) return;
+	const n = liveEnemies().length;
+	S.target = (S.target + dir + n) % Math.max(1, n);
+	audio.sfx("click");
+	updateHUD(true);
+}
+function canAct(bonus = false) {
+	const h = selectedHero();
+	if (
+		S.mode !== "play" ||
+		S.hubStopped ||
+		S.dialogue ||
+		S.modal ||
+		!h ||
+		h.hp <= 0
+	)
+		return false;
+	if (hubInfo && AIHub.time() < 0) return false;
+	if (S.combat?.phase === "enemy") {
+		toast("The enemy is acting.");
+		return false;
+	}
+	if (S.combat && (bonus ? h.bonusAction : h.ap) <= 0) {
+		toast(
+			bonus
+				? "Bonus action spent. Switch companion or end the round."
+				: "Action spent. Switch companion with L1 / R1.",
+		);
+		return false;
+	}
+	return true;
+}
+function useAction(bonus = false) {
+	if (S.combat) {
+		const h = selectedHero();
+		if (bonus) h.bonusAction = 0;
+		else h.ap = 0;
+	}
+	updateHUD(true);
+}
+function attack(special = false) {
+	if (!canAct()) return;
+	if (!S.combat) {
+		if (special) {
+			toast("Your signature ability is ready when battle begins.");
+			return;
+		}
+		interact();
+		return;
+	}
+	const h = selectedHero(),
+		e = targetEnemy();
+	if (!e) return;
+	const range = special
+		? h.role === "bard"
+			? 10
+			: h.role === "mage"
+				? 11
+				: 10
+		: h.range;
+	if (dist(h, e) > range) {
+		toast(`Out of range  ·  move ${Math.ceil(dist(h, e) - range)} m closer`);
+		return;
+	}
+	useAction();
+	h.swing = 0.4;
+	h.facing = Math.atan2(e.x - h.x, e.z - h.z);
+	const d = dice();
+	const advantage = e.status.exposed ? 3 : 0;
+	const landed = special || d === 20 || d + 6 + advantage >= e.def;
+	log(
+		`${h.name}: ${special ? h.special : "Strike"} · d20 ${d}${landed ? "" : " · miss"}`,
+	);
+	if (!landed) {
+		floater(e, "MISS", "#e0d8b9");
+		audio.sfx("sword");
+		return;
+	}
+	let n = h.power + weaponPower() + dice(5) + (d === 20 ? 5 : 0);
+	if (special) {
+		audio.sfx("magic");
+		if (h.role === "bard") {
+			for (const t of liveEnemies().filter((t) => dist(e, t) <= 5)) {
+				hit(t, 3 + dice(5) + weaponPower(), "magic", h);
+				t.status.exposed = 2;
+			}
+			effect(e.x, e.z, 0xe0b66f, "shock", 25);
+		} else if (h.role === "rogue") {
+			hit(
+				e,
+				7 + dice(5) + weaponPower() + (e.status.exposed ? 4 : 0),
+				"physical",
+				h,
+			);
+			const x = e.x + Math.sin(e.facing || 0) * -1.5,
+				z = e.z + Math.cos(e.facing || 0) * -1.5;
+			warp(h, THREE.MathUtils.clamp(x, -20, 20), z);
+			effect(h.x, h.z, 0xa3d4bb, "burst", 15);
+		} else {
+			const wet = !!e.status.wet;
+			hit(e, 7 + dice(4) + weaponPower() + (wet ? 5 : 0), "magic", h);
+			beam(h, e, 0x92e4e0);
+			if (wet)
+				for (const other of liveEnemies().filter(
+					(t) => t !== e && dist(e, t) < 5 && t.status.wet,
+				)) {
+					hit(other, 7, "magic", h);
+					beam(e, other, 0x92e4e0);
+				}
+			effect(e.x, e.z, 0xa7ead9, "shock", 25);
+		}
+	} else {
+		audio.sfx("sword");
+		beam(h, e, h.role === "mage" ? 0xb1dace : 0xefe1ad);
+		if (h.role === "rogue" && e.status.exposed) n += 4;
+		hit(e, n, "physical", h);
+		if (d === 20) {
+			floater(h, "CRITICAL", "#efd38e");
+			S.score += 10;
+		}
+	}
+	for (const p of props) {
+		if (
+			p.explosive &&
+			!p.spent &&
+			Math.hypot(p.body.translation().x - e.x, p.body.translation().z - e.z) <
+				2.3 &&
+			special
+		)
+			explode(p);
+	}
+	checkCombat();
+}
+function potion() {
+	if (!canAct(true)) return;
+	if (S.inventory.salve <= 0) {
+		toast("No healing draughts left. Auntie Fen stocks more.");
+		return;
+	}
+	const h = selectedHero();
+	if (h.hp === h.maxHp) {
+		toast("Already at full vitality.");
+		return;
+	}
+	S.inventory.salve--;
+	useAction(true);
+	heal(h, 16);
+	log(`${h.name} drinks a healing draught.`);
+	updateHUD(true);
+}
+function defend() {
+	if (!canAct()) return;
+	if (!S.combat) {
+		openJournal("party");
+		return;
+	}
+	selectedHero().status.guarding = 2;
+	useAction();
+	toast("Guarding  ·  incoming damage halved until your next round.");
+	log(`${selectedHero().name} takes a guarded stance.`);
+}
+function shove() {
+	if (!canAct(true) || !S.combat) return;
+	const h = selectedHero(),
+		e = targetEnemy();
+	if (!e) return;
+	if (dist(h, e) > 2.8) {
+		toast("Shove requires a target within 3 m.");
+		return;
+	}
+	const dx = e.x - h.x,
+		dz = e.z - h.z,
+		l = Math.hypot(dx, dz) || 1;
+	moveEntity(e, (dx / l) * 3.5, (dz / l) * 3.5, 0.1);
+	useAction(true);
+	e.status.exposed = 2;
+	hit(e, 3, "physical", h);
+	effect(e.x, e.z, 0xd4c99b, "burst", 10);
+	for (const p of props)
+		if (
+			!p.spent &&
+			Math.hypot(p.body.translation().x - e.x, p.body.translation().z - e.z) <
+				2 &&
+			p.explosive
+		)
+			explode(p);
+	log(`${h.name} shoves ${e.name} off balance.`);
+	checkCombat();
+}
+function throwOil() {
+	if (!canAct() || !S.combat) return;
+	if (!S.inventory.oil) {
+		toast("No ember flasks left.");
+		return;
+	}
+	const h = selectedHero(),
+		e = targetEnemy();
+	if (!e || dist(h, e) > 10) {
+		toast("Ember flasks reach 10 m.");
+		return;
+	}
+	S.inventory.oil--;
+	useAction();
+	audio.sfx("fire");
+	for (const t of [...liveEnemies(), ...S.party].filter(
+		(t) => t.hp > 0 && dist(t, e) < 3,
+	))
+		hit(t, 8, "fire", h);
+	addSurface(e.x, e.z, 3, "fire", 3);
+	effect(e.x, e.z, 0xf2b357, "burst", 35);
+	for (const p of props)
+		if (
+			p.explosive &&
+			!p.spent &&
+			Math.hypot(p.body.translation().x - e.x, p.body.translation().z - e.z) < 4
+		)
+			explode(p);
+	checkCombat();
+}
+function explode(p) {
+	if (p.spent) return;
+	p.spent = true;
+	p.g.visible = false;
+	const t = p.body.translation();
+	p.body.setTranslation({ x: t.x, y: -30, z: t.z }, true);
+	audio.sfx("fire");
+	effect(t.x, t.z, 0xf2ad52, "burst", 38);
+	addSurface(t.x, t.z, 3.3, "fire", 3);
+	for (const e of [...S.party, ...liveEnemies()])
+		if (e.hp > 0 && Math.hypot(e.x - t.x, e.z - t.z) < 3.5) hit(e, 10, "fire");
+	for (const other of props)
+		if (!other.spent) {
+			const d = other.body.translation(),
+				dx = d.x - t.x,
+				dz = d.z - t.z,
+				l = Math.hypot(dx, dz);
+			if (l < 6) other.body.applyImpulse({ x: dx * 7, y: 9, z: dz * 7 }, true);
+		}
+	log("An ember barrel bursts. The ground is burning.");
+}
+function endTurn() {
+	if (!S.combat || S.combat.phase !== "party" || S.modal || S.dialogue) return;
+	S.combat.phase = "enemy";
+	S.combat.queue = liveEnemies().map((e) => e.id);
+	S.combat.wait = 0.5;
+	toast("THE ENEMY ACTS", 1.4);
+	updateHUD(true);
+}
+function enemyAction(e) {
+	if (!e || e.hp <= 0) return;
+	const heroes = S.party
+		.filter((h) => h.hp > 0)
+		.sort((a, b) => dist(e, a) - dist(e, b));
+	const h = heroes[0];
+	if (!h) return;
+	if (e.status.burning) {
+		hit(e, 3, "fire");
+		if (e.hp <= 0) return;
+	}
+	const d = dist(e, h),
+		range = e.kind === "wraith" || e.kind === "boss" ? 8 : 2.3;
+	if (d > range) {
+		const step = Math.min(5, d - range + 0.4);
+		moveEntity(e, ((h.x - e.x) / d) * step, ((h.z - e.z) / d) * step, 0.1);
+	}
+	e.facing = Math.atan2(h.x - e.x, h.z - e.z);
+	e.swing = 0.45;
+	if (dist(e, h) > range + 0.5) {
+		log(`${e.name} advances.`);
+		return;
+	}
+	if (e.kind === "boss" && S.combat.round % 3 === 0) {
+		audio.sfx("bell");
+		for (const p of heroes) if (dist(e, p) < 10) hit(p, 7, "magic", e);
+		effect(e.x, e.z, 0x92cfc4, "shock", 35);
+		log("The thirteenth toll strikes every nearby companion.");
+		return;
+	}
+	const roll = dice(),
+		def = h.def + (ITEMS[S.gear.armour]?.def || 0);
+	if (roll + 5 >= def || S.attract) {
+		const n = e.power + dice(4);
+		beam(e, h, e.kind === "wraith" ? 0x9bb8a2 : 0xdfb282);
+		hit(h, n, e.kind === "wraith" ? "magic" : "physical", e);
+		log(`${e.name} hits ${h.name} for ${n}.`);
+	} else {
+		floater(h, "EVADE", "#a8d6c5");
+		log(`${h.name} evades ${e.name}.`);
+	}
+}
+function newRound() {
+	if (!S.combat) return;
+	S.combat.round++;
+	S.combat.phase = "party";
+	for (const h of S.party) {
+		if (h.hp > 0 && h.status.burning) hit(h, 3, "fire");
+		h.ap = 1;
+		h.bonusAction = 1;
+		h.move = 7;
+		for (const k in h.status) {
+			h.status[k]--;
+			if (h.status[k] <= 0) delete h.status[k];
+		}
+		delete h.status.guarding;
+	}
+	for (const e of S.enemies)
+		for (const k in e.status) {
+			e.status[k]--;
+			if (e.status[k] <= 0) delete e.status[k];
+		}
+	for (let i = S.surfaces.length - 1; i >= 0; i--) {
+		const s = S.surfaces[i];
+		if (--s.rounds <= 0) {
+			worldRoot.remove(s.view);
+			S.surfaces.splice(i, 1);
+		}
+	}
+	S.selected = S.party.findIndex((h) => h.hp > 0);
+	if (S.selected < 0) S.selected = 0;
+	toast(`ROUND ${S.combat.round}  ·  Actions restored`, 2);
+	updateHUD(true);
+}
+function checkCombat() {
+	if (!S.combat || S.mode === "over") return;
+	if (liveEnemies().length) return;
+	const group = S.combat.group;
+	S.combat = null;
+	S.gold += group === "boss" ? 55 : 24;
+	for (const h of S.party) {
+		if (h.hp <= 0) h.hp = Math.ceil(h.maxHp * 0.3);
+		h.ap = 1;
+		h.bonusAction = 1;
+		h.move = 7;
+		delete h.status.burning;
+	}
+	S.score += 75;
+	audio.sfx("win");
+	toast("ENCOUNTER WON  ·  +24 gold  ·  +75 renown", 4);
+	if (group === "toll") {
+		S.flags.toll = true;
+		S.flags.seal = true;
+		gain(100, "The gate seal is yours");
+		S.npcs.find((n) => n.id === "vell").visible = false;
+		banter(
+			"Mira",
+			"A convincing argument. Though I rather preferred the part with fewer witnesses.",
+		);
+	}
+	if (group === "dock") {
+		S.flags.dock = true;
+		banter(
+			"Orrin",
+			"The dead are usually more agreeable. These must have worked in administration.",
+		);
+	}
+	if (group === "court") S.flags.court = true;
+	if (group === "boss") {
+		S.flags.warden = true;
+		finishStory("shatter");
+		return;
+	}
+	saveGame(true);
+	updateHUD(true);
+}
+function defeat() {
+	if (S.attract) {
+		S.party.forEach((h) => (h.hp = h.maxHp));
+		return;
+	}
+	S.dead = true;
+	S.mode = "over";
+	audio.sfx("fail");
+	S.dialogue = null;
+	$("dialogue").classList.add("hidden");
+	openModal("defeat");
+	if (hubInfo) finishHub();
+	if (net.active) net.finish();
+}
+function nearestInteraction() {
+	if (S.combat) return null;
+	const h = selectedHero();
+	if (!h) return null;
+	const objects = [
+		...S.npcs.filter((n) => n.visible !== false && n.hp > 0),
+		...INTERACTABLES.filter((o) => {
+			if (o.id === "chest" && S.flags.chest) return false;
+			if (o.id === "gate" && S.flags.gate) return false;
+			return true;
+		}),
+	];
+	return (
+		objects
+			.filter((o) => dist(h, o) < 3.5)
+			.sort((a, b) => dist(h, a) - dist(h, b))[0] || null
+	);
+}
+function interact() {
+	if (S.modal || S.dialogue || S.combat || S.mode !== "play") return;
+	const o = nearestInteraction();
+	if (!o) {
+		toast("Walk toward a person or a gold marker, then press ✕ / Enter.");
+		return;
+	}
+	audio.sfx("click");
+	switch (o.id) {
+		case "nera":
+			talkNera();
+			break;
+		case "vell":
+			talkVell();
+			break;
+		case "merchant":
+			openModal("shop");
+			audio.speak("Something sharp? Something restorative? I sell both.");
+			break;
+		case "tovin":
+			talkTovin();
+			break;
+		case "witness":
+			talkWitness();
+			break;
+		case "chest":
+			openChest();
+			break;
+		case "shrine":
+			if (S.flags.shrine) {
+				toast("The river has given what it can.");
+				break;
+			}
+			S.flags.shrine = true;
+			S.party.forEach((h) => heal(h, h.maxHp));
+			gain(20, "A blessing of river water");
+			saveGame(true);
+			break;
+		case "camp":
+			camp();
+			break;
+		case "book":
+			S.flags.lore = true;
+			gainOnce("loreReward", 30, "A memory recovered");
+			dialog(
+				"Orrin",
+				"A less than reassuring inscription",
+				"“First came the river. Then we raised a lantern. Last, we rang the bell.” Below it, in a smaller hand: “The keeper’s daughter was named Nera. Please. Someone must remember.”",
+				[
+					{
+						text: "Remember the name and the order.",
+						fn: () => {
+							closeDialogue();
+							saveGame(true);
+						},
+					},
+				],
+			);
+			break;
+		case "gate":
+			if (!S.flags.seal) {
+				toast("A brass seal is missing. Captain Vell carries it.");
+				break;
+			}
+			S.flags.gate = true;
+			gateDoor.c.setSensor(true);
+			gain(80, "The borrowed gate opens");
+			audio.sfx("bell");
+			toast("THE HOURLESS COURT  ·  Beyond the borrowed gate", 4);
+			spawnGroup("court");
+			saveGame(true);
+			break;
+		case "riverRune":
+		case "lanternRune":
+		case "bellRune":
+			activateRune(o.id);
+			break;
+	}
+}
+function gainOnce(flag, n, msg) {
+	if (!S.flags[flag]) {
+		S.flags[flag] = true;
+		gain(n, msg);
+	}
+}
+function dialog(name, role, text, choices, roll = null) {
+	S.dialogue = { name, role, text, choices, roll, index: 0 };
+	renderDialogue();
+	audio.speak(
+		text,
+		name === "Orrin"
+			? 0.8
+			: name === "The Bellkeeper"
+				? 0.66
+				: name === "Mira"
+					? 1.35
+					: 1,
+	);
+	updateHUD(true);
+}
+function closeDialogue() {
+	S.dialogue = null;
+	$("dialogue").classList.add("hidden");
+	audio.stopVoice();
+	updateHUD(true);
+}
+function chooseDialogue(index) {
+	const d = S.dialogue;
+	if (!d || !d.choices[index]) return;
+	audio.sfx("click");
+	d.choices[index].fn();
+}
+function abilityCheck(label, dc, success, failure) {
+	const h = selectedHero(),
+		roll = dice(),
+		mod =
+			h.bonus +
+			(label === "Sleight of hand"
+				? h.role === "rogue"
+					? 4
+					: -2
+				: h.role === "bard"
+					? 1
+					: 0) +
+			(ITEMS[S.gear.charm]?.charm || 0) +
+			(S.level === 2 ? 1 : 0),
+		total = roll + mod,
+		pass = total >= dc || S.attract;
+	S.stats.checks++;
+	audio.sfx("roll");
+	dialog(
+		h.name,
+		`${label} · DC ${dc}`,
+		pass
+			? "The words find their mark. For a moment, the city seems to hold its breath."
+			: "For a moment, there is hope. Then the silence makes its opinion known.",
+		[
+			{
+				text: pass ? "Let the moment turn." : "See what follows.",
+				fn: () => {
+					closeDialogue();
+					(pass ? success : failure)();
+				},
+			},
+		],
+		{ roll, mod, total, dc, pass },
+	);
+	if (pass) S.score += 20;
+}
+function talkNera() {
+	if (S.flags.nera) {
+		dialog(
+			"Nera Vale",
+			"Keeper of borrowed hours",
+			S.flags.ferryman
+				? "Tovin lives? Then there is still some kindness in this damp little world. Take his token. My father always knew a ferryman by the debts he forgave."
+				: "Captain Vell keeps the seal. Beyond the gate, three old stones hold the bell asleep. The inscription by the hospice may remember how to wake it.",
+			[
+				{ text: "We will find a way.", fn: closeDialogue },
+				{
+					text: "“Your father?”",
+					fn: () => {
+						S.flags.lore = true;
+						dialog(
+							"Nera Vale",
+							"A daughter, before anything else",
+							"He was a good man before the city taught him to count. If you find him in there, tell him I have grown tired of waiting for breakfast.",
+							[{ text: "I will remember.", fn: closeDialogue }],
+						);
+					},
+				},
+			],
+		);
+		return;
+	}
+	dialog(
+		"Nera Vale",
+		"Keeper of borrowed hours",
+		"You are late. A promising beginning. The city has borrowed this same night for thirty years, and tonight our creditor means to collect. I need someone foolish enough to ask for an extension.",
+		[
+			{
+				text: "A hopeless cause? At last, work suited to my talents.",
+				fn: () => {
+					S.flags.nera = true;
+					closeDialogue();
+					gain(30, "The borrowed night begins");
+					banter(
+						"Mira",
+						"We could have found a nice, ordinary debt. A tavern bill. A horse.",
+					);
+					saveGame(true);
+				},
+			},
+			{
+				text: "What does he want?",
+				fn: () =>
+					dialog(
+						"Nera Vale",
+						"Keeper of borrowed hours",
+						"Everything the night has kept alive. The sick, the old, the children who were never supposed to see morning. Captain Vell has the gate seal. Start with him. He still remembers being human. Most days.",
+						[
+							{
+								text: "Then we start with a conversation.",
+								fn: () => {
+									S.flags.nera = true;
+									closeDialogue();
+									gain(30, "The borrowed night begins");
+									saveGame(true);
+								},
+							},
+						],
+					),
+			},
+			{
+				text: "Give me a moment to take the measure of this place.",
+				fn: closeDialogue,
+			},
+		],
+	);
+}
+function tollSuccess(kind) {
+	S.flags.toll = true;
+	S.flags.seal = true;
+	S.stats.kindness++;
+	gain(120, "The captain yields the seal");
+	gainXP(60);
+	S.npcs.find((n) => n.id === "vell").visible = false;
+	dialog(
+		"Captain Vell",
+		"A man, briefly off duty",
+		kind === "pay"
+			? "Thirty gold. The price of a conscience, apparently. Take the seal before I discover that mine costs more."
+			: "I had a daughter here once. Before the nights stopped ending. Take it. If the bell asks who sent you, tell it nobody worth remembering.",
+		[
+			{
+				text: "Everyone is worth remembering.",
+				fn: () => {
+					closeDialogue();
+					saveGame(true);
+				},
+			},
+		],
+	);
+}
+function talkVell() {
+	if (S.flags.toll) return;
+	dialog(
+		"Captain Vell",
+		"Collector of unpaid mornings",
+		"The gate is closed by order of the Bellkeeper. No pilgrims, no petitions, and emphatically no musicians. The last one tried to pay in exposure.",
+		[
+			{
+				text: "[Persuasion · DC 12] You guard a city. There should be people left in it.",
+				fn: () =>
+					abilityCheck(
+						"Persuasion",
+						12,
+						() => tollSuccess("words"),
+						() => {
+							dialog(
+								"Captain Vell",
+								"Collector of unpaid mornings",
+								"A fine speech. I shall have it entered in the ledger under “insufficient funds.”",
+								[
+									{
+										text: "Then let us settle this another way.",
+										fn: () => {
+											closeDialogue();
+											startCombat("toll");
+										},
+									},
+									{
+										text: "Pay 30 gold for the seal.",
+										fn: () => {
+											if (S.gold < 30) {
+												toast("You need 30 gold.");
+												return;
+											}
+											S.gold -= 30;
+											tollSuccess("pay");
+										},
+									},
+									{ text: "We will return.", fn: closeDialogue },
+								],
+							);
+						},
+					),
+			},
+			{
+				text: `Pay 30 gold. <span>We have ${S.gold}.</span>`,
+				fn: () => {
+					if (S.gold < 30) {
+						toast("You need 30 gold.");
+						return;
+					}
+					S.gold -= 30;
+					tollSuccess("pay");
+				},
+			},
+			{
+				text: "Draw steel. The city has paid enough.",
+				fn: () => {
+					closeDialogue();
+					startCombat("toll");
+				},
+			},
+		],
+	);
+}
+function talkTovin() {
+	if (S.flags.ferryman) {
+		dialog(
+			"Tovin",
+			"Ferryman, soon afloat",
+			"My boat is yours at dawn. If we get a dawn. Never thought I’d find myself haggling over one of those.",
+			[{ text: "Keep a seat for us.", fn: closeDialogue }],
+		);
+		return;
+	}
+	if (!S.flags.dock && S.enemies.some((e) => e.group === "dock" && e.hp > 0)) {
+		dialog(
+			"Tovin",
+			"Ferryman, unwilling guest",
+			"If you could persuade those walking invoices to stop standing on my livelihood, I would be terribly grateful. They have already repossessed my lunch.",
+			[
+				{
+					text: "We will get you out.",
+					fn: () => {
+						closeDialogue();
+						startCombat("dock");
+					},
+				},
+				{
+					text: "[Sleight of hand · DC 13] Slip the lock and lead him out quietly.",
+					fn: () =>
+						abilityCheck(
+							"Sleight of hand",
+							13,
+							() => rescueTovin(true),
+							() => {
+								closeDialogue();
+								startCombat("dock");
+							},
+						),
+				},
+				{ text: "Stay quiet. We will be back.", fn: closeDialogue },
+			],
+		);
+		return;
+	}
+	rescueTovin();
+}
+function rescueTovin(sneak = false) {
+	S.flags.ferryman = true;
+	S.stats.kindness++;
+	S.bag.push("charm");
+	S.gold += 18;
+	gain(90, "Tovin is free");
+	gainXP(45);
+	const npc = S.npcs.find((n) => n.id === "tovin");
+	warp(npc, -12, -9);
+	if (sneak) {
+		S.flags.dock = true;
+		for (const e of S.enemies.filter((e) => e.group === "dock")) {
+			e.visible = false;
+			e.hp = 0;
+		}
+	}
+	dialog(
+		"Tovin",
+		"A man with a tomorrow",
+		"A token, for the crossing. It helps people listen. My wife said that was a gift I ought to use on myself. If you see Nera, ask after her father. The bell remembers him.",
+		[
+			{
+				text: "Take the ferryman’s token. <span>Charm · +2 dialogue checks</span>",
+				fn: () => {
+					S.gear.charm = "charm";
+					closeDialogue();
+					saveGame(true);
+				},
+			},
+		],
+	);
+}
+function openChest() {
+	if (S.flags.chest) return;
+	dialog(
+		"Mira",
+		"Professional curiosity",
+		"A lock this self-important usually guards either a fortune or someone’s exceedingly private poetry. I do hope it is the former.",
+		[
+			{
+				text: "[Sleight of hand · DC 11] Make a discreet introduction.",
+				fn: () =>
+					abilityCheck(
+						"Sleight of hand",
+						11,
+						() => {
+							S.flags.chest = true;
+							S.gold += 26;
+							S.inventory.oil++;
+							gain(35, "A useful discovery");
+							audio.sfx("coin");
+							toast("Strongbox opened  ·  26 gold + 1 ember flask", 4);
+							saveGame(true);
+						},
+						() => {
+							selectedHero().hp = Math.max(1, selectedHero().hp - 5);
+							S.flags.chest = true;
+							S.gold += 12;
+							toast("A spring trap! −5 vitality. Salvaged 12 gold.", 4);
+							saveGame(true);
+						},
+					),
+			},
+			{ text: "Leave the poetry undisturbed.", fn: closeDialogue },
+		],
+	);
+}
+function camp() {
+	if (S.flags.camp) {
+		toast("The fire is low. You have already rested here.");
+		return;
+	}
+	dialog(
+		"Mira",
+		"A rare quiet moment",
+		"We have a fire, a city full of debt, and approximately one idea between us. I have had worse evenings. Shall we sit?",
+		[
+			{
+				text: "Rest. Restore the party and share a story. <span>One rest this night.</span>",
+				fn: () => {
+					S.flags.camp = true;
+					S.party.forEach((h) => {
+						h.hp = h.maxHp;
+						h.status = {};
+					});
+					S.inventory.salve++;
+					closeDialogue();
+					audio.sfx("heal");
+					gain(25, "A moment worth keeping");
+					banter(
+						"Orrin",
+						"I once tried to bottle a sunrise. Do not look at me like that. It was a very small sunrise.",
+						7,
+					);
+					saveGame(true);
+				},
+			},
+			{ text: "The bell will not wait.", fn: closeDialogue },
+		],
+	);
+}
+function activateRune(id) {
+	if (S.flags.runes) {
+		toast("The stones are singing together.");
+		return;
+	}
+	if (!S.flags.gate) {
+		toast("The gate must open first.");
+		return;
+	}
+	if (
+		!S.flags.court &&
+		S.enemies.some((e) => e.group === "court" && e.hp > 0)
+	) {
+		toast("The sentinels will not let you reach the stones.");
+		startCombat("court");
+		return;
+	}
+	const order = ["riverRune", "lanternRune", "bellRune"];
+	if (id === order[S.runeSequence.length]) {
+		S.runeSequence.push(id);
+		audio.sfx("magic");
+		const o = INTERACTABLES.find((o) => o.id === id);
+		effect(o.x, o.z, 0xa4d7c4, "shock", 20);
+		toast(
+			`${["River", "Lantern", "Bell"][S.runeSequence.length - 1]}  ·  ${S.runeSequence.length} of 3 notes`,
+		);
+		if (S.runeSequence.length === 3) {
+			S.flags.runes = true;
+			S.npcs.find((n) => n.id === "witness").visible = true;
+			gain(100, "The keeper wakes");
+			banter(
+				"Orrin",
+				"The equation balances. I find that considerably more alarming than when it did not.",
+			);
+			saveGame(true);
+		}
+	} else {
+		S.runeSequence = [];
+		audio.sfx("fail");
+		selectedHero().hp = Math.max(1, selectedHero().hp - 3);
+		toast("A discordant note. −3 vitality. The stones fall silent.", 4);
+	}
+}
+function talkWitness() {
+	if (!S.flags.runes) {
+		toast("Three stones hold the keeper asleep.");
+		return;
+	}
+	dialog(
+		"The Bellkeeper",
+		"The creditor at the end of the night",
+		"For thirty years, I have given this city another hour. I asked only that it remember why. Now all it remembers is how to ask for more. Tell me, little songbird: what is a morning worth?",
+		[
+			...(S.flags.lore
+				? [
+						{
+							text: "[Memory] Nera has grown tired of waiting for breakfast.",
+							fn: () => {
+								closeDialogue();
+								finishStory("mercy");
+							},
+						},
+					]
+				: []),
+			{
+				text: "[Persuasion · DC 14] A song at every dawn. Let the city pay in living.",
+				fn: () =>
+					abilityCheck(
+						"Persuasion",
+						14,
+						() => finishStory("bargain"),
+						() =>
+							dialog(
+								"The Bellkeeper",
+								"An old and tired god",
+								"Words. I have a city full of them. Show me what yours are worth.",
+								[
+									{
+										text: "Then we break the bell.",
+										fn: () => {
+											closeDialogue();
+											S.npcs.find((n) => n.id === "witness").visible = false;
+											startCombat("boss");
+										},
+									},
+									{
+										text: "There must be something we have missed.",
+										fn: closeDialogue,
+									},
+								],
+							),
+					),
+			},
+			{
+				text: "No one owes you their life. Break the bell.",
+				fn: () => {
+					closeDialogue();
+					S.npcs.find((n) => n.id === "witness").visible = false;
+					startCombat("boss");
+				},
+			},
+			{ text: "We need more time.", fn: closeDialogue },
+		],
+	);
+}
+function finishStory(ending) {
+	closeDialogue();
+	S.flags.ending = ending;
+	S.mode = "over";
+	S.score += ending === "mercy" ? 350 : ending === "bargain" ? 300 : 250;
+	S.stats.kindness += ending === "mercy" ? 1 : 0;
+	audio.sfx("win");
+	audio.sfx("bell");
+	effect(0, -43, 0xefe1a1, "burst", 60);
+	openModal("ending", { ending });
+	reportProgress();
+	if (hubInfo) finishHub();
+	if (net.active) net.finish();
+}
+function objective() {
+	if (!S.flags.nera) return "Speak to Nera by the lantern.";
+	if (!S.flags.seal) return "Obtain Captain Vell’s gate seal.";
+	if (!S.flags.gate) return "Cross the bridge and open the northern gate.";
+	if (!S.flags.court) return "Lay the hourless sentinels to rest.";
+	if (!S.flags.runes) return "Wake the stones: river, lantern, bell.";
+	return "Confront the Bellkeeper. Decide the city’s dawn.";
+}
+function reportProgress() {
+	if (hubInfo && !S.hubStopped)
+		AIHub.progress({
+			score: S.score,
+			label: S.flags.ending
+				? "Dawn reclaimed"
+				: S.flags.gate
+					? "The hourless court"
+					: "Lantern Quay",
+		});
+}
+function finishHub() {
+	if (!hubInfo || S.hubReported) return;
+	S.hubReported = true;
+	AIHub.result({
+		score: S.score,
+		stats: {
+			Renown: S.score,
+			"Foes defeated": S.stats.kills,
+			Kindness: S.stats.kindness,
+			Ending: S.flags.ending || "Unfinished",
+		},
+		awards: S.flags.ending
+			? [{ title: "A dawn of your own", detail: ENDINGS[S.flags.ending].sub }]
+			: [],
+	});
+}
+function updateGame(dt) {
+	if (S.hubStopped || S.mode !== "play") return;
+	if (hubInfo && AIHub.time() < 0) {
+		$("roundHint").textContent = Number.isFinite(AIHub.time())
+			? `Begins in ${Math.ceil(-AIHub.time() / 1000)}`
+			: "Waiting for the shared clock";
+		return;
+	}
+	if (net.started && Date.now() < net.startAt) {
+		$("roundHint").textContent =
+			`Expedition begins in ${Math.ceil((net.startAt - Date.now()) / 1000)}`;
+		return;
+	}
+	if (S.modal || S.dialogue) return;
+	S.time += dt;
+	updateStatuses();
+	if (S.combat) {
+		if (S.combat.phase === "enemy") {
+			S.combat.wait -= dt;
+			if (S.combat.wait <= 0) {
+				const id = S.combat.queue.shift();
+				if (id) {
+					enemyAction(S.enemies.find((e) => e.id === id));
+					if (S.combat) S.combat.wait = 0.9;
+					checkCombat();
+				} else newRound();
+			}
+		} else if (
+			settings.autoEnd &&
+			S.party.filter((h) => h.hp > 0).every((h) => h.ap === 0)
+		)
+			endTurn();
+	}
+	const h = selectedHero();
+	if (h && h.hp > 0 && (!S.combat || S.combat.phase === "party")) {
+		let dx = input.moveX,
+			dz = input.moveZ;
+		const mag = Math.hypot(dx, dz);
+		if (mag > 0.02) {
+			if (S.combat && h.move <= 0) {
+				if (nowTime % 2 < dt)
+					toast("Movement spent. Act, switch companion, or end the round.");
+			} else {
+				const speed = S.combat ? 5 : 6;
+				const step = Math.min(
+					dt * speed * (mag > 1 ? 1 : mag),
+					S.combat ? h.move : 99,
+				);
+				const moved = moveEntity(h, (dx / mag) * step, (dz / mag) * step, dt);
+				if (S.combat) h.move = Math.max(0, h.move - moved);
+				if (moved > 0.001) audio.sfx("step");
+			}
+		} else h.moving = false;
+	}
+	if (!S.combat && h) {
+		S.party.forEach((p, i) => {
+			if (p === h || p.hp <= 0) return;
+			const a = i * 2.6 + 1,
+				target = { x: h.x + Math.sin(a) * 1.7, z: h.z + Math.cos(a) * 1.7 };
+			let d = dist(p, target);
+			p.moving = false;
+			if (d > 1.1) {
+				moveEntity(
+					p,
+					((target.x - p.x) / d) * Math.min(d, dt * 5.8),
+					((target.z - p.z) / d) * Math.min(d, dt * 5.8),
+					dt,
+				);
+				if (d > 13) warp(p, h.x + (i - 1) * 1.4, h.z + 1.6);
+			}
+		});
+		if (!S.attract) {
+			if (S.flags.nera && !S.flags.dock && dist(h, { x: -9, z: -7 }) < 4.3)
+				startCombat("dock");
+			if (S.flags.gate && !S.flags.court && h.z < -32) startCombat("court");
+		}
+	}
+	if (h) {
+		const place =
+			h.z < -29
+				? "The Hourless Court"
+				: h.z < -14
+					? "The Borrowed Bridge"
+					: "Lantern Quay";
+		$("locationName").textContent = place;
+		if (!S.visited.includes(place)) {
+			S.visited.push(place);
+			if (place !== "Lantern Quay") gain(20, place);
+		}
+	}
+	if (S.time - saveStamp > 45 && !S.attract) saveGame(true);
+	if (S.attract) updateAttract(dt);
+	if (hubInfo) reportProgress();
+}
+function updateAttract(dt) {
+	attractTime += dt;
+	const step = Math.floor(attractTime / 8);
+	if (step !== attractStep) {
+		attractStep = step;
+		S.modal = null;
+		S.dialogue = null;
+		$("modalShade").classList.add("hidden");
+		$("dialogue").classList.add("hidden");
+		if (step === 0) {
+			banter(
+				"Nera",
+				"The city is out of time. Fortunately, you seem to have brought a musician.",
+				6,
+			);
+		}
+		if (step === 1) {
+			S.flags.nera = true;
+			S.flags.dock = true;
+			warp(S.party[0], 0, 2);
+			warp(S.party[1], -2, 3);
+			warp(S.party[2], 2, 4);
+			startCombat("toll");
+			banter(
+				"Mira",
+				"I believe we have reached the part of the conversation with knives.",
+				5,
+			);
+		}
+		if (step === 3) {
+			for (const e of S.enemies) {
+				e.hp = 0;
+				e.visible = false;
+			}
+			S.combat = null;
+			S.flags.toll = true;
+			S.flags.seal = true;
+			S.flags.gate = true;
+			gateDoor.c.setSensor(true);
+			warp(S.party[0], 0, -23);
+			warp(S.party[1], -1.5, -21);
+			warp(S.party[2], 1.5, -21);
+			banter(
+				"Orrin",
+				"A bridge between one regrettable decision and the next.",
+				6,
+			);
+		}
+		if (step === 4) {
+			warp(S.party[0], 0, -34);
+			warp(S.party[1], -2, -33);
+			warp(S.party[2], 2, -32);
+			startCombat("court");
+		}
+		if (step === 6) {
+			for (const e of S.enemies) {
+				e.hp = 0;
+				e.visible = false;
+			}
+			S.combat = null;
+			S.flags.court = true;
+			S.flags.runes = true;
+			S.npcs.find((n) => n.id === "witness").visible = true;
+			warp(S.party[0], 0, -41);
+			warp(S.party[1], -2, -40);
+			warp(S.party[2], 2, -40);
+			audio.sfx("bell");
+			banter(
+				"The Bellkeeper",
+				"Tell me, little songbird: what is a morning worth?",
+				7,
+			);
+		}
+		if (step >= 7) {
+			newRun({ attract: true });
+			return;
+		}
+	}
+	if (S.combat && S.combat.phase === "party") {
+		S.aiTimer = (S.aiTimer || 0) - dt;
+		if (S.aiTimer <= 0) {
+			S.aiTimer = 1.1;
+			let idx = S.party.findIndex((h) => h.ap > 0);
+			if (idx < 0) {
+				endTurn();
+			} else {
+				S.selected = idx;
+				let e = targetEnemy(),
+					h = selectedHero();
+				if (e) {
+					if (dist(h, e) > 7) warp(h, e.x - 2 + idx, e.z + 2);
+					attack(true);
+				}
+			}
+		}
+	} else if (step === 0 || step === 3) {
+		const h = selectedHero();
+		moveEntity(h, Math.sin(attractTime * 0.4) * dt * 0.6, -dt * 0.7, dt, true);
+	}
+}
+let shake = 0,
+	accumulator = 0,
+	previous = performance.now(),
+	previousTick = performance.now(),
+	gameTimer = null,
+	gpuLost = false;
+function tick() {
+	if (!initialized) return;
+	const now = performance.now(),
+		dt = Math.max(0, Math.min((now - previousTick) / 1000, 0.05));
+	previousTick = now;
+	nowTime = now / 1000;
+	skyTime += dt;
+	if (!S.hubStopped) pollInput(dt);
+	if (
+		S.mode === "title" &&
+		!S.modal &&
+		performance.now() - lastInput >= 10000 &&
+		!hubInfo
+	)
+		newRun({ attract: true });
+	if (!gpuLost) updateGame(dt);
+	if (net.active) net.update(dt);
+	if (S.mode !== "title" && !S.hubStopped && !S.modal && !S.dialogue) {
+		accumulator += dt;
+		let steps = 0;
+		while (accumulator >= 1 / 60 && steps++ < 4) {
+			physics.timestep = 1 / 60;
+			physics.step();
+			accumulator -= 1 / 60;
+		}
+	}
+	if (nowTime > toastUntil) $("toast").style.opacity = 0;
+	if (nowTime > banterUntil) $("banter").classList.add("hidden");
+	if (now - lastHud > 100) {
+		updateHUD();
+		lastHud = now;
+	}
+	audio.update(!!S.combat);
+}
+function animate(now) {
+	if (!initialized) return;
+	const dt = Math.max(0, Math.min((now - previous) / 1000, 0.1));
+	previous = now;
+	frameCount++;
+	syncViews(dt, skyTime);
+	updateCamera(dt, S.mode === "title");
+	if (shake > 0) {
+		shake = Math.max(0, shake - dt);
+		camera.position.x += Math.sin(now * 0.05) * shake;
+		camera.position.y += Math.cos(now * 0.07) * shake * 0.5;
+	}
+	updateFloaters(dt);
+	if (!gpuLost) renderer.render(scene, camera);
+	requestAnimationFrame(animate);
+}
+
+function actionIcon(name, role) {
+	const paths = {
+		strike: "M5 19 18 6l1-3-3 1L4 16m-1-3 8 8m-7-1-2 2",
+		skill:
+			role === "mage"
+				? "M14 2 5 14h7l-2 8 9-13h-7z"
+				: role === "rogue"
+					? "M5 20 15 4l5-2-1 6L8 20m-5-4 8 5"
+					: "M8 17V5l11-2v12M8 8l11-2M8 17c0 3-6 4-6 1s6-4 6-1m11-2c0 3-6 4-6 1s6-4 6-1",
+		potion: "M9 2h6m-5 0v6L5 15v5h14v-5l-5-7V2M6 14h12",
+		shove: "M3 12h16m-6-6 6 6-6 6M3 7v10",
+		oil: "M12 2c1 5 7 7 7 12a7 7 0 0 1-14 0c0-3 2-5 4-8 0 4 1 5 2 5 2-3 1-5 1-9z",
+		turn: "M6 3h12M6 21h12M7 3c0 7 10 11 10 18M17 3c0 7-10 11-10 18M8 6h8M8 18h8",
+		journal: "M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3zM12 6v16",
+		pack: "M8 3h8l-2 5c5 3 8 8 5 12H5c-3-4 0-9 5-12zM8 8h8",
+		party: "M12 2 3 6v7c0 5 9 9 9 9s9-4 9-9V6zM12 7v9m-4-5h8",
+	};
+	return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[name] || "M12 2l3 7 7 3-7 3-3 7-3-7-7-3 7-3z"}"/></svg>`;
+}
+function escapeHTML(s) {
+	return String(s).replace(
+		/[&<>"']/g,
+		(c) =>
+			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+				c
+			],
+	);
+}
+let titleIndex = 0,
+	titleChoices = [],
+	uiChoices = [],
+	floaters = [],
+	journalTab = "quests";
+function renderTitle() {
+	titleChoices = [
+		{ label: "Begin the tale", fn: () => newRun(), primary: true },
+		...(hasSave() ? [{ label: "Continue your chronicle", fn: loadGame }] : []),
+		{ label: "Play with friends", fn: () => openModal("online") },
+		{ label: "Settings & controls", fn: () => openModal("settings") },
+		{ label: "About this tale", fn: () => openModal("credits") },
+	];
+	titleIndex = Math.min(titleIndex, titleChoices.length - 1);
+	$("titleButtons").innerHTML = titleChoices
+		.map(
+			(x, i) =>
+				`<button data-title="${i}" class="${i === titleIndex ? "selected " : ""}${x.primary ? "primary" : ""}">${x.label}<span class="menu-arrow">${i === titleIndex ? "→" : ""}</span></button>`,
+		)
+		.join("");
+}
+function renderDialogue() {
+	const d = S.dialogue;
+	if (!d) return;
+	const found = [...HEROES, ...NPCS].find((n) => n.name === d.name);
+	$("dialogue").classList.remove("hidden");
+	$("dialogue").innerHTML =
+		`<div class="dialog-portrait">${portrait(found?.id || "orrin")}<span class="sigil">◆</span></div><div><h2 class="dialog-speaker">${escapeHTML(d.name)}</h2><div class="dialog-role">${escapeHTML(d.role.toUpperCase())}</div><p class="dialog-text">${escapeHTML(d.text)}</p>${d.roll ? `<div class="roll-result"><div class="die"><b>${d.roll.roll}</b></div><div class="roll-note">${d.roll.roll} + ${d.roll.mod} = ${d.roll.total} <span class="faint">/ DC ${d.roll.dc}</span><br><b>${d.roll.pass ? "SUCCESS" : "A DIFFERENT TURN"}</b></div></div>` : ""}<div class="dialog-choices">${d.choices.map((c, i) => `<button class="dialog-choice ${d.index === i ? "selected" : ""}" data-dialog="${i}">${i + 1}. &nbsp;${c.text}</button>`).join("")}</div><div class="dialog-foot">↑ ↓ Choose &nbsp; · &nbsp; ✕ / Enter Speak &nbsp; · &nbsp; ○ / Backspace Leave · Esc Settings</div></div>`;
+}
+function openModal(type, data = {}) {
+	if (S.hubStopped && type !== "credits" && type !== "roundOver") return;
+	S.modal = { type, data, index: 0 };
+	$("modalShade").classList.remove("hidden");
+	$("touchNotice").classList.add("hidden");
+	audio.sfx("click");
+	renderModal();
+}
+function closeModal() {
+	S.modal = null;
+	$("modalShade").classList.add("hidden");
+	uiChoices = [];
+	lastInput = performance.now();
+	updateTouchNotice();
+}
+function openJournal(tab = "quests") {
+	journalTab = tab;
+	openModal("journal");
+}
+function button(label, fn, detail = "", disabled = false) {
+	const i = uiChoices.length;
+	uiChoices.push({ fn, disabled });
+	return `<button class="panel-button ${S.modal?.index === i ? "selected" : ""}" data-ui="${i}" ${disabled ? "disabled" : ""}><span>${label}</span>${detail ? `<small>${detail}</small>` : ""}</button>`;
+}
+function tabs(items) {
+	return `<div class="tabs">${items
+		.map((t) => {
+			const i = uiChoices.length;
+			uiChoices.push({ fn: t.fn });
+			return `<button data-ui="${i}" class="${t.active ? "selected" : ""}">${t.name}</button>`;
+		})
+		.join("")}</div>`;
+}
+function panelHead(tag, title) {
+	return `<div class="eyebrow">${tag}</div><h2>${title}</h2>`;
+}
+function foot(text = "↑ ↓ Choose · ✕ / Enter Select") {
+	return `<div class="modal-footer"><span>${text}</span><span>○ / Esc Back</span></div>`;
+}
+function renderModal() {
+	if (!S.modal) return;
+	uiChoices = [];
+	const m = S.modal,
+		type = m.type;
+	let html = "";
+	if (type === "prologue") {
+		html =
+			panelHead(
+				"CHAPTER I · THE BORROWED NIGHT",
+				"You are thirteen bells late.",
+			) +
+			`<p>At Lantern Quay, the lamps have burned for thirty years without a dawn. A woman named Nera is waiting by the last of them.</p><p>You have a song, two companions, and a gift for arriving at precisely the wrong moment.</p><div class="two-col"><div class="detail-card"><h3>A party, not a passenger</h3><p>Lead Rowan, Mira, or Orrin. Your companions follow in exploration. In combat, command each one’s movement, action, and bonus action.</p></div><div class="detail-card"><h3>Your choices leave a mark</h3><p>Talk, trade, steal, fight, or remember. There are three complete endings, and kindness can open a door steel cannot.</p></div></div><div class="hint-box">LS / WASD to move · ✕ / Enter to interact · L1 R1 / Z C to switch companion.</div>` +
+			button(
+				"Step into Lantern Quay",
+				() => {
+					closeModal();
+					banter(
+						"Rowan",
+						"A city that cannot sleep. At last, a sympathetic audience.",
+					);
+					saveGame(true);
+				},
+				"✕",
+			) +
+			foot(
+				"A complete 15–25 minute adventure · Progress autosaves in quiet moments",
+			);
+	}
+	if (type === "combatHelp") {
+		html =
+			panelHead("TACTICAL ENCOUNTER", "Every companion gets a turn.") +
+			`<p>Move and act with your whole party in any order. The enemy waits until you end the round. L1 / R1 switches companions; L2 / R2 chooses a target.</p><div class="help-grid"><div><b>✕ / Enter · Strike</b>One action. Move within your weapon’s range.</div><div><b>□ / Q · Signature</b>Discord exposes, Nightfall exploits, Stormglass chains through wet enemies.</div><div><b>○ / E · Healing draught</b>Restore 16 health. One bonus action.</div><div><b>△ / Space · End round</b>Let the enemy act, then restore all actions.</div><div><b>↑ / F · Shove</b>A bonus action. Push a nearby foe into danger.</div><div><b>↓ / G · Guard</b>Spend your action to halve incoming damage.</div></div><div class="hint-box">Wet ground amplifies lightning. Ember flasks and red barrels leave burning ground. Fallen companions recover when you win.</div>` +
+			button("Take command", closeModal, "✕") +
+			foot();
+	}
+	if (type === "settings") {
+		html =
+			panelHead("A MOMENT BETWEEN NOTES", "Settings & controls") +
+			`<p>Adjust your own view of the tale.</p><div class="modal-actions">` +
+			button("Return to the tale", closeModal, "○ / Esc") +
+			button(
+				"Master volume",
+				() => cycleSetting("volume", 25),
+				`${settings.volume}%`,
+			) +
+			button("Music", () => cycleSetting("music", 20), `${settings.music}%`) +
+			button(
+				"Sound effects",
+				() => cycleSetting("effects", 20),
+				`${settings.effects}%`,
+			) +
+			button(
+				"Gibberish voices",
+				() => cycleSetting("voice", 20),
+				`${settings.voice}%`,
+			) +
+			button(
+				"Invert horizontal axis",
+				() => toggleSetting("invertX"),
+				settings.invertX ? "On" : "Off",
+			) +
+			button(
+				"Invert vertical axis",
+				() => toggleSetting("invertY"),
+				settings.invertY ? "On" : "Off",
+			) +
+			button(
+				"Auto-end after all party actions",
+				() => toggleSetting("autoEnd"),
+				settings.autoEnd ? "On" : "Off",
+			) +
+			button(
+				"Impact camera shake",
+				() => toggleSetting("cameraShake"),
+				settings.cameraShake ? "On" : "Off",
+			) +
+			button("Controls & combat guide", () => openModal("controls"), "View") +
+			button(
+				"Fullscreen",
+				() => {
+					if (document.fullscreenElement)
+						document.exitFullscreen().catch(() => {});
+					else
+						document.documentElement
+							.requestFullscreen()
+							.catch(() => toast("Fullscreen is unavailable here."));
+				},
+				document.fullscreenElement ? "Exit" : "Enter",
+			) +
+			(S.started && S.mode !== "title" && !hubInfo && !net.active
+				? button(
+						"Save chronicle",
+						() => {
+							closeModal();
+							saveGame();
+						},
+						"This browser",
+					) +
+					button(
+						"Return to title",
+						() => {
+							saveGame(true);
+							showTitle();
+						},
+						"Continue later",
+					)
+				: "") +
+			(net.active
+				? button(
+						"Leave expedition",
+						() => {
+							net.leave();
+							showTitle();
+						},
+						"Return to title",
+					)
+				: "") +
+			`</div>` +
+			foot();
+	}
+	if (type === "controls") {
+		html =
+			panelHead("KEEP YOUR HANDS ON THE STORY", "Controls") +
+			`<div class="help-grid"><div><b>Left stick · WASD / arrows</b>Move the selected companion. Up always moves toward the top of the screen.</div><div><b>Right stick · I K U O</b>Orbit the camera and adjust distance.</div><div><b>Cross · Enter / left click action</b>Interact, select, or strike your target.</div><div><b>Square · Q</b>Use your companion’s signature ability.</div><div><b>Circle · E / Escape in menus</b>Healing draught in battle; back in menus.</div><div><b>Triangle · Space</b>End the party’s round in combat.</div><div><b>L1 / R1 · Z / C</b>Switch companions.</div><div><b>L2 / R2 · Tab / Shift+Tab</b>Cycle enemy targets.</div><div><b>D-pad ↑ / ↓ · F / G</b>Shove / guard. Both have actual action costs.</div><div><b>D-pad ← · J</b>Journal, equipment, and party progression.</div><div><b>D-pad → · R</b>Throw an ember flask at the selected enemy.</div><div><b>Options · Escape</b>Settings. Create + Options is reserved for ai-hub.</div></div><div class="hint-box">Keyboard and mouse use the same actions as the controller. There is no click-to-move. A controller or keyboard is required on touch devices.</div>` +
+			button("Return", () => openModal("settings"), "○") +
+			foot();
+	}
+	if (type === "journal") {
+		html =
+			panelHead("THE COMPANY’S CHRONICLE", "Things worth remembering") +
+			tabs([
+				{
+					name: "The tale",
+					active: journalTab === "quests",
+					fn: () => {
+						journalTab = "quests";
+						renderModal();
+					},
+				},
+				{
+					name: "The company",
+					active: journalTab === "party",
+					fn: () => {
+						journalTab = "party";
+						renderModal();
+					},
+				},
+				{
+					name: "The satchel",
+					active: journalTab === "pack",
+					fn: () => {
+						journalTab = "pack";
+						renderModal();
+					},
+				},
+			]);
+		if (journalTab === "quests") {
+			html +=
+				`<div class="hint-box">${objective()}</div>` +
+				JOURNAL.map(
+					(q) =>
+						`<div class="detail-card"><small>${q.tag} · ${q.id === "bell" ? (S.flags.ending ? "COMPLETE" : "IN PROGRESS") : q.id === "ferry" ? (S.flags.ferryman ? "COMPLETE" : "OPTIONAL") : (S.flags.lore ? "DISCOVERED" : "A RUMOUR")}</small><h3>${q.name}</h3><p>${q.text}</p></div>`,
+				).join("");
+		}
+		if (journalTab === "party") {
+			const h = selectedHero();
+			html +=
+				`<div class="two-col"><div class="detail-card"><div style="float:left;width:5rem;height:6rem;margin-right:1rem">${portrait(h.id)}</div><h3>${h.name}</h3><small>${h.className} · Level ${S.level}</small><p>${h.hp} / ${h.maxHp} vitality<br>${h.def + (ITEMS[S.gear.armour]?.def || 0)} defence · ${h.power + weaponPower()} base damage</p></div><div class="detail-card"><h3>${h.special}</h3><p>${h.specialDesc}</p></div></div>` +
+				button(
+					"Previous companion",
+					() => {
+						selectHero(-1);
+						renderModal();
+					},
+					"L1",
+				) +
+				button(
+					"Next companion",
+					() => {
+						selectHero(1);
+						renderModal();
+					},
+					"R1",
+				);
+			if (S.level === 2 && !S.flags.levelChoice) {
+				html +=
+					`<p>Level II earned. Choose a lasting gift for the company.</p>` +
+					button(
+						"Resolve",
+						() => chooseTalent("resolve"),
+						"Every companion gains +8 maximum vitality",
+					) +
+					button(
+						"Insight",
+						() => chooseTalent("insight"),
+						"+2 to all dialogue checks",
+					) +
+					button(
+						"Ferocity",
+						() => chooseTalent("ferocity"),
+						"+2 base damage for every companion",
+					);
+			} else
+				html += `<div class="hint-box">${S.level === 1 ? `${S.xp} / 120 experience to Level II` : S.flags.levelChoice ? `Company gift: ${S.flags.levelChoice}` : "Level II"} · Equipment benefits the entire party.</div>`;
+		}
+		if (journalTab === "pack") {
+			html += `<p>${S.gold} gold · ${S.inventory.salve} healing draughts · ${S.inventory.oil} ember flasks</p>`;
+			for (const id of [...new Set(S.bag)]) {
+				const item = ITEMS[id],
+					equipped = Object.values(S.gear).includes(id);
+				html +=
+					`<div class="detail-card"><h3>${item.name}</h3><p>${item.desc}</p>` +
+					button(
+						equipped ? "Equipped" : "Equip for the company",
+						() => {
+							if (item.slot === "Weapon") S.gear.weapon = id;
+							if (item.slot === "Armour") S.gear.armour = id;
+							if (item.slot === "Charm") S.gear.charm = id;
+							audio.sfx("coin");
+							renderModal();
+						},
+						item.slot,
+						equipped,
+					) +
+					`</div>`;
+			}
+			html += button(
+				"Drink a healing draught",
+				() => {
+					closeModal();
+					potion();
+				},
+				`${S.inventory.salve} remaining`,
+				!S.inventory.salve,
+			);
+		}
+		html += button("Return to the streets", closeModal, "○") + foot();
+	}
+	if (type === "shop") {
+		html =
+			panelHead("AUNTIE FEN’S USEFUL REGRETS", "Good steel. Better advice.") +
+			`<p>“No refunds on destiny. Everything else is negotiable.”</p><div class="hint-box">Your purse: ${S.gold} gold · Equipment applies to the whole company.</div>`;
+		for (const id of ["rapier", "coat", "salve", "oil"]) {
+			const i = ITEMS[id],
+				owned = S.bag.includes(id);
+			html +=
+				`<div class="detail-card"><h3>${i.name}</h3><p>${i.desc}</p>` +
+				button(
+					owned ? "Already yours" : `Buy ${i.name}`,
+					() => buyItem(id),
+					`${i.price} gold`,
+					owned || S.gold < i.price,
+				) +
+				`</div>`;
+		}
+		html += button("Leave the stall", closeModal, "○") + foot();
+	}
+	if (type === "defeat") {
+		html =
+			panelHead("AN UNFINISHED VERSE", "Even good stories stumble.") +
+			`<p>The last lantern gutters. Your company has fallen, but the tale need not end here.</p><div class="detail-card"><h3>A little tactical advice</h3><p>Switch companions after spending an action. Use potions before someone falls. Guard against the Bellkeeper’s third-round toll. Water makes Stormglass considerably less polite.</p></div>` +
+			(hubInfo || net.active
+				? `<p>Your ${S.score} renown has been recorded for this expedition.</p>`
+				: button(
+						hasSave() ? "Continue from your chronicle" : "Try the tale again",
+						() => (hasSave() ? loadGame() : newRun()),
+						"✕",
+					) + button("Return to title", showTitle, "○")) +
+			foot();
+	}
+	if (type === "ending") {
+		const e = ENDINGS[m.data.ending || S.flags.ending];
+		html =
+			`<div class="ending-seal">♮</div><div class="eyebrow" style="justify-content:center">${e.sub}</div><h2 class="ending-title">${e.title}</h2>${e.text
+				.split("\n\n")
+				.map((p) => `<p>${p}</p>`)
+				.join(
+					"",
+				)}<div class="two-col"><div class="detail-card"><h3>${S.score} renown</h3><small>${S.stats.kills} foes laid to rest · ${S.stats.kindness} acts of kindness</small></div><div class="detail-card"><h3>${Math.floor(S.time / 60)} minutes, one dawn</h3><small>${S.flags.ferryman ? "Tovin is free" : "Tovin still waits"} · ${S.flags.lore ? "A name remembered" : "A name lost"}</small></div></div><div class="hint-box">THE END OF THE BORROWED NIGHT<br>Three endings. Another choice may tell another story.</div>` +
+			(hubInfo || net.active
+				? `<p>The expedition’s results have been submitted.</p>`
+				: button("Another telling", () => newRun(), "Begin anew") +
+					button("Return to title", showTitle, "○")) +
+			button("About this tale", () => openModal("credits"), "Credits") +
+			foot();
+	}
+	if (type === "credits") {
+		html =
+			panelHead("THE MAKING OF A BORROWED NIGHT", "About this tale") +
+			`<p>An original homage to party-based fantasy roleplaying. Characters, story, music, geometry, portraits, and world design are original to this demo.</p>`;
+		for (const [heading, lines] of Object.entries(CREDITS)) {
+			html += `<div class="credit-section"><h3>${escapeHTML(heading)}</h3><ul>${lines.map((l) => `<li>${escapeHTML(l)}</li>`).join("")}</ul></div>`;
+		}
+		html +=
+			button(
+				"Return",
+				() => {
+					closeModal();
+					if (S.mode === "over" && S.flags.ending)
+						openModal("ending", { ending: S.flags.ending });
+				},
+				"○",
+			) + foot();
+	}
+	if (type === "online") {
+		html = renderOnlineModal();
+	}
+	if (type === "roundOver") {
+		html =
+			panelHead("THE SHARED EXPEDITION", "The clock has spoken.") +
+			`<p>${S.score} renown earned. ${S.flags.ending ? "Your company found its dawn." : "Some stories take more than a single night."}</p>` +
+			(net.active ? net.scoreHTML() : "") +
+			(hubInfo
+				? `<p>The hub will show the company’s standings.</p>`
+				: button(
+						"Return to title",
+						() => {
+							net.leave();
+							showTitle();
+						},
+						"○",
+					)) +
+			foot();
+	}
+	if (type === "error") {
+		html =
+			panelHead("THE LANTERNS COULD NOT BE LIT", "WebGPU is required") +
+			`<p class="warning">${escapeHTML(m.data.message || "The renderer could not start.")}</p><p>Use a browser with WebGPU and hardware acceleration enabled. Serve this file over HTTPS or localhost. There is no WebGL fallback.</p>` +
+			button("Retry loading", () => location.reload(), "✕") +
+			button("Settings & controls", () => openModal("settings"), "Options") +
+			button("About this tale", () => openModal("credits"), "Credits");
+	}
+	$("modal").innerHTML = html;
+	const buttons = [...$("modal").querySelectorAll("[data-ui]")];
+	if (m.index >= uiChoices.length) m.index = 0;
+	buttons.forEach((b) =>
+		b.classList.toggle("selected", Number(b.dataset.ui) === m.index),
+	);
+}
+function chooseTalent(id) {
+	S.flags.levelChoice = id;
+	if (id === "resolve")
+		for (const h of S.party) {
+			h.maxHp += 8;
+			h.hp += 8;
+		}
+	if (id === "insight") S.party.forEach((h) => (h.bonus += 2));
+	if (id === "ferocity") S.party.forEach((h) => (h.power += 2));
+	audio.sfx("win");
+	renderModal();
+	toast("A lasting gift for the company.");
+}
+function buyItem(id) {
+	const i = ITEMS[id];
+	if (S.gold < i.price) return;
+	if (i.slot !== "Consumable" && S.bag.includes(id)) return;
+	S.gold -= i.price;
+	if (i.slot === "Consumable") S.inventory[id]++;
+	else {
+		S.bag.push(id);
+		if (i.slot === "Weapon") S.gear.weapon = id;
+		if (i.slot === "Armour") S.gear.armour = id;
+		if (i.slot === "Charm") S.gear.charm = id;
+	}
+	audio.sfx("coin");
+	toast(`${i.name} acquired${i.slot === "Consumable" ? "" : " & equipped"}`);
+	renderModal();
+}
+function cycleSetting(key, step) {
+	settings[key] = settings[key] + step > 100 ? 0 : settings[key] + step;
+	storeSettings();
+	renderModal();
+}
+function toggleSetting(key) {
+	settings[key] = !settings[key];
+	storeSettings();
+	renderModal();
+}
+function storeSettings() {
+	try {
+		localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+	} catch {}
+	audio.volume = settings.volume / 100;
+	audio.music = settings.music / 100;
+	audio.effects = settings.effects / 100;
+	audio.voice = settings.voice / 100;
+	audio.set();
+}
+function menuMove(dir) {
+	if (S.modal) {
+		const n = uiChoices.length;
+		if (!n) return;
+		let next = S.modal.index;
+		for (let i = 0; i < n; i++) {
+			next = (next + dir + n) % n;
+			if (!uiChoices[next].disabled) break;
+		}
+		S.modal.index = next;
+		document
+			.querySelectorAll("#modal [data-ui]")
+			.forEach((b) =>
+				b.classList.toggle("selected", Number(b.dataset.ui) === next),
+			);
+		$("modal")
+			.querySelector(`[data-ui="${next}"]`)
+			?.scrollIntoView({ block: "nearest", behavior: "instant" });
+		audio.sfx("click");
+		return;
+	}
+	if (S.dialogue) {
+		S.dialogue.index =
+			(S.dialogue.index + dir + S.dialogue.choices.length) %
+			S.dialogue.choices.length;
+		renderDialogue();
+		return;
+	}
+	if (S.mode === "title") {
+		titleIndex = (titleIndex + dir + titleChoices.length) % titleChoices.length;
+		renderTitle();
+		audio.sfx("click");
+	}
+}
+function menuConfirm() {
+	if (S.modal) {
+		const b = uiChoices[S.modal.index];
+		if (b && !b.disabled) b.fn();
+		return;
+	}
+	if (S.dialogue) {
+		chooseDialogue(S.dialogue.index);
+		return;
+	}
+	if (S.mode === "title") {
+		titleChoices[titleIndex]?.fn();
+		return;
+	}
+}
+function back() {
+	if (S.modal) {
+		if (S.modal.type === "online" && net.active && !net.started) {
+			net.leave();
+		}
+		closeModal();
+		return;
+	}
+	if (S.dialogue) {
+		closeDialogue();
+		return;
+	}
+	if (S.mode === "play") openModal("settings");
+}
+function updateHUD(force = false) {
+	if (S.mode === "title") return;
+	const h = selectedHero();
+	if (!h) return;
+	$("questBrief").textContent = objective();
+	$("goldCount").textContent = S.gold;
+	$("renownCount").textContent = `${S.score} renown`;
+	$("phaseTag").textContent = S.combat
+		? `${S.combat.phase === "party" ? "YOUR PARTY" : "ENEMY TURN"} · ROUND ${S.combat.round}`
+		: "EXPLORATION";
+	if (!hubInfo || AIHub.time() >= 0)
+		$("roundHint").textContent = S.combat
+			? `${h.ap ? "●" : "○"} Action  ·  ${h.bonusAction ? "●" : "○"} Bonus  ·  ${h.move.toFixed(1)} m movement`
+			: S.flags.gate
+				? "The Hourless Court"
+				: "Lantern Quay · Dusk";
+	$("party").innerHTML = S.party
+		.map(
+			(p, i) =>
+				`<button class="party-card ${i === S.selected ? "active" : ""} ${p.hp <= 0 ? "down" : ""}" data-hero="${i}"><span class="party-key">${i + 1}</span><div class="portrait">${portrait(p.id)}</div><div class="party-text"><h3>${p.name}</h3><small>${p.className.toUpperCase()}</small><div class="hpbar"><i style="width:${(p.hp / p.maxHp) * 100}%"></i></div><div class="hp-label"><span>${p.hp} / ${p.maxHp}</span><span class="ap-dot">${S.combat ? (p.ap ? "●" : "○") + " " + (p.bonusAction ? "◆" : "◇") : "LV " + S.level}</span></div></div>${
+					Object.keys(p.status).length
+						? `<span class="status-icons">${Object.keys(p.status)
+								.map((k) =>
+									k === "wet"
+										? "WET"
+										: k === "exposed"
+											? "EXPOSED"
+											: k === "burning"
+												? "BURNING"
+												: "GUARD",
+								)
+								.join(" · ")}</span>`
+						: ""
+				}</button>`,
+		)
+		.join("");
+	const abilityData = S.combat
+		? [
+				["strike", "⚔", "Strike", "✕ / ↵", "1 action", h.ap <= 0],
+				["skill", h.specialGlyph, h.special, "□ / Q", "1 action", h.ap <= 0],
+				[
+					"potion",
+					"♜",
+					"Mend",
+					"○ / E",
+					`${S.inventory.salve} draughts · bonus`,
+					!S.inventory.salve || h.bonusAction <= 0,
+				],
+				["shove", "➜", "Shove", "↑ / F", "1 bonus", h.bonusAction <= 0],
+				[
+					"oil",
+					"♨",
+					"Ember flask",
+					"→ / R",
+					`${S.inventory.oil} left · action`,
+					!S.inventory.oil || h.ap <= 0,
+				],
+				["turn", "⌛", "End round", "△ / ␣", "Enemy acts", false],
+			]
+		: [
+				["strike", "✧", "Interact", "✕ / ↵", "Talk · examine", false],
+				["journal", "▤", "Chronicle", "← / J", "Quests & lore", false],
+				["pack", "◇", "Satchel", "B", `${S.gold} gold`, false],
+				["party", "♜", "Company", "↓ / G", `Level ${S.level}`, false],
+			];
+	$("abilities").innerHTML = abilityData
+		.map(
+			(a) =>
+				`<button class="ability ${a[5] ? "dim" : ""}" data-act="${a[0]}" title="${a[0] === "skill" ? h.specialDesc : a[2]}"><span class="bind">${a[3]}</span><span class="glyph">${actionIcon(a[0] === "strike" && !S.combat ? "interact" : a[0], h.role)}</span><span class="name">${a[2]}</span><span class="cost">${a[4]}</span></button>`,
+		)
+		.join("");
+	const e = targetEnemy();
+	if (S.combat && e) {
+		$("targetPanel").classList.remove("hidden");
+		const range = h.range,
+			mod = e.status.exposed ? 9 : 6;
+		const chance = Math.min(95, Math.max(5, (21 - e.def + mod) * 5));
+		$("targetPanel").innerHTML =
+			`<h3>${e.name}</h3><div class="hpbar"><i style="width:${(e.hp / e.maxHp) * 100}%"></i></div><small>${e.hp} / ${e.maxHp} · ${dist(h, e).toFixed(1)} m · ${dist(h, e) <= range ? chance + "% strike" : "Move closer to strike"}</small><div><small>${Object.keys(e.status).join(" · ").toUpperCase() || "L2 / R2 · Tab to change target"}</small></div>`;
+	} else $("targetPanel").classList.add("hidden");
+	const o = nearestInteraction();
+	$("interaction").classList.toggle(
+		"hidden",
+		!o || !!S.dialogue || !!S.modal || nowTime < banterUntil,
+	);
+	if (o)
+		$("interaction").innerHTML =
+			`<span class="button-glyph">✕</span> ${o.name} <span class="faint">/ Enter</span>`;
+	$("combatLog").innerHTML = S.combat
+		? S.log
+				.slice(-4)
+				.map((t) => `<div>${escapeHTML(t)}</div>`)
+				.join("")
+		: "";
+	const labels = [];
+	for (const n of S.npcs) {
+		if (S.combat || n.visible === false || dist(h, n) > 17) continue;
+		const p = project(n.x, 2.6, n.z);
+		if (p.visible)
+			labels.push(
+				`<div class="world-label" style="left:${p.x}px;top:${p.y}px"><span class="quest-pin">${(n.id === "nera" && !S.flags.nera) || (n.id === "vell" && !S.flags.seal) || n.id === "witness" ? "◆" : "·"}</span><b>${n.name}</b></div>`,
+			);
+	}
+	if (S.combat)
+		for (const n of liveEnemies()) {
+			const p = project(n.x, n.kind === "boss" ? 4 : 2.6, n.z);
+			if (p.visible)
+				labels.push(
+					`<div class="world-label enemy" style="left:${p.x}px;top:${p.y}px"><b>${n.name} · ${n.hp}</b></div>`,
+				);
+		}
+	for (const o of INTERACTABLES) {
+		if (
+			dist(h, o) > 10 ||
+			(o.id === "chest" && S.flags.chest) ||
+			(o.id === "gate" && S.flags.gate)
+		)
+			continue;
+		const p = project(o.x, 1.9, o.z);
+		if (p.visible)
+			labels.push(
+				`<div class="world-label" style="left:${p.x}px;top:${p.y}px"><span class="quest-pin">${o.icon}</span>${dist(h, o) < 4 ? `<b>${o.name}</b>` : ""}</div>`,
+			);
+	}
+	$("worldLabels").innerHTML = S.dialogue || S.modal ? "" : labels.join("");
+	drawMap();
+	if (net.active && net.started) {
+		$("onlineBoard").classList.remove("hidden");
+		$("onlineBoard").innerHTML =
+			`<div class="eyebrow">EXPEDITION</div>${net.scoreHTML()}<div style="font-size:.6rem;margin-top:.5rem">${Math.max(0, Math.ceil((net.deadline - Date.now()) / 60000))} min remaining</div>`;
+	} else $("onlineBoard").classList.add("hidden");
+}
+function floater(e, text, color) {
+	const el = document.createElement("span");
+	el.className = "floater";
+	el.textContent = text;
+	el.style.color = color;
+	$("floaters").appendChild(el);
+	floaters.push({
+		el,
+		x: e.x,
+		z: e.z,
+		y: e.kind === "boss" ? 3.8 : 2.5,
+		life: 1.4,
+	});
+}
+function updateFloaters(dt) {
+	for (let i = floaters.length - 1; i >= 0; i--) {
+		const f = floaters[i];
+		f.life -= dt;
+		f.y += dt * 0.8;
+		const p = project(f.x, f.y, f.z);
+		f.el.style.left = p.x + "px";
+		f.el.style.top = p.y + "px";
+		f.el.style.opacity = Math.min(1, f.life * 2);
+		if (f.life <= 0) {
+			f.el.remove();
+			floaters.splice(i, 1);
+		}
+	}
+}
+function drawMap() {
+	const c = $("minimap"),
+		ctx = c.getContext("2d"),
+		h = selectedHero();
+	if (!h) return;
+	const px = (x) => 90 + x * 2.7,
+		pz = (z) => 90 + (z - h.z) * 2.3;
+	ctx.fillStyle = "#173c43";
+	ctx.fillRect(0, 0, 180, 180);
+	ctx.fillStyle = "#7f9272";
+	ctx.fillRect(px(-22), pz(-15), 44 * 2.7, 42 * 2.3);
+	ctx.fillRect(px(-21), pz(-49), 42 * 2.7, 20 * 2.3);
+	ctx.fillStyle = "#b1ac85";
+	ctx.fillRect(px(-4), pz(-49), 8 * 2.7, 76 * 2.3);
+	ctx.fillStyle = "#6c7863";
+	for (const b of [
+		[-14, 12, 7, 7],
+		[14, 17, 7, 6],
+		[-15, -3, 9, 8],
+		[14, -6, 8, 8],
+	])
+		ctx.fillRect(
+			px(b[0] - b[2] / 2),
+			pz(b[1] - b[3] / 2),
+			b[2] * 2.7,
+			b[3] * 2.3,
+		);
+	for (const n of S.npcs.filter((n) => n.visible !== false)) {
+		ctx.fillStyle = "#e6c27a";
+		ctx.beginPath();
+		ctx.arc(px(n.x), pz(n.z), 2.8, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	for (const e of S.enemies.filter((e) => e.hp > 0 && e.visible !== false)) {
+		ctx.fillStyle = "#cb775c";
+		ctx.beginPath();
+		ctx.arc(px(e.x), pz(e.z), 2.5, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	for (const p of S.party) {
+		ctx.fillStyle = p === h ? "#fff0b9" : "#a8d9bf";
+		ctx.beginPath();
+		ctx.arc(px(p.x), pz(p.z), p === h ? 4 : 2.4, 0, Math.PI * 2);
+		ctx.fill();
+	}
+	ctx.strokeStyle = "#e2d7a599";
+	ctx.strokeRect(px(h.x) - 7, pz(h.z) - 7, 14, 14);
+}
+let keyboardSeen = false;
+function updateTouchNotice() {
+	const touch =
+		matchMedia("(pointer:coarse)").matches &&
+		!keyboardSeen &&
+		!Array.from(navigator.getGamepads?.() || []).some(Boolean);
+	$("touchNotice").classList.toggle("hidden", !touch || !!S.modal);
+}
+document.addEventListener("click", (e) => {
+	const b = e.target.closest("button");
+	if (!b) return;
+	if (registerInput()) return;
+	audio.init();
+	if (b.dataset.title !== undefined) {
+		titleIndex = Number(b.dataset.title);
+		titleChoices[titleIndex]?.fn();
+	}
+	if (b.dataset.ui !== undefined) {
+		const i = Number(b.dataset.ui);
+		if (S.modal) S.modal.index = i;
+		const c = uiChoices[i];
+		if (c && !c.disabled) c.fn();
+	}
+	if (b.dataset.dialog !== undefined) chooseDialogue(Number(b.dataset.dialog));
+	if (b.dataset.hero !== undefined && !S.modal && !S.dialogue) {
+		S.selected = Number(b.dataset.hero);
+		if (selectedHero().hp <= 0) selectHero(1);
+		updateHUD(true);
+	}
+	if (b.dataset.act) action(b.dataset.act);
+});
+
+const ROOM_NAMES = ["Amber Finch", "Teal Otter", "Sage Fox", "Golden Wren"];
+const net = {
+	active: false,
+	host: false,
+	started: false,
+	peer: null,
+	connections: new Map(),
+	players: [],
+	me: 0,
+	code: "",
+	entry: "",
+	status: "",
+	deadline: 0,
+	startAt: 0,
+	nextScore: 0,
+	finished: false,
+	roundEnded: false,
+	attempt: 0,
+	async library() {
+		if (window.Peer) return;
+		if (AIHub.active)
+			throw new Error("Standalone rooms are unavailable inside hub sessions.");
+		await new Promise((resolve, reject) => {
+			const s = document.createElement("script");
+			s.src = "https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js";
+			s.onload = resolve;
+			s.onerror = () =>
+				reject(
+					new Error(
+						"Could not load the room connection library. Check your connection.",
+					),
+				);
+			document.head.appendChild(s);
+		});
+	},
+	async create() {
+		this.leave();
+		const attempt = ++this.attempt;
+		this.status = "Lighting a room lantern…";
+		renderModal();
+		try {
+			await this.library();
+			if (attempt !== this.attempt) return;
+			const n = crypto.getRandomValues(new Uint32Array(1))[0];
+			this.code = String(100000 + (n % 900000));
+			this.host = true;
+			this.me = 0;
+			this.players = [{ id: 0, name: ROOM_NAMES[0], score: 0, done: false }];
+			this.peer = new Peer("bardslate-" + this.code, { debug: 0 });
+			this.bindPeer(attempt);
+			this.peer.on("open", () => {
+				if (attempt !== this.attempt) return;
+				this.active = true;
+				this.status = "Room open. Share the six-digit code with your friends.";
+				if (S.modal?.type === "online") renderModal();
+			});
+			this.peer.on("connection", (c) => {
+				if (this.started || this.connections.size >= 3) {
+					c.on("open", () => {
+						c.send({ t: "full" });
+						setTimeout(() => c.close(), 200);
+					});
+					return;
+				}
+				let id = 1;
+				while (this.connections.has(id)) id++;
+				this.connections.set(id, c);
+				c.on("open", () => {
+					if (this.started) {
+						c.close();
+						return;
+					}
+					this.players.push({
+						id,
+						name: ROOM_NAMES[id],
+						score: 0,
+						done: false,
+					});
+					this.bindConnection(c, id);
+					c.send({
+						t: "welcome",
+						me: id,
+						players: this.players,
+						code: this.code,
+					});
+					this.broadcast({ t: "roster", players: this.players });
+					if (S.modal?.type === "online") renderModal();
+				});
+			});
+		} catch (e) {
+			this.status = e.message;
+			if (S.modal?.type === "online") renderModal();
+		}
+	},
+	async join() {
+		if (this.entry.length !== 6) return;
+		const code = this.entry;
+		this.leave();
+		const attempt = ++this.attempt;
+		this.code = code;
+		this.status = "Finding the other company…";
+		renderModal();
+		try {
+			await this.library();
+			if (attempt !== this.attempt) return;
+			this.peer = new Peer(undefined, { debug: 0 });
+			this.bindPeer(attempt);
+			this.peer.on("open", () => {
+				if (attempt !== this.attempt) return;
+				const c = this.peer.connect("bardslate-" + code, {
+					reliable: true,
+					serialization: "json",
+				});
+				this.connections.set(0, c);
+				this.bindConnection(c, 0);
+				setTimeout(() => {
+					if (attempt === this.attempt && !this.active) {
+						this.status =
+							"No room answered. Check the code, or ask the host to reopen the room.";
+						this.peer?.destroy();
+						if (S.modal?.type === "online") renderModal();
+					}
+				}, 12000);
+			});
+		} catch (e) {
+			this.status = e.message;
+			if (S.modal?.type === "online") renderModal();
+		}
+	},
+	bindPeer(attempt) {
+		this.peer.on("error", (e) => {
+			if (attempt !== this.attempt) return;
+			this.status =
+				e.type === "unavailable-id"
+					? "That lantern is already lit. Create another room."
+					: e.type === "peer-unavailable"
+						? "No room at that code. Check the six digits."
+						: "The room connection failed. Check your network and try again.";
+			if (S.modal?.type === "online") renderModal();
+			if (this.started) toast(this.status, 6);
+		});
+		this.peer.on("disconnected", () => {
+			if (!this.started && S.modal?.type === "online") {
+				this.status = "Signalling disconnected. Reopen the room to try again.";
+				renderModal();
+			}
+		});
+	},
+	bindConnection(c, id) {
+		c.on("data", (data) => {
+			if (!data || typeof data !== "object" || typeof data.t !== "string")
+				return;
+			this.receive(data, id);
+		});
+		c.on("close", () => {
+			this.connections.delete(id);
+			if (this.host) {
+				this.players = this.players.filter((p) => p.id !== id);
+				this.broadcast({ t: "roster", players: this.players });
+				this.status = "A company left the expedition.";
+				this.checkEnd();
+			} else {
+				this.status =
+					"The host left. Your own expedition can still be completed.";
+				toast(this.status, 6);
+			}
+			if (S.modal?.type === "online") renderModal();
+		});
+		c.on("error", () => {
+			this.status = "A company lost its connection.";
+			if (S.modal?.type === "online") renderModal();
+		});
+	},
+	broadcast(data) {
+		for (const c of this.connections.values()) if (c.open) c.send(data);
+	},
+	receive(d, from) {
+		if (this.host) {
+			if (d.t === "score" || d.t === "done") {
+				const p = this.players.find((p) => p.id === from);
+				if (!p) return;
+				if (Number.isFinite(d.score))
+					p.score = Math.max(0, Math.min(100000, Math.floor(d.score)));
+				if (d.t === "done") p.done = true;
+				this.broadcast({ t: "roster", players: this.players });
+				this.checkEnd();
+			}
+			return;
+		}
+		if (from !== 0) return;
+		if (d.t === "full") {
+			this.status = "That expedition is full or has already begun.";
+			this.leave(false);
+			renderModal();
+		}
+		if (d.t === "welcome" && Number.isInteger(d.me)) {
+			this.me = d.me;
+			this.active = true;
+			this.players = this.cleanPlayers(d.players);
+			this.status = "Connected. The host starts the shared clock.";
+			if (S.modal?.type === "online") renderModal();
+		}
+		if (d.t === "roster") {
+			this.players = this.cleanPlayers(d.players);
+			if (S.modal?.type === "online") renderModal();
+		}
+		if (d.t === "begin" && Number.isFinite(d.seed) && Number.isFinite(d.at)) {
+			this.begin(d.seed, d.at);
+		}
+		if (d.t === "over" && this.started) {
+			this.players = this.cleanPlayers(d.players);
+			this.end();
+		}
+	},
+	cleanPlayers(ps) {
+		return Array.isArray(ps)
+			? ps
+					.filter((p) => Number.isInteger(p.id) && p.id >= 0 && p.id < 4)
+					.slice(0, 4)
+					.map((p) => ({
+						id: p.id,
+						name: ROOM_NAMES[p.id],
+						score: Number.isFinite(p.score) ? p.score : 0,
+						done: !!p.done,
+					}))
+			: [];
+	},
+	start() {
+		if (!this.host || !this.active || this.started) return;
+		const seed = crypto.getRandomValues(new Uint32Array(1))[0],
+			at = Date.now() + 3000;
+		this.broadcast({ t: "begin", seed, at });
+		this.begin(seed, at);
+	},
+	begin(seed, at) {
+		this.started = true;
+		this.finished = false;
+		this.roundEnded = false;
+		this.startAt = at;
+		this.deadline = at + 8 * 60 * 1000;
+		this.nextScore = 0;
+		newRun({ seed, trial: true });
+		toast("SHARED EXPEDITION  ·  Eight minutes. One borrowed night.", 5);
+	},
+	update(dt) {
+		if (!this.active || !this.started || this.roundEnded) return;
+		if (Date.now() >= this.deadline) {
+			if (!this.finished) this.finish();
+			this.end();
+			return;
+		}
+		if (this.finished) return;
+		this.nextScore -= dt;
+		if (this.nextScore <= 0) {
+			this.nextScore = 1;
+			const p = this.players.find((p) => p.id === this.me);
+			if (p) p.score = S.score;
+			if (this.host) {
+				this.broadcast({ t: "roster", players: this.players });
+			} else {
+				const c = this.connections.get(0);
+				if (c?.open) c.send({ t: "score", score: S.score });
+			}
+		}
+		if (Date.now() >= this.deadline) {
+			this.finish();
+			this.end();
+		}
+	},
+	finish() {
+		if (this.finished) return;
+		this.finished = true;
+		const p = this.players.find((p) => p.id === this.me);
+		if (p) {
+			p.score = S.score;
+			p.done = true;
+		}
+		if (this.host) {
+			this.broadcast({ t: "roster", players: this.players });
+			this.checkEnd();
+		} else {
+			const c = this.connections.get(0);
+			if (c?.open) c.send({ t: "done", score: S.score });
+		}
+	},
+	checkEnd() {
+		if (
+			this.host &&
+			this.started &&
+			this.players.length &&
+			this.players.every((p) => p.done)
+		) {
+			this.broadcast({ t: "over", players: this.players });
+			this.end();
+		}
+	},
+	end() {
+		this.finished = true;
+		this.roundEnded = true;
+		S.mode = "over";
+		S.dialogue = null;
+		$("dialogue").classList.add("hidden");
+		if (S.modal?.type !== "ending") openModal("roundOver");
+		else toast("All companies have returned. Results are recorded.", 5);
+	},
+	scoreHTML() {
+		return [...this.players]
+			.sort((a, b) => b.score - a.score)
+			.map(
+				(p) =>
+					`<div class="score-line"><span>${escapeHTML(p.name)}${p.id === this.me ? " · you" : ""}${p.done ? " ✓" : ""}</span><b>${p.score}</b></div>`,
+			)
+			.join("");
+	},
+	leave(clear = true) {
+		this.attempt++;
+		for (const c of this.connections.values()) c.close();
+		this.connections.clear();
+		if (this.peer) this.peer.destroy();
+		this.peer = null;
+		this.active = false;
+		this.started = false;
+		this.finished = false;
+		this.host = false;
+		this.players = [];
+		if (clear) {
+			this.status = "";
+			this.code = "";
+		}
+	},
+};
+function renderOnlineModal() {
+	let html =
+		panelHead(
+			"1–4 PLAYERS · PARALLEL EXPEDITIONS",
+			"Different companies. One dawn.",
+		) +
+		`<p>Each player leads their own party through the same adventure. Explore, save lives, and earn the most renown in eight minutes. Your friends appear on the shared scoreboard.</p>`;
+	if (!net.active) {
+		html +=
+			`<div class="two-col"><div class="detail-card"><h3>Gather a company</h3><p>Create a room, share its code, and start the clock together.</p>` +
+			button("Create a room", () => net.create(), "Host") +
+			`</div><div class="detail-card"><h3>Answer an invitation</h3><div class="room-code">${net.entry.padEnd(6, "·")}</div><div class="keypad">` +
+			[1, 2, 3, 4, 5, 6, 7, 8, 9, "←", 0, "Join"]
+				.map((k) =>
+					button(
+						String(k),
+						() => {
+							if (k === "←") net.entry = net.entry.slice(0, -1);
+							else if (k === "Join") {
+								net.join();
+								return;
+							} else if (net.entry.length < 6) net.entry += String(k);
+							const index = S.modal.index;
+							renderModal();
+							S.modal.index = index;
+							document
+								.querySelectorAll("#modal [data-ui]")
+								.forEach((b) =>
+									b.classList.toggle(
+										"selected",
+										Number(b.dataset.ui) === index,
+									),
+								);
+						},
+						"",
+						k === "Join" && net.entry.length !== 6,
+					),
+				)
+				.join("") +
+			`</div></div></div>`;
+	} else {
+		html +=
+			`<div class="detail-card"><small>ROOM CODE</small><div class="room-code">${escapeHTML(net.code)}</div>${net.scoreHTML()}</div>` +
+			(net.host
+				? button(
+						"Begin the shared expedition",
+						() => net.start(),
+						`${net.players.length} / 4 companies`,
+					)
+				: `<p>Waiting for the host to begin.</p>`) +
+			button(
+				"Leave the room",
+				() => {
+					net.leave();
+					renderModal();
+				},
+				"Disconnect",
+			);
+	}
+	html +=
+		`<p>${escapeHTML(net.status)}</p><div class="hint-box">Standalone rooms use PeerJS / WebRTC and need internet access. In ai-hub, the hub owns the lobby, clock, and scoreboard; this room service is never contacted.</div>` +
+		button(
+			"Return",
+			() => {
+				if (!net.started) net.leave();
+				closeModal();
+			},
+			"○",
+		) +
+		foot();
+	return html;
+}
+async function connectHub() {
+	if (!AIHub.active) return null;
+	const info = await AIHub.connect({ mode: "parallel", seats: [1, 4] });
+	if (!info) return null;
+	hubInfo = info;
+	AIHub.on("start", () => audio.init());
+	AIHub.on("time-up", () => {
+		finishHub();
+		S.mode = "over";
+		S.dialogue = null;
+		$("dialogue").classList.add("hidden");
+		openModal("roundOver");
+	});
+	AIHub.on("end", () => {
+		finishHub();
+		S.hubStopped = true;
+		S.mode = "over";
+		input.x = 0;
+		input.y = 0;
+		input.fire = false;
+		input.moveX = 0;
+		input.moveZ = 0;
+		audio.stop();
+		S.dialogue = null;
+		$("dialogue").classList.add("hidden");
+		if (S.modal?.type !== "ending") openModal("roundOver");
+	});
+	return info;
+}
+AIHub.probe(() => ({
+	scene:
+		S.hubStopped || S.mode === "over"
+			? "over"
+			: S.mode === "title"
+				? "title"
+				: hubInfo && AIHub.time() < 0
+					? "ready"
+					: "play",
+	menu: S.modal?.type === "settings" || S.modal?.type === "controls",
+	world: S.time,
+	input: { x: input.x, y: input.y, fire: input.fire, skill: input.skill },
+}));
+
+const keys = new Set();
+let padPrev = [],
+	stickRepeat = 0,
+	usingPad = false,
+	inputSwallowUntil = 0;
+function registerInput() {
+	if (S.hubStopped || performance.now() < inputSwallowUntil) return true;
+	lastInput = performance.now();
+	if (hubReadyGesture) {
+		hubReadyGesture = false;
+		AIHub.ready();
+		return true;
+	}
+	if (S.attract) {
+		inputSwallowUntil = performance.now() + 250;
+		showTitle();
+		input.moveX = input.moveZ = input.x = input.y = 0;
+		keys.clear();
+		return true;
+	}
+	return false;
+}
+function action(a) {
+	if (S.hubStopped) return;
+	if (a === "settings") {
+		if (S.modal) {
+			back();
+		} else openModal("settings");
+		return;
+	}
+	if (S.modal || S.dialogue || S.mode === "title") {
+		if (a === "confirm" || a === "strike") menuConfirm();
+		else if (a === "back") back();
+		return;
+	}
+	if (S.mode === "over") return;
+	switch (a) {
+		case "confirm":
+		case "strike":
+			attack();
+			break;
+		case "skill":
+			attack(true);
+			break;
+		case "potion":
+			potion();
+			break;
+		case "turn":
+			endTurn();
+			break;
+		case "shove":
+			shove();
+			break;
+		case "defend":
+			defend();
+			break;
+		case "oil":
+			throwOil();
+			break;
+		case "journal":
+			openJournal("quests");
+			break;
+		case "pack":
+			openJournal("pack");
+			break;
+		case "party":
+			openJournal("party");
+			break;
+		case "nextHero":
+			selectHero(1);
+			break;
+		case "prevHero":
+			selectHero(-1);
+			break;
+		case "nextTarget":
+			cycleTarget(1);
+			break;
+		case "prevTarget":
+			cycleTarget(-1);
+			break;
+		case "back":
+			openModal("settings");
+			break;
+	}
+}
+addEventListener("keydown", (e) => {
+	if (e.ctrlKey || e.metaKey || e.altKey) return;
+	keyboardSeen = true;
+	usingPad = false;
+	updateTouchNotice();
+	const code =
+		e.code ||
+		{ Escape: "Escape", Enter: "Enter", " ": "Space" }[e.key] ||
+		`Key${e.key.toUpperCase()}`;
+	if (
+		[
+			"Space",
+			"ArrowUp",
+			"ArrowDown",
+			"ArrowLeft",
+			"ArrowRight",
+			"Tab",
+			"Enter",
+			"Escape",
+		].includes(code)
+	)
+		e.preventDefault();
+	if (registerInput()) return;
+	audio.init();
+	keys.add(code);
+	if (e.repeat) return;
+	const menu = !!S.modal || !!S.dialogue || S.mode === "title";
+	if (menu && ["ArrowUp", "KeyW", "ArrowLeft", "KeyA"].includes(code)) {
+		menuMove(-1);
+		return;
+	}
+	if (menu && ["ArrowDown", "KeyS", "ArrowRight", "KeyD"].includes(code)) {
+		menuMove(1);
+		return;
+	}
+	if (S.modal?.type === "online" && !net.active && /^Digit[0-9]$/.test(code)) {
+		if (net.entry.length < 6) {
+			net.entry += code.slice(-1);
+			renderModal();
+		}
+		return;
+	}
+	if (code === "Escape") {
+		action("settings");
+		return;
+	}
+	if (menu) {
+		if (code === "Enter" || code === "Space") menuConfirm();
+		if (code === "Backspace") back();
+		if (S.dialogue && /^Digit[1-4]$/.test(code))
+			chooseDialogue(Number(code.slice(-1)) - 1);
+		return;
+	}
+	const map = {
+		Enter: "strike",
+		KeyQ: "skill",
+		KeyE: "potion",
+		Space: "turn",
+		KeyF: "shove",
+		KeyG: "defend",
+		KeyR: "oil",
+		KeyJ: "journal",
+		KeyB: "pack",
+		KeyZ: "prevHero",
+		KeyC: "nextHero",
+		Tab: e.shiftKey ? "prevTarget" : "nextTarget",
+	};
+	if (map[code]) action(map[code]);
+	if (/^Digit[1-3]$/.test(code)) {
+		S.selected = Number(code.slice(-1)) - 1;
+		if (selectedHero().hp <= 0) selectHero(1);
+		updateHUD(true);
+	}
+});
+addEventListener("keyup", (e) => keys.delete(e.code));
+addEventListener("blur", () => keys.clear());
+addEventListener("pointerdown", (e) => {
+	if (e.pointerType === "touch") return;
+	registerInput();
+	audio.init();
+});
+addEventListener("pointermove", (e) => {
+	if (Math.abs(e.movementX) + Math.abs(e.movementY) > 2) {
+		if (S.attract) showTitle();
+		lastInput = performance.now();
+	}
+});
+addEventListener("gamepadconnected", () => {
+	usingPad = true;
+	updateTouchNotice();
+});
+addEventListener("gamepaddisconnected", updateTouchNotice);
+function pollInput(dt) {
+	const pads = navigator.getGamepads?.() || [],
+		pad = Array.from(pads).find((p) => p && p.connected !== false);
+	let x = 0,
+		y = 0;
+	const menu = !!S.modal || !!S.dialogue || S.mode === "title";
+	input.fire = keys.has("Enter");
+	input.skill = keys.has("KeyQ");
+	if (keys.has("KeyD") || keys.has("ArrowRight")) x++;
+	if (keys.has("KeyA") || keys.has("ArrowLeft")) x--;
+	if (keys.has("KeyS") || keys.has("ArrowDown")) y++;
+	if (keys.has("KeyW") || keys.has("ArrowUp")) y--;
+	if (pad) {
+		const dead = (v) =>
+			Math.abs(v) < 0.18 ? 0 : (Math.sign(v) * (Math.abs(v) - 0.18)) / 0.82;
+		const ax = dead(pad.axes[0] || 0),
+			ay = dead(pad.axes[1] || 0),
+			rx = dead(pad.axes[2] || 0),
+			ry = dead(pad.axes[3] || 0);
+		const buttons = pad.buttons.map((b) => !!b.pressed || b.value > 0.5);
+		const any =
+			Math.abs(ax) + Math.abs(ay) + Math.abs(rx) + Math.abs(ry) > 0.08 ||
+			buttons.some(Boolean);
+		if (any) {
+			usingPad = true;
+			if (registerInput()) {
+				padPrev = buttons;
+				return;
+			}
+			audio.init();
+			updateTouchNotice();
+		}
+		x += ax * (settings.invertX ? -1 : 1);
+		y += ay * (settings.invertY ? -1 : 1);
+		input.fire = input.fire || buttons[0] || buttons[7];
+		input.skill = input.skill || buttons[2];
+		const pressed = (i) => buttons[i] && !padPrev[i];
+		if (pressed(9) && !buttons[8]) action("settings");
+		else if (menu) {
+			if (pressed(0)) menuConfirm();
+			if (pressed(1)) back();
+			let dir =
+				buttons[12] || buttons[14] || ay < -0.5 || ax < -0.7
+					? -1
+					: buttons[13] || buttons[15] || ay > 0.5 || ax > 0.7
+						? 1
+						: 0;
+			stickRepeat -= dt;
+			if (dir && stickRepeat <= 0) {
+				menuMove(dir);
+				stickRepeat = 0.22;
+			}
+			if (!dir) stickRepeat = 0;
+		} else {
+			if (pressed(0)) action("strike");
+			if (pressed(1)) action("potion");
+			if (pressed(2)) action("skill");
+			if (pressed(3)) action("turn");
+			if (pressed(4)) action("prevHero");
+			if (pressed(5)) action("nextHero");
+			if (pressed(6)) action("prevTarget");
+			if (pressed(7)) action("nextTarget");
+			if (pressed(12)) action("shove");
+			if (pressed(13)) action("defend");
+			if (pressed(14)) action("journal");
+			if (pressed(15)) action("oil");
+			cameraYaw -= rx * dt * 1.4 * (settings.invertX ? -1 : 1);
+			cameraZoom = THREE.MathUtils.clamp(
+				cameraZoom + ry * dt * 14 * (settings.invertY ? -1 : 1),
+				18,
+				38,
+			);
+		}
+		padPrev = buttons;
+	} else padPrev = [];
+	input.x = x;
+	input.y = y;
+	const angle = cameraYaw;
+	input.moveX = Math.cos(angle) * x + Math.sin(angle) * y;
+	input.moveZ = -Math.sin(angle) * x + Math.cos(angle) * y;
+	if (
+		menu ||
+		S.mode === "over" ||
+		S.hubStopped ||
+		(hubInfo && AIHub.time() < 0) ||
+		(net.started && Date.now() < net.startAt)
+	) {
+		input.moveX = input.moveZ = 0;
+	}
+	if (!menu) {
+		if (keys.has("KeyU")) cameraYaw += dt;
+		if (keys.has("KeyO")) cameraYaw -= dt;
+		if (keys.has("KeyI")) cameraZoom = Math.max(18, cameraZoom - dt * 10);
+		if (keys.has("KeyK")) cameraZoom = Math.min(38, cameraZoom + dt * 10);
+	}
+	$("inputLabel").textContent = usingPad
+		? "DualSense / standard gamepad"
+		: "Keyboard & controller supported";
+}
+async function boot() {
+	const connection = connectHub();
+	try {
+		storeSettings();
+		await initEngine();
+		initialized = true;
+		newRun({ attract: true });
+		showTitle();
+		const info = await connection;
+		if (info) {
+			newRun({ seed: info.seed, trial: true });
+			if (info.splash) AIHub.ready();
+			else {
+				hubReadyGesture = true;
+				toast("Press any key or controller button when you are ready.", 60);
+			}
+		}
+		$("boot").classList.add("hidden");
+		previous = previousTick = performance.now();
+		gameTimer = setInterval(tick, 1000 / 60);
+		requestAnimationFrame(animate);
+		updateTouchNotice();
+		window.__BARD = {
+			renderer,
+			scene,
+			camera,
+			physics,
+			state: () => S,
+			engine: () => ({
+				three: THREE.REVISION,
+				backend: renderer.backend.constructor.name,
+				rapier: RAPIER.version(),
+				frames: frameCount,
+			}),
+			newRun,
+			move: (x, z) => warp(selectedHero(), x, z),
+			interact,
+			attack,
+			endTurn,
+			selectHero,
+			cycleTarget,
+			openModal,
+			closeModal,
+			chooseDialogue,
+			saveGame,
+			loadGame,
+			shove,
+			potion,
+			throwOil,
+			defend,
+			net,
+			settings,
+			ready: true,
+		};
+	} catch (error) {
+		console.error(error);
+		AIHub.fail(error.message);
+		$("boot").classList.add("hidden");
+		openModal("error", { message: error.message });
+		window.__BARD_ERROR = error.message;
+	}
+}
+boot();
+</script>
+</body></html>

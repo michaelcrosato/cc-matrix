@@ -11,9 +11,13 @@
 //   FAKE:nogame           finish OK without writing a game file
 //   FAKE:noreply          finish OK with an empty final reply
 //   FAKE:todo             leave a TODO in the game
+//   FAKE:limit            claude: work a while (a dev file, tokens), then stop on the 5-hour usage limit
+//   FAKE:limit=start      claude: stop on the usage limit at the first request, having done nothing
 // FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
 // With CODEX_HOME or GROK_HOME set, codex and grok also write session logs there the way the real ones
-// do (a Codex subagent thread; Grok /goal helper sessions), for the runner to find.
+// do (a Codex subagent thread; Grok /goal helper sessions), for the runner to find. With CLAUDE_CONFIG_DIR
+// set, claude keeps its session's transcript there and `--resume <id>` carries on with it like the real
+// one: the limit has passed, and the totals it reports include what the session used before.
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -57,10 +61,19 @@ export async function run(cli) {
   if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal }) + '\n');
 
   const fail = prompt.match(/FAKE:fail=([^\n]*)/)?.[1];
+  // claude --resume <id>: the same session, so the usage limit it stopped on has passed.
+  const resume = cli === 'claude' ? after(argv, '--resume') : undefined;
+  const limit = cli === 'claude' && !resume ? prompt.match(/FAKE:limit(=start)?/) : null;
+  const transcript = cli === 'claude' && process.env.CLAUDE_CONFIG_DIR
+    ? path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'), `${resume ?? 'fake-session'}.jsonl`) : null;
+  if (resume && !(transcript && fs.existsSync(transcript))) { process.stderr.write(`No conversation found with session ID: ${resume}\n`); process.exit(1); }
   await sleep(+(prompt.match(/FAKE:sleep=(\d+)/)?.[1] ?? process.env.FAKE_SLEEP_MS ?? 150));
   const model = after(argv, '--model') ?? after(argv, '-m') ?? 'unknown';
   let reply = 'Done.\n\n## Source Information\n- Model: fake\n\n## Engine Feedback\nnone\n\n## Prompt Feedback\nnone';
-  if (/smoke\.txt/.test(prompt)) { fs.writeFileSync('smoke.txt', 'ok\n'); reply = 'SMOKE-OK'; }
+  if (limit) {
+    reply = 'You\'ve hit your 5-hour limit · resets 10:10am (America/Vancouver)';
+    if (!limit[1]) { fs.mkdirSync('src', { recursive: true }); fs.writeFileSync(path.join('src', 'partial.js'), 'console.log("half a game");\n'); }
+  } else if (/smoke\.txt/.test(prompt)) { fs.writeFileSync('smoke.txt', 'ok\n'); reply = 'SMOKE-OK'; }
   else if (!fail && !/FAKE:nogame/.test(prompt)) {
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(path.join('src', 'main.js'), 'console.log("game");\n');
@@ -72,7 +85,18 @@ export async function run(cli) {
 
   if (cli === 'claude' || cli === 'grok') {
     if (fail && cli === 'grok' && /start/.test(fail)) { line({ type: 'error', message: fail }); process.exit(1); }
-    const sessionId = cli === 'grok' ? crypto.randomUUID() : 'fake-session';
+    const sessionId = cli === 'grok' ? crypto.randomUUID() : resume ?? 'fake-session';
+    // What the session had used before this part (the cost-state its transcript saved), which the totals include.
+    const since = resume ? JSON.parse(fs.readFileSync(transcript, 'utf8').trim().split('\n').filter((l) => l.includes('"cost-state"')).pop() ?? 'null') : null;
+    if (limit?.[1]) { // stopped at the first request: nothing used
+      line({ type: 'system', subtype: 'init', model, session_id: sessionId });
+      line({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resetsAt: 1793293800 } });
+      line({ type: 'assistant', message: { id: 'msg_0', content: [{ type: 'text', text: reply }] } });
+      line({ type: 'result', subtype: 'success', is_error: true, duration_ms: 300, duration_api_ms: 0, num_turns: 1, result: reply,
+        session_id: sessionId, total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0 }, modelUsage: {} });
+      claudeTranscript(transcript, { totalCostUSD: 0, totalAPIDuration: 0, modelUsage: {} });
+      process.exit(1);
+    }
     // The stream (Claude Code's stream-json, Grok's copy of it): two responses, the first in two events (one per
     // content block) with a tool call each; one tool fails; one compaction; Claude Code's plan limits twice.
     const [read, edit] = cli === 'grok' ? ['read_file', 'search_replace'] : ['Read', 'Edit'];
@@ -90,11 +114,18 @@ export async function run(cli) {
     const modelUsage = { [model]: { inputTokens: tok.input, outputTokens: tok.output, cacheReadInputTokens: tok.cacheRead,
       cacheCreationInputTokens: tok.cacheWrite, ...(cli === 'claude' ? { thinkingTokens: tok.reasoning } : {}), costUSD: cli === 'claude' ? 0.04 : 0.0425 },
       ...(cli === 'claude' ? { 'claude-haiku-5-5': { inputTokens: 10, outputTokens: 20, cacheReadInputTokens: 0, cacheCreationInputTokens: 5, costUSD: 0.0025 } } : {}) };
-    line({ type: 'result', subtype: fail ? 'error_during_execution' : 'success', is_error: !!fail, ...(fail ? { errors: [fail] } : {}),
-      duration_ms: 2000, duration_api_ms: 1500, num_turns: 4, ...(goal ? { result_index: 1 } : {}), result: fail ? '' : reply,
-      session_id: sessionId, total_cost_usd: 0.0425, ...(cli === 'claude' ? { subagent_stats: { spawned: 1 }, ttft_ms: 900 } : {}), modelUsage });
+    // A resumed session's totals include what it used before; a usage limit is an error with its message as the result.
+    for (const [id, b] of Object.entries(since?.modelUsage ?? {})) {
+      const u = modelUsage[id] ??= {};
+      for (const [k, v] of Object.entries(b)) u[k] = (u[k] ?? 0) + v;
+    }
+    const cost = 0.0425 + (since?.totalCostUSD ?? 0), apiMs = 1500 + (since?.totalAPIDuration ?? 0);
+    line({ type: 'result', subtype: fail ? 'error_during_execution' : 'success', is_error: !!(fail || limit), ...(fail ? { errors: [fail] } : {}),
+      duration_ms: 2000, duration_api_ms: apiMs, num_turns: 4, ...(goal ? { result_index: 1 } : {}), result: fail ? '' : reply,
+      session_id: sessionId, total_cost_usd: cost, ...(cli === 'claude' ? { subagent_stats: { spawned: 1 }, ttft_ms: 900 } : {}), modelUsage });
     if (cli === 'grok' && process.env.GROK_HOME) grokSession(sessionId);
-    process.exit(fail ? 1 : 0);
+    if (transcript) claudeTranscript(transcript, { totalCostUSD: cost, totalAPIDuration: apiMs, modelUsage });
+    process.exit(fail || limit ? 1 : 0);
   }
   if (cli === 'codex') {
     const thread = crypto.randomUUID();
@@ -149,6 +180,13 @@ export async function run(cli) {
 
 const pad = (n) => String(n).padStart(2, '0');
 const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
+
+// Claude Code: a turn in the session's transcript, and the cost-state it saves as the process ends (the session's
+// totals so far, which --resume restores).
+function claudeTranscript(file, totals) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.appendFileSync(file, jsonl([{ type: 'user', message: { content: 'turn' } }, { type: 'cost-state', ...totals }]));
+}
 
 // Codex: the main thread's rollout (2 requests, plan limits at the start and end) and one subagent's, which
 // starts with a copy of the parent's history (including a token count that isn't its own).

@@ -1,0 +1,11 @@
+Built [Turtle Tempo Trouble — single-file demo](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-ultra__v14__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Turtle Tempo Trouble-Turtles in Time-gpt-6.1-terra-ultra-20261029-0924.html>). The [development folder](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-ultra__v14__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Turtle Tempo Trouble-Turtles in Time-gpt-6.1-terra-ultra-20261029-0924>) contains the source and build script.
+
+The demo includes three encounters and a boss, couch and online co-op, AI Hub session support, controller-first menus, axis inversion, and attract mode. It requires WebGPU and an internet connection for its dependencies.
+
+**Source information:** 2026-10-29 09:24; source: *Turtles in Time*. Built with Three.js R180 WebGPU, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, and AI Hub Session Protocol v1. The art is cel-shaded low-poly; animation uses procedural posing; music, effects, and gibberish voices are synthesized in code. Environment: Codex CLI, headless Linux; browser unknown. Model: OpenAI gpt-6.1-terra, reasoning effort ultra. Usage and cost: unknown.
+
+**Testing feedback:** Lightweight testing caught one headless Chrome graphics-configuration issue and no confirmed critical game defects. The most helpful test was the WebGPU browser smoke test, which rendered the playable encounter; the least helpful was the static syntax check. Network synchronization received mock tests, but a full AI Hub harness run and cross-device co-op playthrough remain unverified.
+
+**Engine feedback:** Three.js made scene composition straightforward. WebGPU startup and Rapier query timing required care, while combat, animation, encounters, and networking needed custom work. Shared simulation was the hardest part. A higher-level character and combat toolkit, along with clearer WebGPU diagnostics, would improve the engine.
+
+**Prompt feedback:** The clear arcade inspiration and controller-first direction were useful. Standalone multiplayer details were open to interpretation, and the hardest part was the networked vertical slice in one file. The most valuable additional test would be a full cross-device co-op playthrough with real controllers.

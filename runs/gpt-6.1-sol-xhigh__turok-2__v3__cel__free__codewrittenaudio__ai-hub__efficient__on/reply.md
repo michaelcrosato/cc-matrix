@@ -1,0 +1,1 @@
+The final co-op review also caught and fixed a shared-arsenal issue: a weapon collected by a guest now stays unlocked for the whole expedition. The release HTML, development sources, test reports, and required feedback are assembled. Only the final packaging checks remain.
