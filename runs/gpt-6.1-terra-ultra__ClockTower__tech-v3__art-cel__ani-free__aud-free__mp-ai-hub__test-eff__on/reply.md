@@ -1,0 +1,1 @@
+The viewport checks passed; I’m fixing controller and pause-menu issues.

@@ -1,0 +1,1 @@
+The world and interface are scaffolded; I’m wiring the playable loop.

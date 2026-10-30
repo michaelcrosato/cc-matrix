@@ -1,0 +1,1 @@
+The core island simulation is in place. I’m checking browser behavior and the multiplayer integration now.
