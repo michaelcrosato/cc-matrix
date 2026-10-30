@@ -457,6 +457,19 @@ test('a time limit set mid-batch: new runs only, or the running ones too (counte
   assert.match(result(sb2, 'opus-low__long').error, /timed out/);
 });
 
+test('Codex ended by the time limit: failed though it exits 0, with its tokens from the session log', (t) => {
+  const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:hang' }] }, agents: [{ id: 'sol', provider: 'codex', model: 'gpt-6.1-sol', efforts: ['max'] }] });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, ['--timeout', '0.02']).status, 0); // 1.2 s
+  const r = result(sb, 'sol-max__a');
+  assert.deepEqual([r.exitCode, r.status, r.turns], [0, 'failed', 0]);
+  assert.match(r.error, /timed out/);
+  // it never printed the turn's usage: the main thread's (10200 in, 9000 cached; 640 out) comes from its
+  // session log, and its subagent's is added as usual
+  assert.deepEqual([r.inputTokens, r.cachedTokens, r.uncachedInputTokens, r.outputTokens, r.reasoningTokens], [13200, 11000, 2200, 940, 170]);
+  assert.equal(+r.apiCostUsd.toFixed(6), +((2200 * 2 + 11000 * 0.1 + 940 * 10) / 1e6).toFixed(6));
+});
+
 test('raising a spent budget mid-batch lets new runs start again', async (t) => {
   const sb = sandbox({ dimensions: { testing: [['v1', 100], ['v2', 2500], ['v3', 100], ['v4', 100]].map(([id, ms]) => ({ id, text: `FAKE:sleep=${ms} ${id}` })) }, agents: opus });
   t.after(() => cleanup(sb));
