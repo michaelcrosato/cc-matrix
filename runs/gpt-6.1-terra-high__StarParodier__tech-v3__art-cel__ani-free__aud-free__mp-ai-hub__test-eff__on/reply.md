@@ -1,0 +1,1 @@
+The first pass exposed audio and portrait-framing issues; I’m fixing both.

@@ -6,6 +6,8 @@
 // Directives anywhere in the prompt (usually a variant's text) steer one run:
 //   FAKE:fail=<message>   exit 1 with this error, in the CLI's own error format
 //   FAKE:sleep=<ms>       take this long (default FAKE_SLEEP_MS, else 150)
+//   FAKE:hang             codex: write its session logs, then work until stopped and exit 0 like the real one,
+//                         never printing the turn's usage
 //   FAKE:nogame           finish OK without writing a game file
 //   FAKE:noreply          finish OK with an empty final reply
 //   FAKE:todo             leave a TODO in the game
@@ -133,6 +135,11 @@ export async function run(cli) {
     line({ type: 'item.completed', item: { id: 'item_1', type: 'command_execution', status: 'failed', exit_code: 1 } });
     line({ type: 'item.completed', item: { id: 'item_2', type: 'file_change', status: 'completed' } });
     line({ type: 'item.completed', item: { id: 'item_3', type: 'agent_message', text: reply } });
+    if (/FAKE:hang/.test(prompt)) { // stopped mid-turn: its logs have the usage so far, its output never will
+      if (process.env.CODEX_HOME) codexRollouts(thread, model);
+      process.on('SIGTERM', () => process.exit(0));
+      return setInterval(() => {}, 60000);
+    }
     line({ type: 'turn.completed', usage: { input_tokens: tok.input + tok.cacheRead, cached_input_tokens: tok.cacheRead, output_tokens: tok.output, reasoning_output_tokens: tok.reasoning } });
     if (process.env.CODEX_HOME) codexRollouts(thread, model);
     process.exit(0);

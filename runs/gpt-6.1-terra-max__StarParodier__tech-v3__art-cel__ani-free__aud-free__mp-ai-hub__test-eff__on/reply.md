@@ -1,0 +1,1 @@
+The layout checks passed. I’ll make WebGPU device loss visible, then exercise the game’s systems.

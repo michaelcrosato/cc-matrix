@@ -1,0 +1,1 @@
+The game starts, but its 3D scene isn’t appearing; I’m investigating.

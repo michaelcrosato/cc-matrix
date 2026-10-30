@@ -1,0 +1,1 @@
+The first viewport pass exposed a WebGPU limitation; I’m checking startup and multiplayer handling.

@@ -1,0 +1,1 @@
+The viewport checks show the expected unsupported-GPU screen; I’m checking gameplay with software WebGPU.

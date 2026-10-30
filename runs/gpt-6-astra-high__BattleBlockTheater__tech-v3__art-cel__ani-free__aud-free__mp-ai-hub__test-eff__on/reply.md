@@ -1,0 +1,13 @@
+Created **[EncoreBlock Theater](./EncoreBlock-Theater-BattleBlockTheater-gpt-6-astra-high-20261029-1050.html)** — a single-file, 2.47 MB demo featuring three acts, a boss finale, controller menus, and a looping attract mode.
+
+Serve through HTTPS or localhost in a WebGPU-capable browser. [Build and play instructions](./EncoreBlock-Theater-BattleBlockTheater-gpt-6-astra-high-20261029-1050/README.md).
+
+**Source Information:** Date: 2026-10-29 11:21, America/Vancouver. Inspiration: BattleBlock Theater. Three.js r180, WebGPU only, Rapier 0.19.3, Gamepad API, Web Audio, optional system narration, esbuild 0.28.2. Original cel-shaded puppet artwork and procedural animation. Original synthesized music/effects. [AI Hub](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) provides synchronized score competition for 1–4 players on separate stages. Environment: Codex CLI, headless Linux; user browser unknown. Model: OpenAI gpt-6-astra, high reasoning. Estimated session: 31 minutes; API cost and token usage: unknown.
+
+**Testing Feedback:** Testing and review found six issues, including two potentially game-breaking edge cases; all were fixed. Passed 18 mechanics checks, eight controller/attract checks, and 24 Hub checks in each of three session scenarios. Phone, tablet, and ultrawide layouts were inspected. Most helpful: mechanics tests paired with actual WebGPU screenshots. Least helpful: initial captures before fixing the test browser’s compositor configuration. Linux WebKit verified compatibility messaging and settings only; physical controllers and real Safari remain untested.
+
+**Engine Feedback:** Best feature: composable geometry and TSL shading. I got stuck on headless GPU capture and the renderer’s implicit fallback. The main custom work was movement, progression, controller menus, and session handling. Coordinating fixed-step physics with responsive actions was hardest. I would overhaul implicit fallback behavior and add an official WebGPU/physics platformer starter.
+
+**Prompt Feedback:** The controller-first direction was strongest. “All features” was ambiguous; the field guide defines this demo’s mechanics. The hardest part was combining three complete acts, original presentation, and single-file deployment. The additional test I’d choose is a four-person AI Hub session using physical DualSense controllers.
+
+The required information and feedback are also embedded in Credits and the HTML’s opening comment.

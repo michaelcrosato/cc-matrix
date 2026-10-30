@@ -1,0 +1,1 @@
+The minimal scene also loses its GPU device; I’m checking the test environment.

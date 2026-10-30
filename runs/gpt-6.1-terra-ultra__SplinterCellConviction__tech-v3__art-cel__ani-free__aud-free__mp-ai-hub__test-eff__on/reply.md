@@ -1,0 +1,1 @@
+The layout is clean; I’m checking graphics failure handling and credits.
