@@ -1,0 +1,3 @@
+Native WebGPU rendering is now verified, including the cel shading and shadows. The issue was the test browser’s driver flags.
+
+The final pass is exercising takedowns, executions, gadgets, checkpoint interactions, extraction, and attract-mode entry and exit. Review also caught several co-op consistency bugs—temporary EMP effects, guest lamp destruction, and checkpoint resupply—which are now corrected.

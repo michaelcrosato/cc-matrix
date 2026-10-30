@@ -1,0 +1,70 @@
+<!-- BUILD_INFORMATION -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <!-- AIHUB_SESSION_CLIENT -->
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#071012">
+  <meta name="hub:session" content="1">
+  <meta name="hub:session-players" content="1-4">
+  <meta name="hub:session-mode" content="parallel">
+  <meta name="hub:session-minutes" content="4">
+  <meta name="hub:session-goal" content="Most points before time runs out">
+  <meta name="hub:session-howto" content="Infiltrate the terminal, recover the ledger, and extract. Stealth and clean takedowns earn more points.">
+  <meta name="hub:webgpu" content="required">
+  <title>Splinter Cell: Suspicion</title>
+  <style>/* BUILD_CSS */</style>
+  <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"}}</script>
+</head>
+<body>
+  <div id="world" aria-hidden="true"></div>
+  <div class="grain" aria-hidden="true"></div>
+  <div class="vignette" aria-hidden="true"></div>
+  <div id="app">
+    <section id="title-screen" class="screen title-screen">
+      <header class="brandline"><span class="brand-icon">◈</span> BLACK LANTERN <span class="brand-divider"></span> A NIGHT OPERATIONS STORY</header>
+      <div class="title-content">
+        <div class="eyebrow"><span class="dot"></span> ONE NIGHT. NO WITNESSES.</div>
+        <h1><span>SPLINTER CELL:</span><strong>SUSPICION</strong></h1>
+        <p class="title-copy">They erased the file. They missed a witness.<br>Tonight, you become the loose end.</p>
+        <nav id="main-menu" class="menu-list" aria-label="Main menu">
+          <button data-action="deploy" class="selected"><span class="menu-index">01</span><span>DEPLOY</span><span class="menu-arrow">↗</span></button>
+          <button data-action="briefing"><span class="menu-index">02</span><span>MISSION BRIEF</span><span class="menu-arrow">↗</span></button>
+          <button data-action="settings"><span class="menu-index">03</span><span>SETTINGS</span><span class="menu-arrow">↗</span></button>
+          <button data-action="about"><span class="menu-index">04</span><span>ABOUT / CREDITS</span><span class="menu-arrow">↗</span></button>
+        </nav>
+        <div id="engine-message" class="engine-message">INITIALIZING NIGHT OPERATIONS...</div>
+      </div>
+      <div class="title-right" aria-hidden="true"><div class="vertical-label">THE DOCKS / 02:17 AM</div><div class="mission-stamp"><span>OPERATION</span><strong>GLASS<br>HARBOR</strong><small>SECTOR 04 / PORT AUTHORITY</small></div></div>
+      <footer class="bottom-bar"><span><b class="pad">✕</b> SELECT <b class="pad">↕</b> NAVIGATE</span><span>GAMEPAD RECOMMENDED <i></i> KEYBOARD + MOUSE SUPPORTED</span><span>BUILD 01 / 01</span></footer>
+    </section>
+
+    <section id="touch-screen" class="screen touch-screen hidden">
+      <div class="touch-card"><div class="brand-icon">◈</div><p class="eyebrow">SPLINTER CELL: SUSPICION</p><h1>Controller or<br>keyboard required</h1><p>This operation is designed for a controller or keyboard and mouse. Touch controls are not supported.</p><button data-action="settings" class="primary">OPEN SETTINGS <span>↗</span></button><p id="touch-engine" class="micro">WEBGPU REQUIRED</p></div>
+    </section>
+
+    <section id="panel-screen" class="screen panel-screen hidden" aria-label="Menu panel">
+      <div class="panel-head"><div><span class="eyebrow">BLACK LANTERN / FIELD TERMINAL</span><h2 id="panel-title">SETTINGS</h2></div><button data-action="back" class="back-button"><span class="pad">○</span> BACK</button></div>
+      <div id="panel-content" class="panel-content"></div>
+      <div class="panel-foot"><span><b class="pad">✕</b> SELECT / TOGGLE</span><span><b class="pad">○</b> BACK</span></div>
+    </section>
+
+    <section id="hud" class="hidden" aria-label="Gameplay information">
+      <div class="hud-top"><div class="objective"><span id="objective-tag">OBJECTIVE 01 / 03</span><strong id="objective-text">BREACH THE SECURITY TERMINAL</strong><small id="objective-hint">Move through the loading yard.</small></div><div class="hud-score"><span>FIELD SCORE</span><strong id="score">0000</strong><small id="clock">02:17 AM</small></div></div>
+      <div id="alert" class="alert hidden">HOSTILES SEARCHING</div>
+      <div id="reticle" class="reticle"><i></i><i></i><i></i><i></i><span id="reticle-dot"></span></div>
+      <div id="world-labels" aria-hidden="true"></div>
+      <div id="prompt" class="prompt hidden"><span class="prompt-key">✕</span><span id="prompt-text"></span></div>
+      <div id="toast" class="toast hidden"></div>
+      <div id="subtitle" class="subtitle hidden"></div>
+      <div class="hud-bottom"><div class="health-block"><span>OPERATOR</span><div id="health-bars" class="health-bars"><i></i><i></i><i></i><i></i><i></i></div><small id="stance">CONCEALED</small></div><div class="ability-block"><span id="execute-label">EXECUTE <b>LOCKED</b></span><small id="marks-label">MARKS 0 / 3</small></div><div class="ammo-block"><span id="weapon">SUPPRESSED PISTOL</span><strong><span id="ammo">12</span><small> / <span id="reserve">48</span></small></strong><small id="gadget-label">△ EMP × 2</small></div></div>
+      <div id="tutorial" class="tutorial"></div>
+      <div id="attract-label" class="attract-label hidden"><span class="dot"></span> FIELD DEMONSTRATION <small>ANY INPUT TO EXIT</small></div>
+    </section>
+
+    <section id="end-screen" class="screen end-screen hidden"><div class="end-card"><span id="end-kicker" class="eyebrow">OPERATION COMPLETE</span><h2 id="end-title">THE TRUTH<br>GOT OUT.</h2><p id="end-copy"></p><div class="end-score"><span>FIELD SCORE</span><strong id="final-score">0000</strong></div><div class="end-actions"><button data-action="retry" class="primary">REDEPLOY <span>↗</span></button><button data-action="title" class="secondary">MAIN MENU</button></div></div></section>
+  </div>
+  <script type="module">/* BUILD_JS */</script>
+</body>
+</html>

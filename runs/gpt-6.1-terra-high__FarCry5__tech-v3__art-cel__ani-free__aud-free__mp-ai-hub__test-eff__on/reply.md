@@ -1,0 +1,1 @@
+The title screen checks out; I’m fixing a rendering issue in gameplay.

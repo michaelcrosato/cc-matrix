@@ -1,0 +1,1 @@
+I’m completing the mansion simulation and controller-driven game loop.

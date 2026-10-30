@@ -1,0 +1,1 @@
+The playable slice is in place; I’m checking browser behavior and controls.

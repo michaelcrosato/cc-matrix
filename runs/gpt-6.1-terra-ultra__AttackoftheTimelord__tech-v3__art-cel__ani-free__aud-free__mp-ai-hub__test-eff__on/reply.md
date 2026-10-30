@@ -1,0 +1,1 @@
+The layout checks are complete; I’m probing WebGPU and gameplay next.

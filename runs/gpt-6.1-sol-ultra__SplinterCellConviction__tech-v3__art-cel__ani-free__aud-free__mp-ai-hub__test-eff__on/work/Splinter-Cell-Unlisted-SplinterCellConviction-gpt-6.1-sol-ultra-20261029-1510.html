@@ -1,0 +1,2912 @@
+<!DOCTYPE html>
+<!--
+Source Information:
+- Date: 2026-10-29 15:10 (America/Vancouver)
+- Source: Splinter Cell: Conviction
+- Title: Splinter Cell: Unlisted; randomly selected with Python secrets.randbelow from 50 brainstormed titles.
+- Tech: Three.js r180 (0.180.0), native WebGPU only (fallback disabled); Rapier 3D 0.19.3 (WASM); Gamepad API; JavaScript ES modules; HTML/CSS; esbuild 0.25.12 for packaging.
+- Art Direction: Procedural cel-shaded 3D industrial noir; stepped toon lighting, ink edges, teal shadows, amber security lights, wet docks and rain.
+- Animation: Procedural articulated character rigs, locomotion/crouch/aim/takedown poses, vault arcs, camera interpolation, rain, machinery, visual pulses and tracers.
+- Audio: Original procedural Web Audio bass/pulse score and synthesized sound effects; optional browser speech synthesis radio voice. Available voice identity unknown.
+- Online: AI Hub Session Protocol v1, session client 1.3.0; host-authoritative 1–4-player co-op, 12 Hz snapshots, reliable actions, shared objectives and results, server-host support. Standalone solo supported.
+- Testing: Efficient, lightweight functional checks; small phone/tablet/wide layouts and WebKit; native WebGPU Chromium playthrough; AI Hub conformance harness. Final results pending.
+- Environment: Codex CLI (headless); Linux (WSL2 Ubuntu 26.04 per supplied environment); development browser unknown.
+- Model: OpenAI, gpt-6.1-sol, reasoning effort ultra.
+- Usage: API cost unknown; token count unknown; session time to be recorded when complete.
+
+Testing Feedback:
+- Issues caught: Pending final verification.
+- Critical / game breaking: Pending final verification.
+- Most helpful test: Pending final verification.
+- Least helpful test: Pending final verification.
+
+Engine Feedback:
+- Liked most: Three.js scene composition and toon materials make readable stylized spaces easy to build; Rapier provides solid capsule movement and collision queries.
+- Stuck or guessed wrong: Three.js WebGPURenderer automatically installs a WebGL fallback; explicitly disabled it to meet the native WebGPU requirement.
+- Most important custom system: The stealth director: light exposure, vision and hearing, patrol/search transitions, last known position, takedown-earned executions and host authority.
+- Hardest part: Keeping physics, procedural animation, camera aim and network authority consistent within a single portable HTML.
+- Remove or overhaul: Overhaul implicit graphics fallback into an explicit application choice.
+- One change: A first-class strict WebGPU renderer option and clearer browser capability diagnostics.
+
+Prompt Feedback:
+- Liked most: A strong creative reference with explicit controller, packaging and attract-mode requirements gives the slice a coherent target.
+- Confusing: Feature-complete has no bounded feature list; interpreted as a complete original four-objective operation demonstrating the implemented stealth-action systems.
+- Hardest: Delivering coherent stealth AI, controller UX and real shared-world networking together in one file.
+- One additional test: A two-person session with physical PS5 controllers on two machines, including real Safari on iOS.
+-->
+<html lang="en"><head><meta charset="UTF-8"><script>/*! aihub-session 1.3.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.3.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#071317"><title>Splinter Cell: Unlisted — Dead Letter</title>
+<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:session-mode" content="co-op"><meta name="hub:session-minutes" content="8"><meta name="hub:session-goal" content="Recover the evidence and extract the whole team"><meta name="hub:session-howto" content="LS/WASD move · L2/RMB aim · R2/click fire · Cross/E interact"><meta name="hub:webgpu" content="required">
+<style>@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@400;500;600;700;800;900&family=IBM+Plex+Mono:wght@400;500;600&display=swap');
+:root{--ink:#071013;--paper:#e8ebdf;--muted:#8daba9;--teal:#77d5cc;--amber:#edba68;--line:rgba(178,211,202,.2);--red:#ee665a;--title-font:'Barlow Condensed','Arial Narrow',Impact,sans-serif;--mono:'IBM Plex Mono','Courier New',monospace;--safe:clamp(22px,4.4vw,84px)}
+*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden;background:var(--ink);color:var(--paper)}body{font-family:var(--mono);font-size:14px}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:0;border-radius:0;background:none;touch-action:manipulation}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--amber);outline-offset:5px}button:hover{color:var(--amber)}button:disabled{opacity:.4;cursor:default}button.selected:not(.primary){color:var(--amber);background:rgba(237,186,104,.08);box-shadow:inset 3px 0 var(--amber)}button.selected.primary,button.primary:hover{background:#f4cc87;color:#111a19}button,input{min-height:44px}p,h1,h2,h3{margin:0}h1,h2,h3{font-family:var(--title-font);font-weight:700}button:focus{scroll-margin:25px}.hidden{display:none!important}.full-screen{position:fixed;inset:0}#vignette{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 18vw 2vw rgba(0,6,9,.52);z-index:2}#grain{position:fixed;inset:0;pointer-events:none;opacity:.035;z-index:45;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 160 160' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.8' filter='url(%23n)'/%3E%3C/svg%3E")}.micro{font-size:10px;line-height:1.7;letter-spacing:1.5px}.amber{color:var(--amber)}.eyebrow{display:flex;align-items:center;gap:10px;font-size:11px;letter-spacing:2px;line-height:1.6}.status-dot{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--teal);box-shadow:0 0 10px rgba(119,213,204,.4)}.pad-chip{display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 4px;border:1px solid rgba(211,232,221,.45);border-radius:50%;font-family:var(--mono);font-weight:500;font-size:11px;letter-spacing:0;line-height:1;vertical-align:middle;color:var(--paper)}
+.title-screen{z-index:10;background:linear-gradient(90deg,rgba(5,14,18,.97) 0%,rgba(5,14,18,.88) 26%,rgba(5,14,18,.55) 46%,rgba(5,14,18,.04) 72%),linear-gradient(0deg,rgba(2,10,13,.88),transparent 20%,transparent 83%,rgba(2,10,13,.45));overflow:hidden}.title-header{position:absolute;top:30px;left:var(--safe);right:var(--safe);display:flex;justify-content:space-between;align-items:center}.brand-badge{display:flex;align-items:center;gap:13px;font-size:8px;letter-spacing:1.5px;line-height:1.7;color:var(--muted)}.brand-square{font-family:var(--title-font);display:flex;align-items:center;justify-content:center;width:39px;height:39px;border:1px solid #7d9e9a;color:var(--paper);font-size:27px;font-weight:700;letter-spacing:-2px}.brand-square span{color:var(--amber)}.classification{display:flex;align-items:center;gap:10px;font-size:9px;letter-spacing:1.7px;color:#c1d0c7}.classification>span{margin-left:22px;color:var(--muted)}.title-content{position:absolute;left:var(--safe);top:19%;width:min(560px,48vw)}.title-rule{height:18px;padding-left:15px;border-left:3px solid var(--amber);font-size:9px;letter-spacing:2px;color:var(--muted)}.title-prelude{margin:30px 0 0 3px;font-family:var(--title-font);font-weight:500;letter-spacing:8px;font-size:clamp(17px,1.9vw,29px);line-height:1.15;color:var(--paper)}h1{font-size:clamp(84px,9vw,151px);line-height:.9;letter-spacing:-.025em;font-weight:800;margin-left:-3px;text-shadow:0 2px 20px rgba(0,0,0,.2)}.title-stop{color:var(--amber)}.title-tagline{font-size:clamp(11px,.95vw,15px);line-height:1.9;letter-spacing:.4px;margin:23px 0 29px;color:#b8c6be}.menu-list{display:flex;flex-direction:column;max-width:395px;gap:3px}.menu-button{position:relative;width:100%;display:flex;align-items:center;gap:20px;min-height:53px;padding:11px 17px;text-align:left;font-family:var(--title-font);font-weight:600;font-size:22px;letter-spacing:1.2px;transition:background .14s,color .14s;white-space:nowrap}.menu-button.primary{background:var(--amber);color:#101a18;margin:0 0 5px}.menu-index{font-family:var(--mono);font-size:9px;letter-spacing:1px;opacity:.55;min-width:16px}.menu-arrow{font-family:Arial,sans-serif;margin-left:auto;font-size:24px;font-weight:400;line-height:1}.menu-side{font-family:var(--mono);font-size:8px;letter-spacing:.5px;margin-left:auto;color:var(--muted)}.utility-menu{display:flex;align-items:center;gap:16px;padding:13px 15px 0 17px;color:var(--muted)}.utility-menu button{min-height:30px;padding:0;font-size:9px;letter-spacing:1px}.utility-menu>span{font-size:10px;opacity:.35}.mission-stamp{position:absolute;right:var(--safe);bottom:135px;width:187px;padding-left:22px;border-left:1px solid rgba(200,225,212,.32);text-shadow:0 2px 10px #000}.stamp-corner{position:absolute;top:0;left:-1px;height:21px;width:9px;border-top:1px solid var(--amber);border-left:2px solid var(--amber)}.mission-stamp h2{font-size:58px;line-height:.91;letter-spacing:1px;margin:15px 0 18px;font-weight:600}.stamp-divider{width:35px;height:2px;background:var(--amber);margin-bottom:12px}.mission-stamp>p:not(.micro){font-family:var(--title-font);font-size:22px;font-weight:500;letter-spacing:2px}.mission-stamp>span:not(.stamp-corner){font-size:8px;letter-spacing:1.2px;line-height:1.8;color:#aec4b9}.mission-bars{height:18px;display:flex;gap:3px;opacity:.5;margin-top:15px}.mission-bars i{width:2px;height:100%;background:var(--muted)}.mission-bars i:nth-child(3n){width:5px}.mission-bars i:nth-child(4n){margin-right:3px}.title-footer{position:absolute;bottom:28px;left:var(--safe);right:var(--safe);display:flex;align-items:center;justify-content:space-between;gap:20px;font-size:9px;letter-spacing:1px;color:var(--muted)}.title-footer>div{display:flex;align-items:center;gap:9px}.title-footer .pad-chip{height:20px;min-width:20px;font-size:10px}.footer-separator{width:1px;height:13px;background:var(--line);margin:0 10px}.keyboard-note{margin-left:12px;font-size:8px;opacity:.6}.footer-version>span{margin-left:18px;font-size:8px;color:#64857f}
+.hud{z-index:7;pointer-events:none}.hud button{pointer-events:auto}.objective-block{position:absolute;top:34px;left:var(--safe);max-width:40vw}.objective-block .eyebrow{color:var(--amber);font-size:10px;letter-spacing:1.7px}#objectiveText{font-family:var(--title-font);font-size:27px;font-weight:500;line-height:1.2;margin-top:7px;letter-spacing:.6px;text-shadow:0 2px 6px #000}#coopStatus{color:var(--teal);margin-top:6px;font-size:9px}.compass{position:absolute;top:29px;left:50%;transform:translateX(-50%);width:190px;display:flex;align-items:center;justify-content:space-between;color:rgba(209,225,216,.6);font-size:9px}.compass i{height:6px;width:1px;background:var(--line)}.compass b{position:absolute;top:13px;left:calc(50% - 4px);font-size:10px;color:var(--amber)}.pause-button{position:absolute;right:var(--safe);top:28px;display:flex;align-items:center;justify-content:center;gap:5px;width:44px;height:44px;border:1px solid var(--line);background:rgba(4,14,16,.3)}.pause-button span{height:12px;width:3px;background:var(--paper)}.pause-button:hover,.pause-button.selected{border-color:var(--amber)}.status-block{position:absolute;bottom:82px;left:var(--safe);width:210px;padding:14px 15px 12px;background:linear-gradient(90deg,rgba(3,12,14,.8),rgba(3,12,14,.2));border-left:2px solid var(--teal)}.shadow-title{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:500;letter-spacing:1.7px;color:var(--teal)}.shadow-symbol{width:13px;height:13px;border:1px solid currentColor;border-radius:50%;display:inline-block;background:linear-gradient(90deg,transparent 50%,currentColor 50%)}.exposure-track{height:3px;width:100%;margin:13px 0 13px;background:rgba(155,191,175,.2)}#exposureFill{height:100%;background:var(--amber);transition:width .1s}.health-row{display:flex;align-items:center;gap:10px;font-size:7px;letter-spacing:1.5px;color:#8da89b}.health-track{height:3px;flex:1;background:#243a35}#healthFill{height:100%;background:#c2d6c5;transition:width .15s}.health-tick{font-size:12px;color:#c2d6c5}.weapon-block{position:absolute;bottom:82px;right:var(--safe);width:250px;padding:12px 15px;background:linear-gradient(270deg,rgba(3,12,14,.8),rgba(3,12,14,.25));border-right:2px solid var(--amber)}.weapon-label{font-size:8px;letter-spacing:1.7px;color:var(--muted)}.ammo-line{display:flex;justify-content:space-between;align-items:center;margin:4px 0 9px}#ammoText{font-family:var(--title-font);font-weight:600;font-size:40px;line-height:1}#ammoText small{font-size:19px;opacity:.4;font-weight:400}.weapon-silhouette{width:53px;height:12px;background:#adc2b8;position:relative;opacity:.65;transform:rotate(-3deg)}.weapon-silhouette:before{content:'';position:absolute;right:-18px;top:2px;width:19px;height:7px;background:#adc2b8}.weapon-silhouette:after{content:'';position:absolute;left:7px;top:10px;width:12px;height:22px;background:#adc2b8;transform:skew(-12deg)}.execute-row{display:flex;align-items:end;justify-content:space-between;border-top:1px solid var(--line);padding-top:9px}.execute-row .micro{font-size:7px;letter-spacing:1px;color:var(--muted)}.mark-slots{display:flex;gap:5px;margin-top:6px}.mark-slots i,.mark-slots span{display:block;width:14px;height:5px;background:#29413b;border:1px solid #6d8b7d}.mark-slots .marked,.mark-slots .active{background:var(--amber);border-color:var(--amber);box-shadow:0 0 7px rgba(237,186,104,.3)}#chargeText{font-size:7px;letter-spacing:.6px;max-width:95px;text-align:right;line-height:1.6;color:var(--amber)}.control-hints{position:absolute;bottom:24px;left:50%;transform:translateX(-50%);display:flex;justify-content:center;align-items:center;gap:24px;white-space:nowrap;color:#b8c9be;font-size:8px;letter-spacing:.6px;text-shadow:0 1px 4px #000}.control-hints>span{display:inline-flex;align-items:center;gap:7px}.control-hints .pad-chip{width:auto;height:21px;font-size:9px;min-width:21px;border-color:#65857a}.interaction-stack{position:absolute;bottom:118px;left:50%;width:min(560px,44vw);transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:16px}.interact{background:rgba(5,15,17,.88);border:1px solid rgba(237,186,104,.55);padding:11px 18px;color:var(--amber);font-size:11px;letter-spacing:.6px;text-align:center;max-width:100%}.interact .pad-chip{margin-right:8px;border-color:var(--amber);color:var(--amber)}.subtitle{font-size:12px;line-height:1.75;text-align:center;text-shadow:0 2px 4px #000;background:rgba(2,10,12,.7);padding:8px 15px;color:#d6dfd2;max-width:100%}.subtitle b,.subtitle strong{color:var(--amber);font-weight:500}.toast{position:absolute;top:100px;left:50%;transform:translateX(-50%);max-width:min(600px,80vw);padding:11px 22px;background:rgba(5,15,17,.85);border-top:1px solid var(--amber);color:var(--amber);font-size:11px;letter-spacing:1.5px;text-align:center}.crosshair{position:absolute;left:50%;top:50%;width:24px;height:24px;transform:translate(-50%,-50%);opacity:.75}.crosshair i{position:absolute;background:#c3dfd4}.crosshair i:nth-child(1){left:0;top:11px;width:6px;height:1px}.crosshair i:nth-child(2){right:0;top:11px;width:6px;height:1px}.crosshair i:nth-child(3){top:0;left:11px;width:1px;height:6px}.crosshair i:nth-child(4){bottom:0;left:11px;width:1px;height:6px}.crosshair b{position:absolute;top:11px;left:11px;width:2px;height:2px;background:var(--amber)}#enemyMarkers{position:absolute;inset:0}.enemy-marker{position:absolute;transform:translate(-50%,-100%);color:var(--amber);font-size:12px;text-shadow:0 1px 4px #000}.enemy-marker.marked{color:#f3c47e}.enemy-marker.alert{color:var(--red)}.attract-label{position:fixed;z-index:13;top:26px;left:50%;transform:translateX(-50%);padding:13px 27px;background:rgba(4,13,16,.88);border:1px solid var(--line);border-top:2px solid var(--amber);text-align:center;min-width:280px;pointer-events:none}.attract-label>span{display:flex;align-items:center;justify-content:center;gap:8px;color:var(--amber);font-size:9px;letter-spacing:1.6px}.attract-label strong{font-family:var(--title-font);font-size:20px;font-weight:500;letter-spacing:1.2px;display:block;margin-top:5px}
+.modal-screen{z-index:25;background:rgba(3,12,15,.87);backdrop-filter:blur(11px);overflow:auto;padding:clamp(25px,5vh,65px) var(--safe);display:flex;align-items:center;justify-content:center}.pause-panel{width:min(550px,100%);margin:auto}.pause-panel h2{font-size:clamp(55px,7vw,94px);line-height:.94;letter-spacing:-1px;margin:19px 0}.pause-panel h2 span,.support-panel h2 span{color:var(--amber)}.panel-intro{color:var(--muted);font-size:12px;line-height:1.8;margin-bottom:27px}.pause-panel .menu-list{max-width:100%}.content-panel{width:min(940px,100%);margin:auto;padding:clamp(20px,3vw,44px);background:rgba(8,22,25,.94);border:1px solid var(--line);border-top:2px solid var(--amber);box-shadow:0 20px 80px rgba(0,0,0,.3);max-height:88vh;display:flex;flex-direction:column}.panel-top{display:flex;align-items:center;justify-content:space-between;gap:15px}.panel-top .eyebrow{font-size:9px;letter-spacing:1.6px}.close-button{display:flex;align-items:center;gap:9px;font-size:10px;letter-spacing:1px;padding:0 0 0 12px;flex-shrink:0}.close-button .pad-chip{font-size:15px}.content-panel h2{font-size:clamp(36px,4vw,59px);line-height:1.05;margin:13px 0 23px;font-weight:600;letter-spacing:1px}.panel-body{overflow:auto;padding:2px 8px 8px 1px;scrollbar-width:thin;scrollbar-color:#6f9a8d transparent;min-height:0;font-size:12px;line-height:1.9;color:#b8ccc2}.panel-body h3{font-size:25px;font-weight:500;letter-spacing:1px;color:var(--paper);margin:21px 0 7px}.panel-body h3:first-child{margin-top:0}.panel-body p{margin:8px 0 15px}.panel-body a{color:var(--amber);text-underline-offset:3px}.panel-body small{font-size:10px;color:var(--muted)}.panel-body ul{padding-left:20px;margin:10px 0 20px}.panel-body li{margin:7px 0}.panel-body strong{color:var(--paper);font-weight:500}.panel-body table{width:100%;border-collapse:collapse;margin:15px 0}.panel-body th,.panel-body td{border-bottom:1px solid var(--line);padding:11px 8px;text-align:left}.panel-body th{font-size:10px;color:var(--amber);font-weight:500}.panel-body kbd{display:inline-block;border:1px solid #456158;min-width:24px;text-align:center;padding:0 5px;font:10px var(--mono);line-height:23px;color:var(--paper);background:#142a29}.panel-body .setting-row,.panel-body .setting{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 4px;border-bottom:1px solid var(--line);color:var(--paper)}.panel-body .setting-row label,.panel-body .setting label{font-size:13px;line-height:1.6}.panel-body .setting-row button,.panel-body .setting button{border:1px solid #4e7366;padding:8px 16px;min-width:110px;color:var(--amber);font-size:11px}.panel-body input[type=range]{accent-color:var(--amber);width:190px;max-width:40%}.panel-body input[type=checkbox]{accent-color:var(--amber);width:22px;height:22px;min-height:22px}.panel-body input[type=text],.panel-body input:not([type]),.panel-body input[type=number]{background:#08191b;border:1px solid #4e7366;color:var(--paper);padding:12px 15px;max-width:100%;letter-spacing:3px;font-size:18px;text-transform:uppercase}.panel-body select{background:#112623;color:var(--paper);border:1px solid #4e7366;padding:12px;max-width:45%}.action-button{display:flex;align-items:center;justify-content:space-between;gap:25px;padding:14px 20px;min-height:53px;border:1px solid var(--line);font-family:var(--title-font);font-size:21px;font-weight:600;letter-spacing:1px;text-align:left}.action-button.primary{color:#10201b;background:var(--amber);border-color:var(--amber)}.panel-body .action-button{margin:12px 0}.result-panel{position:relative;width:min(720px,100%);padding:25px 0;margin:auto}.result-panel h2{font-size:clamp(62px,8vw,111px);line-height:.9;letter-spacing:-1px;margin:23px 0;color:var(--paper)}.result-seal{position:absolute;right:0;top:25px;width:100px;height:100px;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;font-family:var(--title-font);font-size:58px;font-weight:600;color:var(--amber);opacity:.5;transform:rotate(-8deg)}.result-quote{font-size:12px;color:var(--muted);line-height:1.8;margin:0 0 29px}.result-stats{border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:19px 0;display:flex;flex-wrap:wrap;gap:20px 34px;line-height:1.8;color:var(--muted);font-size:11px;margin-bottom:28px}.result-stats strong,.result-stats b{color:var(--paper);font-size:21px;font-family:var(--title-font);font-weight:500}.result-actions{display:flex;gap:12px}.result-actions button{flex:1}.boot-screen,.unsupported-screen{z-index:60;display:flex;align-items:center;justify-content:center;background:#071216;flex-direction:column}.boot-brand{display:flex;align-items:center;gap:22px;font-family:var(--title-font);font-size:46px;font-weight:700;letter-spacing:5px}.signal-icon{display:flex;align-items:center;gap:5px}.signal-icon i{height:8px;width:8px;border-radius:50%;background:var(--teal);box-shadow:0 0 15px #77d5cc55}.signal-icon i:nth-child(2){height:12px;width:12px}.boot-track{height:2px;background:#1b3638;width:240px;margin:28px 0 18px;overflow:hidden}.boot-track i{display:block;width:40%;height:100%;background:var(--amber);animation:boot-scan 1.6s ease-in-out infinite}.boot-screen p{font-size:10px;color:var(--teal);letter-spacing:2px;line-height:1.8;text-align:center;max-width:90vw}.boot-screen>.micro{font-size:8px;color:#4a6c69;margin-top:18px}.support-panel{width:min(560px,100%);padding:30px}.support-panel h2{font-size:76px;line-height:.9;letter-spacing:-1px;margin:21px 0 25px}.support-panel p{font-size:12px;line-height:1.9;color:var(--muted);margin-bottom:24px}.support-panel .micro{margin-top:22px;font-size:9px}.touch-note{position:fixed;bottom:0;left:0;right:0;z-index:50;background:#0a1c20f5;border-top:1px solid #45635b;display:flex;align-items:center;justify-content:center;gap:15px;padding:8px 20px;font-size:11px;line-height:1.5;color:#d2ded4}.touch-note button{font-size:10px;letter-spacing:1px;color:var(--amber);padding:3px 13px;border:1px solid #6c7155;min-height:35px}.controller-icon{width:29px;height:17px;border:1px solid #91baae;border-radius:6px 6px 9px 9px;position:relative;flex-shrink:0}.controller-icon:before{position:absolute;content:'+';left:4px;top:0;font-size:12px;color:#91baae}.controller-icon:after{position:absolute;content:'·';right:5px;top:-3px;font-size:19px;color:#91baae}@keyframes boot-scan{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}
+@media(min-width:1800px){body{font-size:16px}.title-content{top:22%;width:600px}.menu-list{max-width:440px}.menu-button{min-height:61px;font-size:25px}.title-tagline{margin:30px 0 37px}.mission-stamp{bottom:170px;right:6vw;width:215px}.mission-stamp h2{font-size:70px}.title-header{top:45px}.title-footer{bottom:40px}.objective-block{top:45px}#objectiveText{font-size:32px}.status-block,.weapon-block{bottom:100px}.control-hints{bottom:35px;font-size:10px}}
+@media(max-width:1000px){.title-content{top:20%;width:56vw}.title-header{top:24px}.classification{font-size:8px;letter-spacing:1px}.classification>span{display:none}.title-prelude{margin-top:22px;letter-spacing:6px}.title-tagline{margin:19px 0 23px}.menu-list{max-width:350px}.menu-button{min-height:49px;font-size:21px;gap:15px}.mission-stamp{width:150px;bottom:120px}.mission-stamp h2{font-size:48px}.mission-stamp .micro{font-size:8px}.title-footer{font-size:8px;bottom:23px}.keyboard-note,.footer-version>span{display:none}.status-block{width:180px;bottom:80px}.weapon-block{width:210px;bottom:80px}.control-hints{gap:14px;font-size:7px}.interaction-stack{bottom:115px;width:42vw}.subtitle{font-size:11px}.objective-block{max-width:58vw}.objective-block .eyebrow{font-size:8px}#objectiveText{font-size:24px}.compass{display:none}.execute-row{gap:10px}#chargeText{font-size:6px}.weapon-silhouette{transform:scale(.8);transform-origin:right center}.toast{top:96px;font-size:10px;max-width:85vw}}
+@media(max-width:650px){:root{--safe:24px}.title-screen{background:linear-gradient(90deg,rgba(5,14,18,.94),rgba(5,14,18,.55) 70%,rgba(5,14,18,.27)),linear-gradient(0deg,rgba(2,10,13,.93),transparent 45%)}.title-header{top:20px}.brand-badge{gap:9px;font-size:7px}.brand-square{height:31px;width:31px;font-size:23px}.classification{font-size:7px;letter-spacing:.7px;gap:6px}.classification .status-dot{width:4px;height:4px}.title-content{top:18%;width:calc(100% - 48px);max-width:440px}.title-rule{font-size:7px;height:14px;letter-spacing:1.5px}.title-prelude{font-size:19px;margin-top:25px;letter-spacing:6px}h1{font-size:clamp(78px,20vw,123px);line-height:.95}.title-tagline{font-size:11px;line-height:1.8;margin:20px 0 26px}.menu-list{max-width:100%}.menu-button{min-height:51px;font-size:23px;padding:11px 15px;gap:16px}.menu-side{font-size:7px}.utility-menu{padding-left:15px;gap:13px}.utility-menu button{font-size:8px;letter-spacing:.6px}.mission-stamp{display:none}.title-footer{bottom:23px;font-size:8px;left:24px;right:24px;gap:8px}.footer-version{display:none!important}.title-footer .pad-chip{height:18px;min-width:18px;font-size:9px}.title-footer .footer-separator{margin:0 6px}.objective-block{top:22px;left:20px;max-width:calc(100vw - 95px)}.objective-block .eyebrow{font-size:7px;letter-spacing:.8px;gap:6px}#objectiveText{font-size:22px;letter-spacing:.1px;margin-top:5px}.pause-button{top:19px;right:19px;width:38px;min-height:38px;height:38px}.status-block{bottom:77px;left:16px;width:145px;padding:10px;border-width:1px}.shadow-title{font-size:9px;gap:7px;letter-spacing:.7px}.shadow-symbol{width:10px;height:10px}.exposure-track{margin:9px 0 10px}.health-row{font-size:6px;gap:7px}.weapon-block{right:16px;bottom:77px;width:150px;padding:10px;border-width:1px}.weapon-label{font-size:6px;letter-spacing:.9px}.ammo-line{margin:5px 0}#ammoText{font-size:31px}#ammoText small{font-size:15px}.weapon-silhouette{display:none}.execute-row .micro{font-size:6px;letter-spacing:.3px}.execute-row{padding-top:6px;gap:6px}.mark-slots{gap:3px;margin-top:4px}.mark-slots i,.mark-slots span{width:10px;height:4px}#chargeText{font-size:5px;letter-spacing:0;max-width:64px}.control-hints{bottom:23px;gap:7px;width:calc(100% - 28px);max-width:520px;flex-wrap:wrap;line-height:1.6;white-space:normal;font-size:6px}.control-hints>span{gap:4px}.control-hints .pad-chip{min-width:17px;height:17px;font-size:8px}.interaction-stack{bottom:188px;width:calc(100% - 44px);gap:9px}.interact{font-size:10px;padding:9px 13px;line-height:1.7}.subtitle{font-size:10px;padding:7px 11px;line-height:1.7}.toast{top:91px;font-size:9px;letter-spacing:.7px;padding:9px 14px;max-width:calc(100% - 40px);width:max-content}.attract-label{top:95px;min-width:250px;padding:10px 18px}.attract-label>span{font-size:8px;letter-spacing:.8px}.attract-label strong{font-size:18px}.modal-screen{padding:20px 16px}.pause-panel{padding:14px 8px}.pause-panel h2{font-size:66px}.pause-panel .eyebrow{font-size:9px}.pause-panel .panel-intro{font-size:11px}.content-panel{max-height:92vh;padding:20px 17px}.panel-top{align-items:center}.panel-top .eyebrow{font-size:7px;letter-spacing:.7px}.close-button{font-size:8px;gap:5px;padding-left:0}.close-button .pad-chip{height:20px;min-width:20px}.content-panel h2{font-size:39px;margin:13px 0 18px}.panel-body{font-size:11px;line-height:1.8;padding-right:2px}.panel-body h3{font-size:24px}.panel-body .setting-row,.panel-body .setting{gap:12px;padding:12px 0}.panel-body .setting-row label,.panel-body .setting label{font-size:11px}.panel-body .setting-row button,.panel-body .setting button{font-size:10px;min-width:86px;padding:8px}.panel-body input[type=range]{width:125px}.panel-body th,.panel-body td{font-size:10px;padding:9px 4px}.panel-body input[type=text]{font-size:15px;width:100%;letter-spacing:2px}.result-panel{padding:20px 8px}.result-panel h2{font-size:72px;max-width:80%}.result-panel .eyebrow{font-size:8px}.result-seal{width:66px;height:66px;font-size:40px;right:7px;top:25px}.result-quote{font-size:10px}.result-stats{font-size:10px;gap:15px 23px}.result-actions{flex-direction:column;gap:9px}.result-actions button{width:100%;font-size:20px}.support-panel h2{font-size:66px}.support-panel p{font-size:11px}.touch-note{font-size:9px;padding:8px 12px;gap:9px}.touch-note button{font-size:8px;padding:2px 9px}.controller-icon{width:25px;height:16px}.touch-note:not(.hidden)~*{margin-bottom:50px}}
+@media(max-height:760px) and (min-width:651px){.title-content{top:19%}.title-prelude{margin-top:20px}h1{font-size:clamp(80px,9vw,125px)}.title-tagline{margin:16px 0 20px}.menu-button{min-height:46px;font-size:21px;padding:9px 16px}.utility-menu{padding-top:9px}.mission-stamp{bottom:105px}.mission-stamp h2{font-size:48px}.title-footer{bottom:20px}.title-header{top:21px}.title-rule{height:14px;font-size:8px}}
+@media(max-height:590px){.title-content{top:95px;bottom:55px;overflow-y:auto;padding:0 10px 15px 0;scrollbar-width:none;width:48vw}.title-rule{display:none}.title-prelude{font-size:17px;margin-top:0;letter-spacing:5px}h1{font-size:80px;line-height:.9}.title-tagline{font-size:10px;line-height:1.5;margin:13px 0 16px}.menu-list{max-width:340px}.menu-button{min-height:42px;font-size:20px;padding:8px 12px;gap:12px}.utility-menu{padding:7px 0 0 12px}.utility-menu button{font-size:8px;min-height:27px}.title-header{top:17px}.title-footer{bottom:15px}.brand-square{width:31px;height:31px;font-size:24px}.brand-badge{font-size:7px}.mission-stamp{bottom:80px}.mission-stamp h2{font-size:43px}.mission-stamp .micro{font-size:7px}.status-block,.weapon-block{bottom:57px}.control-hints{bottom:14px}.objective-block{top:17px}#objectiveText{font-size:22px}.pause-button{top:15px}.interaction-stack{bottom:91px}.toast{top:75px}.pause-panel h2{font-size:55px}.pause-panel .eyebrow{font-size:8px}.pause-panel .panel-intro{margin-bottom:15px;font-size:10px}.pause-panel .menu-button{min-height:43px;font-size:19px}.content-panel{max-height:94vh}.modal-screen{padding-top:15px;padding-bottom:15px}.result-panel h2{font-size:64px}.result-quote{margin-bottom:15px}.result-stats{padding:12px 0;margin-bottom:16px}.result-panel{padding:12px 0}.attract-label{top:65px}.touch-note{padding-top:5px;padding-bottom:5px}}
+@media(max-width:650px) and (max-height:590px){.title-content{top:95px;bottom:64px;width:calc(100% - 48px);max-width:400px}.title-tagline{margin:13px 0 15px}.title-footer{bottom:22px}.title-prelude{font-size:16px}h1{font-size:77px}.menu-button{font-size:20px;min-height:43px}.interaction-stack{bottom:155px}.status-block,.weapon-block{bottom:67px}.control-hints{bottom:16px}.attract-label{top:78px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.boot-track i{width:60%;transform:translateX(40%)}}
+body:has(#touchNote:not(.hidden)) .title-footer{bottom:74px}body:has(#touchNote:not(.hidden)) .title-content{bottom:110px;overflow-y:auto;scrollbar-width:none}body:has(#touchNote:not(.hidden)) .hud .control-hints{bottom:75px}body:has(#touchNote:not(.hidden)) .status-block,body:has(#touchNote:not(.hidden)) .weapon-block{bottom:130px}
+/* Live operation additions */
+.enemyMarker{position:absolute;transform:translate(-50%,-100%);min-width:24px;height:29px;text-align:center;color:#f5ca7b;font:700 20px var(--mono,monospace);border-bottom:2px solid currentColor}.enemyMarker:empty{display:none!important}.enemyMarker.marked{color:#cffff0;border:1px solid currentColor;width:28px;line-height:27px}.enemyMarker i{position:absolute;bottom:0;left:0;width:3px;background:currentColor}.enemyMarker span{position:relative}.mark-slots i.filled{background:#bdf8de;box-shadow:0 0 12px #bdf8de66}.ready{color:#bdf8de!important}.crosshair.target{color:#ffc17c}.holdProgress{position:absolute;height:3px;bottom:0;left:0;background:#c5ffe4}.manualGrid{display:grid;grid-template-columns:repeat(3,1fr);gap:22px}.controlTable{display:grid;grid-template-columns:1fr 1.4fr;gap:12px 20px;margin-top:25px}.controlTable b{color:#d1e6df}.resultNumbers{display:grid;grid-template-columns:repeat(4,1fr);gap:18px;margin:28px 0}.resultNumbers strong{display:block;font-size:32px;color:#e7c083}.resultNumbers span{font-size:10px;letter-spacing:.1em}.resultRank{font-size:24px;letter-spacing:.2em;color:#d7bd85}.setting input[type=checkbox]{accent-color:#b4ead9;width:25px;height:25px}.setting input[type=range]{accent-color:#b4ead9;width:155px}.damaged #vignette{box-shadow:inset 0 0 150px #f14f3b99}.highContrast{--ink:#f5fff9;--muted:#c4d9d0}.panel-body a{color:#b8f3df;text-decoration:underline}.panel-body p b{color:#c5d6ce}.subtitle span{font-weight:700;letter-spacing:.14em;color:#d8ba80;margin-right:12px}.finePrint{font-size:13px!important;opacity:.65}.panelIntro{font-size:21px!important;line-height:1.5!important}.setting{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:16px 0;border-bottom:1px solid #ffffff15}.enemyMarker,.holdProgress{pointer-events:none}
+@media(max-width:650px){.manualGrid{grid-template-columns:1fr;gap:10px}.controlTable{font-size:12px;gap:12px}.resultNumbers{grid-template-columns:repeat(2,1fr)}.panelIntro{font-size:18px!important}.setting{font-size:14px}.control-hints{max-width:95%;gap:9px!important}.control-hints span{font-size:9px!important}.control-hints span:last-child{display:none}}
+#objectiveDesc{font-size:12px;line-height:1.7;letter-spacing:.03em;color:#a4b9b2;max-width:340px;margin-top:5px}#waypoint{position:absolute;display:flex;flex-direction:column;align-items:center;gap:4px;transform:translate(-50%,-50%);text-align:center;pointer-events:none;color:#e3c58f;text-shadow:0 1px 4px #000;font:10px var(--mono);letter-spacing:.1em}#waypoint i{font-style:normal;font-size:32px;line-height:1}#waypoint b{font-size:10px}#waypoint.offscreen i{font-size:24px}#waypoint span{font-size:13px;color:#e9eee5}.hud .objective-block{max-width:35%}@media(max-width:650px){#objectiveDesc{font-size:10px;max-width:200px}.hud .objective-block{max-width:70%}#waypoint b{font-size:8px}}
+</style>
+<script type="importmap">{"imports":{"three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.core.js","@dimforge/rapier3d-compat":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"}}</script>
+</head><body><div id="vignette" aria-hidden="true"></div>
+<div id="grain" aria-hidden="true"></div>
+
+<div id="boot" class="full-screen boot-screen">
+  <div class="boot-brand"><span class="signal-icon" aria-hidden="true"><i></i><i></i><i></i></span><span>UNLISTED</span></div>
+  <div class="boot-track"><i></i></div>
+  <p id="bootStatus">ESTABLISHING SECURE CHANNEL…</p>
+  <span class="micro">NORTH ATLANTIC / ENCRYPTION ACTIVE</span>
+</div>
+
+<main id="titleScreen" class="full-screen title-screen hidden">
+  <header class="title-header"><div class="brand-badge"><span class="brand-square">U<span>∕</span></span><span>NO NAME.<br>NO PAPER TRAIL.</span></div><div class="classification"><i class="status-dot"></i> CLASSIFIED / EYES ONLY <span>047—09</span></div></header>
+  <div class="title-content">
+    <div class="title-rule"><span>TACTICAL ESPIONAGE / VOL. 01</span></div>
+    <p class="title-prelude">SPLINTER CELL</p>
+    <h1>UNLISTED<span class="title-stop">.</span></h1>
+    <p class="title-tagline">They erased your name.<br>Return the favor.</p>
+    <nav id="titleMenu" class="menu-list" aria-label="Main menu">
+      <button id="startBtn" data-action="startBtn" class="menu-button primary selected"><span class="menu-index">01</span><span>START OPERATION</span><span class="menu-arrow">↗</span></button>
+      <button id="coopBtn" data-action="coopBtn" class="menu-button"><span class="menu-index">02</span><span>JOINT OPERATION</span><span class="menu-side">1–4 OPERATIVES</span></button>
+      <button id="manualBtn" data-action="manualBtn" class="menu-button"><span class="menu-index">03</span><span>FIELD MANUAL</span></button>
+      <div class="utility-menu"><button id="settingsBtn" data-action="settingsBtn">SETTINGS</button><span>/</span><button id="aboutBtn" data-action="aboutBtn">ABOUT & CREDITS</button></div>
+    </nav>
+  </div>
+  <aside class="mission-stamp" aria-label="Operation details"><span class="stamp-corner"></span><p class="micro amber">DEPLOYMENT FILE 01</p><h2>DEAD<br>LETTER</h2><div class="stamp-divider"></div><p>01:40 AM</p><span>NORTH ATLANTIC<br>FREIGHT TERMINAL</span><div class="mission-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></aside>
+  <footer class="title-footer"><div><span class="pad-chip">✕</span> SELECT <span class="footer-separator"></span><span class="pad-chip">↕</span> NAVIGATE <span class="keyboard-note">/ KEYBOARD SUPPORTED</span></div><div class="footer-version"><i class="status-dot"></i> SIGNAL SECURE <span>WEBGPU / 01.00</span></div></footer>
+</main>
+
+<div id="hud" class="full-screen hud hidden">
+  <div class="objective-block"><div class="eyebrow"><i class="status-dot"></i><span id="phaseText">OPERATION / DEAD LETTER</span></div><div id="objectiveText">Cut power to the freight terminal</div><div id="coopStatus" class="micro"></div></div>
+  <div class="compass" aria-hidden="true"><span>W</span><i></i><span>N</span><i></i><span>E</span><b>▾</b></div>
+  <button id="pauseBtn" data-action="pauseBtn" class="pause-button" aria-label="Pause operation"><span></span><span></span></button>
+  <div id="toast" class="toast hidden" role="status"></div>
+  <div id="enemyMarkers" aria-hidden="true"></div>
+  <div id="crosshair" class="crosshair" aria-hidden="true"><i></i><i></i><i></i><i></i><b></b></div>
+  <div class="status-block">
+    <div class="shadow-title"><span class="shadow-symbol" aria-hidden="true"></span><span id="stealthText">IN SHADOW</span></div>
+    <div class="exposure-track"><div id="exposureFill" style="width:0%"></div></div>
+    <div class="health-row"><span>VITALS</span><div class="health-track"><div id="healthFill" style="width:100%"></div></div><span class="health-tick">+</span></div>
+  </div>
+  <div class="weapon-block"><div class="weapon-label">M9 / SUPPRESSED</div><div class="ammo-line"><span id="ammoText">12 <small>/ 48</small></span><span class="weapon-silhouette" aria-hidden="true"></span></div><div class="execute-row"><div><span class="micro">MARK & EXECUTE</span><div id="markSlots" class="mark-slots"><i></i><i></i><i></i></div></div><span id="chargeText">TAKEDOWN TO CHARGE</span></div></div>
+  <div class="interaction-stack"><div id="interact" class="interact hidden"></div><div id="subtitle" class="subtitle hidden" aria-live="polite"></div></div>
+  <div id="controlHints" class="control-hints"><span><b class="pad-chip">✕</b> INTERACT / COVER</span><span><b class="pad-chip">□</b> RELOAD</span><span><b class="pad-chip">△</b> MARK</span><span><b class="pad-chip">R1</b> EXECUTE</span></div>
+</div>
+
+<div id="attractLabel" class="attract-label hidden"><span><i class="status-dot"></i> LIVE FIELD DEMONSTRATION</span><strong>ANY INPUT TO RETURN TO TITLE</strong></div>
+
+<div id="pauseScreen" class="full-screen modal-screen hidden" role="dialog" aria-modal="true" aria-label="Operation paused">
+  <div class="pause-panel"><p class="eyebrow amber">SIGNAL HELD</p><h2>OPERATION<br>PAUSED<span>.</span></h2><p class="panel-intro">Take a breath. The night can wait.</p><nav class="menu-list" aria-label="Pause menu"><button id="resumeBtn" data-action="resumeBtn" class="menu-button primary selected"><span class="menu-index">01</span>RESUME OPERATION<span class="menu-arrow">↗</span></button><button id="restartBtn" data-action="restartBtn" class="menu-button"><span class="menu-index">02</span>RESTART OPERATION</button><button id="pauseSettingsBtn" data-action="pauseSettingsBtn" class="menu-button"><span class="menu-index">03</span>SETTINGS</button><button id="exitBtn" data-action="exitBtn" class="menu-button"><span class="menu-index">04</span>RETURN TO TITLE</button></nav></div>
+</div>
+
+<div id="overlay" class="full-screen modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="panelTitle"><section class="content-panel"><div class="panel-top"><p class="eyebrow amber">UNLISTED / FIELD ARCHIVE</p><button id="panelClose" data-action="panelClose" class="close-button"><span class="pad-chip">○</span> BACK</button></div><h2 id="panelTitle">FIELD MANUAL</h2><div id="panelBody" class="panel-body"></div></section></div>
+
+<div id="results" class="full-screen modal-screen hidden" role="dialog" aria-modal="true" aria-labelledby="resultTitle"><section class="result-panel"><div class="result-seal" aria-hidden="true">U∕</div><p class="eyebrow amber">OPERATION / DEAD LETTER</p><h2 id="resultTitle">GHOST<br>PROTOCOL.</h2><p class="result-quote">“Names disappear. Consequences don't.”</p><div id="resultStats" class="result-stats"></div><div class="result-actions"><button id="replayBtn" data-action="replayBtn" class="action-button primary">REDEPLOY <span>↗</span></button><button id="resultExitBtn" data-action="resultExitBtn" class="action-button">RETURN TO TITLE</button></div></section></div>
+
+<div id="unsupported" class="full-screen unsupported-screen hidden"><div class="support-panel"><span class="eyebrow amber">SECURE CHANNEL UNAVAILABLE</span><h2>WEBGPU<br>REQUIRED<span>.</span></h2><p id="unsupportedReason">This operation requires a browser with WebGPU enabled. Open this page in a supported browser over HTTPS or localhost.</p><button id="retryBtn" data-action="retryBtn" class="action-button primary">RETRY CONNECTION <span>↗</span></button><p class="micro">THREE.JS R180 / WEBGPU ONLY</p></div></div>
+
+<div id="touchNote" class="touch-note hidden"><span class="controller-icon" aria-hidden="true"><i></i></span><span>Controller or keyboard required</span><button id="touchSettingsBtn" data-action="touchSettingsBtn">SETTINGS</button></div>
+<script>window.UNLISTED_ABOUT="\u003ch3>Source Information\u003c/h3>\u003cp>\u003cb>Date\u003c/b> 2026-10-29 15:10 (America/Vancouver)\u003c/p>\u003cp>\u003cb>Source\u003c/b> Splinter Cell: Conviction\u003c/p>\u003cp>\u003cb>Title\u003c/b> Splinter Cell: Unlisted; randomly selected with Python secrets.randbelow from 50 brainstormed titles.\u003c/p>\u003cp>\u003cb>Tech\u003c/b> Three.js r180 (0.180.0), native WebGPU only (fallback disabled); Rapier 3D 0.19.3 (WASM); Gamepad API; JavaScript ES modules; HTML/CSS; esbuild 0.25.12 for packaging.\u003c/p>\u003cp>\u003cb>Art Direction\u003c/b> Procedural cel-shaded 3D industrial noir; stepped toon lighting, ink edges, teal shadows, amber security lights, wet docks and rain.\u003c/p>\u003cp>\u003cb>Animation\u003c/b> Procedural articulated character rigs, locomotion/crouch/aim/takedown poses, vault arcs, camera interpolation, rain, machinery, visual pulses and tracers.\u003c/p>\u003cp>\u003cb>Audio\u003c/b> Original procedural Web Audio bass/pulse score and synthesized sound effects; optional browser speech synthesis radio voice. Available voice identity unknown.\u003c/p>\u003cp>\u003cb>Online\u003c/b> AI Hub Session Protocol v1, session client 1.3.0; host-authoritative 1–4-player co-op, 12 Hz snapshots, reliable actions, shared objectives and results, server-host support. Standalone solo supported.\u003c/p>\u003cp>\u003cb>Testing\u003c/b> Efficient, lightweight functional checks; small phone/tablet/wide layouts and WebKit; native WebGPU Chromium playthrough; AI Hub conformance harness. Final results pending.\u003c/p>\u003cp>\u003cb>Environment\u003c/b> Codex CLI (headless); Linux (WSL2 Ubuntu 26.04 per supplied environment); development browser unknown.\u003c/p>\u003cp>\u003cb>Model\u003c/b> OpenAI, gpt-6.1-sol, reasoning effort ultra.\u003c/p>\u003cp>\u003cb>Usage\u003c/b> API cost unknown; token count unknown; session time to be recorded when complete.\u003c/p>\u003ch3>Testing Feedback\u003c/h3>\u003cp>\u003cb>Issues caught\u003c/b> Pending final verification.\u003c/p>\u003cp>\u003cb>Critical / game breaking\u003c/b> Pending final verification.\u003c/p>\u003cp>\u003cb>Most helpful test\u003c/b> Pending final verification.\u003c/p>\u003cp>\u003cb>Least helpful test\u003c/b> Pending final verification.\u003c/p>\u003ch3>Engine Feedback\u003c/h3>\u003cp>\u003cb>Liked most\u003c/b> Three.js scene composition and toon materials make readable stylized spaces easy to build; Rapier provides solid capsule movement and collision queries.\u003c/p>\u003cp>\u003cb>Stuck or guessed wrong\u003c/b> Three.js WebGPURenderer automatically installs a WebGL fallback; explicitly disabled it to meet the native WebGPU requirement.\u003c/p>\u003cp>\u003cb>Most important custom system\u003c/b> The stealth director: light exposure, vision and hearing, patrol/search transitions, last known position, takedown-earned executions and host authority.\u003c/p>\u003cp>\u003cb>Hardest part\u003c/b> Keeping physics, procedural animation, camera aim and network authority consistent within a single portable HTML.\u003c/p>\u003cp>\u003cb>Remove or overhaul\u003c/b> Overhaul implicit graphics fallback into an explicit application choice.\u003c/p>\u003cp>\u003cb>One change\u003c/b> A first-class strict WebGPU renderer option and clearer browser capability diagnostics.\u003c/p>\u003ch3>Prompt Feedback\u003c/h3>\u003cp>\u003cb>Liked most\u003c/b> A strong creative reference with explicit controller, packaging and attract-mode requirements gives the slice a coherent target.\u003c/p>\u003cp>\u003cb>Confusing\u003c/b> Feature-complete has no bounded feature list; interpreted as a complete original four-objective operation demonstrating the implemented stealth-action systems.\u003c/p>\u003cp>\u003cb>Hardest\u003c/b> Delivering coherent stealth AI, controller UX and real shared-world networking together in one file.\u003c/p>\u003cp>\u003cb>One additional test\u003c/b> A two-person session with physical PS5 controllers on two machines, including real Safari on iOS.\u003c/p>";window.addEventListener('error',e=>{if(document.getElementById('boot')&&!document.getElementById('boot').classList.contains('hidden')){document.getElementById('bootStatus').textContent='CONNECTION ERROR · '+(e.message||'Check CDN connectivity, then reload.')}});</script><script type="module">// main.js
+import * as THREE2 from "three/webgpu";
+import RAPIER from "@dimforge/rapier3d-compat";
+
+// world.js
+import * as THREE from "three/webgpu";
+var C = { ink: 463645, floor: 2438204, concrete: 4740188, pale: 10532794, teal: 2450540, tealDark: 1522504, rust: 12150587, amber: 16758611, glow: 9630415, red: 16083024 };
+var ramp;
+function toon(color, extra = {}) {
+  if (!ramp) {
+    ramp = new THREE.DataTexture(new Uint8Array([70, 70, 70, 255, 140, 140, 140, 255, 210, 210, 210, 255, 255, 255, 255, 255]), 4, 1, THREE.RGBAFormat);
+    ramp.needsUpdate = true;
+    ramp.minFilter = ramp.magFilter = THREE.NearestFilter;
+  }
+  return new THREE.MeshToonMaterial({ color, gradientMap: ramp, ...extra });
+}
+function ink(mesh, opacity = 0.55) {
+  const e = new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry, 25), new THREE.LineBasicMaterial({ color: C.ink, transparent: true, opacity }));
+  mesh.add(e);
+  return mesh;
+}
+function box(parent, x, y, z, w, h, d, mat, outline = false) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), typeof mat === "number" ? toon(mat) : mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  if (outline) ink(m);
+  return m;
+}
+function cyl(parent, x, y, z, r, h, mat, segments = 8) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, h, segments), typeof mat === "number" ? toon(mat) : mat);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  return m;
+}
+function textTexture(text, color = "#d5e1dd", bg = null, w = 1024, h = 256) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext("2d");
+  if (bg) {
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+  }
+  ctx.fillStyle = color;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `900 ${Math.min(h * 0.7, w / (text.length * 0.57))}px Arial, sans-serif`;
+  ctx.fillText(text, w / 2, h * 0.52);
+  const t = new THREE.CanvasTexture(c);
+  t.anisotropy = 4;
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function sign(parent, text, x, y, z, w, h, { color = "#c7dcd5", bg = null, rotation = 0 } = {}) {
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: textTexture(text, color, bg), transparent: true, depthWrite: false, side: THREE.DoubleSide }));
+  m.position.set(x, y, z);
+  m.rotation.y = rotation;
+  parent.add(m);
+  return m;
+}
+function floorText(parent, text, x, z, w, h, color = "#9da99d") {
+  const m = sign(parent, text, x, 0.035, z, w, h, { color });
+  m.rotation.x = -Math.PI / 2;
+  return m;
+}
+function line(parent, x, z, w, d, color = 12102515) {
+  const m = box(parent, x, 0.018, z, w, 0.022, d, new THREE.MeshBasicMaterial({ color }));
+  m.castShadow = false;
+  return m;
+}
+function pipe(parent, a, b, r, color) {
+  const v = new THREE.Vector3().subVectors(b, a);
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(r, r, v.length(), 8), toon(color));
+  m.position.copy(a).add(b).multiplyScalar(0.5);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), v.normalize());
+  parent.add(m);
+  return m;
+}
+function createWorld(scene2, physics2, RAPIER2) {
+  const world2 = new THREE.Group();
+  world2.name = "Kestrel cold-storage dock";
+  scene2.add(world2);
+  const solids = [], lights = [], cameras = [], terminals = [], animated = [], rotors = [], rain = [];
+  const fixed = (x, z, w, d, h, mesh) => {
+    let collider2;
+    if (physics2 && RAPIER2) collider2 = physics2.createCollider(RAPIER2.ColliderDesc.cuboid(w / 2, h / 2, d / 2).setTranslation(x, h / 2, z));
+    const s = { x, z, w, d, h, mesh, collider: collider2 };
+    solids.push(s);
+    return s;
+  };
+  const solid = (x, z, w, d, h, color, y = 0) => {
+    const m = box(world2, x, h / 2 + y, z, w, h, d, color, true);
+    if (y === 0) fixed(x, z, w, d, h, m);
+    return m;
+  };
+  const dark = toon(C.ink), metal = toon(3755096), concrete = toon(C.concrete), yellow = toon(C.amber), teal = toon(C.teal);
+  const glow = (color) => new THREE.MeshBasicMaterial({ color });
+  scene2.background = new THREE.Color(727074);
+  scene2.fog = new THREE.Fog(727074, 48, 135);
+  scene2.add(new THREE.HemisphereLight(9358041, 2306619, 2.05));
+  const moon = new THREE.DirectionalLight(10213606, 2.7);
+  moon.position.set(-28, 45, 12);
+  moon.castShadow = true;
+  moon.shadow.mapSize.set(2048, 2048);
+  moon.shadow.camera.left = -42;
+  moon.shadow.camera.right = 42;
+  moon.shadow.camera.top = 47;
+  moon.shadow.camera.bottom = -47;
+  moon.shadow.camera.near = 1;
+  moon.shadow.camera.far = 110;
+  moon.shadow.bias = -1e-3;
+  scene2.add(moon);
+  box(world2, 0, -1.2, 0, 190, 0.4, 190, toon(1191228));
+  for (let i = 0; i < 120; i++) {
+    const side = i % 2 ? 1 : -1;
+    const x = side * (27 + i * 7.31 % 53), z = -80 + i * 12.17 % 160;
+    line(world2, x, z, 1 + i % 9, 0.06, i % 3 === 0 ? 2183781 : 1588557);
+    world2.children[world2.children.length - 1].position.y = -0.95;
+  }
+  box(world2, 0, -0.32, 0, 49, 0.62, 69, concrete, true);
+  const floor = box(world2, 0, -0.035, 0, 48, 0.08, 68, toon(C.floor));
+  floor.castShadow = false;
+  if (physics2 && RAPIER2) physics2.createCollider(RAPIER2.ColliderDesc.cuboid(24, 0.3, 34).setTranslation(0, -0.3, 0));
+  for (let x = -24; x <= 24; x += 6) line(world2, x, 0, 0.035, 68, 1516847);
+  for (let z = -34; z <= 34; z += 6) line(world2, 0, z, 48, 0.035, 1516847);
+  for (let i = 0; i < 75; i++) {
+    const x = -23 + i * 13.257 % 46, z = -33 + i * 7.619 % 66;
+    const m = new THREE.Mesh(new THREE.CircleGeometry(0.7 + i % 6 * 0.34, 5), new THREE.MeshBasicMaterial({ color: i % 4 === 0 ? 7376273 : 3428442, transparent: true, opacity: i % 4 === 0 ? 0.19 : 0.36, depthWrite: false }));
+    m.rotation.x = -Math.PI / 2;
+    m.rotation.z = i * 2.3;
+    m.scale.y = 0.24 + i % 3 * 0.12;
+    m.position.set(x, 0.025, z);
+    world2.add(m);
+  }
+  solid(-24.1, 0, 0.5, 68, 0.65, 5464424);
+  solid(24.1, 0, 0.5, 68, 0.65, 5464424);
+  solid(0, -34, 48, 0.6, 1, 4608859);
+  solid(0, 34, 48, 0.6, 0.7, 4608859);
+  for (let z = -32; z < 35; z += 4) {
+    for (const side of [-1, 1]) {
+      line(world2, side * 23.5, z, 0.3, 1.7, C.amber);
+      cyl(world2, side * 24.1, 0.9, z, 0.17, 0.8, dark);
+      box(world2, side * 24.1, 1.35, z, 0.7, 0.14, 0.2, metal);
+    }
+  }
+  for (let z = -30; z < 34; z += 8) {
+    cyl(world2, -25, 0.2, z, 0.24, 0.8, dark);
+    cyl(world2, 25, 0.2, z, 0.24, 0.8, dark);
+  }
+  function container(x, z, w, d, h, col, id) {
+    const base = solid(x, z, w, d, h, col), front = z + d / 2 + 0.018;
+    for (let a = -w / 2 + 0.22; a < w / 2; a += 0.46) {
+      box(world2, x + a, h / 2, front, 0.055, h - 0.25, 0.065, toon(new THREE.Color(col).multiplyScalar(0.8)));
+      box(world2, x + a, h / 2, z - d / 2 - 0.018, 0.055, h - 0.25, 0.065, toon(new THREE.Color(col).multiplyScalar(1.12)));
+    }
+    for (let a = -d / 2 + 0.2; a < d / 2; a += 0.42) {
+      box(world2, x - w / 2 - 0.015, h / 2, z + a, 0.055, h - 0.2, 0.055, toon(new THREE.Color(col).multiplyScalar(0.8)));
+      box(world2, x + w / 2 + 0.015, h / 2, z + a, 0.055, h - 0.2, 0.055, toon(new THREE.Color(col).multiplyScalar(1.1)));
+    }
+    for (const side of [-1, 1]) {
+      box(world2, x + side * w * 0.25, h / 2, front + 0.025, 0.055, h - 0.15, 0.1, metal);
+      box(world2, x + side * w * 0.25, h * 0.48, front + 0.1, 0.28, 0.055, 0.12, metal);
+    }
+    box(world2, x, h / 2, front + 0.035, 0.045, h, 0.05, dark);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) box(world2, x + sx * (w / 2 - 0.12), h - 0.1, z + sz * (d / 2 - 0.1), 0.25, 0.25, 0.25, metal);
+    sign(world2, id, x, h * 0.73, front + 0.09, w * 0.8, 0.36, { color: "#b9c7bf" });
+    sign(world2, "KESTREL // COLD CHAIN", x, h * 0.36, front + 0.09, w * 0.8, 0.19, { color: "#c7d0be" });
+    return base;
+  }
+  container(-12.5, 21, 7, 4, 2.75, C.tealDark, "KST 04  /  817");
+  container(11.3, 19.7, 7.6, 4.2, 2.75, 8806468, "KST 11  /  290");
+  container(-9.5, -0.5, 7, 6, 2.8, 3041392, "KST 06  /  115");
+  container(10.5, 1, 8, 4.7, 2.8, 7685173, "KST 08  /  663");
+  container(-7, -15.6, 8, 3.5, 2.8, C.tealDark, "RESTRICTED  /  09");
+  container(16, -26, 9, 5, 3.3, 3691872, "KST 01  /  008");
+  for (const [x, z, h] of [[-12.5, 21, 2.75], [11.3, 19.7, 2.75], [-9.5, -0.5, 2.8], [10.5, 1, 2.8], [-7, -15.6, 2.8]]) {
+    box(world2, x, h + 0.12, z, 2, 0.22, 1.4, metal, true);
+    for (let k = -0.7; k < 0.8; k += 0.2) box(world2, x + k, h + 0.25, z, 0.07, 0.04, 1.15, dark);
+  }
+  function crate(x, z, w = 2, d = 1.45, h = 1.15, col = 8156e3) {
+    solid(x, z, w, d, h, col);
+    for (const yy of [0.15, h - 0.15]) box(world2, x, yy, z + d / 2 + 0.02, w, 0.1, 0.05, metal);
+    for (const xx of [-w / 2 + 0.15, w / 2 - 0.15]) box(world2, x + xx, h / 2, z + d / 2 + 0.04, 0.1, h, 0.05, metal);
+    box(world2, x, h + 0.035, z, w + 0.08, 0.07, d + 0.08, toon(new THREE.Color(col).multiplyScalar(1.2)));
+  }
+  for (const q of [[-4, 23, 2.2, 1.5, 1.15], [4, 16, 2.6, 1.5, 1.2], [-18, 14, 2.1, 1.7, 1.25], [-16, 2, 3, 1.6, 1.2], [-1, 7, 2.6, 1.5, 1.1], [2, -6, 3, 1.7, 1.2], [19, -4, 2, 1.5, 1.25], [-15, -10, 2.8, 1.5, 1.2], [7, -18, 3, 1.7, 1.1], [-5, -24, 2, 1.5, 1.3], [4, -28, 2.5, 1.4, 1.3]]) crate(...q);
+  for (const [x, z] of [[-20, 23], [18, 12], [-20, -20], [19, -19], [-12, 30]]) {
+    solid(x, z, 1.8, 1.8, 1.25, 3427413);
+    for (let k = 0; k < 4; k++) cyl(world2, x - 0.42 + k % 2 * 0.84, 0.65, z - 0.42 + Math.floor(k / 2) * 0.84, 0.37, 1.22, teal);
+  }
+  solid(18, 24, 2, 3, 1.25, 12946748);
+  box(world2, 18, 1.1, 24.4, 1.4, 0.55, 1.2, metal, true);
+  box(world2, 18, 1.6, 24.5, 0.65, 0.65, 0.5, dark, true);
+  for (const s of [-1, 1]) {
+    cyl(world2, 18 + s * 0.98, 0.43, 23, 0.42, 0.22, dark).rotation.z = Math.PI / 2;
+    cyl(world2, 18 + s * 0.98, 0.43, 25, 0.42, 0.22, dark).rotation.z = Math.PI / 2;
+    box(world2, 18 + s * 0.7, 2.1, 24, 0.12, 2.3, 0.12, metal);
+    box(world2, 18 + s * 0.48, 1.7, 22.6, 0.15, 2.8, 0.2, metal);
+    box(world2, 18 + s * 0.48, 0.14, 21.85, 0.15, 0.16, 1.8, metal);
+  }
+  box(world2, 18, 3.2, 24, 1.7, 0.18, 2.1, teal, true);
+  const officeFloor = box(world2, 14, 0.025, -12, 14, 0.06, 10, toon(3885904));
+  officeFloor.castShadow = false;
+  solid(21, -12, 0.3, 10, 3.8, C.tealDark);
+  solid(14, -17, 14, 0.3, 3.8, C.tealDark);
+  for (let x = 8; x <= 20; x += 3) {
+    box(world2, x, 2.4, -16.8, 2.65, 1.55, 0.07, new THREE.MeshBasicMaterial({ color: 4880513, transparent: true, opacity: 0.6 }));
+    box(world2, x, 1.61, -16.7, 2.85, 0.075, 0.11, metal);
+  }
+  sign(world2, "RECORDS / 02", 14, 3.4, -16.73, 8, 0.6, { color: "#d0e3d8" });
+  for (const x of [9, 18]) {
+    box(world2, x, 0.8, -14, 2.6, 1.6, 1.2, metal, true);
+    for (let j = 0; j < 4; j++) {
+      box(world2, x, 0.27 + j * 0.38, -13.38, 2.45, 0.025, 0.02, dark);
+      box(world2, x, 0.42 + j * 0.38, -13.33, 0.4, 0.05, 0.035, concrete);
+    }
+  }
+  for (let z = -25; z < 29; z += 4) {
+    line(world2, 1, z, 0.12, 1.5, 9409388);
+  }
+  for (const z of [28, 12, -8, -22]) {
+    line(world2, 0, z, 5, 0.15, 7834505);
+    floorText(world2, "\u2191", 0, z - 1.4, 1.4, 1.7, "#a3b29d");
+  }
+  floorText(world2, "KESTREL", 0, 19, 10, 1.5, "#738e8e");
+  floorText(world2, "04  /  NORTH DOCK", 0, 16.9, 8, 0.55, "#a0b9b3");
+  floorText(world2, "POWER", -15, 10.7, 5.5, 1, "#e8af61");
+  floorText(world2, "RECORDS", 14, -6.4, 6.2, 0.9, "#a8d2cb");
+  floorText(world2, "NO SIGNAL", 0, -22.3, 9, 1.7, "#9ac9bd");
+  floorText(world2, "01", -19, 28, 3, 3, "#a47c4b");
+  floorText(world2, "02", 19, 7, 3, 3, "#a47c4b");
+  floorText(world2, "03", -16, -23, 3, 3, "#a47c4b");
+  solid(-19.3, 7.4, 3, 3.6, 1.65, 6120277);
+  box(world2, -19.3, 1.76, 7.4, 3.15, 0.2, 3.7, metal, true);
+  for (let k = 0; k < 10; k++) box(world2, -20.84, 0.35 + k * 0.115, 7.4, 0.055, 0.05, 2.8, dark);
+  const fan = cyl(world2, -19.3, 0.88, 9.23, 0.58, 0.08, metal, 12);
+  fan.rotation.x = Math.PI / 2;
+  rotors.push(fan);
+  for (let i = 0; i < 4; i++) {
+    const blade = box(fan, 0, 0.045, 0.25, 0.15, 0.055, 0.5, dark);
+    blade.rotation.y = i * Math.PI / 2;
+  }
+  for (const s of [-1, 1]) {
+    pipe(world2, new THREE.Vector3(-19.3 + s * 0.6, 1.8, 6.5), new THREE.Vector3(-19.3 + s * 0.6, 2.4, 6.5), 0.08, 7695708);
+    pipe(world2, new THREE.Vector3(-19.3 + s * 0.6, 2.4, 6.5), new THREE.Vector3(-19.3 + s * 0.6, 2.4, 5.6), 0.08, 7695708);
+  }
+  for (const x of [-2.5, 2.5]) {
+    solid(x, -31, 1.5, 1.35, 2.7, 2571853);
+    for (let k = 0; k < 9; k++) {
+      box(world2, x, 0.3 + k * 0.26, -30.3, 1.3, 0.16, 0.06, metal);
+      box(world2, x + 0.45, 0.32 + k * 0.26, -30.26, 0.13, 0.04, 0.02, glow(k % 3 ? C.glow : C.amber));
+    }
+  }
+  cyl(world2, -9, -0, -28, 0.7, 0.1, metal);
+  cyl(world2, -9, 4.3, -28, 0.16, 8.6, metal);
+  for (let y = 1; y < 8; y += 1) box(world2, -9, y, -28, 0.8, 0.05, 0.8, metal);
+  const dishGroup = new THREE.Group();
+  dishGroup.position.set(-9, 7.8, -28);
+  dishGroup.rotation.x = 0.45;
+  world2.add(dishGroup);
+  const dish = new THREE.Mesh(new THREE.SphereGeometry(2.05, 16, 8, 0, Math.PI * 2, 0, 0.9), toon(8165020, { side: THREE.DoubleSide }));
+  dish.rotation.x = -Math.PI / 2;
+  dishGroup.add(dish);
+  pipe(dishGroup, new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0, 2.1), 0.055, 1519423);
+  cyl(dishGroup, 0, 0, 2.1, 0.18, 0.4, glow(C.amber));
+  function terminal(x, z, label, caption, col) {
+    const g = new THREE.Group();
+    g.position.set(x, 0, z);
+    world2.add(g);
+    box(g, 0, 0.55, 0, 1.2, 1.1, 0.6, metal, true);
+    const screen = box(g, 0, 1.25, 0, 1.2, 0.65, 0.2, dark, true);
+    screen.rotation.x = -0.15;
+    box(screen, 0, 0.01, 0.112, 0.99, 0.43, 0.025, glow(col));
+    for (let i = 0; i < 5; i++) box(screen, -0.3 + i * 0.15, 0.07, 0.13, 0.07, 0.025, 0.01, glow(1260859));
+    box(g, 0, 0.98, 0.32, 0.9, 0.08, 0.3, concrete);
+    sign(g, caption, 0, 2.02, 0, 3.3, 0.36, { color: col === C.amber ? "#ffc475" : "#b6f8e6" });
+    const halo = new THREE.Mesh(new THREE.RingGeometry(1.05, 1.14, 32), new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide, transparent: true, opacity: 0.65, depthWrite: false }));
+    halo.rotation.x = -Math.PI / 2;
+    halo.position.y = 0.05;
+    g.add(halo);
+    animated.push(halo);
+    const t = { x, z, mesh: g, label, screen, halo };
+    terminals.push(t);
+    return t;
+  }
+  terminal(-15, 8, "breaker", "01 / CUT THE LIGHTS", C.amber);
+  terminal(15, -10, "archive", "02 / STEAL THE LEDGER", C.glow);
+  terminal(0, -28, "uplink", "03 / BURN THE SIGNAL", C.glow);
+  function lamp(x, z, radius, col = C.amber) {
+    const poleX = x + (x < 0 ? -1.7 : 1.7);
+    cyl(world2, poleX, 3.2, z, 0.095, 6.4, metal);
+    pipe(world2, new THREE.Vector3(poleX, 6.3, z), new THREE.Vector3(x, 6.3, z), 0.08, 5398632);
+    const fixture = box(world2, x, 6.2, z, 0.9, 0.18, 0.52, glow(col), true);
+    const light = new THREE.PointLight(col, 28, Math.max(14, radius * 2.1), 2);
+    light.position.set(x, 5.65, z);
+    world2.add(light);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(radius, 6, 32, 1, true), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.048, depthWrite: false, side: THREE.DoubleSide }));
+    cone.position.set(0, -3.1, 0);
+    fixture.add(cone);
+    const pool = new THREE.Mesh(new THREE.CircleGeometry(radius, 40), new THREE.MeshBasicMaterial({ color: col, transparent: true, opacity: 0.06, depthWrite: false }));
+    pool.rotation.x = -Math.PI / 2;
+    pool.position.set(0, -6.14, 0);
+    fixture.add(pool);
+    lights.push({ x, z, radius, on: true, mesh: fixture, light, cone, pool });
+  }
+  lamp(-8, 14, 5);
+  lamp(9, 8, 5);
+  lamp(-17, -6, 4.5);
+  lamp(14, -15, 5);
+  lamp(1, -26, 5, 7654843);
+  function security(x, z, angle) {
+    const g = new THREE.Group();
+    g.position.set(x, 3.4, z);
+    g.rotation.y = angle;
+    world2.add(g);
+    box(g, 0, 0, 0, 0.5, 0.32, 0.85, concrete, true);
+    box(g, 0, 0, 0.44, 0.29, 0.2, 0.04, dark);
+    box(g, 0.13, 0.09, 0.47, 0.045, 0.045, 0.02, glow(C.red));
+    box(g, 0, 0.23, -0.3, 0.13, 0.2, 0.2, metal);
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(3, 8, 24, 1, true), new THREE.MeshBasicMaterial({ color: 15251821, transparent: true, opacity: 0.045, depthWrite: false, side: THREE.DoubleSide }));
+    cone.rotation.x = -Math.PI / 2;
+    cone.position.set(0, -1.3, 4);
+    cone.rotation.x = -1.18;
+    g.add(cone);
+    cameras.push({ x, z, angle, mesh: g, on: true, cone });
+  }
+  security(-21, 5, 0.9);
+  security(19, -16, -1);
+  security(-4, -31, 0.2);
+  const exG = new THREE.Group();
+  exG.position.set(0, 0, 30);
+  world2.add(exG);
+  const ring = new THREE.Mesh(new THREE.RingGeometry(1.9, 2, 64), new THREE.MeshBasicMaterial({ color: C.glow, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false }));
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.y = 0.06;
+  exG.add(ring);
+  animated.push(ring);
+  floorText(world2, "EXFIL", 0, 30, 2.7, 0.65, "#b4e7d3");
+  for (const s of [-1, 1]) {
+    box(exG, s * 2.4, 0.3, 0, 0.4, 0.6, 0.4, metal, true);
+    box(exG, s * 2.4, 0.62, 0, 0.3, 0.06, 0.3, glow(C.glow));
+  }
+  const extract = { x: 0, z: 30, mesh: exG };
+  const crane = new THREE.Group();
+  crane.position.set(-32, 0, -8);
+  world2.add(crane);
+  for (const x of [-3, 3]) for (const z of [-3, 3]) {
+    box(crane, x, 10, z, 0.55, 20, 0.55, toon(4346716));
+    pipe(crane, new THREE.Vector3(x, 1, z), new THREE.Vector3(-x, 16, z), 0.12, 6254698);
+  }
+  box(crane, 0, 19, 0, 7, 1.7, 7, toon(C.rust), true);
+  box(crane, 8, 21, 0, 27, 0.6, 1, toon(C.rust), true);
+  for (let x = -5; x < 20; x += 2) {
+    pipe(crane, new THREE.Vector3(x, 21, 0), new THREE.Vector3(x + 2, 23.2, 0), 0.09, 6584696);
+    pipe(crane, new THREE.Vector3(x + 2, 23.2, 0), new THREE.Vector3(x + 2, 21, 0), 0.09, 6584696);
+  }
+  pipe(crane, new THREE.Vector3(-5, 23.2, 0), new THREE.Vector3(20, 23.2, 0), 0.1, 6584696);
+  for (const z of [-1, 1]) pipe(crane, new THREE.Vector3(14, 21, z * 0.4), new THREE.Vector3(14, 8, z * 0.4), 0.035, 8491917);
+  box(crane, 14, 7.7, 0, 5, 0.35, 2, toon(C.amber), true);
+  for (let i = 0; i < 24; i++) {
+    const x = -70 + i * 6.2, z = -64 - i % 4 * 7, h = 8 + i * 7 % 24;
+    box(world2, x, h / 2, z, 4.5, h, 5, toon(i % 2 ? 1847358 : 2309195));
+    for (let y = 3; y < h - 1; y += 2.6) for (let a = -1; a <= 1; a++) {
+      if ((i + a + Math.floor(y)) % 3) box(world2, x + a * 1.1, y, z + 2.55, 0.55, 0.9, 0.025, glow((i + a) % 4 ? 5401444 : 9664851));
+    }
+  }
+  for (const x of [-28, 28]) {
+    box(world2, x, 4.5, -38, 4, 9, 5, toon(C.tealDark));
+    box(world2, x, 9.2, -38, 5, 0.4, 6, metal);
+  }
+  const boat = new THREE.Group();
+  boat.position.set(35, -0.3, 20);
+  world2.add(boat);
+  box(boat, 0, 0, 0, 4, 1, 10, toon(2571850), true);
+  box(boat, 0, 1, 1, 2.9, 1.5, 3, toon(9213579), true);
+  box(boat, 0, 1.4, 2.52, 2.4, 0.65, 0.04, glow(3628905));
+  box(boat, -1.8, 0.7, 3, 0.15, 0.2, 0.2, glow(C.red));
+  box(boat, 1.8, 0.7, 3, 0.15, 0.2, 0.2, glow(C.glow));
+  const rainGeometry = new THREE.BufferGeometry();
+  const positions = new Float32Array(1100 * 6);
+  for (let i = 0; i < 1100; i++) {
+    let x = -40 + i * 17.271 % 80, y = i * 7.173 % 23, z = -47 + i * 13.721 % 94;
+    positions.set([x, y, z, x - 0.12, y + 0.55, z + 0.04], i * 6);
+  }
+  rainGeometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  const rainMesh = new THREE.LineSegments(rainGeometry, new THREE.LineBasicMaterial({ color: 7575200, transparent: true, opacity: 0.24, depthWrite: false }));
+  world2.add(rainMesh);
+  sign(world2, "KESTREL", -12.5, 2.15, 23.08, 5, 0.8, { color: "#c5d3c6" });
+  sign(world2, "PRIVATE PROPERTY", 11.3, 2.15, 21.86, 5.6, 0.45, { color: "#d7b891" });
+  for (const [x, z] of [[-21, 17], [21, -8], [-18, -25]]) {
+    box(world2, x, 1, z, 0.08, 2, 0.08, metal);
+    sign(world2, "\u26A0", x, 1.6, z + 0.05, 0.65, 0.65, { color: "#edbc68", bg: "#253d48" });
+  }
+  const cables = [[-19, 8, -15, 8], [-15, 8, -15, 13], [-2, -31, 0, -28], [2, -31, 0, -28], [-9, -28, -4, -28]];
+  for (const [x1, z1, x2, z2] of cables) pipe(world2, new THREE.Vector3(x1, 0.08, z1), new THREE.Vector3(x2, 0.08, z2), 0.045, 1383715);
+  return { solids, lights, cameras, terminals, extract, spawn: { x: 0, z: 27 }, group: world2, decorUpdate(t, dt) {
+    const rp = rainGeometry.attributes.position;
+    for (let i = 0; i < rp.count; i += 2) {
+      let yy = rp.getY(i) - dt * 9;
+      if (yy < 0) yy += 23;
+      rp.setY(i, yy);
+      rp.setY(i + 1, yy + 0.55);
+    }
+    rp.needsUpdate = true;
+    for (const a of animated) a.material.opacity = 0.52 + Math.sin(t * 2.1) * 0.15;
+    for (const r of rotors) r.rotation.y = t * 4;
+    boat.position.y = -0.3 + Math.sin(t * 0.7) * 0.07;
+    boat.rotation.z = Math.sin(t * 0.6) * 0.012;
+  } };
+}
+function createAgent(scene2, { color = 2506572, enemy = false } = {}) {
+  const group = new THREE.Group(), rig = new THREE.Group();
+  group.add(rig);
+  scene2.add(group);
+  const dark = toon(1056296), cloth = toon(color), armor = toon(enemy ? 3752522 : 3231580), skin = toon(enemy ? 10779483 : 12227960), edge = toon(7373962);
+  const body2 = box(rig, 0, 1.18, 0, 0.49, 0.61, 0.31, cloth, true);
+  box(rig, 0, 1.3, 0.18, 0.41, 0.39, 0.08, armor, true);
+  box(rig, 0, 1.4, 0.23, 0.3, 0.09, 0.025, edge);
+  box(rig, 0, 0.94, 0, 0.52, 0.13, 0.35, dark, true);
+  for (const s of [-1, 1]) {
+    box(rig, s * 0.19, 1.28, 0.235, 0.045, 0.43, 0.035, dark);
+    box(rig, s * 0.14, 1.12, 0.25, 0.18, 0.14, 0.08, armor, true);
+    box(rig, s * 0.29, 0.91, 0, 0.12, 0.16, 0.25, armor, true);
+  }
+  box(rig, 0, 1.28, -0.23, 0.4, 0.5, 0.19, dark, true);
+  box(rig, 0, 1.34, -0.34, 0.28, 0.2, 0.04, armor, true);
+  box(rig, 0.16, 1.69, -0.27, 0.025, 0.32, 0.025, edge);
+  const neck = cyl(rig, 0, 1.55, 0, 0.095, 0.17, skin, 7);
+  const head = box(rig, 0, 1.72, 0.02, 0.3, 0.35, 0.28, skin, true);
+  box(rig, 0, 1.83, -0.02, 0.32, 0.18, 0.3, dark, true);
+  box(rig, 0, 1.69, 0.15, 0.32, 0.085, 0.04, dark);
+  box(rig, 0, 1.58, 0.155, 0.24, 0.065, 0.025, dark);
+  if (enemy) {
+    box(rig, 0, 1.88, 0.015, 0.39, 0.17, 0.38, armor, true);
+    box(rig, 0, 1.78, 0.21, 0.36, 0.12, 0.09, new THREE.MeshBasicMaterial({ color: 14656617 }));
+    box(rig, -0.2, 1.7, -0.015, 0.06, 0.12, 0.12, dark);
+  } else {
+    for (let i = -1; i <= 1; i++) {
+      const lens = cyl(rig, i * 0.085, 1.72, 0.19, 0.042, 0.055, new THREE.MeshBasicMaterial({ color: 10944475 }), 8);
+      lens.rotation.x = Math.PI / 2;
+    }
+    box(rig, 0, 1.54, 0.2, 0.065, 0.035, 0.09, dark);
+  }
+  const legs = [], arms = [];
+  for (const s of [-1, 1]) {
+    const leg = new THREE.Group();
+    leg.position.set(s * 0.145, 0.94, 0);
+    rig.add(leg);
+    box(leg, 0, -0.21, 0, 0.19, 0.43, 0.23, cloth, true);
+    const knee = new THREE.Group();
+    knee.position.y = -0.4;
+    leg.add(knee);
+    box(knee, 0, -0.19, 0, 0.16, 0.4, 0.19, dark, true);
+    box(knee, 0, -0.01, 0.11, 0.19, 0.17, 0.055, armor, true);
+    box(knee, 0, -0.43, 0.065, 0.21, 0.13, 0.35, dark, true);
+    legs.push({ hip: leg, knee });
+    const arm = new THREE.Group();
+    arm.position.set(s * 0.34, 1.46, 0);
+    rig.add(arm);
+    box(arm, 0, -0.155, 0, 0.19, 0.34, 0.22, cloth, true);
+    box(arm, 0, -0.02, 0, 0.23, 0.15, 0.27, armor, true);
+    const elbow = new THREE.Group();
+    elbow.position.y = -0.29;
+    arm.add(elbow);
+    box(elbow, 0, -0.14, 0, 0.145, 0.3, 0.17, cloth, true);
+    box(elbow, 0, -0.3, 0.015, 0.15, 0.12, 0.18, dark, true);
+    if (s === 1) {
+      box(elbow, 0, -0.31, 0.1, 0.1, 0.14, 0.12, dark);
+      box(elbow, 0, -0.27, 0.24, 0.085, 0.1, 0.36, dark, true);
+      cyl(elbow, 0, -0.27, 0.49, 0.044, 0.18, dark).rotation.x = Math.PI / 2;
+    } else {
+      box(elbow, 0, -0.15, 0.09, 0.13, 0.12, 0.04, new THREE.MeshBasicMaterial({ color: enemy ? 11164992 : 8183490 }));
+    }
+    arms.push({ shoulder: arm, elbow });
+  }
+  box(rig, 0.21, 0.6, 0.1, 0.1, 0.24, 0.08, dark, true);
+  box(rig, -0.21, 0.64, -0.02, 0.09, 0.19, 0.09, dark, true);
+  const shadow = new THREE.Mesh(new THREE.CircleGeometry(0.46, 14), new THREE.MeshBasicMaterial({ color: 199440, transparent: true, opacity: 0.38, depthWrite: false }));
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.025;
+  group.add(shadow);
+  let gait = 0;
+  return { group, rig, head, body: body2, animate(t, speed = 0, crouch = false, aim = false, dead = false) {
+    const motion = Math.min(1, Math.abs(speed) / 3.5);
+    gait += Math.abs(speed) * 0.041;
+    const cycle = t * (crouch ? 7 : 10), swing = Math.sin(cycle) * motion;
+    rig.rotation.x = THREE.MathUtils.lerp(rig.rotation.x, dead ? -Math.PI / 2 : crouch ? 0.16 : 0, 0.2);
+    rig.position.y = THREE.MathUtils.lerp(rig.position.y, dead ? 0.14 : crouch ? -0.43 : Math.abs(Math.sin(cycle)) * motion * 0.025, 0.2);
+    for (let i = 0; i < 2; i++) {
+      const v = i === 0 ? 1 : -1;
+      legs[i].hip.rotation.x = crouch ? -0.48 + swing * 0.35 * v : swing * 0.62 * v;
+      legs[i].knee.rotation.x = crouch ? 0.9 : Math.max(0, -swing * v) * 0.6;
+      arms[i].shoulder.rotation.x = aim ? i === 1 ? -1.25 : -1.08 : -swing * 0.42 * v;
+      arms[i].elbow.rotation.x = aim ? -0.35 : crouch ? -0.5 : -0.12;
+      arms[i].shoulder.rotation.z = aim ? i === 1 ? -0.1 : 0.3 : v * 0.06;
+    }
+    if (dead) {
+      for (const a of arms) a.shoulder.rotation.x = -0.3;
+      shadow.scale.set(1, 2, 1);
+    } else shadow.scale.set(1, 1, 1);
+  } };
+}
+
+// online.js
+var CHANNEL = "unlisted:1";
+var SNAPSHOT_INTERVAL = 1 / 12;
+var noop = () => {
+};
+var OnlineSession = class {
+  constructor() {
+    this.hub = globalThis.AIHub || null;
+    this.info = null;
+    this.status = this.hub?.active ? "connecting" : "offline";
+    this.code = "";
+    this.onState = noop;
+    this.onEvent = noop;
+    this.onStatus = noop;
+    this.peerStates = /* @__PURE__ */ new Map();
+    this.lastSequence = /* @__PURE__ */ new Map();
+    this._unsub = [];
+    this._connectPromise = null;
+    this._elapsed = SNAPSHOT_INTERVAL;
+    this._eventElapsed = 0;
+    this._queue = [];
+    this._sequence = 0;
+    this._finished = false;
+    this._ready = false;
+    this._ended = false;
+    this._clockStarted = false;
+  }
+  get active() {
+    return !!(this.info && !this._ended);
+  }
+  get isHost() {
+    return this.info ? this.info.isHost : true;
+  }
+  get isServer() {
+    return this.info?.server === true;
+  }
+  get me() {
+    return this.info?.me ?? 0;
+  }
+  get hostId() {
+    return this.info?.host ?? 0;
+  }
+  get players() {
+    return this.info?.players || [];
+  }
+  get peers() {
+    return this.players.filter((p) => p.id !== this.me);
+  }
+  get peerIds() {
+    return this.peers.map((p) => p.id);
+  }
+  get started() {
+    return !this.active || this.hub.time() >= 0 && !this._ended;
+  }
+  get ended() {
+    return this._ended;
+  }
+  get time() {
+    return this.active ? this.hub.time() : 0;
+  }
+  get remaining() {
+    return this.active ? Math.max(0, this.info.limitMs - this.hub.time()) : Infinity;
+  }
+  _setStatus(status, detail = "") {
+    this.status = status;
+    this.onStatus(status, detail);
+    this.onEvent("status", { status, detail }, this.me);
+  }
+  connect() {
+    if (this._connectPromise) return this._connectPromise;
+    this._connectPromise = this._connect();
+    return this._connectPromise;
+  }
+  async _connect() {
+    if (!this.hub?.active) {
+      this._setStatus("offline");
+      return null;
+    }
+    this._setStatus("connecting");
+    try {
+      const info = await this.hub.connect({ mode: "co-op", seats: [1, 4] });
+      if (!info) {
+        this._setStatus("offline");
+        return null;
+      }
+      this.info = info;
+      this._setStatus("ready", "Waiting for the synchronized mission start");
+      this._unsub.push(
+        this.hub.on("message", (data, from) => this._receive(data, from)),
+        this.hub.on("start", (data) => {
+          this._clockStarted = true;
+          this._setStatus(data.in > 0 ? "countdown" : "connected");
+          this.onEvent("start", data, this.hostId);
+        }),
+        this.hub.on("leave", (data) => {
+          this.peerStates.delete(data.id);
+          this.lastSequence.delete(data.id);
+          this.info.players = this.info.players.filter((p) => p.id !== data.id);
+          this.onEvent("leave", data, data.id);
+          if (data.id === this.hostId && !this.isHost) {
+            this._ended = true;
+            this._queue.length = 0;
+            this._setStatus("ended", "Operation ended: command connection lost");
+          }
+        }),
+        this.hub.on("time-up", (data) => this.onEvent("time-up", data, this.hostId)),
+        this.hub.on("end", (data) => {
+          this._ended = true;
+          this._queue.length = 0;
+          this._setStatus("ended", data.reason || "Operation ended");
+          this.onEvent("end", data, this.hostId);
+        })
+      );
+      return info;
+    } catch (error) {
+      this._setStatus("error", error?.message || "Unable to connect to AI Hub");
+      throw error;
+    }
+  }
+  ready() {
+    if (!this.active || this._ready) return;
+    this._ready = true;
+    this.hub.ready();
+  }
+  _receive(message, from) {
+    if (!this.active || !message || message.c !== CHANNEL || !this.players.some((p) => p.id === from) && from !== this.hostId) return;
+    if (message.t === "s") {
+      if (!Number.isFinite(message.n) || message.n <= (this.lastSequence.get(from) ?? -1)) return;
+      if (!message.s || typeof message.s !== "object") return;
+      this.lastSequence.set(from, message.n);
+      const received = { state: message.s, at: Number(message.at) || 0, receivedAt: performance.now() };
+      this.peerStates.set(from, received);
+      this.onState(message.s, from);
+    } else if (message.t === "e" && typeof message.k === "string") {
+      if (this.isHost || from === this.hostId) this.onEvent(message.k, message.d, from);
+    }
+  }
+  update(state, dt) {
+    if (!this.active || this._ended) return;
+    if (this._clockStarted && this.hub.time() >= 0 && this.status !== "connected") this._setStatus("connected");
+    const elapsed2 = Number.isFinite(dt) ? Math.max(0, Math.min(dt, 0.25)) : 0;
+    this._elapsed += elapsed2;
+    this._eventElapsed += elapsed2;
+    if (this._queue.length && this._eventElapsed >= 1 / 6) {
+      this._eventElapsed = 0;
+      const pending = this._queue[0];
+      if (this.hub.send(pending.message, pending.options)) this._queue.shift();
+    }
+    if (state && this._elapsed >= SNAPSHOT_INTERVAL) {
+      this._elapsed %= SNAPSHOT_INTERVAL;
+      const message = { c: CHANNEL, t: "s", n: this._sequence++, at: this.hub.time(), s: state };
+      const options = this.isHost ? { reliable: false } : { to: this.hostId, reliable: false };
+      this.hub.send(message, options);
+    }
+  }
+  sendEvent(type, data = {}) {
+    if (!this.active || this._ended || typeof type !== "string") return false;
+    const options = this.isHost ? { reliable: true } : { to: this.hostId, reliable: true };
+    return this._enqueue(type, data, options);
+  }
+  broadcastEvent(type, data = {}) {
+    if (!this.active || !this.isHost || this._ended || typeof type !== "string") return false;
+    return this._enqueue(type, data, { reliable: true });
+  }
+  _enqueue(type, data, options) {
+    const message = { c: CHANNEL, t: "e", k: type, d: data };
+    try {
+      if (JSON.stringify(message).length > 15e3) return false;
+    } catch {
+      return false;
+    }
+    if (this._queue.length >= 64) {
+      this.onEvent("network-warning", { message: "Action queue full; waiting for command link." }, this.me);
+      return false;
+    }
+    this._queue.push({ message, options });
+    if (this._eventElapsed >= 1 / 6) {
+      this._eventElapsed = 0;
+      const pending = this._queue[0];
+      if (this.hub.send(pending.message, pending.options)) this._queue.shift();
+    }
+    return true;
+  }
+  finish({ won = false, score = 0, stats = {} } = {}) {
+    if (!this.active || !this.isHost || this._finished || this._ended) return;
+    this._finished = true;
+    const ids = this.players.map((p) => p.id);
+    this.broadcastEvent("operation-finished", { won, score, stats });
+    this.hub.finish({ standings: ids.length ? [ids] : [], won: !!won, scores: Object.fromEntries(ids.map((id) => [id, score])), stats: Object.fromEntries(ids.map((id) => [id, stats])) });
+  }
+  progress(score, label) {
+    if (this.active) this.hub.progress({ score, label });
+  }
+  probe(fn) {
+    this.hub?.probe(fn);
+  }
+  fail(message) {
+    this.hub?.fail(message);
+    this._setStatus("error", message);
+  }
+  leave() {
+    for (const remove of this._unsub) remove();
+    this._unsub.length = 0;
+    this._queue.length = 0;
+    this.peerStates.clear();
+    this._ended = true;
+    this._setStatus("ended");
+  }
+};
+
+// audio.js
+var AudioDirector = class {
+  constructor() {
+    this.ctx = null;
+    this.enabled = true;
+    this.voice = true;
+    this.volume = 0.45;
+    this.nextBeat = 0;
+    this.beat = 0;
+    this.alert = 0;
+  }
+  start() {
+    if (!this.ctx) {
+      this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = this.volume;
+      this.master.connect(this.ctx.destination);
+    }
+    this.ctx.resume().catch(() => {
+    });
+  }
+  tone(freq, duration = 0.12, type = "sine", gain = 0.12, slide = 0) {
+    if (!this.ctx || !this.enabled) return;
+    const t = this.ctx.currentTime, o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = type;
+    o.frequency.setValueAtTime(freq, t);
+    if (slide) o.frequency.exponentialRampToValueAtTime(Math.max(20, freq + slide), t + duration);
+    g.gain.setValueAtTime(gain, t);
+    g.gain.exponentialRampToValueAtTime(1e-4, t + duration);
+    o.connect(g);
+    g.connect(this.master);
+    o.start(t);
+    o.stop(t + duration);
+  }
+  noise(duration, gain, filter = 900) {
+    if (!this.ctx || !this.enabled) return;
+    const n = this.ctx.createBuffer(1, this.ctx.sampleRate * duration, this.ctx.sampleRate), d = n.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (1 - i / d.length);
+    const s = this.ctx.createBufferSource(), f = this.ctx.createBiquadFilter(), g = this.ctx.createGain();
+    s.buffer = n;
+    f.type = "lowpass";
+    f.frequency.value = filter;
+    g.gain.value = gain;
+    s.connect(f);
+    f.connect(g);
+    g.connect(this.master);
+    s.start();
+  }
+  fx(name) {
+    if (name === "shot") {
+      this.noise(0.15, 0.4, 2e3);
+      this.tone(130, 0.11, "triangle", 0.25, -100);
+    }
+    if (name === "hit") {
+      this.noise(0.2, 0.3, 600);
+      this.tone(60, 0.2, "sine", 0.25);
+    }
+    if (name === "mark") {
+      this.tone(900, 0.12, "sine", 0.08);
+      setTimeout(() => this.tone(1250, 0.12, "sine", 0.05), 70);
+    }
+    if (name === "execute") {
+      this.tone(70, 0.6, "sawtooth", 0.15, -45);
+    }
+    if (name === "emp") {
+      this.noise(0.7, 0.3, 4e3);
+      this.tone(700, 0.7, "sine", 0.2, -660);
+    }
+    if (name === "hack") {
+      [440, 554, 659, 880].forEach((f, i) => setTimeout(() => this.tone(f, 0.3, "sine", 0.1), i * 100));
+    }
+    if (name === "reload") {
+      this.noise(0.16, 0.13, 3500);
+      setTimeout(() => this.noise(0.12, 0.2, 2200), 350);
+    }
+    if (name === "step") this.noise(0.06, 0.06, 300);
+    if (name === "alert") this.tone(160, 0.5, "square", 0.08, 200);
+    if (name === "click") this.tone(600, 0.06, "sine", 0.06);
+  }
+  speak(text) {
+    if (!this.ctx || !this.enabled || !this.voice || !window.speechSynthesis) return;
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text);
+    u.rate = 0.91;
+    u.pitch = 0.68;
+    u.volume = this.volume * 0.75;
+    const voices = speechSynthesis.getVoices();
+    u.voice = voices.find((v) => /en-(GB|US)/.test(v.lang)) || null;
+    speechSynthesis.speak(u);
+  }
+  update(t, alert) {
+    if (!this.ctx || !this.enabled) return;
+    this.master.gain.value = this.volume;
+    if (t < this.nextBeat) return;
+    this.nextBeat = t + (alert ? 0.28 : 0.58);
+    this.beat++;
+    const notes = [55, 55, 65.4, 49, 55, 73.4, 65.4, 49];
+    this.tone(notes[this.beat % 8], 0.7, "triangle", 0.11);
+    if (this.beat % 4 === 0) this.tone(notes[this.beat % 8] * 4, 1.8, "sine", 0.045);
+    if (alert) this.noise(0.07, 0.07, 1800);
+  }
+};
+
+// main.js
+var $ = (id) => document.getElementById(id);
+var clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+var dist = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
+var lerp = (a, b, t) => a + (b - a) * t;
+var TAU = Math.PI * 2;
+var wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
+var mode = "boot";
+var priorMode = "title";
+var overlayKind = "";
+var lastInput = performance.now();
+var elapsed = 0;
+var stage = 0;
+var ammo = 12;
+var reserve = 60;
+var charge = false;
+var marks = [];
+var empCount = 3;
+var distractions = 5;
+var sonar = 0;
+var sonarCooldown = 0;
+var empUntil = 0;
+var reloading = 0;
+var shootCooldown = 0;
+var execution = [];
+var executeTimer = 0;
+var interaction = 0;
+var interactHeld = false;
+var alerts = 0;
+var kills = 0;
+var takedowns = 0;
+var shots = 0;
+var intel = 0;
+var lastDamage = -100;
+var checkpoint = 0;
+var toastUntil = 0;
+var subtitleUntil = 0;
+var attractTime = 0;
+var attractPhase = -1;
+var cover = false;
+var vault = null;
+var mouseAim = false;
+var aiming = false;
+var controller = false;
+var stepClock = 0;
+var missionEnded = false;
+var renderer;
+var scene;
+var camera;
+var world;
+var physics;
+var player;
+var body;
+var collider;
+var kcc;
+var network;
+var remoteAgents = /* @__PURE__ */ new Map();
+var enemies = [];
+var lastKnown = null;
+var ghost;
+var ghostUntil = 0;
+var objectiveMarker;
+var moveSpeed = 0;
+var camYaw = 0;
+var camPitch = 0.74;
+var screenShake = 0;
+var keys = /* @__PURE__ */ new Set();
+var pressed = /* @__PURE__ */ new Set();
+var gameButtons = [];
+var padPrev = [];
+var padEdge = [];
+var pointer = { x: 0, y: 0 };
+var ray = new THREE2.Raycaster();
+var ground = new THREE2.Plane(new THREE2.Vector3(0, 1, 0), 0);
+var aimPoint = new THREE2.Vector3();
+var settings = { invertX: false, invertY: false, music: true, voice: true, sensitivity: 1, contrast: false };
+try {
+  settings = { ...settings, ...JSON.parse(localStorage.getItem("unlisted-settings") || "{}") };
+} catch {
+}
+var audio = new AudioDirector();
+audio.enabled = settings.music;
+audio.voice = settings.voice;
+var objectives = [{ title: "CUT THE EYES", desc: "Disable the security feed at the west breaker.", label: "SECURITY BREAKER", x: -15, z: 8 }, { title: "FIND THE NAME", desc: "Recover the witness file from the east archive.", label: "WITNESS ARCHIVE", x: 15, z: -10 }, { title: "BREAK THE SILENCE", desc: "Transmit the evidence from the northern uplink.", label: "UPLINK ARRAY", x: 0, z: -28 }, { title: "LEAVE NO ADDRESS", desc: "Return to the south gate and extract.", label: "EXTRACTION", x: 0, z: 30 }];
+function show(id, yes = true) {
+  $(id)?.classList.toggle("hidden", !yes);
+}
+function say(text, speaker = "CONTROL") {
+  const e = $("subtitle");
+  e.innerHTML = `<span>${speaker}</span> ${text}`;
+  subtitleUntil = elapsed + 6;
+  show("subtitle");
+  audio.speak(text);
+}
+function toast(text) {
+  $("toast").textContent = text;
+  toastUntil = elapsed + 3.5;
+  show("toast");
+}
+function activity() {
+  lastInput = performance.now();
+  if (mode === "attract") {
+    goTitle();
+    return true;
+  }
+  return false;
+}
+function saveSettings() {
+  try {
+    localStorage.setItem("unlisted-settings", JSON.stringify(settings));
+  } catch {
+  }
+  audio.enabled = settings.music;
+  audio.voice = settings.voice;
+  document.body.classList.toggle("highContrast", settings.contrast);
+}
+function userAction(id) {
+  if (network?.info && ["startBtn", "restartBtn", "replayBtn", "exitBtn", "resultExitBtn"].includes(id)) {
+    toast("AI Hub controls the shared round.");
+    return;
+  }
+  audio.start();
+  audio.fx("click");
+  if (id === "startBtn" || id === "restartBtn" || id === "replayBtn") {
+    const cp = id === "replayBtn" && player?.health <= 0 ? checkpoint : 0;
+    closeOverlay();
+    startMission(false);
+    if (cp) {
+      stage = cp;
+      checkpoint = cp;
+      const o = objectives[cp - 1];
+      setPosition(o.x, o.z + 3);
+      if (cp > 0) world.cameras.forEach((c) => c.on = false);
+      updateObjective();
+    }
+  } else if (id === "resumeBtn") {
+    resume();
+  } else if (id === "exitBtn" || id === "resultExitBtn") {
+    goTitle();
+  } else if (id === "settingsBtn" || id === "pauseSettingsBtn" || id === "touchSettingsBtn") {
+    openSettings();
+  } else if (id === "manualBtn") {
+    openManual();
+  } else if (id === "aboutBtn") {
+    openAbout();
+  } else if (id === "coopBtn") {
+    openCoop();
+  } else if (id === "panelClose") {
+    closeOverlay();
+  } else if (id === "pauseBtn") {
+    pause();
+  } else if (id === "retryBtn") {
+    location.reload();
+  }
+}
+window.addEventListener("keydown", (e) => {
+  if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space", "Tab"].includes(e.code)) e.preventDefault();
+  if (activity()) return;
+  if (!keys.has(e.code)) pressed.add(e.code);
+  keys.add(e.code);
+  audio.start();
+  const menuActive = !!overlayKind || mode === "title" || mode === "pause" || mode === "results" || !$("pauseScreen").classList.contains("hidden");
+  if (menuActive) {
+    if (e.code === "ArrowUp" || e.code === "ArrowDown" || e.code === "Tab") {
+      menuFocus(e.code === "ArrowUp" || e.shiftKey ? -1 : 1);
+      return;
+    }
+    if (e.code === "Space") {
+      document.activeElement?.click();
+      return;
+    }
+    if (document.activeElement?.type === "range" && (e.code === "ArrowLeft" || e.code === "ArrowRight")) {
+      const el = document.activeElement;
+      el.value = clamp(+el.value + (e.code === "ArrowRight" ? 0.1 : -0.1), +el.min, +el.max);
+      el.dispatchEvent(new Event("input"));
+      return;
+    }
+  }
+  if (e.code === "Escape") {
+    if (overlayKind) closeOverlay();
+    else if (!$("pauseScreen").classList.contains("hidden")) resume();
+    else if (mode === "play") pause();
+    else if (mode === "pause") resume();
+  }
+  if (e.code === "Tab" && mode === "play") openManual();
+});
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => {
+  keys.clear();
+  if (mode === "play" && !network?.active) pause();
+});
+document.addEventListener("pointerdown", (e) => {
+  if (activity()) return;
+  audio.start();
+  if (e.target.closest("button")) return;
+  if (e.button === 0) keys.add("Mouse0");
+  if (e.button === 2) keys.add("Mouse2");
+});
+document.addEventListener("pointerup", (e) => {
+  keys.delete(e.button === 0 ? "Mouse0" : "Mouse2");
+});
+document.addEventListener("contextmenu", (e) => e.preventDefault());
+window.addEventListener("pointermove", (e) => {
+  if (Math.hypot(e.movementX, e.movementY) > 2) {
+    activity();
+    pointer.x = e.clientX / innerWidth * 2 - 1;
+    pointer.y = -(e.clientY / innerHeight) * 2 + 1;
+    mouseAim = true;
+  }
+});
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("button[data-action]");
+  if (b) userAction(b.dataset.action);
+});
+function menuFocus(delta = 0) {
+  const scope = overlayKind ? $("overlay") : mode === "title" ? $("titleScreen") : !$("pauseScreen").classList.contains("hidden") ? $("pauseScreen") : mode === "results" ? $("results") : null;
+  if (!scope) return;
+  const buttons = [...scope.querySelectorAll("button,input,select,a")].filter((b) => !b.disabled && b.offsetParent !== null);
+  if (!buttons.length) return;
+  let i = buttons.indexOf(document.activeElement);
+  i = i < 0 ? 0 : (i + delta + buttons.length) % buttons.length;
+  buttons[i].focus({ preventScroll: true });
+  buttons[i].scrollIntoView({ block: "nearest" });
+}
+function updateGamepad() {
+  const p = [...navigator.getGamepads?.() || []].find(Boolean);
+  controller = !!p;
+  padEdge.length = 0;
+  if (!p) return;
+  let active = false;
+  for (let i = 0; i < p.buttons.length; i++) {
+    const down = p.buttons[i].pressed;
+    padEdge[i] = down && !padPrev[i];
+    padPrev[i] = down;
+    gameButtons[i] = down;
+    if (padEdge[i]) active = true;
+  }
+  if (p.axes.some((a) => Math.abs(a) > 0.25)) active = true;
+  if (active) {
+    if (activity()) return;
+    audio.start();
+  }
+  if (padEdge[9] && !gameButtons[8]) {
+    if (overlayKind) closeOverlay();
+    else if (!$("pauseScreen").classList.contains("hidden")) resume();
+    else if (mode === "play") pause();
+    else if (mode === "pause") resume();
+  }
+  if (mode === "title" || mode === "pause" || mode === "results" || overlayKind || !$("pauseScreen").classList.contains("hidden")) {
+    if (padEdge[12]) menuFocus(-1);
+    if (padEdge[13]) menuFocus(1);
+    if (padEdge[0]) {
+      if (document.activeElement?.type === "checkbox") document.activeElement.click();
+      else document.activeElement?.click();
+    }
+    if (padEdge[1]) {
+      if (overlayKind) closeOverlay();
+      else if (!$("pauseScreen").classList.contains("hidden")) resume();
+    }
+    const el = document.activeElement;
+    if (el?.type === "range" && (padEdge[14] || padEdge[15])) {
+      el.value = clamp(+el.value + (padEdge[15] ? 0.1 : -0.1), +el.min, +el.max);
+      el.dispatchEvent(new Event("input"));
+    }
+  }
+}
+function action(code, button) {
+  return pressed.has(code) || !!padEdge[button];
+}
+function held(code, button) {
+  return keys.has(code) || !!gameButtons[button];
+}
+function closeOverlay() {
+  overlayKind = "";
+  show("overlay", false);
+  if (priorMode === "play" && mode === "pause") resume();
+  else menuFocus();
+}
+function panel(title, html, kind) {
+  priorMode = mode;
+  overlayKind = kind;
+  if (mode === "play" && !network?.active) mode = "pause";
+  $("panelTitle").textContent = title;
+  $("panelBody").innerHTML = html;
+  show("overlay");
+  setTimeout(() => menuFocus(), 20);
+}
+function openSettings() {
+  panel("FIELD SETTINGS", `<p class="panelIntro">Make the controls yours. Changes save automatically.</p><label class="setting"><span>Invert horizontal axis</span><input id="invertX" type="checkbox" ${settings.invertX ? "checked" : ""}></label><label class="setting"><span>Invert vertical axis</span><input id="invertY" type="checkbox" ${settings.invertY ? "checked" : ""}></label><label class="setting"><span>Look sensitivity</span><input id="sensitivity" type="range" min="0.4" max="2" step="0.1" value="${settings.sensitivity}" aria-label="Look sensitivity"></label><label class="setting"><span>Music & sound effects</span><input id="music" type="checkbox" ${settings.music ? "checked" : ""}></label><label class="setting"><span>Radio voice</span><input id="voice" type="checkbox" ${settings.voice ? "checked" : ""}></label><label class="setting"><span>High contrast interface</span><input id="contrast" type="checkbox" ${settings.contrast ? "checked" : ""}></label><p class="finePrint">Left stick moves \xB7 Right stick aims / turns view \xB7 Options opens menu. Keyboard and mouse use the same actions.</p>`, "settings");
+  for (const id of Object.keys(settings)) $(id)?.addEventListener("input", (e) => {
+    settings[id] = e.target.type === "checkbox" ? e.target.checked : +e.target.value;
+    saveSettings();
+  });
+}
+function openManual() {
+  panel("WORK IN THE DARK", `<p class="panelIntro">You are Rook. A private intelligence firm erased your identity. Tonight you take back the witness who can prove it.</p><div class="manualGrid"><div><h3>01 / DISAPPEAR</h3><p>Stay out of amber pools of light. Crouch to reduce noise and visibility. Break line of sight after detection: guards search the outline of your last known position.</p></div><div><h3>02 / MAKE AN OPENING</h3><p>A silent takedown earns an Execution. Mark up to three guards, then execute while they are in range and in sight. Shoot lamps to create a path through darkness.</p></div><div><h3>03 / GET THE FILE</h3><p>Cut the west security feed, copy the east archive, transmit at the north uplink, return to the south gate. Hold Interact at each terminal. Checkpoints restore your equipment.</p></div></div><div class="controlTable"><span>Move / aim</span><b>LS / RS \xB7 WASD / mouse</b><span>Aim / fire</span><b>L2 / R2 \xB7 RMB / LMB</b><span>Interact / takedown</span><b>Cross \xB7 E</b><span>Crouch / cover</span><b>Circle \xB7 C</b><span>Mark / execute</span><b>R1 / Triangle \xB7 Q / F</b><span>EMP / distraction</span><b>L1 / D-pad left \xB7 G / T</b><span>Sonar / reload</span><b>R3 / Square \xB7 V / R</b><span>Vault nearby low cover</span><b>D-pad up \xB7 Space</b><span>Pause / field manual</span><b>Options / Touchpad \xB7 Esc / Tab</b></div><p class="finePrint">EMP disables nearby lights and cameras for 12 seconds. Sonar reveals guards briefly. Running and gunfire attract attention. Ammunition is limited; resupply at terminals. No touch controls.</p>`, "manual");
+}
+function openCoop() {
+  panel("JOINT OPERATION", `<p class="panelIntro">One terminal. Up to four ghosts.</p><p>Launch this HTML through <a href="https://github.com/michaelcrosato/ai-hub" target="_blank" rel="noopener">AI Hub</a> and invite your team in the Hub lobby. The session connects automatically: shared objectives, enemy state, executions and extraction.</p><p>The host runs the operation. Each operator moves and fights independently. One operator securing the uplink advances the entire team. Opening settings keeps a live session running.</p><p class="finePrint">${network?.active ? "SECURE SESSION ACTIVE" : "STANDALONE \xB7 Solo operation is ready. AI Hub provides the lobby and transport; no account or room code is collected here."}</p>`, "coop");
+}
+function openAbout() {
+  panel("DOSSIER / CREDITS", window.UNLISTED_ABOUT || "<p>Loading dossier.</p>", "about");
+}
+function pause() {
+  if (mode !== "play") return;
+  if (network?.info) {
+    $("restartBtn").disabled = true;
+    $("exitBtn").disabled = true;
+  }
+  mode = network?.active ? "play" : "pause";
+  show("pauseScreen");
+  document.body.classList.add("menuOpen");
+  setTimeout(() => {
+    $("resumeBtn")?.focus();
+  }, 10);
+}
+function resume() {
+  show("pauseScreen", false);
+  document.body.classList.remove("menuOpen");
+  if (mode === "pause") mode = "play";
+  keys.clear();
+}
+function goTitle() {
+  mode = "title";
+  missionEnded = false;
+  overlayKind = "";
+  show("overlay", false);
+  show("pauseScreen", false);
+  show("results", false);
+  show("hud", false);
+  show("attractLabel", false);
+  show("titleScreen");
+  document.body.classList.add("menuOpen");
+  lastInput = performance.now();
+  if (player) {
+    player.group.visible = true;
+    setPosition(0, 27);
+    player.group.rotation.y = Math.PI;
+  }
+  setTimeout(() => {
+    $("startBtn")?.focus();
+  }, 20);
+}
+var patrolSpecs = [[0, 23.5, 0, 17], [8, 16, 17, 16], [-17, 6, -9, -1], [2, 3, 2, -7], [16, -4, 17, -16], [-11, -11, -17, -19], [5, -18, 12, -24], [-5, -25, 4, -25], [20, 0, 20, 9], [-20, -7, -20, 3]];
+var effects = [];
+var empZones = [];
+function empDisabled(p) {
+  return empZones.some((zone) => zone.until > elapsed && dist(zone, p) < 14);
+}
+function isFree(x, z, pad = 0.55) {
+  return Math.abs(x) < 22.7 && Math.abs(z) < 32 && !world.solids.some((s) => s.h > 0.25 && Math.abs(x - s.x) < s.w / 2 + pad && Math.abs(z - s.z) < s.d / 2 + pad);
+}
+function freePoint(x, z) {
+  if (isFree(x, z)) return { x, z };
+  for (let r = 1; r < 7; r += 0.7) for (let a = 0; a < TAU; a += 0.4) if (isFree(x + Math.sin(a) * r, z + Math.cos(a) * r)) return { x: x + Math.sin(a) * r, z: z + Math.cos(a) * r };
+  return { x: 0, z: 27 };
+}
+function lineClear(a, b, height = 1.4) {
+  const dx = b.x - a.x, dz = b.z - a.z;
+  return !world.solids.some((s) => {
+    if (s.h < height) return false;
+    let lo = 0, hi = 1;
+    for (const [p, v, min, max] of [[a.x, dx, s.x - s.w / 2, s.x + s.w / 2], [a.z, dz, s.z - s.d / 2, s.z + s.d / 2]]) {
+      if (Math.abs(v) < 1e-5) {
+        if (p < min || p > max) return false;
+      } else {
+        let t1 = (min - p) / v, t2 = (max - p) / v;
+        if (t1 > t2) [t1, t2] = [t2, t1];
+        lo = Math.max(lo, t1);
+        hi = Math.min(hi, t2);
+        if (lo > hi) return false;
+      }
+    }
+    return hi > 0.03 && lo < 0.97;
+  });
+}
+var navSize = 1.5;
+function findPath(a, b) {
+  const toCell = (p) => [Math.round((p.x + 22) / navSize), Math.round((p.z + 31) / navSize)], [sx, sz] = toCell(a), [ex, ez] = toCell(b), key = (x, z) => x + z * 32;
+  let open = [{ x: sx, z: sz, g: 0, f: 0 }], came = /* @__PURE__ */ new Map(), cost = /* @__PURE__ */ new Map([[key(sx, sz), 0]]), end = null;
+  for (let n = 0; n < 1600 && open.length; n++) {
+    open.sort((a2, b2) => a2.f - b2.f);
+    const cur = open.shift();
+    if (Math.abs(cur.x - ex) + Math.abs(cur.z - ez) <= 1) {
+      end = cur;
+      break;
+    }
+    for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const x = cur.x + dx, z = cur.z + dz, k = key(x, z);
+      if (x < 0 || x > 29 || z < 0 || z > 42 || !isFree(x * navSize - 22, z * navSize - 31, 0.4)) continue;
+      const g = cur.g + 1;
+      if (g >= (cost.get(k) ?? Infinity)) continue;
+      cost.set(k, g);
+      came.set(k, cur);
+      open.push({ x, z, g, f: g + Math.abs(x - ex) + Math.abs(z - ez) });
+    }
+  }
+  if (!end) return [];
+  const path = [];
+  let c = end;
+  while (c && (c.x !== sx || c.z !== sz)) {
+    path.unshift({ x: c.x * navSize - 22, z: c.z * navSize - 31 });
+    c = came.get(key(c.x, c.z));
+  }
+  return path;
+}
+function makeCone(radius, color) {
+  const p = [0, 0.035, 0];
+  for (let i = 0; i <= 24; i++) {
+    const a = -0.52 + i / 24 * 1.04;
+    p.push(Math.sin(a) * radius, 0.035, Math.cos(a) * radius);
+  }
+  const indices = [];
+  for (let i = 1; i <= 24; i++) indices.push(0, i, i + 1);
+  const g = new THREE2.BufferGeometry();
+  g.setAttribute("position", new THREE2.Float32BufferAttribute(p, 3));
+  g.setIndex(indices);
+  const m = new THREE2.Mesh(g, new THREE2.MeshBasicMaterial({ color, transparent: true, opacity: 0.065, side: THREE2.DoubleSide, depthWrite: false }));
+  scene.add(m);
+  return m;
+}
+function createEnemies() {
+  for (const e of enemies) {
+    scene.remove(e.agent.group, e.cone);
+    e.marker.remove();
+  }
+  enemies = [];
+  patrolSpecs.forEach((s, i) => {
+    const p = freePoint(s[0], s[1]), q = freePoint(s[2], s[3]), agent = createAgent(scene, { color: i > 7 ? 12035191 : 8162441, enemy: true }), marker = document.createElement("div");
+    marker.className = "enemyMarker";
+    $("enemyMarkers").append(marker);
+    agent.group.position.set(p.x, 0, p.z);
+    enemies.push({ id: i, x: p.x, z: p.z, angle: i % 2 ? Math.PI : 0, agent, alive: true, suspicion: 0, state: "patrol", waypoints: [p, q], way: 1, path: [], repath: 0, shootAt: 0, searchTime: 0, target: null, bodySeen: false, cone: makeCone(9, 15247700), marker });
+  });
+}
+function resetWorld() {
+  empZones = [];
+  for (const l of world.lights) {
+    l.on = true;
+    l.mesh.visible = true;
+    if (l.light) l.light.visible = true;
+    if (l.cone) l.cone.visible = true;
+  }
+  for (const c of world.cameras) c.on = true;
+  createEnemies();
+  marks = [];
+  execution = [];
+  lastKnown = null;
+  ghostUntil = 0;
+  empUntil = 0;
+}
+function setPosition(x, z) {
+  const p = freePoint(x, z);
+  player.x = p.x;
+  player.z = p.z;
+  body.setTranslation({ x: p.x, y: 1, z: p.z }, true);
+  body.setNextKinematicTranslation({ x: p.x, y: 1, z: p.z });
+  player.group.position.set(p.x, 0, p.z);
+}
+function startMission(demo = false) {
+  audio.nextBeat = 0;
+  audio.beat = 0;
+  resetWorld();
+  stage = 0;
+  elapsed = 0;
+  ammo = 12;
+  reserve = 60;
+  charge = false;
+  empCount = 3;
+  distractions = 5;
+  sonar = 0;
+  sonarCooldown = 0;
+  reloading = 0;
+  shootCooldown = 0;
+  interaction = 0;
+  alerts = 0;
+  kills = 0;
+  takedowns = 0;
+  shots = 0;
+  intel = 0;
+  checkpoint = 0;
+  lastDamage = -100;
+  player.health = 100;
+  player.crouch = true;
+  player.angle = Math.PI;
+  camYaw = 0;
+  camPitch = 0.74;
+  cover = false;
+  missionEnded = false;
+  vault = null;
+  setPosition(0, 27);
+  mode = demo ? "attract" : "play";
+  attractTime = 0;
+  attractPhase = -1;
+  show("titleScreen", false);
+  show("results", false);
+  show("pauseScreen", false);
+  show("hud");
+  show("attractLabel", demo);
+  document.body.classList.remove("menuOpen");
+  keys.clear();
+  if (!demo) {
+    say("Your name is gone. Every record. Every photograph.");
+    setTimeout(() => {
+      if (mode === "play") say("Good. Then they won\u2019t see me coming.", "ROOK");
+    }, 5600);
+    setTimeout(() => {
+      if (mode === "play") say("Kill the security feed. West side. Then find our witness.");
+    }, 10500);
+  }
+  updateObjective();
+}
+function updateObjective() {
+  const o = objectives[stage];
+  $("phaseText").textContent = `DEAD LETTER / 0${stage + 1}`;
+  $("objectiveText").textContent = o.title;
+  $("objectiveText").title = o.desc;
+  let desc = $("objectiveDesc");
+  if (!desc) {
+    desc = document.createElement("p");
+    desc.id = "objectiveDesc";
+    $("objectiveText").after(desc);
+  }
+  desc.textContent = o.desc;
+  objectiveMarker.position.set(o.x, 0.1, o.z);
+  toast(o.desc);
+}
+function advanceObjective() {
+  if (stage >= 3) {
+    finishMission(true);
+    return;
+  }
+  stage++;
+  checkpoint = stage;
+  ammo = 12;
+  reserve = Math.max(reserve, 48);
+  empCount = Math.min(3, empCount + 1);
+  distractions = Math.min(5, distractions + 2);
+  player.health = 100;
+  interaction = 0;
+  audio.fx("hack");
+  updateObjective();
+  if (stage === 1) {
+    world.cameras.forEach((c) => c.on = false);
+    say("Security is blind. The archive is on the east side.");
+  } else if (stage === 2) say("They didn\u2019t erase the witness. They sold her. Get this on the wire.", "ROOK");
+  else if (stage === 3) {
+    say("Evidence is out. Every newsroom has a copy. Now get yourself home.");
+    enemies.filter((e) => e.alive).forEach((e) => {
+      e.state = "search";
+      e.target = { x: 0, z: -22 };
+      e.searchTime = 16;
+    });
+  }
+  network?.progress(stage * 1e3 + kills * 100 + takedowns * 150, `${stage}/4 objectives`);
+}
+function finishMission(won) {
+  if (missionEnded) return;
+  missionEnded = true;
+  mode = "results";
+  show("hud", false);
+  show("attractLabel", false);
+  $("resultTitle").textContent = won ? "NAME RESTORED" : "SIGNAL LOST";
+  const score = Math.max(0, stage * 1500 + takedowns * 300 + kills * 100 + intel * 500 + Math.max(0, 1800 - Math.floor(elapsed) * 2) - alerts * 250);
+  const rank = alerts === 0 ? "GHOST" : alerts < 4 ? "PREDATOR" : "SURVIVOR";
+  $("resultStats").innerHTML = `<p class="resultRank">${won ? rank : "OPERATOR DOWN"}</p><p>${won ? "The file is public. The people who erased you are running out of places to hide." : "Your last secured terminal is saved. Restart from the checkpoint or return to the operation."}</p><div class="resultNumbers"><div><strong>${Math.floor(elapsed / 60)}:${String(Math.floor(elapsed % 60)).padStart(2, "0")}</strong><span>OPERATION TIME</span></div><div><strong>${takedowns}</strong><span>SILENT TAKEDOWNS</span></div><div><strong>${alerts}</strong><span>ALERTS</span></div><div><strong>${score}</strong><span>FIELD SCORE</span></div></div>`;
+  $("replayBtn").textContent = won ? "REPLAY OPERATION" : "RETRY CHECKPOINT";
+  show("results");
+  if (network?.info) {
+    $("replayBtn").disabled = true;
+    $("resultExitBtn").disabled = true;
+  } else $("replayBtn").focus();
+  if (network?.active && network.isHost) network.finish({ won, score, stats: { objectives: stage, takedowns, alerts, kills, time: Math.floor(elapsed) } });
+}
+function killEnemy(e, silent = false) {
+  if (!e?.alive) return;
+  e.alive = false;
+  e.state = "down";
+  e.suspicion = 0;
+  e.cone.visible = false;
+  marks = marks.filter((id) => id !== e.id);
+  kills++;
+  if (silent) {
+    takedowns++;
+    charge = true;
+    audio.fx("hit");
+    toast("EXECUTION EARNED \xB7 Mark up to 3 hostiles");
+  } else audio.fx("shot");
+  if (network?.active && network.isHost) network.broadcastEvent("down", { id: e.id, silent });
+}
+function noiseAt(p, radius) {
+  for (const e of enemies) if (e.alive && dist(e, p) < radius && e.state !== "combat") {
+    e.state = "investigate";
+    e.target = { x: p.x, z: p.z };
+    e.searchTime = 10;
+    e.repath = 0;
+  }
+}
+function getAimCandidate(range = 24) {
+  let best = null, score = Infinity;
+  const dir = { x: Math.sin(player.angle), z: Math.cos(player.angle) };
+  for (const e of enemies) {
+    if (!e.alive || dist(player, e) > range || !lineClear(player, e)) continue;
+    const d = dist(player, e), dot = ((e.x - player.x) * dir.x + (e.z - player.z) * dir.z) / d;
+    const s = (1 - dot) * 25 + d * 0.03;
+    if (dot > 0.73 && s < score) {
+      best = e;
+      score = s;
+    }
+  }
+  return best;
+}
+function mark() {
+  const e = getAimCandidate();
+  if (!e) {
+    toast("Aim toward a visible hostile to mark");
+    return;
+  }
+  if (marks.includes(e.id)) {
+    marks = marks.filter((id) => id !== e.id);
+    audio.fx("click");
+    return;
+  }
+  if (marks.length >= 3) {
+    toast("Three targets marked \xB7 Execute or unmark one");
+    return;
+  }
+  marks.push(e.id);
+  audio.fx("mark");
+}
+function execute() {
+  if (!charge) {
+    toast("Earn an Execution with a silent takedown");
+    return;
+  }
+  const valid = marks.map((id) => enemies[id]).filter((e) => e.alive && dist(e, player) < 26 && lineClear(player, e));
+  if (!valid.length) {
+    toast("Marked targets need a clear line of fire");
+    return;
+  }
+  execution = valid.map((e) => e.id);
+  executeTimer = 0.2;
+  charge = false;
+  audio.fx("execute");
+  toast("EXECUTING");
+}
+function traceShot() {
+  const dir = { x: Math.sin(player.angle), z: Math.cos(player.angle) };
+  let lamp = null, ld = Infinity;
+  for (const l of world.lights) {
+    const d = dist(player, l), dot = ((l.x - player.x) * dir.x + (l.z - player.z) * dir.z) / d;
+    if (l.on && d < 26 && dot > 0.98 && lineClear(player, l) && d < ld) {
+      lamp = l;
+      ld = d;
+    }
+  }
+  const e = getAimCandidate(29);
+  if (lamp && (!e || dist(player, e) > ld)) {
+    lamp.on = false;
+    audio.fx("hit");
+    toast("LIGHT DESTROYED");
+    return { x: lamp.x, z: lamp.z };
+  }
+  if (e) {
+    e.hits = (e.hits || 0) + 1;
+    if (e.hits >= (aiming ? 1 : 2)) killEnemy(e);
+    else {
+      e.state = "combat";
+      e.suspicion = 1;
+    }
+    return { x: e.x, z: e.z };
+  }
+  return { x: player.x + dir.x * 22, z: player.z + dir.z * 22 };
+}
+function fire() {
+  if (reloading > 0 || shootCooldown > 0 || execution.length) return;
+  if (ammo <= 0) {
+    reload();
+    return;
+  }
+  ammo--;
+  shots++;
+  shootCooldown = 0.26;
+  audio.fx("shot");
+  screenShake = 0.12;
+  const end = traceShot();
+  tracer(player, end, 16112027);
+  noiseAt(player, aiming ? 8 : 14);
+  if (network?.active && !network.isHost) network.sendEvent("fire", { x: player.x, z: player.z, angle: player.angle, aiming });
+}
+function tracer(a, b, color) {
+  const g = new THREE2.BufferGeometry().setFromPoints([new THREE2.Vector3(a.x, 1.3, a.z), new THREE2.Vector3(b.x, 1.3, b.z)]), m = new THREE2.Line(g, new THREE2.LineBasicMaterial({ color, transparent: true, opacity: 0.9 }));
+  scene.add(m);
+  effects.push({ mesh: m, time: 0.1, life: 0.1 });
+}
+function pulse(x, z, color, radius = 8, life = 0.8) {
+  const mesh = new THREE2.Mesh(new THREE2.RingGeometry(0.94, 1, 64), new THREE2.MeshBasicMaterial({ color, transparent: true, opacity: 0.7, side: THREE2.DoubleSide, depthWrite: false }));
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.set(x, 0.12, z);
+  scene.add(mesh);
+  effects.push({ mesh, time: life, life, radius });
+}
+function reload() {
+  if (reloading || ammo === 12 || reserve <= 0) return;
+  reloading = 1.5;
+  audio.fx("reload");
+  toast("RELOADING");
+}
+function emp() {
+  if (!empCount) {
+    toast("No EMP charges \xB7 Resupply at a terminal");
+    return;
+  }
+  empCount--;
+  empUntil = elapsed + 12;
+  empZones.push({ x: player.x, z: player.z, until: elapsed + 12 });
+  audio.fx("emp");
+  pulse(player.x, player.z, 8781811, 13, 1);
+  toast("EMP PULSE \xB7 Nearby security disabled for 12 seconds");
+  noiseAt(player, 5);
+  if (network?.active && !network.isHost) network.sendEvent("emp", { x: player.x, z: player.z });
+}
+function distract() {
+  if (!distractions) {
+    toast("No distractions remaining");
+    return;
+  }
+  distractions--;
+  const target = freePoint(player.x + Math.sin(player.angle) * 8, player.z + Math.cos(player.angle) * 8);
+  pulse(target.x, target.z, 15645048, 3, 1.2);
+  noiseAt(target, 17);
+  audio.fx("hit");
+  toast("DISTRACTION DEPLOYED");
+  if (network?.active && !network.isHost) network.sendEvent("noise", target);
+}
+function useSonar() {
+  if (sonarCooldown > 0) {
+    toast(`Sonar recharging \xB7 ${Math.ceil(sonarCooldown)}s`);
+    return;
+  }
+  sonar = 5;
+  sonarCooldown = 18;
+  pulse(player.x, player.z, 12122349, 22, 1.3);
+  audio.fx("mark");
+  toast("SONAR \xB7 Hostiles revealed for 5 seconds");
+}
+function nearCover() {
+  return world.solids.filter((s) => s.h > 0.6 && s.h < 1.9).map((s) => ({ s, d: Math.hypot(Math.max(0, Math.abs(player.x - s.x) - s.w / 2), Math.max(0, Math.abs(player.z - s.z) - s.d / 2)) })).sort((a, b) => a.d - b.d)[0];
+}
+function startVault() {
+  const c = nearCover();
+  if (!c || c.d > 1.5) {
+    toast("Move beside low cover to vault");
+    return;
+  }
+  const s = c.s;
+  let dx = player.x - s.x, dz = player.z - s.z;
+  if (Math.abs(dx) / (s.w / 2) > Math.abs(dz) / (s.d / 2)) {
+    dx = -Math.sign(dx) * (s.w + 1.4);
+    dz = 0;
+  } else {
+    dz = -Math.sign(dz) * (s.d + 1.4);
+    dx = 0;
+  }
+  const end = { x: player.x + dx, z: player.z + dz };
+  if (!isFree(end.x, end.z)) {
+    toast("No clear landing beyond cover");
+    return;
+  }
+  vault = { start: { x: player.x, z: player.z }, end, t: 0 };
+  cover = false;
+  audio.fx("step");
+}
+function interact(dt) {
+  if (interaction < 0) interaction = Math.min(0, interaction + dt);
+  const near = enemies.filter((e) => e.alive && dist(player, e) < 2.2 && lineClear(player, e, 0.8)).sort((a, b) => dist(player, a) - dist(player, b))[0];
+  if (near) {
+    if (interactHeld && interaction === 0) {
+      killEnemy(near, true);
+      interaction = -0.6;
+      if (network?.active && !network.isHost) network.sendEvent("takedown", { id: near.id });
+    }
+    return { text: "SILENT TAKEDOWN", hold: false };
+  }
+  const o = objectives[stage];
+  if (dist(player, o) < 2.7) {
+    if (interactHeld) {
+      interaction = Math.max(0, interaction) + dt;
+      if (interaction > (stage === 3 ? 1 : 2.2)) {
+        if (stage === 3 && network?.active && !allOperators().every((p) => dist(p, objectives[3]) < 7)) {
+          toast("EXTRACTION \xB7 Waiting for the team");
+          interaction = 0;
+          return { text: "REGROUP AT EXTRACTION", hold: true };
+        }
+        if (network?.active && !network.isHost) {
+          network.sendEvent("objective", { stage });
+          interaction = 0;
+        } else advanceObjective();
+      }
+    } else interaction = Math.max(0, interaction - dt * 2);
+    return { text: stage === 3 ? "HOLD TO EXTRACT" : `HOLD TO ${stage === 0 ? "CUT SECURITY" : stage === 1 ? "COPY WITNESS FILE" : "TRANSMIT EVIDENCE"}`, hold: true };
+  }
+  interaction = Math.min(0, interaction + dt);
+  const cov = nearCover();
+  if (cov?.d < 1.4) return { text: "CROUCH INTO COVER \xB7 \u2191 / SPACE TO VAULT", hold: false };
+  return null;
+}
+function exposureAt(p) {
+  let value = 0.12;
+  for (const l of world.lights) {
+    if (l.on && !empDisabled(l)) {
+      const d = dist(p, l);
+      if (d < l.radius) value = Math.max(value, 1 - d / l.radius * 0.45);
+    }
+  }
+  if (!p.crouch) value += 0.13;
+  if (moveSpeed > 4.4) value += 0.2;
+  return clamp(value, 0, 1);
+}
+function allOperators() {
+  const list = [];
+  if (!network?.isServer) list.push({ id: network?.me ?? 0, x: player.x, z: player.z, crouch: player.crouch, health: player.health });
+  for (const [id, r] of remoteAgents) list.push({ id, x: r.x, z: r.z, crouch: r.crouch, health: r.health });
+  return list.filter((p) => p.health > 0);
+}
+function setAlert(e, target) {
+  if (e.state !== "combat") {
+    alerts++;
+    audio.fx("alert");
+    if (e.targetId === (network?.me ?? 0) || !network?.active) {
+      toast("COMPROMISED \xB7 Break line of sight");
+    }
+  }
+  e.state = "combat";
+  e.target = { x: target.x, z: target.z };
+  e.targetId = target.id;
+  e.searchTime = 12;
+  e.suspicion = 1;
+  lastKnown = { x: target.x, z: target.z };
+  ghostUntil = elapsed + 14;
+}
+function updateEnemies(dt) {
+  const operators = allOperators();
+  for (const e of enemies) {
+    if (!e.alive) {
+      e.agent.animate(elapsed, 0, false, false, true);
+      continue;
+    }
+    let seen = null, best = Infinity;
+    for (const p of operators) {
+      const d = dist(e, p);
+      if (d > 18 || d < 0.05) continue;
+      const dot = ((p.x - e.x) * Math.sin(e.angle) + (p.z - e.z) * Math.cos(e.angle)) / d;
+      const exp = exposureAt(p), range = (p.crouch ? 5.5 : 8) + exp * 8;
+      if ((dot > 0.62 || d < 1.9) && d < range && lineClear(e, p, p.crouch ? 0.8 : 1.4) && d < best) {
+        seen = p;
+        best = d;
+      }
+    }
+    if (seen) {
+      e.suspicion = clamp(e.suspicion + dt * (1.5 - best * 0.045) * (exposureAt(seen) * 0.8 + 0.2), 0, 1);
+      e.target = { x: seen.x, z: seen.z };
+      e.searchTime = 12;
+      if (e.suspicion >= 1) setAlert(e, seen);
+    } else {
+      e.suspicion = Math.max(0, e.suspicion - dt * 0.19);
+      if (e.state === "combat") {
+        e.state = "search";
+        e.searchTime = 12;
+      }
+    }
+    if (e.state === "patrol" && Math.floor(elapsed * 2 + e.id) % 7 === 0) {
+      const fallen = enemies.find((b) => !b.alive && !b.bodySeen && dist(e, b) < 6 && lineClear(e, b));
+      if (fallen) {
+        fallen.bodySeen = true;
+        e.state = "search";
+        e.target = { x: fallen.x, z: fallen.z };
+        e.searchTime = 9;
+        e.suspicion = 0.5;
+      }
+    }
+    let speed = e.state === "combat" ? 3.1 : e.state === "patrol" ? 1.25 : 2, target = e.state === "patrol" ? e.waypoints[e.way] : e.target;
+    if (e.state === "combat" && seen && best < 15 && lineClear(e, seen)) {
+      speed = best < 6 ? 0 : 1.5;
+      e.angle = Math.atan2(seen.x - e.x, seen.z - e.z);
+      e.shootAt -= dt;
+      if (e.shootAt <= 0) {
+        e.shootAt = 1.05 + Math.random() * 0.5;
+        tracer(e, seen, 16748909);
+        audio.noise(0.1, 0.1, 1100);
+        if (mode !== "attract" && Math.random() < (seen.crouch ? 0.38 : 0.64)) {
+          if (seen.id === (network?.me ?? 0)) damagePlayer(12);
+          else network?.broadcastEvent("damage", { id: seen.id, amount: 12 });
+        }
+      }
+    }
+    if ((e.state === "search" || e.state === "investigate") && e.searchTime > 0) {
+      e.searchTime -= dt;
+      if (e.searchTime <= 0) {
+        e.state = "patrol";
+        e.target = null;
+        e.path = [];
+      }
+    }
+    if (target && dist(e, target) > 0.8 && speed > 0) {
+      e.repath -= dt;
+      if (lineClear(e, target, 0.3)) {
+        e.path = [target];
+      } else if (e.repath <= 0) {
+        e.path = findPath(e, target);
+        e.repath = 1.8;
+      }
+      const p = e.path[0];
+      if (p) {
+        const d = dist(e, p);
+        if (d < 0.5) e.path.shift();
+        else {
+          const dx = (p.x - e.x) / d, dz = (p.z - e.z) / d;
+          if (isFree(e.x + dx * speed * dt, e.z + dz * speed * dt, 0.36)) {
+            e.x += dx * speed * dt;
+            e.z += dz * speed * dt;
+          }
+          e.angle = lerp(e.angle, e.angle + wrap(Math.atan2(dx, dz) - e.angle), Math.min(1, dt * 6));
+        }
+      }
+    } else if (e.state === "patrol") e.way = (e.way + 1) % e.waypoints.length;
+    else if (e.state !== "combat") {
+      e.angle += dt * 0.6;
+      speed = 0;
+    }
+    e.agent.group.position.set(e.x, 0, e.z);
+    e.agent.group.rotation.y = e.angle;
+    e.agent.animate(elapsed, speed, false, e.state === "combat", false);
+    e.cone.position.set(e.x, 0, e.z);
+    e.cone.rotation.y = e.angle;
+    e.cone.material.color.set(e.state === "combat" ? 15889764 : e.suspicion > 0.25 ? 15647335 : 13024142);
+    e.cone.material.opacity = e.state === "combat" ? 0.055 : 0.035;
+  }
+  for (const c of world.cameras) {
+    const disabled = !c.on || stage > 0 || empDisabled(c);
+    if (c.cone) c.cone.visible = !disabled;
+    if (disabled) continue;
+    c.mesh.rotation.y = c.angle + Math.sin(elapsed * 0.28) * 0.5;
+    const angle = c.mesh.rotation.y;
+    for (const p of operators) {
+      const d = dist(c, p), dot = ((p.x - c.x) * Math.sin(angle) + (p.z - c.z) * Math.cos(angle)) / d;
+      if (d < 10 && dot > 0.88 && exposureAt(p) > 0.4 && lineClear(c, p)) {
+        const guard = enemies.find((e) => e.alive && e.state !== "combat");
+        if (guard) {
+          guard.suspicion += dt * 0.8;
+          if (guard.suspicion >= 1) setAlert(guard, p);
+        }
+      }
+    }
+  }
+}
+function damagePlayer(amount) {
+  if (mode !== "play" || network?.isServer) return;
+  player.health = Math.max(0, player.health - amount);
+  lastDamage = elapsed;
+  screenShake = 0.23;
+  document.body.classList.add("damaged");
+  setTimeout(() => document.body.classList.remove("damaged"), 160);
+  if (player.health <= 0) {
+    if (network?.active) {
+      toast("OPERATOR DOWN \xB7 Emergency extraction in 5 seconds");
+      setTimeout(() => {
+        if (mode === "play") {
+          const p = checkpoint ? objectives[checkpoint - 1] : world.spawn;
+          setPosition(p.x, p.z + 3);
+          player.health = 100;
+          toast("OPERATOR REDEPLOYED AT CHECKPOINT");
+        }
+      }, 5e3);
+    } else finishMission(false);
+  }
+}
+function updatePlayer(dt) {
+  const pad = [...navigator.getGamepads?.() || []].find(Boolean), blocked = overlayKind || !$("pauseScreen").classList.contains("hidden") || network?.active && !network.started || network?.isServer || player.health <= 0;
+  let mx = 0, my = 0, rx = 0, ry = 0;
+  if (!blocked) {
+    mx = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
+    my = (keys.has("KeyW") ? 1 : 0) - (keys.has("KeyS") ? 1 : 0);
+    if (pad) {
+      mx += Math.abs(pad.axes[0]) > 0.16 ? pad.axes[0] : 0;
+      my += Math.abs(pad.axes[1]) > 0.16 ? -pad.axes[1] : 0;
+      rx = Math.abs(pad.axes[2]) > 0.18 ? pad.axes[2] : 0;
+      ry = Math.abs(pad.axes[3]) > 0.18 ? pad.axes[3] : 0;
+      if (rx || ry) mouseAim = false;
+    }
+    const len = Math.hypot(mx, my);
+    if (len > 1) {
+      mx /= len;
+      my /= len;
+    }
+    aiming = held("Mouse2", 6);
+    if (rx || ry) {
+      camYaw -= rx * dt * 1.7 * settings.sensitivity * (settings.invertX ? -1 : 1);
+      camPitch = clamp(camPitch + ry * dt * 0.7 * settings.sensitivity * (settings.invertY ? -1 : 1), 0.38, 1.13);
+      player.angle = camYaw + Math.PI;
+    }
+    if (mouseAim) {
+      ray.setFromCamera(pointer, camera);
+      if (ray.ray.intersectPlane(ground, aimPoint)) {
+        player.angle = Math.atan2(aimPoint.x - player.x, aimPoint.z - player.z);
+      }
+    } else if (aiming) {
+      const candidate = enemies.filter((e) => e.alive && dist(e, player) < 22 && lineClear(player, e)).sort((a, b) => dist(a, player) - dist(b, player))[0];
+      if (candidate) player.angle = Math.atan2(candidate.x - player.x, candidate.z - player.z);
+    }
+    if (action("KeyC", 1)) {
+      player.crouch = !player.crouch;
+      cover = player.crouch && nearCover()?.d < 1.4;
+      audio.fx("step");
+    }
+    if (action("KeyQ", 5)) mark();
+    if (action("KeyF", 3)) execute();
+    if (action("KeyG", 4)) emp();
+    if (action("KeyT", 14)) distract();
+    if (action("KeyV", 11)) useSonar();
+    if (action("KeyR", 2)) reload();
+    if (action("Space", 12)) startVault();
+    if (padEdge[17]) openManual();
+    if (held("Mouse0", 7)) fire();
+  }
+  moveSpeed = blocked ? 0 : (player.crouch ? 2.45 : held("ShiftLeft", 10) ? 6.2 : 4.3) * Math.min(1, Math.hypot(mx, my));
+  const dx = mx * Math.cos(camYaw) - my * Math.sin(camYaw), dz = -mx * Math.sin(camYaw) - my * Math.cos(camYaw);
+  if (vault) {
+    vault.t += dt / 0.55;
+    const t = clamp(vault.t, 0, 1);
+    player.x = lerp(vault.start.x, vault.end.x, t);
+    player.z = lerp(vault.start.z, vault.end.z, t);
+    body.setTranslation({ x: player.x, y: 1, z: player.z }, true);
+    body.setNextKinematicTranslation({ x: player.x, y: 1, z: player.z });
+    player.group.position.y = Math.sin(t * Math.PI) * 1.4;
+    if (t >= 1) {
+      vault = null;
+      player.group.position.y = 0;
+    }
+  } else {
+    kcc.computeColliderMovement(collider, { x: dx * moveSpeed * dt, y: -0.1, z: dz * moveSpeed * dt });
+    const v = kcc.computedMovement(), pos = body.translation();
+    body.setNextKinematicTranslation({ x: pos.x + v.x, y: pos.y + v.y, z: pos.z + v.z });
+    player.x = pos.x + v.x;
+    player.z = pos.z + v.z;
+    player.group.position.y = Math.max(0, pos.y + v.y - 0.97);
+  }
+  if (moveSpeed > 0.2 && !aiming && !mouseAim && !rx && !ry) player.angle = Math.atan2(dx, dz);
+  player.group.position.x = player.x;
+  player.group.position.z = player.z;
+  player.group.rotation.y = player.angle;
+  player.agent.animate(elapsed, moveSpeed, player.crouch, aiming || held("Mouse0", 7), player.health <= 0);
+  stepClock += dt * moveSpeed;
+  if (stepClock > 2.3) {
+    stepClock = 0;
+    audio.fx("step");
+    if (!player.crouch) noiseAt(player, moveSpeed > 5 ? 9 : 4);
+  }
+  interactHeld = !blocked && held("KeyE", 0);
+  const prompt = interact(dt);
+  if (prompt) {
+    $("interact").innerHTML = `<span class="pad-chip">${controller ? "\u2715" : "E"}</span> ${prompt.text}${prompt.hold ? `<span class="holdProgress" style="width:${Math.max(0, interaction) / 2.2 * 100}%"></span>` : ""}`;
+    show("interact");
+  } else show("interact", false);
+  if (elapsed - lastDamage > 7 && player.health > 0 && player.health < 100 && exposureAt(player) < 0.6) player.health = Math.min(100, player.health + dt * 9);
+}
+function updateAttract(dt) {
+  attractTime += dt;
+  const phase = Math.floor(attractTime / 8);
+  if (phase !== attractPhase) {
+    attractPhase = phase;
+    const actions = [() => {
+      setPosition(-5, 23);
+      player.angle = Math.PI;
+      toast("SHADOW APPROACH \xB7 Silent movement");
+    }, () => {
+      const e = enemies[0];
+      setPosition(e.x, e.z + 1.5);
+      killEnemy(e, true);
+      toast("SILENT TAKEDOWN \xB7 Execution earned");
+    }, () => {
+      setPosition(6, 13);
+      const es = enemies.filter((e) => e.alive).slice(0, 3);
+      for (let i = 0; i < es.length; i++) {
+        es[i].x = 7 + i * 2;
+        es[i].z = 7;
+        es[i].agent.group.position.set(es[i].x, 0, 7);
+      }
+      marks = es.map((e) => e.id);
+      charge = true;
+      player.angle = Math.PI;
+      toast("MARK HOSTILES \xB7 Chain an execution");
+    }, () => {
+      execution = marks.slice();
+      executeTimer = 0.4;
+      charge = false;
+      toast("MARK & EXECUTE \xB7 Three targets, one opening");
+    }, () => {
+      setPosition(-13, 8);
+      emp();
+      toast("EMP PULSE \xB7 Turn the environment against them");
+      stage = 0;
+      advanceObjective();
+    }, () => {
+      setPosition(13, -9);
+      useSonar();
+      toast("SONAR \xB7 Read the room through cover");
+    }, () => {
+      setPosition(15, -8);
+      stage = 1;
+      advanceObjective();
+      toast("WITNESS FILE RECOVERED \xB7 The truth has a name");
+    }, () => {
+      setPosition(0, -25);
+      stage = 2;
+      advanceObjective();
+      toast("EVIDENCE TRANSMITTED \xB7 Leave no address");
+    }, () => {
+      setPosition(1, 24);
+      player.crouch = false;
+      lastKnown = { x: 1, z: 19 };
+      ghostUntil = elapsed + 9;
+      toast("LAST KNOWN POSITION \xB7 Break contact, change the angle");
+    }, () => {
+      setPosition(0, 29);
+      toast("EXTRACTION \xB7 Four objectives. Your way through.");
+    }];
+    if (phase >= actions.length) {
+      startMission(true);
+      return;
+    }
+    actions[phase]();
+  }
+  const a = attractTime % 8;
+  player.angle += dt * 0.12;
+  player.agent.animate(elapsed, 1.2, phase < 5, false, false);
+  player.group.rotation.y = player.angle;
+  player.health = 100;
+}
+function updateHUD() {
+  let waypoint = $("waypoint");
+  if (!waypoint) {
+    waypoint = document.createElement("div");
+    waypoint.id = "waypoint";
+    $("hud").append(waypoint);
+  }
+  const goal = objectives[stage], wp = new THREE2.Vector3(goal.x, 1.4, goal.z).project(camera);
+  waypoint.style.left = clamp(wp.x * 0.5 + 0.5, 0.12, 0.88) * 100 + "%";
+  waypoint.style.top = clamp(-wp.y * 0.5 + 0.5, 0.23, 0.7) * 100 + "%";
+  waypoint.innerHTML = `<i>\u25C7</i><b>${goal.label}</b><span>${Math.round(dist(player, goal))} M</span>`;
+  waypoint.classList.toggle("offscreen", Math.abs(wp.x) > 1 || Math.abs(wp.y) > 1 || wp.z > 1);
+  const exp = exposureAt(player), susp = Math.max(0, ...enemies.filter((e) => e.alive).map((e) => e.suspicion));
+  $("healthFill").style.width = player.health + "%";
+  $("exposureFill").style.width = Math.max(exp * 0.55, susp) * 100 + "%";
+  $("stealthText").textContent = susp > 0.95 ? "COMPROMISED" : susp > 0.3 ? "BEING OBSERVED" : cover ? "IN COVER" : exp < 0.35 ? "IN SHADOW" : "EXPOSED";
+  $("ammoText").innerHTML = `${reloading > 0 ? "\u2014" : ammo} <small>/ ${reserve}</small>`;
+  $("chargeText").textContent = charge ? "\u25B3 / F EXECUTE READY" : "TAKEDOWN TO CHARGE";
+  $("chargeText").classList.toggle("ready", charge);
+  $("markSlots").innerHTML = [0, 1, 2].map((i) => `<i class="${marks[i] !== void 0 ? "filled" : ""}"></i>`).join("");
+  $("controlHints").innerHTML = controller ? '<span><b class="pad-chip">\u2715</b> INTERACT</span><span><b class="pad-chip">R1</b> MARK</span><span><b class="pad-chip">\u25B3</b> EXECUTE</span><span><b class="pad-chip">L1</b> EMP</span>' : '<span><b class="pad-chip">E</b> INTERACT</span><span><b class="pad-chip">Q</b> MARK</span><span><b class="pad-chip">F</b> EXECUTE</span><span><b class="pad-chip">G</b> EMP</span><span><b class="pad-chip">TAB</b> MANUAL</span>';
+  $("coopStatus").textContent = network?.active ? `CO-OP \xB7 ${network.players.length} OPERATORS \xB7 ${network.isHost ? "COMMAND" : "LINKED"}` : `EMP ${empCount} \xB7 LURES ${distractions} \xB7 ${sonarCooldown > 0 ? "SONAR " + Math.ceil(sonarCooldown) + "s" : "SONAR READY"}`;
+  for (const e of enemies) {
+    const visible = e.alive && (lineClear(player, e) || sonar > 0 || marks.includes(e.id)), p = new THREE2.Vector3(e.x, 2.5, e.z).project(camera);
+    e.marker.style.display = visible && p.z < 1 && Math.abs(p.x) < 1 && Math.abs(p.y) < 1 ? "block" : "none";
+    e.marker.style.left = (p.x * 0.5 + 0.5) * 100 + "%";
+    e.marker.style.top = (-p.y * 0.5 + 0.5) * 100 + "%";
+    e.marker.classList.toggle("marked", marks.includes(e.id));
+    e.marker.innerHTML = marks.includes(e.id) ? `<b>${marks.indexOf(e.id) + 1}</b>` : e.suspicion > 0.1 ? `<i style="height:${e.suspicion * 100}%"></i><span>${e.state === "combat" ? "!" : "?"}</span>` : sonar > 0 ? "<span>\u25C7</span>" : "";
+  }
+  $("crosshair").classList.toggle("target", !!getAimCandidate());
+  renderer.domElement.style.filter = exp < 0.35 ? "saturate(.55)" : "none";
+}
+var worldFrames = 0;
+var netProgressAt = 0;
+function remoteState(id, s) {
+  if (id === (network?.me ?? 0) || !Number.isFinite(s.x) || !Number.isFinite(s.z)) return;
+  let r = remoteAgents.get(id);
+  if (!r) {
+    const a = createAgent(scene, { color: [7186074, 9016780, 13216878, 11041191][Number(id) % 4] || 7186074 });
+    r = { ...s, agent: a };
+    remoteAgents.set(id, r);
+  }
+  Object.assign(r, { x: s.x, z: s.z, angle: s.angle || 0, crouch: !!s.crouch, health: s.health ?? 100 });
+}
+function applyWorld(w) {
+  if (!w) return;
+  if (Number.isFinite(w.stage) && stage !== w.stage) {
+    stage = clamp(w.stage, 0, 3);
+    checkpoint = stage;
+    updateObjective();
+    ammo = 12;
+    reserve = Math.max(reserve, 48);
+    empCount = Math.min(3, empCount + 1);
+    distractions = Math.min(5, distractions + 2);
+    player.health = 100;
+  }
+  if (w.enemies) for (const s of w.enemies) {
+    const e = enemies[s.id];
+    if (!e) continue;
+    Object.assign(e, { x: s.x, z: s.z, angle: s.angle, alive: s.alive, suspicion: s.suspicion, state: s.state });
+    e.agent.group.position.set(e.x, 0, e.z);
+    e.agent.group.rotation.y = e.angle;
+    e.agent.animate(elapsed, e.alive ? 1 : 0, false, e.state === "combat", !e.alive);
+    e.cone.position.set(e.x, 0, e.z);
+    e.cone.rotation.y = e.angle;
+    e.cone.visible = e.alive;
+  }
+  if (w.empZones) empZones = w.empZones.map((z) => ({ ...z, until: elapsed + z.remaining }));
+  if (w.lamps) world.lights.forEach((l, i) => l.on = w.lamps[i]);
+  if (w.cameras) world.cameras.forEach((c, i) => c.on = w.cameras[i]);
+}
+function setupNetworking() {
+  network.onState = (s, from) => {
+    if (network.isHost) {
+      remoteState(from, s);
+    } else if (from === network.hostId) {
+      if (!s.server) remoteState(from, s);
+      for (const [id, p] of Object.entries(s.peers || {})) remoteState(Number(id), p);
+      applyWorld(s.world);
+    }
+  };
+  network.onEvent = (type, data, from) => {
+    if (type === "leave") {
+      const r2 = remoteAgents.get(data.id);
+      if (r2) scene.remove(r2.agent.group);
+      remoteAgents.delete(data.id);
+      toast("Operator disconnected");
+      return;
+    }
+    if (type === "time-up") {
+      if (network.isHost) finishMission(false);
+      return;
+    }
+    if (type === "end") {
+      if (mode === "play") finishMission(data?.reason === "finished" && stage >= 3);
+      keys.clear();
+      if (audio.ctx) audio.ctx.suspend();
+      return;
+    }
+    if (type === "damage" && data.id === network.me) {
+      damagePlayer(data.amount);
+      return;
+    }
+    if (!network.isHost) {
+      if (type === "down") {
+        const e = enemies[data.id];
+        if (e?.alive) killEnemy(e, data.silent);
+      }
+      return;
+    }
+    const r = remoteAgents.get(from);
+    if (!r || !data) return;
+    if (type === "takedown") {
+      const e = enemies[data.id];
+      if (e?.alive && dist(r, e) < 3) killEnemy(e, true);
+    }
+    if (type === "fire") {
+      const shotLamp = world.lights.filter((l) => l.on && dist(l, r) < 26 && lineClear(r, l) && Math.cos(wrap(Math.atan2(l.x - r.x, l.z - r.z) - data.angle)) > 0.98).sort((a, b) => dist(a, r) - dist(b, r))[0];
+      const target = enemies.filter((e) => e.alive && dist(e, r) < 30 && lineClear(e, r) && Math.cos(wrap(Math.atan2(e.x - r.x, e.z - r.z) - data.angle)) > 0.85).sort((a, b) => dist(a, r) - dist(b, r))[0];
+      if (shotLamp && (!target || dist(shotLamp, r) < dist(target, r))) {
+        shotLamp.on = false;
+        tracer(r, shotLamp, 16045738);
+      } else if (target) {
+        killEnemy(target);
+        tracer(r, target, 16045738);
+      }
+      noiseAt(r, 10);
+    }
+    if (type === "execute-target") {
+      const e = enemies[data.id];
+      if (e?.alive && dist(e, r) < 28 && lineClear(e, r)) killEnemy(e);
+    }
+    if (type === "noise") noiseAt(data, 17);
+    if (type === "emp") {
+      empZones.push({ x: r.x, z: r.z, until: elapsed + 12 });
+      pulse(r.x, r.z, 8781811, 14, 1);
+    }
+    if (type === "objective" && data.stage === stage && dist(r, objectives[stage]) < 3.5) {
+      if (stage === 3 && !allOperators().every((p) => dist(p, objectives[3]) < 7)) {
+        toast("EXTRACTION \xB7 Waiting for the team");
+        return;
+      }
+      advanceObjective();
+    }
+  };
+  network.probe(() => ({ scene: mode === "play" ? "play" : mode === "results" ? "over" : mode === "boot" ? "ready" : "title", menu: !!overlayKind || mode === "pause" || !$("pauseScreen").classList.contains("hidden"), world: worldFrames, input: { x: (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0) + ([...navigator.getGamepads()].find(Boolean)?.axes[0] || 0), y: (keys.has("KeyS") ? 1 : 0) - (keys.has("KeyW") ? 1 : 0) + ([...navigator.getGamepads()].find(Boolean)?.axes[1] || 0), fire: held("Mouse0", 7), action: held("KeyE", 0) }, position: { x: player.x, z: player.z } }));
+}
+function updateNetwork(dt) {
+  if (!network?.active) return;
+  const state = { x: player.x, z: player.z, angle: player.angle, crouch: player.crouch, health: player.health, server: network.isServer };
+  if (network.isHost) {
+    state.world = { stage, enemies: enemies.map((e) => ({ id: e.id, x: e.x, z: e.z, angle: e.angle, alive: e.alive, suspicion: e.suspicion, state: e.state })), lamps: world.lights.map((l) => l.on), cameras: world.cameras.map((c) => c.on), empZones: empZones.filter((z) => z.until > elapsed).map((z) => ({ x: z.x, z: z.z, remaining: z.until - elapsed })) };
+    state.peers = Object.fromEntries([...remoteAgents].map(([id, r]) => [id, { x: r.x, z: r.z, angle: r.angle, crouch: r.crouch, health: r.health }]));
+  }
+  network.update(state, dt);
+  if (elapsed > netProgressAt) {
+    netProgressAt = elapsed + 1;
+    network.progress(stage * 1e3 + kills * 100 + takedowns * 150, `${stage}/4 objectives`);
+  }
+  for (const r of remoteAgents.values()) {
+    r.agent.group.position.lerp(new THREE2.Vector3(r.x, 0, r.z), Math.min(1, dt * 14));
+    r.agent.group.rotation.y = r.angle;
+    r.agent.animate(elapsed, 1, r.crouch, false, r.health <= 0);
+  }
+}
+function updateCamera(dt) {
+  const title = mode === "title" || mode === "boot";
+  let target, pos;
+  if (title) {
+    const t = performance.now() * 8e-5;
+    target = new THREE2.Vector3(-2.8, 1.1, 22.5);
+    pos = new THREE2.Vector3(7 + Math.sin(t) * 1.5, 6.3, 34);
+    camera.fov = 48;
+  } else {
+    const distance = execution.length ? 9 : aiming ? 11 : 14;
+    const height = distance * Math.sin(camPitch);
+    pos = new THREE2.Vector3(player.x + Math.sin(camYaw) * distance, Math.max(5, height) + 1.2, player.z + Math.cos(camYaw) * distance);
+    target = new THREE2.Vector3(player.x, 1, player.z - 1.2);
+    camera.fov = aiming ? 48 : 55;
+  }
+  camera.position.lerp(pos, Math.min(1, dt * (title ? 1.2 : 6)));
+  if (screenShake > 0) {
+    camera.position.x += (Math.random() - 0.5) * screenShake;
+    screenShake = Math.max(0, screenShake - dt);
+  }
+  camera.lookAt(target);
+  camera.updateProjectionMatrix();
+}
+function updateEffects(dt) {
+  for (const c of world.cameras) if (c.cone) c.cone.visible = c.on && stage === 0 && !empDisabled(c);
+  for (let i = effects.length - 1; i >= 0; i--) {
+    const e = effects[i];
+    e.time -= dt;
+    if (e.radius) {
+      const p = 1 - e.time / e.life;
+      e.mesh.scale.setScalar(0.5 + e.radius * p);
+      e.mesh.material.opacity = (1 - p) * 0.65;
+    }
+    if (e.time <= 0) {
+      scene.remove(e.mesh);
+      e.mesh.geometry.dispose();
+      e.mesh.material.dispose();
+      effects.splice(i, 1);
+    }
+  }
+  if (ghost) {
+    ghost.visible = ghostUntil > elapsed && lastKnown != null;
+    if (ghost.visible) {
+      ghost.position.set(lastKnown.x, 1, lastKnown.z);
+      ghost.material.opacity = 0.15 + Math.sin(elapsed * 4) * 0.06;
+    }
+  }
+  objectiveMarker.rotation.z += dt * 0.12;
+  objectiveMarker.scale.setScalar(1 + Math.sin(elapsed * 3) * 0.08);
+  for (const l of world.lights) {
+    const visible = l.on && !empDisabled(l);
+    l.mesh.visible = l.on;
+    if (l.light) l.light.visible = visible;
+    if (l.cone) l.cone.visible = visible;
+    if (l.pool) l.pool.visible = visible;
+  }
+  show("toast", toastUntil > elapsed);
+  show("subtitle", subtitleUntil > elapsed);
+}
+var lastFrame = performance.now();
+function tick(now) {
+  const dt = Math.min(0.05, (now - lastFrame) / 1e3);
+  lastFrame = now;
+  updateGamepad();
+  const playing = mode === "play" || mode === "attract";
+  if (mode === "title" && !overlayKind && now - lastInput > 1e4) startMission(true);
+  if (playing) {
+    elapsed += dt;
+    worldFrames++;
+    if (mode === "attract") updateAttract(dt);
+    else updatePlayer(dt);
+    if ((!network?.active || network.isHost) && (!network?.active || network.started)) updateEnemies(dt);
+    physics.timestep = dt;
+    physics.step();
+    sonar = Math.max(0, sonar - dt);
+    sonarCooldown = Math.max(0, sonarCooldown - dt);
+    shootCooldown = Math.max(0, shootCooldown - dt);
+    if (reloading > 0) {
+      reloading -= dt;
+      if (reloading <= 0) {
+        const rounds = Math.min(12 - ammo, reserve);
+        ammo += rounds;
+        reserve -= rounds;
+      }
+    }
+    if (execution.length) {
+      executeTimer -= dt;
+      if (executeTimer <= 0) {
+        executeTimer = 0.28;
+        const e = enemies[execution.shift()];
+        if (e?.alive) {
+          player.angle = Math.atan2(e.x - player.x, e.z - player.z);
+          tracer(player, e, 13107185);
+          killEnemy(e);
+          pulse(e.x, e.z, 12189675, 1, 0.3);
+          if (network?.active && !network.isHost) network.sendEvent("execute-target", { id: e.id });
+        }
+      }
+    }
+    updateNetwork(dt);
+    updateHUD();
+    audio.update(elapsed, enemies.some((e) => e.state === "combat" && e.alive));
+  } else if (mode === "title") {
+    player.agent.animate(now / 1e3, 0, false, true, false);
+    renderer.domElement.style.filter = "none";
+  }
+  world.decorUpdate(now / 1e3, dt);
+  updateEffects(playing ? dt : 0);
+  updateCamera(dt);
+  renderer.render(scene, camera);
+  pressed.clear();
+  requestAnimationFrame(tick);
+}
+async function boot() {
+  try {
+    network = new OnlineSession();
+    const hubConnection = network.connect();
+    $("bootStatus").textContent = "VERIFYING WEBGPU DEVICE\u2026";
+    if (!navigator.gpu) throw Error("WebGPU is unavailable in this browser. Use a WebGPU-enabled browser over HTTPS or localhost. This operation has no graphics fallback.");
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) throw Error("No WebGPU adapter is available. Enable hardware acceleration and open this page over HTTPS or localhost.");
+    renderer = new THREE2.WebGPURenderer({ antialias: true, alpha: false });
+    renderer._getFallback = null;
+    await renderer.init();
+    if (!renderer.backend.isWebGPUBackend) throw Error("A native WebGPU backend is required.");
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    renderer.setSize(innerWidth, innerHeight);
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE2.PCFSoftShadowMap;
+    renderer.toneMapping = THREE2.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.12;
+    renderer.domElement.id = "gameCanvas";
+    document.body.prepend(renderer.domElement);
+    $("bootStatus").textContent = "ASSEMBLING FIELD INTELLIGENCE\u2026";
+    await RAPIER.init();
+    physics = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    scene = new THREE2.Scene();
+    camera = new THREE2.PerspectiveCamera(55, innerWidth / innerHeight, 0.1, 240);
+    camera.position.set(7, 6.3, 34);
+    world = createWorld(scene, physics, RAPIER);
+    const agent = createAgent(scene, { color: 2440003 });
+    player = { agent, group: agent.group, x: 0, z: 27, angle: Math.PI, crouch: true, health: 100 };
+    player.group.rotation.y = Math.PI;
+    body = physics.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, 1, 27));
+    collider = physics.createCollider(RAPIER.ColliderDesc.capsule(0.5, 0.38), body);
+    kcc = physics.createCharacterController(0.025);
+    kcc.enableAutostep(0.25, 0.2, true);
+    kcc.enableSnapToGround(0.4);
+    kcc.setSlideEnabled(true);
+    setPosition(0, 27);
+    createEnemies();
+    objectiveMarker = new THREE2.Mesh(new THREE2.RingGeometry(1.6, 1.7, 4), new THREE2.MeshBasicMaterial({ color: 13035728, transparent: true, opacity: 0.6, side: THREE2.DoubleSide, depthWrite: false }));
+    objectiveMarker.rotation.x = -Math.PI / 2;
+    scene.add(objectiveMarker);
+    ghost = new THREE2.Mesh(new THREE2.CapsuleGeometry(0.38, 0.9, 3, 6), new THREE2.MeshBasicMaterial({ color: 15069416, transparent: true, opacity: 0.2, wireframe: true, depthWrite: false }));
+    scene.add(ghost);
+    ghost.visible = false;
+    setupNetworking();
+    await renderer.compileAsync(scene, camera);
+    await hubConnection;
+    show("boot", false);
+    saveSettings();
+    if (network.active) {
+      startMission(false);
+      player.group.visible = !network.isServer;
+      network.ready();
+    } else goTitle();
+    if (matchMedia("(pointer:coarse)").matches && !navigator.getGamepads().some(Boolean)) show("touchNote");
+    window.addEventListener("resize", () => {
+      camera.aspect = innerWidth / innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(innerWidth, innerHeight);
+    });
+    window.__UNLISTED = { get state() {
+      return { mode, stage, ammo, reserve, charge, marks, empCount, sonar, sonarCooldown, health: player.health, position: { x: player.x, z: player.z }, enemies: enemies.map((e) => ({ id: e.id, alive: e.alive, x: e.x, z: e.z, state: e.state, suspicion: e.suspicion })), worldFrames, network: network.status };
+    }, start: () => startMission(false), attract: () => startMission(true), teleport: setPosition, objective: advanceObjective, shoot: fire, emp, sonar: useSonar, mark, execute, pause, resume };
+    lastFrame = performance.now();
+    requestAnimationFrame(tick);
+  } catch (e) {
+    console.error("Operation boot:", e);
+    mode = "unsupported";
+    show("boot", false);
+    show("unsupported");
+    $("unsupportedReason").textContent = e.message || "The secure channel could not be established.";
+    network?.fail(e.message);
+  }
+}
+boot();
+</script></body></html>

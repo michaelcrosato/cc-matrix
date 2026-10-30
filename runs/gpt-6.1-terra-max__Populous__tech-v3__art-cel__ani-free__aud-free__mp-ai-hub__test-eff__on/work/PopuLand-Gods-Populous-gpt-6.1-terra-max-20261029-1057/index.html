@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- HUB_SCRIPT -->
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="parallel">
+<meta name="hub:session-minutes" content="4">
+<meta name="hub:session-goal" content="Earn the most divine favor before the age ends.">
+<meta name="hub:session-howto" content="Shape the earth, grow your people, and break the rival shrine. Everyone plays their own realm; highest favor wins.">
+<meta name="hub:webgpu" content="required">
+<meta name="theme-color" content="#173c4c">
+<title>PopuLand Gods</title>
+<style>/* INLINE_CSS */</style>
+</head>
+<body>
+<div id="world" aria-hidden="true"></div>
+<div class="vignette" aria-hidden="true"></div>
+
+<header id="topbar" class="topbar hidden">
+  <div class="brand-mini"><span class="brand-mark">✦</span><span>POPULAND <b>GODS</b></span></div>
+  <div class="top-center"><span id="age-label">THE FIRST AGE</span><strong id="time-label">04:00</strong></div>
+  <button id="settings-shortcut" class="icon-button" aria-label="Open settings"><span>⚙</span><small>OPTIONS</small></button>
+</header>
+
+<main id="title-screen" class="title-screen">
+  <div class="title-copy">
+    <div class="eyebrow"><span class="sun-icon">✹</span> A LITTLE GOD GAME <span class="dash"></span> VOL. I</div>
+    <h1>POPU<span>LAND</span><br><em>GODS</em><i>✦</i></h1>
+    <p>Shape the land.<br><strong>Shape their destiny.</strong></p>
+    <div class="title-actions menu-group" id="title-actions">
+      <button class="menu-button primary" data-action="start"><span class="button-glyph">✦</span><span>Begin a new age</span><kbd>✕</kbd></button>
+      <button class="menu-button" data-action="guide"><span class="button-glyph">☼</span><span>How to play</span><kbd>□</kbd></button>
+      <button class="menu-button" data-action="settings"><span class="button-glyph">⚙</span><span>Settings</span><kbd>☰</kbd></button>
+      <button class="menu-button" data-action="about"><span class="button-glyph">✧</span><span>About &amp; credits</span><kbd>△</kbd></button>
+    </div>
+    <div class="title-note"><span class="pulse-dot"></span> A world awaits your touch <span>·</span> <span id="title-network">SOLO REALM</span></div>
+  </div>
+  <div class="title-aside"><span>THE DIVINE CHRONICLES</span><b>01</b><span>A WORLD IN YOUR HANDS</span></div>
+  <div class="bottom-note"><span>CONTROLLER RECOMMENDED</span><span>KEYBOARD &amp; MOUSE SUPPORTED</span></div>
+</main>
+
+<section id="hud" class="hud hidden" aria-label="Game status">
+  <div class="realm-panel player-panel">
+    <div class="realm-heading"><span class="crest blue">✦</span><div><small>YOUR PEOPLE</small><b>THE SKYBOUND</b></div></div>
+    <div class="stat-row"><span>SOULS <b id="player-pop">0</b></span><span>HOMES <b id="player-homes">0</b></span></div>
+    <div class="shrine-line"><span>SHRINE</span><div class="health-track"><i id="player-health"></i></div><b id="player-hp">100%</b></div>
+  </div>
+  <div class="realm-panel enemy-panel">
+    <div class="realm-heading"><span class="crest red">✹</span><div><small>THE RIVAL</small><b>THE EMBERKIN</b></div></div>
+    <div class="stat-row"><span>SOULS <b id="enemy-pop">0</b></span><span>HOMES <b id="enemy-homes">0</b></span></div>
+    <div class="shrine-line"><span>SHRINE</span><div class="health-track"><i id="enemy-health"></i></div><b id="enemy-hp">100%</b></div>
+  </div>
+  <div class="objective"><span>YOUR DIVINE TASK</span><strong id="objective-text">Raise a home for your people.</strong><small id="hint-text">Level the land near your shrine to invite settlers.</small></div>
+  <div class="favor-card"><span>DIVINE FAVOR</span><strong id="score">00000</strong><small>THE CHRONICLE REMEMBERS</small></div>
+  <div class="spell-dock">
+    <div class="mana-line"><span>✦ &nbsp;DEVOTION</span><div class="mana-track"><i id="mana-fill"></i></div><b id="mana-text">0 / 100</b></div>
+    <div class="spells" id="spells"></div>
+    <div class="spell-description"><div><span id="spell-name">RAISE LAND</span><small id="spell-detail">Make land for your people.</small></div><strong id="spell-cost">9 DEVOTION</strong></div>
+    <div class="control-hints"><span><kbd>LS</kbd> MOVE HAND</span><span><kbd>L1</kbd> <kbd>R1</kbd> CHOOSE POWER</span><span><kbd>✕</kbd> ACT</span><span><kbd>☰</kbd> PAUSE</span></div>
+  </div>
+  <div id="announcement" class="announcement hidden"><span>✦</span><div><b id="announcement-title"></b><small id="announcement-body"></small></div></div>
+  <div id="attract-label" class="attract-label hidden"><span class="pulse-dot"></span> THE GODS ARE DREAMING <small>ANY INPUT TO RETURN</small></div>
+  <div id="hub-label" class="hub-label hidden">AI HUB <span>PARALLEL REALMS</span></div>
+</section>
+
+<div id="modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+  <div class="modal-card">
+    <div class="modal-top"><div><span id="modal-kicker">THE DIVINE CHRONICLES</span><h2 id="modal-title"></h2></div><button id="modal-close" class="close-button" aria-label="Close">✕</button></div>
+    <div id="modal-content" class="modal-content"></div>
+    <div class="modal-footer"><span><kbd>↑</kbd><kbd>↓</kbd> NAVIGATE &nbsp; <kbd>✕</kbd> SELECT</span><span><kbd>○</kbd> BACK</span></div>
+  </div>
+</div>
+
+<div id="touch-warning" class="touch-warning hidden">
+  <div><span>✦</span><h2>Controller or keyboard required</h2><p>This little world is played with a controller or keyboard. Connect one to begin.</p><button id="touch-settings">SETTINGS</button></div>
+</div>
+<div id="error-screen" class="error-screen hidden"><div><span>✧</span><h2>A new age requires WebGPU.</h2><p id="error-message">This browser cannot awaken the world. Use a WebGPU-enabled browser and device.</p><button id="error-settings">SETTINGS</button></div></div>
+<div id="loading" class="loading"><div class="loading-mark">✦</div><b>AWAKENING A WORLD</b><span>Gathering earth, sky, and a little devotion…</span></div>
+<div id="live" class="sr-only" aria-live="polite"></div>
+<script type="module">/* INLINE_GAME */</script>
+</body>
+</html>

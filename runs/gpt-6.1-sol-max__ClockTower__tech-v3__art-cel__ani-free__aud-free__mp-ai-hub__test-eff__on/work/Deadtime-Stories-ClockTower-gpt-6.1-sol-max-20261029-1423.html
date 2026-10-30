@@ -1,0 +1,916 @@
+<!doctype html>
+<!--
+DEADTIME STORIES — Source Information
+Date: 2026-10-29 14:23 (America/Vancouver)
+Source: ClockTower · an original spiritual successor; no original game assets
+Title: Deadtime Stories · selected with Node crypto.randomInt from 50 titles
+Tech: Three.js r180 (0.180.0), WebGPU exclusively, TSL cel materials; Rapier 3D 0.19.3; Gamepad API; HTML/CSS/JavaScript
+Animation: Procedural articulated mesh rigs; blended locomotion, crouching, breathing, pendulums, gears and physical props
+Audio: Original procedural Web Audio music, footsteps, clockwork, bells and effects; subtitled narrative; no recorded voice
+Online: AI Hub client 1.3.0 / Session Protocol v1; 1–4 player parallel sessions with synchronized start, progress and results
+Testing: Lightweight Playwright functional checks; Chromium 153 WebGPU; 14 WebKit viewports (360–2560 px); emulated DualSense; AI Hub 1/2 players and departure. FPS/optimization out of scope.
+Environment: Codex CLI (headless); Linux; delivery browser unknown. Real iOS Safari and physical controllers untested.
+Model: OpenAI, gpt-6.1-sol, reasoning effort max
+Usage: Estimated API cost in USD: unknown. Total tokens: unknown. Session wall time: approximately 70 minutes.
+Art direction: Procedural cel-shaded Gothic dollhouse; ink silhouettes, matte color bands, moonbeams and candlelight
+
+Testing Feedback
+How many issues did testing catch?
+14 tracked issue groups, corrected. The development test record lists each one.
+How many were critical or game breaking?
+2 startup blockers, corrected. Final gameplay and pursuer checks pass without JavaScript or WebGPU validation errors.
+Most helpful test?
+The complete WebGPU objective-to-ending input pass caught focus theft from a stationary mouse pointer. The AI Hub harness also caught input/ready timing defects.
+Least helpful test?
+The initial CommonJS syntax check: it allowed a duplicate function name that an HTML ES module rejected. Browser testing was necessary.
+
+Engine Feedback
+What did you like most?
+Three.js scene graphs and TSL made a coherent cel-shaded world possible with procedural assets.
+Did you get stuck or guess wrong?
+Yes. Module scope, idle-pointer focus and WebGPU initialization required real-browser verification. Input now runs independently of rendering.
+Most important system built yourself?
+Pursuer perception, pathfinding, witnessed-hiding memory, room events, persistent checkpoints and the shared controller focus model.
+Hardest part?
+Keeping Rapier collision, room changes, enemy knowledge and controller input consistent.
+What would you remove or overhaul?
+Make automatic graphics-backend fallback an explicit application choice. This r180 build disables WebGL fallback.
+One engine change?
+A public WebGPU-only option and clearer asset-ready versus frame-presented initialization signals.
+
+Prompt Feedback
+What did you like most?
+The controller-first requirement and attract mode gave the vertical slice a clear, playable presentation.
+What was confusing?
+Multiplayer was specified as a library URL without a mode. Parallel shared-start sessions preserve the solo horror design.
+Hardest requirement?
+A finite, polished story demonstrating every mechanic, with responsive controller UX, in one HTML file.
+One additional test you would run?
+A full AI Hub session using four physical DualSense controllers on four different WebGPU-capable devices, including real iOS Safari.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>
+/*! aihub-session 1.3.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.3.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#111b1d">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="parallel">
+<meta name="hub:session-minutes" content="8">
+<meta name="hub:session-goal" content="Restore the bell and escape; most memories breaks ties">
+<meta name="hub:session-howto" content="Stick/WASD move; Cross/E use; R2/Shift run; L2/C sneak; R1/Q decoy">
+<meta name="hub:webgpu" content="required">
+<title>Deadtime Stories · The House That Listened</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Libre+Caslon+Display&display=swap');
+:root{--ink:#101b1e;--ivory:#e9e1cb;--gold:#c6a66b;--muted:#9da8a3;--red:#c66058;--green:#9ebba1;--font:'DM Sans',sans-serif;--serif:'Libre Caslon Display',Georgia,serif;--u:clamp(18px,1.35vw,23px)}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101b1e;color:var(--ivory);font-family:var(--font);font-size:var(--u)}button{font:inherit;color:inherit;cursor:pointer;touch-action:manipulation}button:disabled{cursor:wait;opacity:.4}button:focus{outline:none}button:focus-visible{outline:2px solid var(--gold);outline-offset:4px}button,.nav{ -webkit-tap-highlight-color:transparent}#world{position:fixed;inset:0;display:block;width:100%;height:100%}#vignette{pointer-events:none;position:fixed;inset:0;background:radial-gradient(ellipse at 53% 46%,transparent 35%,#06101488 100%);z-index:1}#grain{position:fixed;inset:0;z-index:18;opacity:.038;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.86' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath filter='url(%23n)' opacity='.7' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}#panicVeil{position:fixed;inset:0;z-index:2;pointer-events:none;opacity:0;box-shadow:inset 0 0 150px 50px #7b1718aa;transition:opacity .35s}#fade{position:fixed;inset:0;background:#0b1519;z-index:25;pointer-events:none;opacity:0;transition:opacity .35s}#fade.on{opacity:1}[hidden]{display:none!important}.smallcaps{text-transform:uppercase;letter-spacing:.21em;font-size:.68rem;font-weight:600}.muted{color:var(--muted)}.gold{color:var(--gold)}.icon-clock{display:inline-block;border:1px solid var(--gold);border-radius:50%;width:25px;height:25px;position:relative}.icon-clock:before{content:'';position:absolute;width:1px;height:7px;left:11px;top:5px;background:var(--gold)}.icon-clock:after{content:'';position:absolute;width:6px;height:1px;left:11px;top:12px;background:var(--gold);transform:rotate(30deg);transform-origin:left}#titleScreen{position:fixed;inset:0;z-index:5;display:flex;flex-direction:column;padding:3.2vh 4.4vw 2.8vh;background:linear-gradient(90deg,#0c171bf5 0%,#101c20ef 23%,#111b1d66 48%,transparent 72%)}.topline{display:flex;justify-content:space-between;align-items:center;gap:20px}.wordmark{display:flex;gap:14px;align-items:center}.soundnote{padding-right:65px;display:flex;align-items:center;gap:12px;color:#bdc4b8;font-size:.64rem;letter-spacing:.14em}.soundnote svg{width:20px;height:20px}.title-content{margin-top:auto;margin-bottom:auto;max-width:560px;padding:4vh 0}.episode{display:flex;align-items:center;gap:12px;color:var(--gold)}.episode:before{content:'';width:36px;height:1px;background:var(--gold)}h1{font-family:var(--serif);font-size:clamp(72px,8.5vw,155px);font-weight:400;line-height:.79;letter-spacing:-.05em;margin:3.3vh 0 2.5vh;text-shadow:0 3px 30px #08101455}h1 em{font-style:normal;color:#c1b39a;letter-spacing:.025em;font-size:.91em}.tagline{font-family:var(--serif);font-size:clamp(20px,2vw,30px);line-height:1.3;color:#b8c1b9;margin:0 0 3.5vh}.title-menu{display:flex;flex-direction:column;align-items:stretch;gap:5px;width:min(340px,100%)}.title-button{border:0;background:transparent;text-align:left;padding:13px 14px;color:#bbc4bb;min-height:44px;display:flex;align-items:center;gap:15px;transition:background .18s,color .18s}.title-button .arrow{opacity:0;color:var(--gold);transition:opacity .15s;min-width:18px}.title-button.focused,.title-button:hover{color:var(--ivory);background:linear-gradient(90deg,#c6a66b17,transparent)}.title-button.focused .arrow,.title-button:hover .arrow{opacity:1}.title-button.primary{background:#d5c7a8;color:#182224;padding:16px 23px;margin-bottom:8px;justify-content:space-between;font-weight:600;box-shadow:0 4px 20px #0003}.title-button.primary.focused,.title-button.primary:hover{background:#eee1c4;box-shadow:0 0 0 1px #f4e5c777,0 5px 25px #0005}.title-button.primary .arrow{opacity:1;color:#273631}.title-footer{display:flex;justify-content:space-between;align-items:end;color:#9aa69f;font-size:.62rem;letter-spacing:.14em;gap:20px}.title-footer .time{color:#d3c7ae}.title-footer .footrule{width:26px;height:1px;background:#64756c;display:inline-block;vertical-align:middle;margin:0 10px}#engineStatus{font-size:.6rem;color:#b7bda9;letter-spacing:.07em;margin:12px 0 0}#loadingLine{height:1px;background:#c6a66b55;margin-top:8px;width:190px;overflow:hidden}#loadingLine:after{content:'';display:block;background:#d8bc81;width:40%;height:100%;animation:loading 1.5s infinite ease-in-out}@keyframes loading{from{transform:translateX(-100%)}to{transform:translateX(350%)}}#touchNotice{position:fixed;bottom:17px;left:50%;transform:translateX(-50%);z-index:14;padding:12px 20px;max-width:90%;background:#101b1ef2;border:1px solid #d3bc8d55;font-size:14px;text-align:center;white-space:nowrap}.corner-button{height:46px;min-width:46px;border:1px solid #c6a66b44;background:#142026aa;display:grid;place-items:center;color:var(--ivory);border-radius:50%}.corner-button:hover,.corner-button.focused{border-color:var(--gold);background:#273734}.corner-button svg{width:20px;height:20px}#quickSettings{position:fixed;right:3vw;top:3vh;z-index:12}#titleScreen~#quickSettings{margin-top:0}#hud{position:fixed;inset:0;z-index:4;pointer-events:none;padding:3.8vh 4vw;display:flex;justify-content:space-between;flex-direction:column}#hud .toprow{display:flex;justify-content:space-between;gap:20px}#roomName{font-family:var(--serif);font-size:clamp(26px,2.4vw,42px);line-height:1.15;margin:5px 0 10px}#objective{max-width:420px;color:#d8d9c6;font-size:1rem;line-height:1.5;display:flex;gap:10px}#objective:before{content:'◇';color:var(--gold)}.hud-right{margin-right:55px;display:flex;align-items:start;gap:20px}#timeDisplay{font-family:var(--serif);font-size:1.8rem;color:#d2cab8;letter-spacing:.04em}#inventoryMini{display:flex;gap:7px;padding-top:7px}.mini-item{height:30px;width:30px;border:1px solid #c6a66b40;display:grid;place-items:center;font-size:18px;background:#101b1e55;color:var(--gold)}.mini-item.empty{opacity:.35}.bottomrow{display:flex;justify-content:space-between;align-items:end;gap:18px}#statusBlock{min-width:170px;width:200px}.status-label{font-size:.6rem;letter-spacing:.16em;display:flex;justify-content:space-between;margin:0 0 9px}.meter{height:3px;background:#d3d9bf22;margin:0 0 14px}.meter-fill{height:100%;width:100%;background:#afc4ac;transition:width .1s}#panicFill{background:#c4a878}#stateLabel{color:#d6c5ab;letter-spacing:.14em;font-size:.63rem;min-height:20px;display:flex;align-items:center;gap:8px}#stateDot{width:5px;height:5px;border-radius:100%;background:#a6c2ac}.control-strip{display:flex;gap:18px;align-items:center;color:#c1c9bd;font-size:.73rem}.control{display:flex;align-items:center;gap:7px}.pad{display:inline-flex;align-items:center;justify-content:center;border:1px solid currentColor;color:#dfdbc6;min-width:23px;height:23px;border-radius:5px;font-size:12px;font-weight:600;letter-spacing:0;padding:0 4px}.pad.round{border-radius:50%;font-size:14px}.kb{font-size:10px;color:#9aa69e;margin-left:3px}.context{position:fixed;bottom:16vh;left:50%;transform:translateX(-50%);z-index:6;text-align:center;pointer-events:auto;max-width:min(90vw,560px)}#interactButton{display:flex;align-items:center;justify-content:center;gap:13px;border:1px solid #d7c29366;background:#101b1ee8;color:var(--ivory);padding:13px 22px;min-height:51px;min-width:230px;backdrop-filter:blur(8px)}#interactButton:hover{background:#293932}#interactSub{font-size:.62rem;color:#b8c5b9;margin:8px 0 0;letter-spacing:.08em}#holdbar{position:absolute;bottom:0;left:0;height:3px;background:var(--gold);width:0}#subtitle{position:fixed;left:50%;transform:translateX(-50%);bottom:25vh;max-width:min(74vw,680px);text-align:center;z-index:7;font-family:var(--serif);font-size:clamp(20px,2vw,28px);line-height:1.35;text-shadow:0 2px 8px #000;background:linear-gradient(90deg,transparent,#081317bb,transparent);padding:8px 30px;pointer-events:none}#subtitle .speaker{display:block;font-family:var(--font);font-size:.5em;color:var(--gold);letter-spacing:.2em;margin-bottom:7px;text-transform:uppercase}#toast{position:fixed;right:4vw;top:16vh;z-index:7;border-left:2px solid var(--gold);background:#101b1eea;padding:13px 20px;color:#dbd8c2;font-size:.75rem;max-width:300px;line-height:1.5}#toast small{display:block;color:#8eaa9a;letter-spacing:.12em;font-size:.66em;margin-top:5px}#attractBanner{position:fixed;top:3vh;left:50%;transform:translateX(-50%);z-index:12;text-align:center;background:#111b1ef2;border:1px solid #c6a66b66;padding:13px 25px;letter-spacing:.15em;font-size:.62rem;max-width:94vw}#attractBanner strong{display:block;font-weight:400;color:var(--gold);margin-bottom:5px;font-size:.85rem}#chaseLabel{position:fixed;top:18vh;left:50%;transform:translateX(-50%);color:#e9a38f;letter-spacing:.3em;font-size:.7rem;text-align:center;z-index:5}#grip{position:fixed;inset:0;z-index:9;background:#210b0c55;display:grid;place-items:center;text-align:center}#grip .grip-content{width:min(500px,80vw);padding:30px;background:#161719ee;border:1px solid #a8544566}#grip h2{font-family:var(--serif);font-size:45px;font-weight:400;margin:0 0 14px}#grip p{font-size:.9rem;line-height:1.6}#gripBar{height:5px;background:#db9a7a;width:0}#gripTrack{height:5px;background:#e5c9af22;margin:25px 0 5px}.overlay{position:fixed;inset:0;z-index:15;display:grid;place-items:center;background:#071215c9;backdrop-filter:blur(10px);padding:3vh 5vw}.panel{width:min(780px,100%);max-height:94dvh;position:relative;padding:38px 46px;background:#142126f5;border:1px solid #bca26d44;box-shadow:0 30px 100px #0007;overflow:auto;scrollbar-width:thin;scrollbar-color:#778578 #142126}.panel:before,.panel:after{content:'';position:absolute;width:14px;height:14px;border:solid #c5ae7c77;pointer-events:none}.panel:before{top:8px;left:8px;border-width:1px 0 0 1px}.panel:after{bottom:8px;right:8px;border-width:0 1px 1px 0}.panel h2{font-family:var(--serif);font-size:clamp(32px,4vw,58px);font-weight:400;line-height:1.1;margin:13px 0 24px}.panel p{line-height:1.65;color:#c2cbbb;font-size:.92rem}.panel .lead{font-family:var(--serif);font-size:1.5rem;line-height:1.5;color:#ded8c5}.panel-header{display:flex;justify-content:space-between;align-items:center;gap:16px}.panel-page{letter-spacing:.15em;font-size:.65rem;color:var(--gold)}.panel-actions{display:flex;gap:12px;align-items:center;justify-content:space-between;margin-top:28px}.btn{background:#d3c5a5;color:#172629;border:1px solid #d3c5a5;padding:13px 22px;min-height:47px;font-size:.86rem;font-weight:500;display:inline-flex;align-items:center;justify-content:center;gap:10px}.btn:hover,.btn.focused{background:#ede0c4;border-color:#ede0c4;box-shadow:0 0 0 2px #c7ad7166}.btn.secondary{background:transparent;color:#c9d1c4;border-color:#91a08c55}.btn.secondary:hover,.btn.secondary.focused{background:#314238;border-color:#bac0a8}.backhint{font-size:.7rem;color:#aab6a8;display:flex;gap:8px;align-items:center}.settings-tabs,.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:0 0 24px}.tab{padding:10px 16px;border:1px solid #98a28c33;background:transparent;color:#a7b5aa;min-height:40px;font-size:.74rem}.tab.active{border-color:var(--gold);color:#e2d9bd;background:#c6a66b11}.tab.focused,.tab:hover{background:#c6a66b25;color:#eee1c5}.settings-row{border:0;border-bottom:1px solid #a5b19d22;background:transparent;width:100%;display:flex;justify-content:space-between;align-items:center;gap:20px;text-align:left;padding:17px 12px;min-height:58px}.settings-row.focused,.settings-row:hover{background:#c6a66b13}.settings-row .value{color:var(--gold);white-space:nowrap}.settings-row small{color:#94a79b;font-size:.65rem;display:block;margin-top:5px}.volume-bars{letter-spacing:3px;font-family:monospace}.about-list{display:grid;grid-template-columns:100px 1fr;gap:12px 20px;font-size:.77rem;line-height:1.6}.about-list dt{color:var(--gold)}.about-list dd{margin:0;color:#c1cbbb}.feedback-list{margin:0;padding:0;list-style:none}.feedback-list li{padding:11px 0;border-bottom:1px solid #a8b19b20;font-size:.79rem;color:#bfcabd;line-height:1.5}.feedback-list b{font-weight:500;color:#d5d9c5;display:block;margin-bottom:4px}.howto-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 22px}.howto-row{display:flex;gap:12px;align-items:center;padding:12px 0;border-bottom:1px solid #abb5a122;font-size:.85rem}.howto-row .pad{min-width:35px;height:30px}.howto-row small{color:#94a69a;font-size:.65rem;display:block;margin-top:4px}#letter .panel{max-width:650px;background:#d6cbb0;color:#2c3731;padding:45px 55px}#letter .panel p{color:#3c4840;font-family:var(--serif);font-size:1.35rem;line-height:1.5}#letter .smallcaps{color:#6f6752}#letter .panel h2{font-size:42px}#letter .btn{background:#263b36;border-color:#263b36;color:#e6dabc}#letter .backhint{color:#586357}.puzzle-desc{margin-top:-7px}.dials{display:flex;justify-content:center;gap:18px;margin:25px 0}.dial{width:130px;height:145px;background:#1b2b2b;border:1px solid #8a8e6966;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px;font-size:.65rem;letter-spacing:.12em;color:#c5cbb8}.dial span{font-size:46px;line-height:1.3;color:var(--gold)}.dial.focused,.dial:hover{background:#384334;border-color:#d4b779;box-shadow:0 0 25px #c6a66b11}.puzzle-message{min-height:22px;text-align:center;color:#c8ad7c;font-size:.78rem}.journal-objective{padding:18px 22px;border-left:2px solid var(--gold);background:#c6a66b0c}.journal-objective p{margin:0}.inventory-cards{display:flex;gap:12px;margin:20px 0}.inventory-card{flex:1;text-align:center;padding:16px 9px;background:#a5b19d08;border:1px solid #a5b19d22;font-size:.67rem;color:#b5c1b2}.inventory-card .symbol{font-size:28px;color:var(--gold);display:block;margin-bottom:10px}.map-wrap{position:relative;width:100%;height:270px}.map-wrap svg{width:100%;height:100%;display:block}.journal-bottom{font-size:.72rem;line-height:1.6;color:#9caf9f}#ringTrack{position:relative;height:20px;background:#091619;border:1px solid #9caa8e55;margin:38px 0}.ring-zone{position:absolute;left:61%;width:19%;height:100%;background:#cdb37b77;border-left:1px solid #d2bc83;border-right:1px solid #d2bc83}#ringNeedle{position:absolute;height:34px;top:-8px;width:3px;background:#f0e2c2;box-shadow:0 0 15px #e8c48b;left:0}#ringCount{display:flex;justify-content:center;gap:20px;margin:26px 0}.ring-dot{width:14px;height:14px;transform:rotate(45deg);border:1px solid #d4b97a}.ring-dot.lit{background:#d4b97a;box-shadow:0 0 17px #d4b97a66}.ending-stats{display:flex;justify-content:space-around;border-top:1px solid #bac6aa33;border-bottom:1px solid #bac6aa33;margin:28px 0;padding:20px 0;text-align:center}.ending-stats strong{font-family:var(--serif);font-size:2rem;font-weight:400;display:block;color:var(--gold)}.ending-stats span{font-size:.6rem;text-transform:uppercase;letter-spacing:.1em;color:#a5b4a7}.unsupported-title{font-family:var(--serif);font-size:32px;color:#e1cfaa}#supportPanel{position:fixed;z-index:10;right:7vw;top:40%;width:340px;max-width:90vw;border:1px solid #a99a6b66;padding:27px;background:#15252bee}#supportPanel p{line-height:1.6;font-size:.8rem;color:#becbbd}#supportPanel .btn{margin-top:8px}#arrival{position:fixed;inset:0;z-index:8;pointer-events:none;display:grid;place-items:center;background:#08121555;transition:opacity 1s}#arrival h2{font-family:var(--serif);font-size:clamp(40px,6vw,80px);font-weight:400;text-align:center;margin:15px}#arrival p{text-align:center;color:#d4c4a1;letter-spacing:.2em;font-size:.65rem}#hubReady{position:fixed;inset:0;z-index:13;background:#101b1e9c;display:grid;place-items:center;text-align:center}#hubReady h2{font-family:var(--serif);font-size:50px;font-weight:400}#hubReady p{color:#c1caba}body.high-contrast{--muted:#c3cebd;--gold:#efd29b}body.reduced-motion *{animation:none!important;transition:none!important}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+body.touch-device .title-footer{margin-bottom:42px}
+@media(min-width:1800px){.title-content{max-width:700px}.title-menu{width:370px}.title-button{padding-top:16px;padding-bottom:16px}.title-button.primary{padding-top:19px;padding-bottom:19px}.panel{width:850px;padding:45px 55px}.context{bottom:14vh}}
+@media(max-height:720px) and (min-width:701px){#titleScreen{padding-top:22px;padding-bottom:20px}.title-content{padding:20px 0}.title-content h1{font-size:clamp(65px,8vw,105px);margin:20px 0}.tagline{margin-bottom:18px}.title-button{min-height:36px;padding-top:8px;padding-bottom:8px}.title-button.primary{padding-top:12px;padding-bottom:12px}.panel{padding:25px 35px;max-height:95dvh}.panel h2{margin:8px 0 17px;font-size:38px}.settings-row{padding:12px;min-height:48px}.panel-actions{margin-top:20px}.dials{margin:17px 0}.dial{height:115px}.panel p{font-size:.86rem}.map-wrap{height:200px}.title-footer{font-size:10px}.episode{font-size:9px}}
+@media(max-width:700px){:root{--u:15px}#titleScreen{padding:25px 6vw 25px;background:linear-gradient(90deg,#101b1ef2,#101b1e99 60%,#101b1e22)}.soundnote{display:none}.wordmark{font-size:9px;gap:10px}.icon-clock{width:22px;height:22px}.icon-clock:before{left:9px;top:4px}.icon-clock:after{left:9px;top:11px}.title-content{padding:20px 0;margin-top:auto;margin-bottom:auto}h1{font-size:clamp(64px,15.8vw,105px);margin:30px 0 22px}.episode{font-size:9px;letter-spacing:.15em}.episode:before{width:25px}.tagline{font-size:23px;max-width:270px;margin-bottom:30px}.title-menu{width:290px;max-width:90%}.title-button{min-height:44px;padding:12px 10px}.title-button.primary{padding:16px 18px}.title-footer{font-size:9px;gap:10px}.title-footer .footrule{display:none}.title-footer .right-footer{text-align:right;max-width:110px;line-height:1.8}#quickSettings{right:6vw;top:22px;height:40px;min-width:40px}.panel{padding:27px 24px;max-height:92dvh}.panel h2{font-size:40px;margin-top:9px}.panel p{font-size:14px;line-height:1.6}.overlay{padding:4vh 5vw}.about-list{grid-template-columns:65px 1fr;gap:10px 12px;font-size:12px}.feedback-list li{font-size:12px;padding:10px 0}.panel-actions{flex-wrap:wrap;gap:14px;margin-top:23px}.panel .lead{font-size:21px}.tabs,.settings-tabs{gap:5px;margin-bottom:17px}.tab{font-size:11px;padding:9px 10px;min-height:38px}.settings-row{font-size:14px;padding:14px 8px;min-height:56px}.settings-row small{font-size:11px}.howto-grid{grid-template-columns:1fr;gap:0}.howto-row{padding:10px 0;font-size:13px}.howto-row small{font-size:10px}.howto-row .pad{height:25px}#letter .panel{padding:30px 28px}#letter .panel h2{font-size:34px}#letter .panel p{font-size:20px}.dials{gap:8px}.dial{width:30%;height:115px;font-size:9px}.dial span{font-size:32px}#hud{padding:25px 6vw}#roomName{font-size:28px}#objective{font-size:11px;max-width:230px}.hud-right{display:none}#statusBlock{width:145px;min-width:130px}.control-strip{gap:8px;flex-direction:column;align-items:flex-end;max-width:160px}.control-strip .control:nth-child(-n+2){display:none}.control-strip .control{font-size:10px}.kb{font-size:9px}#subtitle{max-width:95vw;width:90vw;font-size:21px;bottom:28vh;padding:8px 10px}.context{bottom:17vh;max-width:92vw}#interactButton{font-size:13px;padding:12px 18px;min-width:200px}#interactSub{font-size:10px}#chaseLabel{top:19vh;font-size:10px;max-width:95vw;white-space:nowrap}#toast{font-size:11px;top:18vh;max-width:200px}.inventory-cards{gap:7px}.inventory-card{font-size:9px;padding:12px 5px}.inventory-card .symbol{font-size:24px}.map-wrap{height:230px}#supportPanel{top:auto;bottom:8vh;right:6vw;width:88vw;padding:20px}#supportPanel .unsupported-title{font-size:28px}#supportPanel p{font-size:12px}.ending-stats{gap:7px;padding:17px 0}.ending-stats strong{font-size:26px}.ending-stats span{font-size:8px}#touchNotice{bottom:12px;font-size:11px;padding:10px 13px}body.touch-device .title-footer{margin-bottom:42px}body.touch-device .title-button{min-height:40px}body.touch-device .tagline{margin-bottom:20px}}
+@media(max-height:500px){body.touch-device .right-footer{visibility:hidden}#titleScreen{padding-top:14px;padding-bottom:12px}.topline .wordmark{font-size:8px}.title-content{padding:12px 0}.title-content h1{font-size:63px;margin:14px 0}.tagline{font-size:19px;margin-bottom:12px}.episode{font-size:8px}.title-menu{gap:0;width:260px}.title-button{min-height:30px;padding:6px 10px;font-size:12px}.title-button.primary{padding:10px 16px;margin-bottom:2px;min-height:35px}.title-footer{font-size:8px}#engineStatus{font-size:9px;margin-top:5px}.panel{max-height:94dvh;padding:22px 26px}.overlay{padding:3vh 4vw}.panel h2{font-size:32px;margin:7px 0 15px}.howto-grid{grid-template-columns:1fr 1fr}.howto-row{padding:8px 0}.title-content{margin:0}.panel .lead{font-size:20px}#supportPanel{top:20%;bottom:auto;width:43vw;right:3vw}.settings-row{min-height:42px;padding:10px}.panel-actions{margin-top:17px}.panel-header{margin-top:0}.settings-tabs{margin-bottom:10px}.map-wrap{height:160px}#touchNotice{left:auto;right:6vw;transform:none;bottom:8px}body.touch-device .title-footer{margin-bottom:0}}
+
+#supportPanel .unsupported-title{font-family:var(--serif);font-size:32px;line-height:1.15;margin:18px 0}
+body.gpu-unavailable .title-footer{margin-top:auto}body.gpu-unavailable h1{font-size:clamp(54px,7vw,110px)}body.gpu-unavailable .title-menu,body.gpu-unavailable #engineStatus{display:none}
+@media(max-width:700px){body.gpu-unavailable .title-content{position:absolute;left:6vw;top:13vh;padding:0;margin:0}body.gpu-unavailable .episode{display:none}body.gpu-unavailable h1{font-size:clamp(56px,15vw,88px);margin:0 0 18px}body.gpu-unavailable .tagline{font-size:20px}body.gpu-unavailable #supportPanel{top:43vh;bottom:auto}#supportPanel .unsupported-title{font-size:30px}#supportPanel .btn{font-size:12px;min-height:40px;padding:10px 13px}}
+@media(max-height:500px){.title-content{display:grid;grid-template-columns:minmax(260px,1fr) minmax(220px,.7fr);grid-template-rows:auto auto auto auto;gap:0 35px;max-width:720px;width:90%;margin:auto 0}.title-content .episode{grid-column:1;grid-row:1}.title-content h1{grid-column:1;grid-row:2;font-size:56px;margin:15px 0}.title-content .tagline{grid-column:1;grid-row:3;font-size:17px;margin:0 0 10px}.title-content .title-menu{grid-column:2;grid-row:1/5;align-self:center;width:235px;max-width:100%}.title-content #engineStatus{grid-column:1;grid-row:4}.title-content #loadingLine{grid-column:1;grid-row:5}.title-footer{margin-top:auto}.title-content .title-button{min-height:37px;font-size:12px}.title-content .title-button.primary{margin-bottom:7px}body.gpu-unavailable .title-content{display:block;width:42%;max-width:320px;margin:auto 0}body.gpu-unavailable #supportPanel{top:19%;bottom:auto;right:4vw;width:44vw;padding:18px}#supportPanel .unsupported-title{font-size:26px;margin:13px 0}#supportPanel p{font-size:11px}.soundnote{display:none}}
+.btn:not(.secondary) .pad{color:inherit;border-color:currentColor}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}</script>
+</head>
+<body>
+<canvas id="world" aria-label="Deadtime Stories game world"></canvas>
+<div id="vignette"></div><div id="panicVeil"></div><div id="grain"></div><div id="fade"></div>
+<main id="titleScreen">
+ <div class="topline"><div class="wordmark"><span class="icon-clock"></span><span class="smallcaps">A Hollowmere haunting</span></div><div class="soundnote"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4 14v-3a8 8 0 0 1 16 0v3M4 12H2v7h4v-7zm16 0h2v7h-4v-7z"/></svg>LISTEN CLOSELY. THE HOUSE DOES.</div></div>
+ <div class="title-content"><div class="episode smallcaps">The house that listened</div><h1>DEADTIME<br><em>STORIES</em></h1><p class="tagline">Some things should stay<br>where the clock left them.</p>
+ <nav class="title-menu" aria-label="Main menu"><button id="beginButton" class="title-button primary nav" disabled><span>Enter the house</span><span class="arrow">→</span></button><button id="continueButton" class="title-button nav" hidden><span class="arrow">›</span><span>Continue the night</span></button><button id="howButton" class="title-button nav"><span class="arrow">›</span><span>Before you enter</span></button><button id="settingsButton" class="title-button nav"><span class="arrow">›</span><span>Settings</span></button><button id="aboutButton" class="title-button nav"><span class="arrow">›</span><span>About & credits</span></button></nav>
+ <div id="engineStatus">Opening the house…</div><div id="loadingLine"></div></div>
+ <div class="title-footer"><span><span class="gold">I</span><span class="footrule"></span>A PLAYABLE NIGHTMARE</span><span class="right-footer">HOLLOWMERE HOUSE <span class="footrule"></span><span class="time">11:53 PM</span></span></div>
+</main>
+<button id="quickSettings" class="corner-button" aria-label="Open settings" title="Settings · Options / Esc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3"><path d="m9 3-.7 3-2.4 1.4L3 7l-2 3 2.2 2-0.1 2.7L1 17l2 3 3-.5L8.4 21l.6 3h4l.7-3 2.4-1.4L19 20l2-3-2.2-2 .1-2.7L21 10l-2-3-3 .5L13.6 6 13 3z" transform="translate(1 -1) scale(.9)"/><circle cx="11" cy="11" r="3.1"/></svg></button>
+<div id="touchNotice" hidden>Controller or keyboard required</div>
+<div id="hud" hidden><div class="toprow"><div><div class="smallcaps gold" id="chapterLabel">Chapter I · The house that listened</div><div id="roomName">Entrance hall</div><div id="objective">Find out why the house is still awake.</div></div><div class="hud-right"><span id="timeDisplay">11:53</span><div id="inventoryMini"></div></div></div><div class="bottomrow"><div id="statusBlock"><div class="status-label"><span>BREATH</span><span id="staminaText">STEADY</span></div><div class="meter"><div id="staminaFill" class="meter-fill"></div></div><div class="status-label"><span>COMPOSURE</span><span id="composureText">100</span></div><div class="meter"><div id="panicFill" class="meter-fill"></div></div><div id="stateLabel"><span id="stateDot"></span><span id="stateText">LISTENING</span></div></div><div class="control-strip"><div class="control"><span class="pad">R2</span>Run<span class="kb">SHIFT</span></div><div class="control"><span class="pad">L2</span>Sneak<span class="kb">C</span></div><div class="control"><span class="pad">R1</span><span id="decoyCount">Windbird ×3</span><span class="kb">Q</span></div><button id="journalButton" class="btn secondary" style="pointer-events:auto;padding:7px 11px;min-height:35px;font-size:11px"><span class="pad round">△</span> Journal <span class="kb">TAB</span></button></div></div></div>
+<div id="context" class="context" hidden><button id="interactButton"><span class="pad round">✕</span><span id="interactLabel">Examine</span><span class="kb">E</span></button><div id="holdbar"></div><div id="interactSub"></div></div>
+<div id="subtitle" aria-live="polite" hidden></div><div id="toast" role="status" hidden></div><div id="chaseLabel" hidden>THE KEEPER IS LISTENING</div>
+<div id="attractBanner" hidden><strong>THE HOUSE NEVER SLEEPS</strong>DEMONSTRATION · ANY INPUT TO RETURN</div>
+<div id="grip" hidden><div class="grip-content"><div class="smallcaps gold">His hands are cold.</div><h2>Do not let go.</h2><p>Hold <span class="pad round">✕</span> or <span class="pad">E</span> to break free.<br>Keep your nerve. This is your last chance.</p><div id="gripTrack"><div id="gripBar"></div></div></div></div>
+<div id="arrival" hidden><div><p>HOLLOWMERE HOUSE · 11:53 PM</p><h2>The house that listened</h2><p>NOT EVERYTHING THAT FOLLOWS YOU IS ALIVE.</p></div></div>
+<section id="modal" class="overlay" hidden aria-modal="true" role="dialog" aria-labelledby="modalTitle"><div class="panel" id="modalPanel"></div></section>
+<section id="letter" class="overlay" hidden aria-modal="true" role="dialog" aria-labelledby="letterTitle"><div class="panel"><span class="smallcaps" id="letterMeta"></span><h2 id="letterTitle"></h2><div id="letterText"></div><div class="panel-actions"><span class="backhint">A memory entered in your journal</span><button class="btn nav" id="letterClose">Keep going <span class="pad round">✕</span></button></div></div></section>
+<div id="supportPanel" hidden><div class="smallcaps gold">The door cannot open here</div><p class="unsupported-title">WebGPU is required.</p><p id="supportMessage">Open this file in a browser with WebGPU enabled, using localhost or HTTPS. The game uses WebGPU exclusively.</p><div style="display:flex;gap:10px;flex-wrap:wrap"><button class="btn nav" id="retryButton">Try again</button><button class="btn secondary nav" id="supportAboutButton">About & credits</button></div></div>
+<div id="hubReady" hidden><div><div class="smallcaps gold">AI HUB · PARALLEL NIGHT</div><h2>The same house.<br>Four different nightmares.</h2><p id="hubReadyMessage">Waiting for the session…</p></div></div>
+<script type="module">
+/* Deadtime Stories — a data-driven, single-file WebGPU survival horror slice. */
+const $=id=>document.getElementById(id);
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const lerp=(a,b,t)=>a+(b-a)*t;
+const dist=(a,b)=>Math.hypot(a.x-b.x,a.z-b.z);
+const SAVE_KEY='deadtime-stories.save.v1', SETTINGS_KEY='deadtime-stories.settings.v1';
+const buildInfo={"source": {"Date": "2026-10-29 14:23 (America/Vancouver)", "Source": "ClockTower · an original spiritual successor; no original game assets", "Title": "Deadtime Stories · selected with Node crypto.randomInt from 50 titles", "Tech": "Three.js r180 (0.180.0), WebGPU exclusively, TSL cel materials; Rapier 3D 0.19.3; Gamepad API; HTML/CSS/JavaScript", "Animation": "Procedural articulated mesh rigs; blended locomotion, crouching, breathing, pendulums, gears and physical props", "Audio": "Original procedural Web Audio music, footsteps, clockwork, bells and effects; subtitled narrative; no recorded voice", "Online": "AI Hub client 1.3.0 / Session Protocol v1; 1–4 player parallel sessions with synchronized start, progress and results", "Testing": "Lightweight Playwright functional checks; Chromium 153 WebGPU; 14 WebKit viewports (360–2560 px); emulated DualSense; AI Hub 1/2 players and departure. FPS/optimization out of scope.", "Environment": "Codex CLI (headless); Linux; delivery browser unknown. Real iOS Safari and physical controllers untested.", "Model": "OpenAI, gpt-6.1-sol, reasoning effort max", "Usage": "Estimated API cost in USD: unknown. Total tokens: unknown. Session wall time: approximately 70 minutes.", "Art direction": "Procedural cel-shaded Gothic dollhouse; ink silhouettes, matte color bands, moonbeams and candlelight"}, "testing": [["How many issues did testing catch?", "14 tracked issue groups, corrected. The development test record lists each one."], ["How many were critical or game breaking?", "2 startup blockers, corrected. Final gameplay and pursuer checks pass without JavaScript or WebGPU validation errors."], ["Most helpful test?", "The complete WebGPU objective-to-ending input pass caught focus theft from a stationary mouse pointer. The AI Hub harness also caught input/ready timing defects."], ["Least helpful test?", "The initial CommonJS syntax check: it allowed a duplicate function name that an HTML ES module rejected. Browser testing was necessary."]], "engine": [["What did you like most?", "Three.js scene graphs and TSL made a coherent cel-shaded world possible with procedural assets."], ["Did you get stuck or guess wrong?", "Yes. Module scope, idle-pointer focus and WebGPU initialization required real-browser verification. Input now runs independently of rendering."], ["Most important system built yourself?", "Pursuer perception, pathfinding, witnessed-hiding memory, room events, persistent checkpoints and the shared controller focus model."], ["Hardest part?", "Keeping Rapier collision, room changes, enemy knowledge and controller input consistent."], ["What would you remove or overhaul?", "Make automatic graphics-backend fallback an explicit application choice. This r180 build disables WebGL fallback."], ["One engine change?", "A public WebGPU-only option and clearer asset-ready versus frame-presented initialization signals."]], "prompt": [["What did you like most?", "The controller-first requirement and attract mode gave the vertical slice a clear, playable presentation."], ["What was confusing?", "Multiplayer was specified as a library URL without a mode. Parallel shared-start sessions preserve the solo horror design."], ["Hardest requirement?", "A finite, polished story demonstrating every mechanic, with responsive controller UX, in one HTML file."], ["One additional test you would run?", "A full AI Hub session using four physical DualSense controllers on four different WebGPU-capable devices, including real iOS Safari."]]};
+let THREE,TSL,RAPIER,renderer,scene,camera,roomGroup,world,player,keeper,pc,kc,playerBody,playerCollider,keeperBody,keeperCollider;
+let ready=false,failed=false,mode='title',modalKind='',settingsTab=0,aboutPage=0,journalPage=0,uiIndex=0,lastPadButtons=[],padRepeat=0,padDir='',padConnected=false;
+let room='foyer',roomTime=0,totalTime=0,simTime=0,lastFrame=performance.now(),idleTime=performance.now(),toastUntil=0,subtitleUntil=0,arrivalUntil=0,transitioning=false,transitionToken=0;
+let attract=false,attractTime=0,attractStage=-1,hubSession=false,hubEnded=false,hubReported=false,hubWaiting=false,lastProgress=-1;
+let game=null,nearby=null,holdProgress=0,holdingPointer=false,grip=0,gripElapsed=0,gripCooldown=0,hidden=null,hiddenSeen=false,physicsAcc=0,shake=0;
+let windowIndex=0;let sceneObstacles=[],interactables=[],markers=[],candleLights=[],flames=[],clockHands=[],pendulums=[],dust,decoys=[],physicsProps=[],roomProps={},navGrid=null,enemyPath=[],enemyPathTimer=0;
+let traces=[];function trace(kind,extra={}){if(new URLSearchParams(location.search).get('qa')!=='1')return;traces.push({kind,mode,modalKind,transitioning,hubWaiting,hidden:!!hidden,nearby:nearby?.id,position:player?{x:player.group.position.x,z:player.group.position.z}:null,...extra});if(traces.length>45)traces.shift();}
+const keys=new Set();let pressed=new Set();let input={x:0,y:0,fire:false,run:false,sneak:false,lookX:0,lookY:0};
+let settings={volume:.6,music:.45,effects:.7,invertX:false,invertY:false,reducedMotion:false,subtitles:true,gentleTiming:false,highContrast:false};
+try{settings={...settings,...JSON.parse(localStorage.getItem(SETTINGS_KEY)||'{}')};}catch{}
+const loadSave=()=>{try{const v=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');return v?.version===1?v:null;}catch{return null;}};
+let saved=loadSave();
+const ROOM_DEFS={"foyer": {"name": "Entrance hall", "caption": "Where she left you.", "palette": {"wall": 2640716, "floor": 7495244, "trim": 2307637}, "doors": [{"id": "library", "x": -6.1, "z": 0.5, "to": "library", "spawn": [5.2, 0.5], "name": "West library"}, {"id": "nursery", "x": 6.1, "z": 0.5, "to": "nursery", "spawn": [-5.2, 0.5], "name": "The nursery", "requires": "key"}, {"id": "belfry", "x": 0.1, "z": -4.45, "to": "belfry", "spawn": [0, 3.5], "name": "Bell tower", "requires": "bell"}, {"id": "exit", "x": 0.1, "z": 4.4, "name": "Front doors"}], "objects": [{"id": "letter", "x": -4.3, "z": 2.2, "type": "page", "page": "letter", "label": "Read the letter", "radius": 1.7}, {"id": "tonic", "x": 4.2, "z": 2.8, "type": "tonic", "label": "Lavender tonic", "radius": 1.6}, {"id": "foyer-hide", "x": -4.9, "z": -3.2, "type": "hide", "label": "Hide behind the curtains", "radius": 1.65}, {"id": "foyer-bird", "x": 4.8, "z": -3.25, "type": "refill", "label": "Wind the little birds", "radius": 1.5}]}, "library": {"name": "West library", "caption": "A song with three missing notes.", "palette": {"wall": 3231049, "floor": 6707530, "trim": 2765872}, "doors": [{"id": "foyer", "x": 6.1, "z": 0.5, "to": "foyer", "spawn": [-5.15, 0.5], "name": "Entrance hall"}, {"id": "conservatory", "x": -0.5, "z": -4.45, "to": "conservatory", "spawn": [0, 3.5], "name": "Glass conservatory"}], "objects": [{"id": "music", "x": -0.6, "z": -0.5, "type": "music", "label": "Examine the music box", "radius": 1.85}, {"id": "library-hide", "x": -5, "z": 2.65, "type": "hide", "label": "Hide beneath the writing desk", "radius": 1.8}, {"id": "library-shelf", "x": 3.6, "z": 2.9, "type": "barricade", "label": "Topple the bookcase", "radius": 1.7}, {"id": "library-note", "x": -4.8, "z": -2.5, "type": "lore", "label": "Examine the margin notes", "radius": 1.5}]}, "nursery": {"name": "The forgotten nursery", "caption": "Someone has been keeping it warm.", "palette": {"wall": 5526610, "floor": 7692367, "trim": 4276795}, "doors": [{"id": "foyer", "x": -6.1, "z": 0.5, "to": "foyer", "spawn": [5.15, 0.5], "name": "Entrance hall"}], "objects": [{"id": "clapper", "x": 1.5, "z": -2.8, "type": "item", "item": "clapper", "label": "Take the silver clapper", "radius": 1.7}, {"id": "portrait", "x": -3.9, "z": -3.45, "type": "page", "page": "portrait", "label": "Turn over the photograph", "radius": 1.65}, {"id": "nursery-hide", "x": 4.8, "z": 2.7, "type": "hide", "label": "Hide in the wardrobe", "radius": 1.65}, {"id": "nursery-shelf", "x": -3.7, "z": 2.8, "type": "barricade", "label": "Pull down the clothes rail", "radius": 1.6}]}, "conservatory": {"name": "Glass conservatory", "caption": "The roots learned to drink the rain.", "palette": {"wall": 2836808, "floor": 5792090, "trim": 2374197}, "doors": [{"id": "library", "x": 0.1, "z": 4.45, "to": "library", "spawn": [-0.5, -3.6], "name": "West library"}], "objects": [{"id": "wheel", "x": 3, "z": -0.2, "type": "wheel", "label": "Hold to drain the basin", "radius": 1.8}, {"id": "garden-page", "x": -4, "z": 2.4, "type": "page", "page": "garden", "label": "Read the gardener’s record", "radius": 1.75}, {"id": "conservatory-hide", "x": -4.9, "z": -2.7, "type": "hide", "label": "Hide among the leaves", "radius": 1.8}, {"id": "garden-bird", "x": 4.8, "z": 2.8, "type": "refill", "label": "Wind the little birds", "radius": 1.6}]}, "belfry": {"name": "The silent belfry", "caption": "The last minute has been waiting.", "palette": {"wall": 3950662, "floor": 7627084, "trim": 3226933}, "doors": [{"id": "foyer", "x": 0.1, "z": 4.45, "to": "foyer", "spawn": [0, -3.6], "name": "Entrance hall"}], "objects": [{"id": "bell", "x": 0.1, "z": -1.8, "type": "bell", "label": "Restore the tower bell", "radius": 2.1}, {"id": "belfry-hide", "x": -4.6, "z": 2.1, "type": "hide", "label": "Hide behind the counterweight", "radius": 1.7}, {"id": "belfry-shelf", "x": 4.5, "z": 2.4, "type": "barricade", "label": "Release the counterweight", "radius": 1.9}]}};
+const PAGES={"letter": {"meta": "A letter without a date", "title": "My dearest Mara,", "text": ["If you have come for my things, begin in the library. I left the nursery key in the music box. You remember the tune.", "The moth comes first. Then the moon. Then the bell.", "Do not wind the grandfather clock. He listens for things that ought to be still."], "journal": "Mother’s music box: MOTH → MOON → BELL. The nursery key is inside."}, "portrait": {"meta": "On the back of a photograph", "title": "The girl in the glass", "text": ["Two sisters, standing beneath the bell. Mother is the taller one. The smaller girl has my eyes.", "On the back, in Mother’s handwriting: “Elsie, 1958. We were told never to say her name in the house.”", "The child in the nursery was never me."], "journal": "Mother had a sister named Elsie. The nursery was hers."}, "garden": {"meta": "The gardener’s last entry · 17 November", "title": "He only wanted a minute.", "text": ["After Elsie fell, the caretaker stopped the clock at eleven fifty-three. He said she could not be gone while her minute was still here.", "We took out the clapper. We drowned the gear. Still he walked.", "To let her go, the house must hear its bell again. Three times."], "journal": "The Keeper stopped time for Elsie. Return the gear and clapper; ring the bell three times."}};
+const SYMBOLS=[{icon:'☀',name:'SUN'},{icon:'☾',name:'MOON'},{icon:'♧',name:'TREE'},{icon:'♧',name:'MOTH'},{icon:'♜',name:'BELL'}];
+// The moth and bell use bespoke SVGs so their silhouettes read at sofa distance.
+const glyph=name=>name==='MOTH'?'<svg viewBox="0 0 70 50" width="56" height="48" fill="currentColor"><path d="M33 22C13-3 0 5 9 24c1 8 11 10 22 8C9 48 25 51 34 36l1-3 1 3c9 15 25 12 3-4 11 2 21 0 22-8C70 5 57-3 37 22l-1-8h-2z"/><path d="m35 15-5-8m5 8 5-8" stroke="currentColor" stroke-width="2"/></svg>':name==='BELL'?'<svg viewBox="0 0 55 55" width="44" height="48" fill="currentColor"><path d="M9 40c9-7 3-21 13-25V9h11v6c10 4 4 18 13 25zm12 5h13c0 9-13 9-13 0z"/></svg>':SYMBOLS.find(s=>s.name===name)?.icon||'◇';
+let musicDials=[0,2,0],ringPhase=0,ringHits=0,ringCooldown=0;
+
+// All audio is synthesized locally; no media files or voices are fetched.
+const audio={ctx:null,master:null,musicGain:null,fxGain:null,nextMusic:0,nextTick:0,note:0,muted:false,
+ init(){if(!this.ctx){try{this.ctx=new (window.AudioContext||window.webkitAudioContext)();this.master=this.ctx.createGain();this.master.connect(this.ctx.destination);this.musicGain=this.ctx.createGain();this.fxGain=this.ctx.createGain();this.musicGain.connect(this.master);this.fxGain.connect(this.master);}catch{return;}}this.ctx.resume().catch(()=>{});this.apply();},
+ apply(){if(!this.ctx)return;this.master.gain.setTargetAtTime(this.muted?0:settings.volume,this.ctx.currentTime,.08);this.musicGain.gain.value=settings.music*.3;this.fxGain.gain.value=settings.effects*.55;},
+ tone(freq,dur=.2,type='sine',vol=.15,slide=0,music=false,delay=0){if(!this.ctx||this.ctx.state!=='running')return;const c=this.ctx,t=c.currentTime+delay,o=c.createOscillator(),g=c.createGain();o.type=type;o.frequency.setValueAtTime(freq,t);if(slide)o.frequency.exponentialRampToValueAtTime(Math.max(15,freq+slide),t+dur);g.gain.setValueAtTime(.0001,t);g.gain.exponentialRampToValueAtTime(Math.max(.001,vol),t+.015);g.gain.exponentialRampToValueAtTime(.0001,t+dur);o.connect(g);g.connect(music?this.musicGain:this.fxGain);o.start(t);o.stop(t+dur+.03);},
+ noise(dur=.1,vol=.1,cut=900){if(!this.ctx||this.ctx.state!=='running')return;const c=this.ctx,n=Math.ceil(c.sampleRate*dur),b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);for(let i=0;i<n;i++)d[i]=(Math.random()*2-1)*Math.pow(1-i/n,2);const s=c.createBufferSource(),f=c.createBiquadFilter(),g=c.createGain();s.buffer=b;f.type='lowpass';f.frequency.value=cut;g.gain.value=vol;s.connect(f);f.connect(g);g.connect(this.fxGain);s.start();},
+ play(kind){if(kind==='step')this.noise(.08,.1,500);else if(kind==='run')this.noise(.1,.22,600);else if(kind==='keeperStep'){this.noise(.18,.25,250);this.tone(72,.16,'triangle',.2,-28);this.tone(740,.05,'sine',.035,-300);}else if(kind==='click')this.tone(320,.075,'triangle',.07,-90);else if(kind==='pickup'){[440,554,660].forEach((f,i)=>this.tone(f,.6,'sine',.1,0,false,i*.09));}else if(kind==='door'){this.noise(.45,.25,400);this.tone(80,.5,'triangle',.13,-30);}else if(kind==='bell'){[164.81,329.63,493.9,674].forEach((f,i)=>this.tone(f,3.8-i*.3,'sine',.2/(1+i*.7)));}else if(kind==='scissor'){this.noise(.25,.4,2400);this.tone(1200,.3,'sawtooth',.03,-1000);}else if(kind==='bird'){[1000,1400,1150].forEach((f,i)=>this.tone(f,.17,'sine',.1,-200,false,i*.15));}else if(kind==='grab'){this.noise(.4,.5,1600);this.tone(60,1,'sawtooth',.15,-30);}else if(kind==='wrong')this.tone(100,.5,'triangle',.18,-35);else if(kind==='topple'){this.noise(1,.5,650);this.tone(55,.6,'triangle',.3,-25);}},
+ update(t){if(!this.ctx||hubEnded||this.muted)return;const danger=game&&keeper?.state==='chase'&&!attract;if(t>this.nextMusic){this.nextMusic=t+(danger?.42:2.7);const notes=danger?[73.42,77.78,73.42,65.41]:[146.83,174.61,220,164.81,146.83,130.81,110,138.59];this.tone(notes[this.note++%notes.length],danger?.5:4,'sine',danger?.16:.1,0,true);if(!danger)this.tone(55,5,'triangle',.018,0,true);}if(t>this.nextTick){this.nextTick=t+1;this.tone(this.note%2?1100:900,.025,'triangle',.025);if(danger)this.tone(50,.11,'sine',.25);}}
+};
+
+function applySettings(){document.body.classList.toggle('reduced-motion',settings.reducedMotion);document.body.classList.toggle('high-contrast',settings.highContrast);audio.apply();try{localStorage.setItem(SETTINGS_KEY,JSON.stringify(settings));}catch{}}
+applySettings();
+function subtitle(text,speaker='Mara',seconds=5){if(!settings.subtitles)return;$('subtitle').innerHTML='';const s=document.createElement('span');s.className='speaker';s.textContent=speaker;$('subtitle').append(s,document.createTextNode(text));$('subtitle').hidden=false;subtitleUntil=performance.now()+seconds*1000;}
+function toast(text,sub=''){const e=$('toast');e.textContent=text;if(sub){const s=document.createElement('small');s.textContent=sub;e.append(s);}e.hidden=false;toastUntil=performance.now()+4200;}
+function objective(){if(game?.flags.escaped)return 'You made it beyond the gates.';if(game?.flags.bellRung)return 'Return to the entrance hall. Leave through the front doors.';if(game?.items.clapper&&game?.items.gear)return 'Restore the tower bell. The stairs are in the entrance hall.';if(game?.items.key)return game.items.clapper?'Find the drowned gear in the conservatory.':'Search the nursery for the bell’s missing clapper.';return game?.pages.includes('letter')?'Find the music box in the west library.':'Read the letter on the writing table.';}
+function freshGame(){return {version:1,items:{key:false,clapper:false,gear:false},pages:[],flags:{musicSolved:false,drained:false,bellRung:false,escaped:false},barricades:{},visited:['foyer'],composure:100,stamina:100,decoys:3,tonics:2,wounds:0,duration:0,room:'foyer',spawn:[0,3.25],grabs:0,hides:0,birdsUsed:0};}
+function checkpoint(){if(!game||attract||hubSession)return;game.room=room;game.spawn=[player.group.position.x,player.group.position.z];game.duration=totalTime;try{localStorage.setItem(SAVE_KEY,JSON.stringify(game));saved=structuredClone(game);}catch{}updateContinue();}
+function updateContinue(){$('continueButton').hidden=!saved||hubSession;$('continueButton').disabled=!ready;}
+
+// Cel shading: three explicit bands in world-space, over physically lit matte materials.
+const matCache=new Map(),geoCache=new Map();let inkMat,glowMat,contactMat;
+function mat(hex,opts={}){const key=hex+'-'+JSON.stringify(opts);if(matCache.has(key))return matCache.get(key);let m;if(opts.glow){m=new THREE.MeshBasicNodeMaterial({color:hex,transparent:!!opts.opacity,opacity:opts.opacity??1,side:opts.double?THREE.DoubleSide:THREE.FrontSide,depthWrite:!opts.opacity});}else{m=new THREE.MeshStandardNodeMaterial({color:hex,roughness:.94,metalness:opts.metal??0,flatShading:true,transparent:!!opts.opacity,opacity:opts.opacity??1,side:opts.double?THREE.DoubleSide:THREE.FrontSide,depthWrite:!opts.opacity});m.colorNode=TSL.color(hex).mul(TSL.normalWorld.dot(TSL.vec3(-.35,.84,.42)).max(0).mul(3).floor().div(3).mul(.5).add(.5));}matCache.set(key,m);return m;}
+function geo(type,...args){const key=type+args.join(',');if(geoCache.has(key))return geoCache.get(key);const g=new THREE[type](...args);geoCache.set(key,g);return g;}
+function mesh(g,m,x=0,y=0,z=0,parent=roomGroup,outline=false){const o=new THREE.Mesh(g,m);o.position.set(x,y,z);o.castShadow=!m.transparent;o.receiveShadow=true;parent.add(o);if(outline){const edge=new THREE.Mesh(g,inkMat);edge.scale.setScalar(1.027);o.add(edge);edge.castShadow=false;}return o;}
+function box(x,y,z,w,h,d,color,parent=roomGroup,outline=false){return mesh(geo('BoxGeometry',w,h,d),typeof color==='object'?color:mat(color),x,y,z,parent,outline);}
+function cyl(x,y,z,rt,rb,h,color,parent=roomGroup,segments=10,outline=false){return mesh(geo('CylinderGeometry',rt,rb,h,segments),typeof color==='object'?color:mat(color),x,y,z,parent,outline);}
+function sphere(x,y,z,r,color,parent=roomGroup,detail=0,outline=false){return mesh(geo('IcosahedronGeometry',r,detail),typeof color==='object'?color:mat(color),x,y,z,parent,outline);}
+function torus(x,y,z,r,t,color,parent=roomGroup){return mesh(geo('TorusGeometry',r,t,6,40),typeof color==='object'?color:mat(color),x,y,z,parent);}
+function shadow(x,z,sx,sz,parent=roomGroup){const o=mesh(geo('CircleGeometry',1,30),contactMat,x,.027,z,parent);o.rotation.x=-Math.PI/2;o.scale.set(sx,sz,1);return o;}
+function colliderBox(x,z,w,d,height=1.5,y=.75){const co=world.createCollider(RAPIER.ColliderDesc.cuboid(w/2,height/2,d/2).setTranslation(x,y,z));sceneObstacles.push({x,z,w,d,collider:co});return co;}
+function obstacle(x,z,w,d,h=1.5){return colliderBox(x,z,w,d,h,h/2);}
+function frame(x,y,z,w,h,parent=roomGroup){box(x,y,z,w+.13,h+.13,.1,0x887044,parent);box(x,y,z+.06,w,h,.07,0x172a2a,parent);}
+function candle(x,y,z,parent=roomGroup){cyl(x,y+.04,z,.18,.22,.08,0x8b784c,parent);cyl(x,y+.25,z,.055,.07,.4,0xd7ccb0,parent);const f=sphere(x,y+.49,z,.075,mat(0xffce7d,{glow:true}),parent);f.scale.y=2;flames.push(f);const l=new THREE.PointLight(0xffbc70,1.6,5,1.4);l.position.set(x,y+.62,z);parent.add(l);candleLights.push(l);return f;}
+function table(x,z,w=2,d=1.2,h=1.05,parent=roomGroup){box(x,h,z,w,.15,d,0x665044,parent,true);for(const dx of [-w/2+.13,w/2-.13])for(const dz of [-d/2+.13,d/2-.13]){box(x+dx,h/2,z+dz,.12,h,.12,0x3f3b30,parent);cyl(x+dx,.14,z+dz,.12,.14,.18,0x3b352b,parent);}shadow(x,z,w*.7,d*.8,parent);}
+function chair(x,z,rot=0,parent=roomGroup){const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=rot;parent.add(g);box(0,.61,0,.67,.15,.66,0x5c493a,g);box(0,1.13,-.28,.67,.85,.1,0x4a4033,g);box(0,1.16,-.2,.49,.55,.12,0x7a5750,g);for(let dx of [-.25,.25])for(let dz of [-.25,.25])box(dx,.3,dz,.085,.6,.085,0x393b2d,g);return g;}
+function book(x,y,z,w=.18,h=.65,color=0x664842,parent=roomGroup){const b=box(x,y+h/2,z,w,h,.43,color,parent);box(x,y+h*.2,z+.23,w*.8,.025,.015,0xb9a06c,parent);box(x,y+h*.8,z+.23,w*.8,.025,.015,0xb9a06c,parent);return b;}
+function bookcase(x,z,w=2.5,h=3.4,parent=roomGroup){box(x,h/2,z-.32,w,h,.12,0x453e31,parent,true);for(const side of [-1,1])box(x+side*(w/2-.06),h/2,z,.12,h,.75,0x453e31,parent,true);for(let s=0;s<4;s++){const y=.2+s*.78;box(x,y,z+.07,w,.09,.85,0x8c7351,parent);for(let b=0;b<Math.floor(w/.23)-1;b++){const bh=.4+((b*17+s*13)%7)*.045;book(x-w/2+.22+b*.23,y+.06,z+.11,.16,bh,[0x725b4b,0x335653,0x6e3f40,0x9c8058,0x4f5341][(b+s)%5],parent);}}box(x,h+.04,z,w+.16,.15,.9,0x8d7450,parent);}
+function curtain(x,z,w=2.4,h=3.8,parent=roomGroup){box(x,h+.4,z,w+.3,.11,.12,0x9a8256,parent);for(let side of [-1,1])for(let n=0;n<4;n++){const xx=x+side*(w*.31+n*.09);const c=cyl(xx,h/2+.4,z+.08,.22,.34,h,0x58443f,parent,8);c.scale.z=.48;box(xx,h*.42,z+.23,.22,.07,.08,0x9f8759,parent);}}
+function archedWindow(x,z,w=2.1,h=3.4,parent=roomGroup){const y=2.6;frame(x,y,z,w,h,parent);const glass=box(x,y,z+.08,w-.16,h-.16,.06,mat(0x7eaca7,{glow:true}),parent);box(x,y,z+.13,.07,h,.07,0x243c39,parent);box(x,y,z+.14,w,.065,.06,0x263d3b,parent);box(x,y+.85,z+.15,w,.06,.05,0x263d3b,parent);box(x,y-.9,z+.15,w,.07,.07,0x263d3b,parent);if(windowIndex++===0)mesh(geo('CircleGeometry',.36,32),mat(0xd5d8b7,{glow:true}),x+.35,y+.9,z+.12,parent);box(x,y-h/2-.05,z+.26,w+.3,.15,.42,0x839386,parent);for(let b=0;b<3;b++){const beam=box(x+b*.55-.5,.42+b*.3,z+2.3+b*.2,.2,4.9,1.7,mat(0x94b7ae,{glow:true,opacity:.045,double:true}),parent);beam.rotation.z=-.65;beam.rotation.x=-.8;}return glass;}
+function plant(x,z,s=1,parent=roomGroup){cyl(x,.29*s,z,.32*s,.23*s,.55*s,0x786351,parent,8,true);cyl(x,.58*s,z,.28*s,.28*s,.05*s,0x232d24,parent,8);for(let n=0;n<7;n++){const a=n*2.4,leaf=sphere(x+Math.cos(a)*.27*s,(.9+n*.12)*s,z+Math.sin(a)*.25*s,.36*s,[0x3b6552,0x5b795b,0x334f41][n%3],parent,0);leaf.scale.set(.5,1.5,.37);leaf.rotation.set(.3, a,.5);}shadow(x,z,.6*s,.45*s,parent);}
+function rug(x,z,w,d,color=0x70413e,parent=roomGroup){box(x,.035,z,w,.035,d,0xaba17c,parent);box(x,.056,z,w-.16,.018,d-.16,color,parent);for(let s of [-1,1]){box(x+s*(w/2-.24),.07,z,.045,.015,d-.38,0xbc9b69,parent);box(x,.07,z+s*(d/2-.24),w-.4,.015,.045,0xbc9b69,parent);}for(let n=0;n<5;n++){const m=box(x,.077,z+(n-2)*d/6,.36,.01,.36,0xb39667,parent);m.rotation.y=Math.PI/4;}for(let n=0;n<Math.floor(w*8);n++)for(let s of [-1,1])box(x-w/2+n*.125,.06,z+s*(d/2+.05),.025,.02,.1,0xa29875,parent);}
+function clockFace(x,y,z,r,parent=roomGroup){const cv=document.createElement('canvas');cv.width=cv.height=512;const c=cv.getContext('2d');c.fillStyle='#c4bc98';c.beginPath();c.arc(256,256,250,0,Math.PI*2);c.fill();c.strokeStyle='#293d36';c.lineWidth=9;c.stroke();c.beginPath();c.arc(256,256,223,0,Math.PI*2);c.lineWidth=2;c.stroke();c.font='33px Georgia';c.textAlign='center';c.textBaseline='middle';const roman=['XII','I','II','III','IV','V','VI','VII','VIII','IX','X','XI'];for(let n=0;n<60;n++){let a=n*Math.PI/30;c.save();c.translate(256,256);c.rotate(a);c.fillStyle='#30433a';c.fillRect(-1,-218,2,n%5===0?14:6);c.restore();}roman.forEach((s,i)=>{let a=i*Math.PI/6-Math.PI/2;c.fillText(s,256+Math.cos(a)*177,256+Math.sin(a)*177);});c.font='13px Georgia';c.fillText('HOLLOWMERE',256,310);c.fillText('EST. 1847',256,331);const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;const face=mesh(geo('CircleGeometry',r,64),new THREE.MeshBasicNodeMaterial({map:tex}),x,y,z,parent);torus(x,y,z+.03,r,.065,0x9a8457,parent);for(let a of [Math.PI*.2,-Math.PI*.08]){const g=new THREE.Group();g.position.set(x,y,z+.06);g.rotation.z=a;parent.add(g);box(0,r*.29,0,.045,r*.65,.04,0x1c3330,g);clockHands.push(g);}sphere(x,y,z+.1,.09,0xa18e5f,parent);return face;}
+function grandfather(x,z,parent=roomGroup){box(x,1.8,z,1.3,3.6,.8,0x453e2e,parent,true);box(x,.17,z,1.5,.28,1,0x756344,parent);box(x,3.7,z,1.5,.2,1,0x927847,parent);box(x,1.6,z+.43,.95,1.7,.05,0x1a302c,parent);clockFace(x,2.9,z+.46,.52,parent);const pend=new THREE.Group();pend.position.set(x,2.15,z+.48);parent.add(pend);box(0,-.6,0,.045,1.2,.04,0xa58d56,pend);sphere(0,-1.15,0,.23,0xa58d56,pend);pendulums.push(pend);}
+function doorway(d,parent=roomGroup){const side=Math.abs(d.x)>5;const g=new THREE.Group();g.position.set(d.x,0,d.z);g.rotation.y=side?(d.x<0?Math.PI/2:-Math.PI/2):(d.z>0?Math.PI:0);parent.add(g);if(d.z>0||d.x>5){box(0,.1,0,2.1,.16,.65,0x8d8b68,g);for(const side of [-1,1])box(side*.97,.4,0,.16,.65,.28,0xa99c71,g);box(0,.19,0,1.6,.018,.3,0x344f45,g);return;}box(0,1.6,-.1,1.7,3.2,.16,0x132a2b,g,true);for(let s of [-1,1])box(s*.97,1.7,.03,.17,3.4,.3,0x9b8c68,g);box(0,3.43,.03,2.1,.18,.3,0xa39874,g);box(0,3.64,.03,2.3,.12,.36,0x6b7864,g);for(let s of [-1,1])for(let yy of [.75,2.2]){box(s*.4,yy,.02,.63,.98,.08,0x314842,g);box(s*.4,yy,.08,.45,.8,.035,0x233b37,g);}sphere(.59,1.43,.15,.07,0xd7b66f,g);box(0,3.1,.08,.7,.15,.06,0xa58d5d,g);shadow(d.x,d.z,1.1,.6,parent);}
+
+function buildShell(def){world.createCollider(RAPIER.ColliderDesc.cuboid(7,.2,5.6).setTranslation(0,-.23,0));const p=def.palette;box(0,-.28,0,14,.5,11.2,0x1f302b);box(0,-.57,0,14.3,.15,11.5,0x0b1718);for(let z=-5;z<5.1;z+=.44){for(let x=-6.65;x<6.7;x+=2.7){const off=(Math.round(z/.44)%2)*.65;let xx=clamp(x+off,-6.7,6.5);box(xx,-.009,z,2.65,.045,.43,[p.floor,p.floor+0x050503,p.floor-0x080603][Math.abs(Math.round(x+z))%3]);if((Math.round(x*3+z*7)%3)===0)box(xx+.4,.016,z,.7,.004,.009,0x3b4336);}}
+ box(0,2.35,-5.43,14,4.7,.22,p.wall);box(-6.9,2.35,0,.22,4.7,11,p.wall);box(6.9,.24,0,.22,.48,11,p.trim);box(0,.24,5.43,14,.48,.22,p.trim);
+ for(let y of [.2,1.05,4.35,4.65]){box(0,y,-5.25,14,.1,.18,y>4?0x8b987e:p.trim);box(-6.73,y,0,.18,.1,11,y>4?0x8b987e:p.trim);}
+ for(let x=-6.5;x<7;x+=.65){box(x,.6,-5.25,.035,.82,.1,0x607565);for(let y=1.45;y<4.4;y+=.5){const o=box(x,y,-5.3,.07,.13,.025,p.wall+0x10160b);o.rotation.z=Math.PI/4;}}
+ for(let z=-5;z<5.3;z+=.65){box(-6.73,.6,z,.1,.82,.035,0x607565);}
+ for(let x of [-6.6,6.6]){box(x,2.25,-5.1,.3,4.5,.35,0x77816b);box(x,4.5,-5.1,.5,.14,.6,0xb0af85);}
+ const edges=new THREE.LineSegments(new THREE.EdgesGeometry(geo('BoxGeometry',14,.5,11.2)),new THREE.LineBasicMaterial({color:0x0b1718}));edges.position.y=-.28;roomGroup.add(edges);
+ // A few deep, inked cracks and scattered dust give the clean geometry a drawn finish.
+ for(let n=0;n<7;n++){let x=-5.8+n*1.7;const crack=box(x,2.1+(n%3)*.6,-5.292,.015,.48,.01,0x1c3332);crack.rotation.z=(n%2?.38:-.3);}
+ for(let x of [-7,7])colliderBox(x,0,.35,11.6,5,2.5);for(let z of [-5.5,5.5])colliderBox(0,z,14.5,.35,5,2.5);
+ def.doors.forEach(d=>doorway(d));
+ const ambient=new THREE.HemisphereLight(0xb8d7cf,0x4b3a32,2.1);roomGroup.add(ambient);
+ const moon=new THREE.DirectionalLight(0x9dc8d0,3.2);moon.position.set(-3,9,-4);moon.castShadow=true;moon.shadow.mapSize.set(2048,2048);moon.shadow.camera.left=-10;moon.shadow.camera.right=10;moon.shadow.camera.top=10;moon.shadow.camera.bottom=-10;moon.shadow.normalBias=.045;moon.shadow.bias=-.0003;roomGroup.add(moon);roomGroup.add(moon.target);
+ const warm=new THREE.DirectionalLight(0xf6c181,1);warm.position.set(6,4,6);roomGroup.add(warm);
+ const points=[];for(let n=0;n<100;n++)points.push((Math.random()-.5)*13,Math.random()*4.8,(Math.random()-.5)*10);const dg=new THREE.BufferGeometry();dg.setAttribute('position',new THREE.Float32BufferAttribute(points,3));dust=new THREE.Points(dg,new THREE.PointsMaterial({color:0xd3cba8,size:.028,transparent:true,opacity:.35,sizeAttenuation:true,depthWrite:false}));roomGroup.add(dust);
+}
+
+function buildFoyer(){archedWindow(-3.8,-5.17,2.3,3.4);curtain(-3.8,-5.03,2.8,3.7);archedWindow(3.8,-5.17,2.3,3.4);curtain(3.8,-5.03,2.8,3.7);rug(0,.1,2.5,8.2);for(let s of [-1,1]){box(s*2.1,.27,-3.7,1.5,.5,2.5,0x6c7060);for(let n=0;n<5;n++)box(s*2.1,.12+n*.12,-2.5-n*.25,1.55,.12,.29,0x94917a);box(s*2.85,1,-3.5,.1,1.8,2.8,0x344941);for(let n=0;n<6;n++)cyl(s*2.85,.6,-4.6+n*.4,.035,.045,1.1,0x9c9876);box(s*2.85,1.22,-3.5,.13,.1,3,0xaa9a71);}grandfather(5.2,-4.3);table(-4.35,2.15,2.5,1.15);chair(-4.35,3.15,.12);box(-4.7,1.14,2.15,.68,.02,.5,0xd9cead);box(-4.7,1.16,2.15,.4,.01,.014,0x686a50);candle(-3.55,1.15,2.1);table(4.5,2.9,1.9,.85,.95);candle(4.95,1.04,2.9);for(let x of [4.05,4.3]){cyl(x,1.2,2.9,.09,.1,.33,mat(0x93b4a3,{opacity:.75}),roomGroup,8);cyl(x,1.4,2.9,.065,.07,.08,0xb79c70);}plant(-5.7,.3,.9);plant(5.65,-2.6,1.2);table(4.7,-3.3,1.3,.8,.9);birdProp(4.7,1.12,-3.3);for(let x of [-5.5,1.85]){frame(x,2.6,-5.15,1,1.2);const g=box(x,2.64,-5.02,.65,.72,.05,0x8b8a69);sphere(x,2.83,-4.96,.18,0xb5ac85);box(x,2.48,-4.96,.32,.34,.05,0x354c43);}obstacle(-4.35,2.15,2.5,1.15);obstacle(4.5,2.9,1.9,.85);obstacle(5.2,-4.3,1.4,1.1);obstacle(4.7,-3.3,1.4,.8);obstacle(-2.1,-3.7,1.8,2.3);obstacle(2.1,-3.7,1.8,2.3);}
+function birdProp(x,y,z,parent=roomGroup){const g=new THREE.Group();g.position.set(x,y,z);parent.add(g);sphere(0,0,0,.13,0xc9a75b,g);sphere(.12,.07,0,.08,0xd0b66d,g);const wing=sphere(-.03,.055,.07,.1,0x536b60,g);wing.scale.set(1.2,.35,.9);box(.2,.07,0,.12,.04,.05,0xd9c494,g);torus(-.13,.07,0,.1,.025,0xa69a68,g).rotation.y=Math.PI/2;return g;}
+function buildLibrary(){for(let x of [-4.65,3.4,5.5])bookcase(x,-4.9,x===-4.65?3.1:1.9,3.9);archedWindow(-.4,-5.15,2.1,3.5);rug(-.5,.3,5.5,4.9,0x374f4a);table(-.6,-.5,2.2,1.35,1.1);const boxg=new THREE.Group();boxg.position.set(-.6,1.2,-.5);roomGroup.add(boxg);box(0,.05,0,.72,.15,.55,0x926d45,boxg,true);box(0,.16,-.25,.72,.36,.045,0xb99c64,boxg);for(let n=0;n<3;n++)cyl((n-1)*.18,.16,0,.065,.065,.08,0xd0b774,boxg);sphere(0,.26,0,.06,0x98b7aa,boxg);roomProps.music=boxg;candle(.15,1.18,-.55);table(-4.85,2.7,2.6,1.35,1.3);chair(-4.8,3.9);box(-5,1.4,2.6,.75,.025,.55,0xc9bb96);candle(-4.05,1.4,2.5);const fallingShelf=new THREE.Group();fallingShelf.position.set(3.6,0,3.1);roomGroup.add(fallingShelf);bookcase(0,0,1.5,2.6,fallingShelf);roomProps.barricade=fallingShelf;chair(2.9,-1,.4);chair(3.9,-1.7,-.2);table(3.8,-1.4,1.05,.8,.7);for(let n=0;n<3;n++)book(3.6+n*.2,.8,-1.4,.12,.4,0x6d6550);const gram=cyl(4.5,1.2,-2.8,.3,.2,.6,0xa58c5c);gram.rotation.z=-.7;table(4.4,-2.9,1.3,.9,.75);plant(-5.8,-2.7,1.2);obstacle(-.6,-.5,2.2,1.35);obstacle(-4.85,2.7,2.6,1.35);obstacle(3.6,3.1,1.6,.9);obstacle(3.8,-1.4,2.3,1.7);obstacle(4.4,-2.9,1.3,.9);obstacle(-4.65,-4.9,3.1,.8);}
+function wardrobe(x,z,parent=roomGroup){const g=new THREE.Group();g.position.set(x,0,z);parent.add(g);box(0,1.4,0,1.75,2.8,.95,0x4c493a,g,true);box(0,2.85,0,1.95,.2,1.1,0x8d7955,g);for(let s of [-1,1]){box(s*.43,1.47,.51,.77,2.5,.09,0x68604a,g);box(s*.43,1.55,.57,.55,1.85,.05,0x444e3e,g);sphere(s*.12,1.4,.63,.05,0xc7aa70,g);}shadow(x,z,1.2,.7,parent);return g;}
+function buildNursery(){archedWindow(-.5,-5.15,2.2,3.5);curtain(-.5,-5.02,2.8,3.6);rug(.8,.8,4.8,4.9,0x746a53);box(1.5,.7,-3.0,2,.15,1.35,0x887953);for(let s of [-1,1]){box(1.5+s*1.05,.95,-3.0,.12,1.6,1.6,0xa2966d);for(let n=0;n<8;n++)box(.6+n*.25,1.1,-3.65,.045,.9,.06,0xb0a27c);box(1.5,1.55,-3.65,2.2,.1,.1,0xb5a77d);}box(1.5,.85,-3,1.75,.18,1.2,0xc4b995);const clapper=new THREE.Group();clapper.position.set(1.5,1.08,-2.8);roomGroup.add(clapper);sphere(0,0,0,.16,0xc3c6ac,clapper);box(0,.17,0,.06,.4,.06,0xadb398,clapper);roomProps.clapper=clapper;table(-3.9,-3.5,1.5,.9,1.1);frame(-3.9,1.65,-3.65,.6,.75);sphere(-3.9,1.8,-3.55,.15,0xb1a384);box(-3.9,1.5,-3.54,.25,.27,.05,0x465c50);candle(-4.4,1.2,-3.5);wardrobe(4.8,2.8);obstacle(4.8,2.8,1.85,1.05);const rocking=chair(3.8,-1.8,-.35);for(let x of [3.5,4.1]){const r=torus(x,.2,-1.8,.65,.045,0x9b865b);r.rotation.y=Math.PI/2;r.scale.z=.6;}sphere(-1.8,.28,2.5,.28,0xb69867);box(-1.8,.53,2.5,.35,.4,.25,0x6c5b47);sphere(-1.8,.85,2.5,.19,0xc7b18a);for(let s of [-1,1])sphere(-1.8+s*.14,1,2.5,.08,0x9b845d);for(let n=0;n<5;n++){const b=box(-2.1+n*.45,.18,3.8-(n%2)*.35,.33,.33,.33,[0x8c5949,0xa79461,0x52746a][n%3],roomGroup,true);b.rotation.y=n*.4;}const rail=new THREE.Group();rail.position.set(-3.8,0,2.9);roomGroup.add(rail);box(0,1.6,0,2.4,.08,.14,0x8a7956,rail);for(let s of [-1,1])box(s*1.1,.8,0,.1,1.6,.1,0x9c865c,rail);for(let n=0;n<5;n++){const dress=cyl(-.7+n*.38,1,0,.1,.24,.8,[0x6e7770,0x987b6c,0xb4aa87][n%3],rail);dress.scale.z=.4;}roomProps.barricade=rail;obstacle(1.5,-3,2.2,1.7);obstacle(-3.9,-3.5,1.5,.9);obstacle(-3.8,2.9,2.5,.6);obstacle(3.8,-1.8,.8,.8);}
+function buildConservatory(){for(let x of [-4.6,-1.7,1.2,4.1])archedWindow(x,-5.15,2.65,3.6);for(let n=0;n<3;n++){box(-6.72,2.65,n*2.4-2.9,.06,3.6,2.1,mat(0x77a09a,{glow:true}));box(-6.64,2.65,n*2.4-2.9,.1,3.8,.065,0x2c4c42);}for(let z=-4.8;z<5;z+=.7)for(let x=-6.4;x<6.5;x+=.7){if((Math.round(x*10)+Math.round(z*10))%2===0)box(x,.027,z,.66,.025,.66,0x757e6c);}cyl(0,.38,-.3,1.65,1.8,.75,0x85917a,roomGroup,14,true);cyl(0,.81,-.3,1.6,1.6,.08,0xadb49a,roomGroup,14);const water=cyl(0,.78,-.3,1.43,1.43,.035,mat(0x619496,{metal:.6,opacity:.83}),roomGroup,40);roomProps.water=water;torus(0,.83,-.3,1.5,.12,0x929d83).rotation.x=Math.PI/2;cyl(0,1.3,-.3,.26,.4,1.2,0x748473);sphere(0,1.95,-.3,.3,0xabb298);roomProps.basinGear=gearProp(.5,.9,-.25,.32);const wheel=torus(3,1.2,-.2,.45,.055,0xa68c59);for(let n=0;n<4;n++){const r=box(3,1.2,-.2,.04,.85,.04,0xa68c59);r.rotation.z=n*Math.PI/4;}box(3,.55,-.3,.13,1.1,.13,0x697c68);box(1.7,.35,-.3,2.8,.12,.12,0x546e5e);roomProps.wheel=wheel;for(let n=0;n<13;n++){const x=n<7?-5.7+n*1.65:(n%2?-5.5:5.6),z=n<7?-4.3:-2.5+(n-7)*1.15;plant(x,z,.8+(n%3)*.25);}table(-4,2.5,2.2,1,1);box(-4,1.11,2.5,.65,.02,.5,0xc8c09e);candle(-3.2,1.1,2.5);table(4.8,2.9,1.3,.8,.9);birdProp(4.8,1.12,2.9);for(let n=0;n<9;n++){let x=-6+n*1.5;const v=box(x,4.25,-4.8,.04,.8,.04,0x3e5c45);v.rotation.z=(n%2?.3:-.5);sphere(x,3.9,-4.65,.17,0x4a694e).scale.set(1.6,.7,.4);}obstacle(0,-.3,3.4,3.4,.85);obstacle(3,-.2,.35,.4);obstacle(-4,2.5,2.2,1);obstacle(4.8,2.9,1.3,.8);}
+function gearProp(x,y,z,r,parent=roomGroup){const g=new THREE.Group();g.position.set(x,y,z);parent.add(g);torus(0,0,0,r,.09,0xaf9864,g);for(let n=0;n<12;n++){const a=n*Math.PI/6;const tooth=box(Math.sin(a)*(r+.04),Math.cos(a)*(r+.04),0,.13,.16,.16,0xae9864,g);tooth.rotation.z=-a;}for(let n=0;n<3;n++){const spoke=box(0,0,0,.07,r*1.8,.08,0xa9925d,g);spoke.rotation.z=n*Math.PI/3;}return g;}
+function buildBelfry(){clockFace(0,3.1,-5.18,1.9);for(let x of [-4.9,4.9]){box(x,2.4,-5.2,1.7,4.4,.09,mat(0x5d9695,{glow:true}));for(let y=1;y<4.4;y+=.35)box(x,y,-5.06,1.7,.13,.16,0x334e46);}for(let x of [-5.5,5.5]){box(x,3.4,0,.3,.3,10.5,0x655f46);box(x,2.3,0,.24,4.5,.28,0x70694a);}for(let x of [-3,3])box(x,4.55,-2.8,.3,.3,4.8,0x7e7653);const bell=new THREE.Group();bell.position.set(0,2.8,-2.1);roomGroup.add(bell);cyl(0,0,0,.62,1,.95,0xa58c54,bell,16,true);cyl(0,.66,0,.17,.5,.4,0xbba16a,bell,12);torus(0,-.48,0,1,.095,0xdbc083,bell).rotation.x=Math.PI/2;box(0,-.5,0,.09,.65,.09,0x8d9e86,bell);sphere(0,-.89,0,.13,0xa4b39b,bell);roomProps.bell=bell;box(0,.24,-2.1,3,.45,2.3,0x6a715d);for(let s of [-1,1])box(s*1.35,1.8,-2.1,.15,3.5,.18,0x7e7856);box(0,3.6,-2.1,3,.24,.24,0x897d56);const rope=cyl(.4,1.6,-1.5,.025,.025,2.6,0xb6a579,roomGroup,6);torus(.4,.4,-1.5,.11,.035,0xb6a579);for(let n=0;n<5;n++){const g=gearProp(-3.5+n*1.5,1.8+(n%2)*.7,-4.85,.52+(n%2)*.2);roomProps['gear'+n]=g;}for(let n=0;n<4;n++)box(-4.7,.5+n*.4,2.2,1,.37,1.15,0x66766a,roomGroup,true);const weight=new THREE.Group();weight.position.set(4.6,0,2.5);roomGroup.add(weight);cyl(0,1.2,0,.4,.4,2.4,0x9c9269,weight,8);box(0,2.9,0,.06,1.5,.06,0x5e7362,weight);roomProps.barricade=weight;candle(-2.5,.1,2.6);candle(2.5,.1,2.6);obstacle(0,-2.1,3.2,2.4,.6);obstacle(-4.7,2.2,1.2,1.3);obstacle(4.6,2.5,1,1);}
+
+function buildActor(isKeeper=false){const g=new THREE.Group(),j={};const skin=isKeeper?0xb4b9a1:0xd2b994,cloth=isKeeper?0x334744:0x6e8a73;const h=isKeeper?1.3:1;
+ const root=new THREE.Group();g.add(root);j.root=root;
+ for(let s of [-1,1]){const leg=new THREE.Group();leg.position.set(s*.15,.78*h,0);root.add(leg);box(0,-.27*h,0,.17,.62*h,.19,isKeeper?0x233532:0x4b4c43,leg,true);box(0,-.61*h,.06,.22,.15,.35,0x27322c,leg,true);j[s<0?'leftLeg':'rightLeg']=leg;}
+ cyl(0,.93*h,0,.23,.38,.56*h,isKeeper?0x344945:0x4c5753,root,8,true);box(0,1.24*h,0,.52,.57*h,.33,cloth,root,true);if(isKeeper){cyl(0,1.02*h,0,.26,.44,.7,0x354a46,root,8,true);for(let n=0;n<3;n++)sphere(.06,(1.03+n*.2)*h,.2,.025,0xb1a57b,root);}else{box(0,1.43,.19,.34,.12,.045,0xdfd5b5,root);const scarf=box(.14,1.25,.2,.09,.38,.06,0xb49a61,root);scarf.rotation.z=.12;}
+ const head=new THREE.Group();head.position.set(0,1.72*h,0);root.add(head);j.head=head;sphere(0,0,0,isKeeper?.24:.225,skin,head,1,true);if(isKeeper){const mask=box(0,-.01,.18,.33,.43,.11,0xcbd1b5,head,true);mask.rotation.x=.09;for(let s of [-1,1])box(s*.085,.055,.242,.063,.027,.013,0x1c3330,head);box(0,-.1,.247,.15,.015,.015,0x67544b,head);for(let n=0;n<5;n++)box(-.06+n*.03,-.1,.255,.008,.045,.01,0x2c4540,head);box(0,.23,0,.44,.06,.38,0x263e39,head);}else{sphere(0,.07,-.06,.245,0x433c30,head,1);for(let s of [-1,1]){box(s*.19,-.035,-.04,.11,.37,.29,0x433c30,head);box(s*.077,.015,.193,.033,.038,.025,0x203d38,head);}box(0,-.1,.21,.055,.014,.018,0x986e60,head);box(-.1,.16,.13,.21,.13,.13,0x433c30,head);}
+ for(let s of [-1,1]){const arm=new THREE.Group();arm.position.set(s*.33,1.46*h,0);root.add(arm);box(0,-.23*h,0,.16,.48*h,.18,cloth,arm,true);sphere(0,-.5*h,.015,.09,skin,arm);j[s<0?'leftArm':'rightArm']=arm;}
+ if(isKeeper){const blades=new THREE.Group();blades.position.set(0,-.55,.05);j.rightArm.add(blades);for(let s of [-1,1]){const b=new THREE.Group();b.rotation.z=s*.16;blades.add(b);const blade=box(s*.08,-.5,0,.105,1.4,.055,0xa7b3a1,b,true);blade.rotation.z=s*.025;torus(s*.09,.25,0,.13,.04,0x8e8054,b);}j.blades=blades;j.rightArm.rotation.z=-.16;}else{j.leftArm.rotation.x=-.4;const lamp=new THREE.Group();lamp.position.set(0,-.6,.17);j.leftArm.add(lamp);box(0,0,0,.25,.3,.22,mat(0xe6b96a,{glow:true,opacity:.68}),lamp);for(let s of [-1,1])box(s*.13,0,.12,.025,.35,.025,0x6d6849,lamp);box(0,-.18,0,.31,.06,.28,0x455447,lamp);box(0,.18,0,.31,.07,.28,0x455447,lamp);torus(0,.3,0,.1,.02,0x8e8e63,lamp);const l=new THREE.PointLight(0xffc47e,2.2,4.8,1.4);l.position.set(0,0,.1);lamp.add(l);j.lamp=l;}
+ const sh=shadow(0,0,isKeeper?.65:.45,isKeeper?.4:.3,g);j.shadow=sh;return {group:g,joints:j,state:'dormant',room:'foyer',x:4,z:-3,alert:0,target:null,stateTime:0,active:false,seenHide:null,stun:0,walk:0};}
+
+function setRoom(id,spawn=[0,3.3],instant=true){room=id;roomTime=0;nearby=null;holdProgress=0;hidden=null;hiddenSeen=false;$('context').hidden=true;sceneObstacles=[];interactables=[];markers=[];candleLights=[];flames=[];clockHands=[];pendulums=[];roomProps={};windowIndex=0;for(const d of decoys){if(world.getRigidBody(d.body.handle))world.removeRigidBody(d.body);}for(const p of physicsProps){if(world.getRigidBody(p.body.handle))world.removeRigidBody(p.body);}decoys=[];physicsProps=[];
+ if(world){const old=[];world.forEachCollider(c=>{if(c.handle!==playerCollider?.handle&&c.handle!==keeperCollider?.handle)old.push(c);});for(const c of old)world.removeCollider(c,true);}
+ if(roomGroup){scene.remove(roomGroup);roomGroup.traverse(o=>{if(o.geometry&&!([...geoCache.values()].includes(o.geometry)))o.geometry.dispose();if(o.material?.map){o.material.map.dispose();o.material.dispose();}});}
+ roomGroup=new THREE.Group();scene.add(roomGroup);const def=ROOM_DEFS[id];buildShell(def);({foyer:buildFoyer,library:buildLibrary,nursery:buildNursery,conservatory:buildConservatory,belfry:buildBelfry}[id])();
+ if(game?.barricades[id]){const o=def.objects.find(o=>o.type==='barricade');if(o){for(const b of [...sceneObstacles])if(dist(b,o)<1.3&&b.w<8){world.removeCollider(b.collider,true);sceneObstacles=sceneObstacles.filter(x=>x!==b);}if(roomProps.barricade)roomProps.barricade.rotation.x=1.35;}}
+ interactables=[...def.doors.map(d=>({...d,type:'door',label:d.name,radius:1.7})),...def.objects.map(o=>({...o}))];
+ for(const o of interactables){if(o.type==='door')continue;const ring=torus(o.x,.12,o.z,.25,.015,mat(0xd1b47b,{glow:true,opacity:.6}));ring.rotation.x=Math.PI/2;markers.push({mesh:ring,object:o});}
+ if(game){if(!game.visited.includes(id))game.visited.push(id);$('roomName').textContent=def.name;$('objective').textContent=objective();}
+ teleport(spawn[0],spawn[1]);if(keeper.room===id&&keeper.active){keeper.group.visible=true;keeperBody.setTranslation({x:keeper.x,y:.9,z:keeper.z},true);}else{keeper.group.visible=false;keeperBody.setTranslation({x:30,y:.9,z:30},true);}
+ navGrid=buildNavGrid();enemyPath=[];enemyPathTimer=0;world.step();updateObjectVisibility();if(!instant)subtitle(def.caption,'',3);}
+function teleport(x,z){if(!playerBody)return;playerBody.setTranslation({x,y:.82,z},true);playerBody.setNextKinematicTranslation({x,y:.82,z});player.group.position.set(x,0,z);player.group.visible=true;}
+
+function buildNavGrid(){const size=.55,w=25,h=19,blocked=new Uint8Array(w*h);for(let j=0;j<h;j++)for(let i=0;i<w;i++){const x=-6.6+i*size,z=-4.95+j*size;if(sceneObstacles.some(o=>Math.abs(x-o.x)<o.w/2+.36&&Math.abs(z-o.z)<o.d/2+.36))blocked[j*w+i]=1;}return {w,h,size,blocked};}
+function findPath(from,to){if(!navGrid)return [to];const {w,h,size,blocked}=navGrid;const cell=p=>[clamp(Math.round((p.x+6.6)/size),0,w-1),clamp(Math.round((p.z+4.95)/size),0,h-1)];let [sx,sz]=cell(from),[tx,tz]=cell(to);const start=sz*w+sx;let goal=tz*w+tx;if(blocked[goal]){let best=Infinity;for(let j=0;j<h;j++)for(let i=0;i<w;i++){let n=j*w+i,d=Math.hypot(i-tx,j-tz);if(!blocked[n]&&d<best){best=d;goal=n;}}}const queue=[start],parent=new Int32Array(w*h).fill(-1);parent[start]=start;for(let q=0;q<queue.length;q++){const n=queue[q];if(n===goal)break;const x=n%w,z=Math.floor(n/w);for(const [dx,dz]of [[1,0],[-1,0],[0,1],[0,-1]]){const xx=x+dx,zz=z+dz,next=zz*w+xx;if(xx>=0&&xx<w&&zz>=0&&zz<h&&!blocked[next]&&parent[next]<0){parent[next]=n;queue.push(next);}}}if(parent[goal]<0)return [to];const path=[];for(let n=goal;n!==start;n=parent[n])path.push({x:-6.6+n%w*size,z:-4.95+Math.floor(n/w)*size});return path.reverse();}
+function lineOfSight(a,b){return !sceneObstacles.some(o=>{if(o.w>12||o.d>10)return false;let t0=0,t1=1;for(let axis of ['x','z']){const half=(axis==='x'?o.w:o.d)/2,delta=b[axis]-a[axis],lo=o[axis]-half,hi=o[axis]+half;if(Math.abs(delta)<.001){if(a[axis]<lo||a[axis]>hi)return false;}else{let u=(lo-a[axis])/delta,v=(hi-a[axis])/delta;if(u>v)[u,v]=[v,u];t0=Math.max(t0,u);t1=Math.min(t1,v);if(t0>t1)return false;}}return t0<1&&t1>0;});}
+
+function updateObjectVisibility(){for(const marker of markers){const o=marker.object;marker.mesh.visible=enabled(o)&&!(o.type==='page'&&game?.pages.includes(o.page));}if(roomProps.clapper)roomProps.clapper.visible=!game?.items.clapper;if(roomProps.basinGear)roomProps.basinGear.visible=!game?.items.gear;if(roomProps.water&&game?.flags.drained)roomProps.water.position.y=.36;if(roomProps.music&&game?.flags.musicSolved)roomProps.music.rotation.y=.2;$('objective').textContent=objective();}
+function enabled(o){if(!game)return true;if(o.type==='item'&&game.items[o.item])return false;if(o.type==='wheel'&&game.flags.drained)return false;if(o.type==='tonic'&&game.tonics<=0)return false;if(o.type==='barricade'&&game.barricades[room])return false;return true;}
+function updateNearby(){if(hidden){nearby={type:'leaveHide',label:'Leave your hiding place'};}else if(grip>0||transitioning||modalKind){nearby=null;}else{let best=null,bestD=Infinity;for(const o of interactables){if(!enabled(o))continue;const d=dist(player.group.position,o);if(d<(o.radius||1.6)&&d<bestD){best=o;bestD=d;}}nearby=best;}
+ const visible=mode==='play'&&!!nearby&&!modalKind&&grip<=0&&!transitioning;$('context').hidden=!visible;if(visible){let label=nearby.label,sub='';if(nearby.type==='door'){label=(nearby.id==='exit'?'Open the front doors':'Enter '+nearby.name);if(nearby.requires==='key'&&!game.items.key)sub='LOCKED · THE SMALL KEY IS MISSING';if(nearby.requires==='bell'&&!(game.items.clapper&&game.items.gear))sub='THE BELL NEEDS ITS CLAPPER AND GEAR';}if(nearby.type==='hide')sub=keeper.state==='chase'?'BREAK HIS LINE OF SIGHT FIRST':'STAY STILL. LISTEN FOR HIS FOOTSTEPS.';if(nearby.type==='leaveHide'){sub='L2 / C · STEADY YOUR BREATH';}if(nearby.type==='wheel')sub='HOLD ✕ / E · LOUD · RELEASE TO STOP';if(nearby.type==='refill')sub='REWINDS ALL THREE DECOYS';if(nearby.type==='barricade')sub='ONE USE · STUNS HIM IF HE IS CLOSE';if(nearby.type==='bell')label=game.flags.bellRung?'The bell is awake':'Fit the missing pieces';$('interactLabel').textContent=label;$('interactSub').textContent=sub;}
+ $('holdbar').style.width=(holdProgress/4*100)+'%';for(const marker of markers){const chosen=nearby?.id===marker.object.id;marker.mesh.scale.setScalar(chosen?1.2+Math.sin(simTime*3)*.08:1);marker.mesh.position.y=chosen?.16:.12;}}
+function readPage(id){if(!game.pages.includes(id)){game.pages.push(id);audio.play('pickup');checkpoint();updateObjectVisibility();}const p=PAGES[id];if(attract){subtitle(p.journal,'A memory',6);return;}$('letter').querySelector('.backhint').textContent='A memory entered in your journal';$('letterMeta').textContent=p.meta;$('letterTitle').textContent=p.title;$('letterText').replaceChildren(...p.text.map(t=>{const e=document.createElement('p');e.textContent=t;return e;}));modalKind='letter';$('letter').hidden=false;$('context').hidden=true;focusUI(0);$('letter').querySelector('.panel').scrollTop=0;}
+function closeLetter(){$('letter').hidden=true;modalKind='';pressed.clear();keys.delete('Enter');keys.delete('Space');updateNearby();}
+function interact(){trace('interact');if(hubWaiting||hubEnded)return;if(mode==='play'&&!modalKind&&!transitioning&&grip<=0)updateNearby();if(mode!=='play'||modalKind||transitioning||grip>0||!nearby)return;const o=nearby;audio.init();audio.play('click');
+ if(o.type==='leaveHide'){leaveHide();return;}
+ if(o.type==='door'){if(o.id==='exit'){if(!game.flags.bellRung){subtitle('The doors will not move. Something is holding this minute shut.');toast('Restore the tower bell','FIND ITS CLAPPER AND THE DROWNED GEAR');}else endGame(true);return;}if(o.requires==='key'&&!game.items.key){subtitle('The nursery… Mother always kept it locked.');toast('A small key is needed','SEARCH THE MUSIC BOX IN THE WEST LIBRARY');return;}if(o.requires==='bell'&&!(game.items.clapper&&game.items.gear)){toast('The tower mechanism is incomplete',!game.items.clapper?'FIND THE SILVER CLAPPER IN THE NURSERY':'DRAIN THE CONSERVATORY BASIN FOR ITS GEAR');return;}travel(o.to,o.spawn);return;}
+ if(o.type==='page'){readPage(o.page);return;}
+ if(o.type==='music'){if(game.flags.musicSolved){subtitle('The little dancer has stopped. At least one of us can rest.');return;}openMusic();return;}
+ if(o.type==='lore'){showReading('Notes in the margins','Three small drawings',['A moth, folded into a square. A moon, inked over a hundred times. A bell without its tongue.','Below them: “The tune she liked. Never let him hear it.”']);return;}
+ if(o.type==='item'){game.items[o.item]=true;audio.play('pickup');toast('Silver clapper found','ONE OF THE BELL’S TWO MISSING PIECES');subtitle('Someone wrapped it in her blanket. As if it were a child.');checkpoint();updateObjectVisibility();hearNoise(player.group.position,5);return;}
+ if(o.type==='hide'){const seen=keeper.active&&keeper.room===room&&keeper.state==='chase'&&lineOfSight(keeper,player.group.position)&&dist(keeper,player.group.position)<7;hidden=o;hiddenSeen=seen;game.hides++;player.group.visible=false;game.stamina=Math.min(100,game.stamina+15);keeper.seenHide=seen?o.id:null;if(seen){keeper.target={x:o.x,z:o.z};keeper.state='search';keeper.stateTime=0;subtitle('He saw me. I have to move.','Mara',3);}else{if(keeper.room===room&&keeper.state==='chase'){keeper.state='search';keeper.stateTime=0;}subtitle('Still. Just be still.','Mara',3);}updateNearby();return;}
+ if(o.type==='refill'){if(game.decoys===3){toast('All three windbirds are wound','R1 / Q · THROW ONE TOWARD THE WAY YOU FACE');}else{game.decoys=3;audio.play('bird');hearNoise(o,5);toast('Three windbirds rewound','THE KEEPER FOLLOWS THEIR SONG');checkpoint();}return;}
+ if(o.type==='tonic'){game.composure=100;game.stamina=100;game.wounds=Math.max(0,game.wounds-1);game.tonics--;audio.play('pickup');toast('Lavender tonic · composure restored',game.tonics+' DOSE REMAINS');checkpoint();return;}
+ if(o.type==='wheel'){holdProgress=.01;return;}
+ if(o.type==='barricade'){topple(o);return;}
+ if(o.type==='bell'){if(game.flags.bellRung){subtitle('Three times. It was always three times.');return;}openBell();return;}
+}
+function showReading(meta,title,paragraphs){if(attract){subtitle(paragraphs[0],'',5);return;}$('letter').querySelector('.backhint').textContent='The note remains here if you need it.';$('letterMeta').textContent=meta;$('letterTitle').textContent=title;$('letterText').replaceChildren(...paragraphs.map(t=>{const p=document.createElement('p');p.textContent=t;return p;}));modalKind='letter';$('letter').hidden=false;focusUI(0);$('letter').querySelector('.panel').scrollTop=0;}
+function leaveHide(){if(!hidden)return;hidden=null;hiddenSeen=false;player.group.visible=true;keeper.seenHide=null;gripCooldown=Math.max(gripCooldown,.75);subtitle('Keep moving.','Mara',2);updateNearby();}
+async function travel(id,spawn){trace('travel',{to:id});if(transitioning)return;const token=++transitionToken;transitioning=true;audio.play('door');$('fade').classList.add('on');if(keeper.active&&keeper.room===room){keeper.travelTo=id;keeper.travelTimer=keeper.state==='chase'?4:13;keeper.target=null;}await new Promise(r=>setTimeout(r,320));if(token!==transitionToken)return;setRoom(id,spawn,false);checkpoint();await new Promise(r=>setTimeout(r,160));if(token!==transitionToken)return;$('fade').classList.remove('on');transitioning=false;}
+function wakeKeeper(){keeper.active=true;keeper.room=room==='library'?'foyer':room;keeper.state='investigate';keeper.stateTime=0;keeper.travelTo=room;keeper.travelTimer=10;keeper.target={x:-.6,z:-.5};keeper.x=5.6;keeper.z=.4;keeper.alert=0;keeper.lastSeen=0;toast('The song has carried beyond this room','HIDE OR LEAVE BEFORE THE FOOTSTEPS ARRIVE');subtitle('That was not the house settling.','Mara',5);}
+function hearNoise(pos,radius=5){if(!keeper?.active)return;if(keeper.room===room){if(dist(keeper,pos)<radius||radius>=8){keeper.target={x:pos.x,z:pos.z};if(keeper.state!=='chase'){keeper.state='investigate';keeper.stateTime=0;}enemyPathTimer=0;}}else if(radius>=5&&!keeper.travelTo){keeper.travelTo=room;keeper.travelTimer=8;}}
+function throwBird(){if(mode!=='play'||modalKind||hidden||grip>0||game.decoys<1||transitioning)return;game.decoys--;game.birdsUsed++;audio.play('bird');const p=player.group.position,yaw=player.group.rotation.y;const dx=Math.sin(yaw),dz=Math.cos(yaw);const body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x+dx*.5,.85,p.z+dz*.5).setLinearDamping(.9).setAngularDamping(1.8));world.createCollider(RAPIER.ColliderDesc.ball(.14).setRestitution(.35).setFriction(.7),body);body.setLinvel({x:dx*5,y:3,z:dz*5},true);const group=birdProp(0,0,0);decoys.push({body,group,age:0,next:0});toast('The windbird will sing for seven seconds','SLIP AWAY WHILE HE LISTENS');}
+function topple(o){if(game.barricades[room])return;game.barricades[room]=true;audio.play('topple');shake=.6;hearNoise(o,12);if(keeper.room===room&&dist(keeper,o)<4.5){keeper.stun=6;keeper.state='stunned';keeper.stateTime=0;toast('The Keeper is pinned','RUN. THIS WILL NOT HOLD HIM.');}else toast('A barricade falls','HE WILL HAVE TO WORK HIS WAY THROUGH');const removed=sceneObstacles.filter(b=>dist(b,o)<1.3&&b.w<8);for(const b of removed){world.removeCollider(b.collider,true);sceneObstacles=sceneObstacles.filter(x=>x!==b);}for(let n=0;n<9;n++){const body=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(o.x+(Math.random()-.5)*.8,1+n*.15,o.z).setLinearDamping(.6));world.createCollider(RAPIER.ColliderDesc.cuboid(.19,.08,.13).setRestitution(.1),body);body.setLinvel({x:(Math.random()-.5)*2,y:1,z:2.2},true);const group=box(0,0,0,.38,.16,.26,[0x7b6552,0x57705e,0x9b8254][n%3]);physicsProps.push({body,group,age:0});}roomProps.fall={time:0,object:roomProps.barricade};navGrid=buildNavGrid();checkpoint();updateObjectVisibility();}
+function drained(){game.flags.drained=true;game.items.gear=true;holdProgress=0;audio.play('pickup');toast('The drowned gear is yours','BOTH MISSING PIECES BELONG IN THE TOWER');subtitle('Even the water was keeping a secret.');checkpoint();updateObjectVisibility();}
+function caught(){if(grip>0||gripCooldown>0||attract)return;if(hidden)leaveHide();game.grabs++;grip=.001;gripElapsed=0;$('grip').hidden=false;$('context').hidden=true;audio.play('grab');shake=1;vibrate(250,.8,.9);}
+function breakFree(){grip=0;gripElapsed=0;game.wounds++;game.composure=Math.max(12,game.composure-28);game.stamina=Math.max(45,game.stamina);keeper.stun=5;keeper.state='stunned';keeper.stateTime=0;gripCooldown=7;$('grip').hidden=true;audio.play('scissor');toast('You broke free','HE WILL GET UP. PUT A DOOR BETWEEN YOU.');if(game.wounds>=3)endGame(false);}
+function enemyUpdate(dt){keeper.vx=0;keeper.vz=0;if(!keeper.active)return;keeper.stateTime+=dt;keeper.stun=Math.max(0,keeper.stun-dt);
+ if(keeper.travelTo){keeper.travelTimer-=dt;if(keeper.travelTimer<=0){keeper.room=keeper.travelTo;keeper.travelTo=null;keeper.x=5.7;keeper.z=.55;if(room==='foyer'&&keeper.state==='chase'){keeper.x=0;keeper.z=-3.5;}if(keeper.room===room){keeperBody.setTranslation({x:keeper.x,y:.95,z:keeper.z},true);keeper.group.visible=true;keeper.target=keeper.target||{x:0,z:0};keeper.state='investigate';keeper.stateTime=0;enemyPathTimer=0;audio.play('scissor');subtitle('The footsteps stopped at the door.','',3);}else{keeper.group.visible=false;keeperBody.setTranslation({x:30,y:.95,z:30},true);}}}
+ if(keeper.room!==room){keeper.group.visible=false;if(!keeper.travelTo&&keeper.stateTime>18&&!hidden){keeper.travelTo=room;keeper.travelTimer=7;keeper.stateTime=0;}return;}
+ keeper.group.visible=true;if(keeper.stun>0){keeper.state='stunned';return;}if(keeper.state==='stunned'){keeper.state='search';keeper.stateTime=0;}
+ const p=player.group.position,d=dist(keeper,p),los=lineOfSight(keeper,p),facing={x:Math.sin(keeper.group.rotation.y),z:Math.cos(keeper.group.rotation.y)},dot=((p.x-keeper.x)*facing.x+(p.z-keeper.z)*facing.z)/(d||1),moving=Math.hypot(input.x,input.y)>.15;
+ const sees=!hidden&&los&&(d<(input.sneak?3:6.2))&&(dot>-.1||d<2.2||keeper.state==='chase');const hears=!hidden&&moving&&d<(input.run?7:input.sneak?.85:2.8);
+ if((sees||hears)&&grip<=0){if(keeper.state!=='chase'){audio.play('scissor');vibrate(150,.3,.5);keeper.state='chase';keeper.stateTime=0;subtitle('No. Not again.','Mara',2.5);}keeper.target={x:p.x,z:p.z};keeper.lastSeen=simTime;keeper.alert=1;}
+ if(keeper.state==='chase'&&!(sees||hears)&&simTime-(keeper.lastSeen||0)>2.8){keeper.state='search';keeper.stateTime=0;}
+ if(hidden&&keeper.seenHide===hidden.id){keeper.target={x:p.x,z:p.z};if(d<1.5){leaveHide();caught();return;}}
+ if(hidden&&!hiddenSeen&&keeper.stateTime>8&&keeper.state==='search'){keeper.state='patrol';keeper.target={x:5.8,z:.4};keeper.stateTime=0;}
+ if(keeper.state==='investigate'&&keeper.target&&dist(keeper,keeper.target)<.8){keeper.state='search';keeper.stateTime=0;}
+ if(keeper.state==='search'&&keeper.stateTime>9&&!hiddenSeen){keeper.state='patrol';keeper.stateTime=0;keeper.target={x:5.6,z:.3};}
+ if(keeper.state==='patrol'&&keeper.stateTime>7){keeper.room=room==='library'?'foyer':'library';keeper.group.visible=false;keeperBody.setTranslation({x:30,y:.95,z:30},true);keeper.stateTime=0;keeper.target=null;return;}
+ if(!keeper.target){keeper.target={x:Math.sin(simTime*.1)*4,z:Math.cos(simTime*.13)*3};}
+ enemyPathTimer-=dt;if(enemyPathTimer<=0){enemyPathTimer=keeper.state==='chase'?.45:1.1;enemyPath=findPath(keeper,keeper.target);}
+ while(enemyPath.length&&dist(keeper,enemyPath[0])<.3)enemyPath.shift();const target=enemyPath[0]||keeper.target;const len=dist(keeper,target);if(len>.13){const speed=keeper.state==='chase'?(game.flags.bellRung?3.35:2.95):1.3;keeper.vx=(target.x-keeper.x)/len*speed;keeper.vz=(target.z-keeper.z)/len*speed;}
+ if(Math.hypot(keeper.vx,keeper.vz)>.15){keeper.footTime=(keeper.footTime||0)+dt;if(keeper.footTime>(keeper.state==='chase'?.4:.7)){keeper.footTime=0;audio.play('keeperStep');}}
+ if(d<.82&&!hidden&&grip<=0&&!modalKind&&keeper.state==='chase')caught();
+}
+function stepPhysics(dt){if(!world||!game)return;const p=playerBody.translation();let dx=0,dz=0;if(!hidden&&grip<=0&&!transitioning){const length=Math.hypot(input.x,input.y);let speed=input.sneak?1.12:input.run&&game.stamina>5&&!game.exhausted?4.25:2.28;const running=speed>3&&length>.15;if(game.stamina<5)game.exhausted=true;if(game.stamina>28)game.exhausted=false;game.stamina=clamp(game.stamina+(running?-23:input.sneak?19:14)*dt,0,100);if(length>.13){const nx=input.x/Math.max(1,length),ny=input.y/Math.max(1,length);dx=(nx*.842+ny*.54)*speed*dt;dz=(-nx*.54+ny*.842)*speed*dt;player.moveSpeed=speed;player.yaw=Math.atan2(dx,dz);player.walk+=dt*speed*3.8;player.footTime=(player.footTime||0)+dt;if(player.footTime>(running?.27:.45)&&!input.sneak){player.footTime=0;audio.play(running?'run':'step');}}else{player.moveSpeed=0;}}
+ else{player.moveSpeed=0;game.stamina=clamp(game.stamina+(hidden&&input.sneak?-12:16)*dt,0,100);}
+ pc.computeColliderMovement(playerCollider,{x:dx,y:-.15,z:dz},undefined,undefined,c=>c.handle!==keeperCollider.handle);const m=pc.computedMovement();playerBody.setNextKinematicTranslation({x:p.x+m.x,y:Math.max(.79,p.y+m.y),z:p.z+m.z});
+ if(keeper.active&&keeper.room===room){const k=keeperBody.translation();kc.computeColliderMovement(keeperCollider,{x:(keeper.vx||0)*dt,y:-.15,z:(keeper.vz||0)*dt},undefined,undefined,c=>c.handle!==playerCollider.handle);const kMove=kc.computedMovement();keeperBody.setNextKinematicTranslation({x:k.x+kMove.x,y:Math.max(.95,k.y+kMove.y),z:k.z+kMove.z});}
+ world.timestep=dt;world.step();const t=playerBody.translation();player.group.position.set(t.x,t.y-.8,t.z);if(keeper.active&&keeper.room===room){const k=keeperBody.translation();keeper.x=k.x;keeper.z=k.z;keeper.group.position.set(k.x,k.y-.95,k.z);if(Math.hypot(keeper.vx||0,keeper.vz||0)>.1){keeper.yaw=Math.atan2(keeper.vx,keeper.vz);keeper.walk+=dt*6;}}
+}
+function gameUpdate(dt){totalTime+=dt;simTime+=dt;roomTime+=dt;gripCooldown=Math.max(0,gripCooldown-dt);enemyUpdate(dt);
+ const close=keeper.active&&keeper.room===room?dist(keeper,player.group.position):100,danger=keeper.state==='chase'&&keeper.room===room;
+ if(!attract){let change=danger?-3.7:close<3.5&&hidden&&!input.sneak?-5:1.9;if(hidden&&input.sneak&&game.stamina>5)change=2.5;game.composure=clamp(game.composure+change*dt,0,100);if(hidden&&close<3&&game.composure<22&&(!input.sneak||game.stamina<5)){hiddenSeen=true;keeper.seenHide=hidden.id;keeper.target={x:player.group.position.x,z:player.group.position.z};}if(game.composure<=0&&grip<=0)endGame(false);}
+ if(grip>0){gripElapsed+=dt;grip=clamp(grip+(input.fire?.55:-.1)*dt,0.001,1);$('gripBar').style.width=grip*100+'%';if(grip>=1)breakFree();else if(gripElapsed>6.5)endGame(false);}
+ if(nearby?.type==='wheel'&&!hidden){if(input.fire){holdProgress+=dt;hearNoise(nearby,9);if(roomProps.wheel)roomProps.wheel.rotation.z+=dt*2;if(roomProps.water)roomProps.water.position.y=.78-holdProgress*.09;if(holdProgress>=4)drained();}else{holdProgress=Math.max(0,holdProgress-dt*.5);}}
+ else if(holdProgress>0)holdProgress=0;
+ physicsAcc=Math.min(physicsAcc+dt,.1);while(physicsAcc>=1/60){stepPhysics(1/60);physicsAcc-=1/60;}
+ for(let i=decoys.length-1;i>=0;i--){const b=decoys[i];b.age+=dt;const p=b.body.translation();b.group.position.set(p.x,p.y,p.z);const q=b.body.rotation();b.group.quaternion.set(q.x,q.y,q.z,q.w);if(b.age>b.next){b.next=b.age+1;audio.play('bird');if(keeper.room===room&&keeper.stun<=0&&(dist(keeper,player.group.position)>2||hidden)){keeper.target={x:p.x,z:p.z};keeper.state='investigate';keeper.stateTime=0;enemyPathTimer=0;}else hearNoise(p,9);}if(b.age>7){world.removeRigidBody(b.body);roomGroup.remove(b.group);decoys.splice(i,1);}}
+ for(const p of physicsProps){const t=p.body.translation(),q=p.body.rotation();p.group.position.set(t.x,t.y,t.z);p.group.quaternion.set(q.x,q.y,q.z,q.w);}
+ if(roomProps.fall){const f=roomProps.fall;f.time=Math.min(1.2,f.time+dt);if(f.object)f.object.rotation.x=Math.min(1.35,f.time*2);}
+ if(game.flags.drained&&roomProps.water)roomProps.water.position.y=lerp(roomProps.water.position.y,.36,dt*2);
+ if(pressed.has('interact'))interact();if(pressed.has('bird'))throwBird();if(pressed.has('journal')&&!grip)openJournal();if(pressed.has('back')&&hidden)leaveHide();updateNearby();updateHUD(danger,close);updateHubProgress();
+}
+function animateActor(actor,dt,isKeeper=false){const j=actor.joints;const moving=isKeeper?Math.hypot(actor.vx||0,actor.vz||0)>.15:actor.moveSpeed>.1;const wave=Math.sin(actor.walk||0);j.leftLeg.rotation.x=moving?wave*.55:Math.sin(simTime)*.02;j.rightLeg.rotation.x=moving?-wave*.55:Math.sin(simTime+1)*.02;j.rightArm.rotation.x=isKeeper?.1+(moving?-wave*.3:Math.sin(simTime*.6)*.08):moving?-wave*.4:.1;j.leftArm.rotation.x=isKeeper?(moving?wave*.3:.05):-.3+(moving?wave*.1:0);j.root.position.y=Math.sin(simTime*2)*.013+(moving?Math.abs(wave)*.03:0);j.head.rotation.y=Math.sin(simTime*.5)*.06;
+ if(isKeeper){j.root.rotation.z=actor.stun>0?.22:Math.sin(simTime*.4)*.025;j.head.rotation.z=.08+Math.sin(simTime*.7)*.05;if(j.blades)j.blades.rotation.z=Math.sin(simTime*1.2)*.09;}else{const crouch=input.sneak&&!hidden;actor.group.scale.y=lerp(actor.group.scale.y,crouch?.73:1,Math.min(1,dt*12));j.root.rotation.x=lerp(j.root.rotation.x,crouch?.15:0,Math.min(1,dt*10));}
+ if(actor.yaw!==undefined){const delta=Math.atan2(Math.sin(actor.yaw-actor.group.rotation.y),Math.cos(actor.yaw-actor.group.rotation.y));actor.group.rotation.y+=delta*Math.min(1,dt*12);}}
+function updateHUD(danger=false,close=100){$('staminaFill').style.width=game.stamina+'%';$('panicFill').style.width=game.composure+'%';$('staminaText').textContent=game.stamina<25?'GASPING':input.run&&player.moveSpeed>3?'RUNNING':'STEADY';$('composureText').textContent=Math.ceil(game.composure);const state=hidden?(hiddenSeen?'HE SAW YOU':input.sneak?'BREATH HELD':'HIDDEN'):danger?'PURSUED':close<6?'FOOTSTEPS NEARBY':input.sneak?'MOVING QUIETLY':'LISTENING';$('stateText').textContent=state;$('stateText').style.color=danger||hiddenSeen?'#e99e85':'';$('stateDot').style.background=danger?'#d57a64':hidden?'#c6b884':'#a6c2ac';$('decoyCount').textContent='Windbird ×'+game.decoys;$('panicVeil').style.opacity=attract?.12:clamp((100-game.composure)/100*.6+(danger?.3:0),0,.8);$('chaseLabel').hidden=!danger||!!modalKind;$('chaseLabel').textContent=game.flags.bellRung?'THE HOUSE IS LETTING GO. RUN.':'THE KEEPER HAS FOUND YOU';const min=53+Math.min(6,Math.floor(totalTime/70));$('timeDisplay').textContent='11:'+min;$('inventoryMini').innerHTML=[['key','⚿'],['clapper','♧'],['gear','⚙']].map(([id,icon])=>'<span class="mini-item '+(game.items[id]?'':'empty')+'" title="'+id+'">'+icon+'</span>').join('');}
+function updateHubProgress(){if(!hubSession||hubReported||hubEnded)return;const score=scoreGame();if(score!==lastProgress){lastProgress=score;AIHub.progress({score,label:game.flags.bellRung?'Bell restored':game.flags.drained?'Gear recovered':game.items.key?'Nursery open':'Exploring'});}}
+function scoreGame(){if(!game)return 0;return (game.items.key?200:0)+(game.items.clapper?200:0)+(game.items.gear?200:0)+(game.flags.bellRung?300:0)+(game.flags.escaped?1000:0)+game.pages.length*50+game.visited.length*5;}
+function vibrate(duration=100,weakMagnitude=.2,strongMagnitude=.3){const p=navigator.getGamepads?.();for(const g of p||[])if(g?.vibrationActuator)g.vibrationActuator.playEffect('dual-rumble',{duration,weakMagnitude,strongMagnitude}).catch(()=>{});}
+
+// One focus model is shared by gamepad, keyboard and pointer menus.
+function activeRoot(){return !$('letter').hidden?$('letter'):!$('modal').hidden?$('modalPanel'):failed&&!$('supportPanel').hidden?$('supportPanel'):$('titleScreen');}
+function navButtons(){return [...activeRoot().querySelectorAll('button.nav:not(:disabled)')].filter(b=>!b.hidden&&b.getClientRects().length);}
+function focusUI(index=0){const list=navButtons();if(!list.length)return;uiIndex=((index%list.length)+list.length)%list.length;document.querySelectorAll('.focused').forEach(b=>b.classList.remove('focused'));list[uiIndex].classList.add('focused');list[uiIndex].focus({preventScroll:true});if(modalKind)list[uiIndex].scrollIntoView({block:'nearest'});}
+function moveUI(dir){focusUI(uiIndex+dir);audio.play('click');}
+function activateUI(){const b=navButtons()[uiIndex];if(b){audio.init();audio.play('click');b.click();}}
+function panelHeader(eyebrow,title,page=''){return '<div class="panel-header"><span class="smallcaps gold">'+eyebrow+'</span><span class="panel-page">'+page+'</span></div><h2 id="modalTitle">'+title+'</h2>';}
+function closeModal(){trace('closeModal');if(modalKind==='settings'){closeSettings();return;}if(modalKind==='letter'){closeLetter();return;}modalKind='';$('modal').hidden=true;$('letter').hidden=true;pressed.clear();if(mode==='title'){idleTime=performance.now();focusUI(0);}else if(mode==='play')updateNearby();}
+let settingsReturn='';
+function openSettings(){if(attract){stopAttract();return;}if(modalKind==='settings'){closeSettings();return;}settingsReturn=modalKind;$('letter').hidden=true;modalKind='settings';$('modal').hidden=false;$('context').hidden=true;renderSettings();}
+function closeSettings(){const back=settingsReturn;settingsReturn='';modalKind='';$('modal').hidden=true;if(back==='music')renderMusic();else if(back==='bell')openBell(false);else if(back==='journal')renderJournal();else if(back==='about')renderAbout();else if(back==='how')openHow();else if(back==='letter'){modalKind='letter';$('letter').hidden=false;focusUI(0);$('letter').querySelector('.panel').scrollTop=0;}else if(mode==='title'){idleTime=performance.now();focusUI(0);}pressed.clear();}
+function settingRow(label,key,help=''){const v=settings[key];const value=typeof v==='boolean'?(v?'On':'Off'):Math.round(v*100)+'%';return '<button class="settings-row nav" data-action="setting" data-key="'+key+'"><span>'+label+(help?'<small>'+help+'</small>':'')+'</span><span class="value">'+value+'</span></button>';}
+function renderSettings(focus=0){const tabs=['Sound','Controls','Comfort'];let rows='';if(settingsTab===0)rows=settingRow('Master volume','volume')+settingRow('Music','music','A sparse, procedural music-box score')+settingRow('Sound effects','effects','Footsteps, clockwork and nearby danger');if(settingsTab===1)rows=settingRow('Invert horizontal axis','invertX','Left and right sticks')+settingRow('Invert vertical axis','invertY','Left and right sticks')+'<button class="settings-row nav" data-action="fullscreen"><span>Fullscreen<small>Toggle from a button press</small></span><span class="value">'+(document.fullscreenElement?'On':'Off')+'</span></button><button class="settings-row nav" data-action="how"><span>Controller & keyboard guide</span><span class="value">→</span></button>';if(settingsTab===2)rows=settingRow('Subtitles','subtitles')+settingRow('Reduce motion','reducedMotion','Disables camera shake, sway and animated UI')+settingRow('Generous bell timing','gentleTiming','Widens the timing window; no score penalty')+settingRow('High contrast interface','highContrast');$('modalPanel').innerHTML=panelHeader(mode==='play'?'The night is paused':'Make yourself comfortable','Settings')+'<div class="settings-tabs">'+tabs.map((t,i)=>'<button class="tab nav '+(i===settingsTab?'active':'')+'" data-action="settingsTab" data-page="'+i+'">'+t+'</button>').join('')+'</div>'+rows+'<div class="panel-actions"><span class="backhint"><span class="pad">↔</span> Adjust <span class="pad round">○</span> Back</span><button class="btn nav" data-action="closeSettings">Return <span class="pad round">✕</span></button></div>';focusUI(focus);}
+function adjustSetting(key,direction=1){if(typeof settings[key]==='boolean')settings[key]=!settings[key];else settings[key]=Math.round(clamp(settings[key]+direction*.1,0,1)*10)/10;const f=uiIndex;applySettings();renderSettings(f);}
+function openHow(){modalKind='how';$('modal').hidden=false;const rows=[['L','Move','WASD / arrow keys · movement follows the screen'],['✕','Examine, use, hide','E / Space · hold to work a mechanism or break a grip'],['R2','Run','Shift · loud; uses breath'],['L2','Move quietly / steady breath','C / Ctrl · hold while hidden to quiet your breathing'],['R1','Throw a windbird','Q · distracts the Keeper; rewind at bird stands'],['△','Journal & map','Tab / J · clues, belongings and your next step']];$('modalPanel').innerHTML=panelHeader('Before you enter','Listen. Hide. Survive.')+'<p class="lead">You have no weapon. Learn the house.<br>Make him listen somewhere else.</p><div class="howto-grid">'+rows.map(r=>'<div class="howto-row"><span class="pad">'+r[0]+'</span><span>'+r[1]+'<small>'+r[2]+'</small></span></div>').join('')+'</div><p>He follows footsteps through doors. Break his line of sight before hiding. A fallen shelf buys time. Lavender tonic restores your composure. Progress saves when you change rooms or recover something.</p><div class="panel-actions"><span class="backhint">Options / Esc · Settings<br>Right stick · Look around</span><button class="btn nav" data-action="close">I understand <span class="pad round">✕</span></button></div>';focusUI(0);}
+function openAbout(){aboutPage=0;renderAbout();}
+function renderAbout(){modalKind='about';$('modal').hidden=false;let body='',title='Source information';const src=buildInfo.source||{};
+ if(aboutPage===0){body='<dl class="about-list">'+Object.entries(src).map(([k,v])=>'<dt>'+k+'</dt><dd>'+v+'</dd>').join('')+'</dl>';}else{const keys=['','testing','engine','prompt'],section=keys[aboutPage];title={testing:'Testing feedback',engine:'Engine feedback',prompt:'Prompt feedback'}[section];body='<ul class="feedback-list">'+(buildInfo[section]||[]).map(([q,a])=>'<li><b>'+q+'</b>'+a+'</li>').join('')+'</ul>';}
+ $('modalPanel').innerHTML=panelHeader('Deadtime Stories · Credits',title,(aboutPage+1)+' / 4')+body+'<div class="panel-actions"><button class="btn secondary nav" data-action="aboutPrev" '+(aboutPage===0?'disabled':'')+'>← Previous</button><span class="backhint">'+'Right stick / PgUp / PgDn · scroll'+'</span><button class="btn nav" data-action="'+(aboutPage===3?'close':'aboutNext')+'">'+(aboutPage===3?'Done':'Next →')+'</button></div>';focusUI(aboutPage===0?0:1);$('modalPanel').scrollTop=0;}
+function openJournal(){if(mode!=='play'||grip>0)return;if(modalKind==='journal'){closeModal();return;}if(modalKind)return;journalPage=0;renderJournal();}
+function renderJournal(){modalKind='journal';$('modal').hidden=false;$('context').hidden=true;let body='';const titles=['A way out','The shape of the house','What Mother left behind'];
+ if(journalPage===0){body='<div class="journal-objective"><div class="smallcaps gold">Your next step</div><p>'+objective()+'</p></div><div class="inventory-cards">'+[['key','⚿','Nursery key'],['clapper','♧','Silver clapper'],['gear','⚙','Moon gear']].map(([id,icon,name])=>'<div class="inventory-card"><span class="symbol">'+(game.items[id]?icon:'◇')+'</span>'+name+'<br><span class="muted">'+(game.items[id]?'Recovered':'Missing')+'</span></div>').join('')+'</div><p class="journal-bottom">'+(game.pages.includes('letter')?'THE MUSIC BOX: MOTH → MOON → BELL.':'Mother’s letter is on the writing table in the entrance hall.')+'<br>Windbirds: '+game.decoys+'/3 · Lavender tonic: '+game.tonics+' dose'+(game.tonics!==1?'s':'')+' · Memories: '+game.pages.length+'/3</p>';
+ }else if(journalPage===1){const loc={foyer:[310,155],library:[120,155],nursery:[500,155],conservatory:[120,50],belfry:[310,50]};body='<div class="map-wrap"><svg viewBox="0 0 620 270" role="img" aria-label="Map: entrance hall connects west library, nursery and bell tower. Library connects conservatory."><g fill="none" stroke="#9da888" stroke-width="1"><path d="M200 155h40m140 0h40M120 92v28M310 92v28" stroke-dasharray="4 4"/>'+Object.entries(loc).map(([id,[x,y]])=>'<rect x="'+(x-79)+'" y="'+(y-32)+'" width="158" height="64" rx="1" fill="'+(id===room?'#36483a':'#182a2b')+'" stroke="'+(id===room?'#d5bd80':'#738373')+'"/>').join('')+'</g><g text-anchor="middle" font-family="Georgia" font-size="16" fill="#c9d2bd">'+Object.entries(loc).map(([id,[x,y]])=>'<text x="'+x+'" y="'+(y-1)+'">'+({foyer:'Entrance hall',library:'West library',nursery:'Nursery',conservatory:'Conservatory',belfry:'Bell tower'}[id])+'</text><text x="'+x+'" y="'+(y+18)+'" font-family="sans-serif" font-size="9" letter-spacing="2" fill="'+(id===room?'#d5bd80':'#899d8b')+'">'+(id===room?'YOU ARE HERE':game.visited.includes(id)?'VISITED':id==='nursery'&&!game.items.key?'LOCKED':'UNEXPLORED')+'</text>').join('')+'<path d="M310 188v30" stroke="#9da888" stroke-dasharray="4 4"/><text x="310" y="241" font-size="14">Front doors · '+(game.flags.bellRung?'OPEN':'SEALED')+'</text></g></svg></div><p class="journal-bottom">Doors open with ✕ / E. The Keeper can follow. Leave his sight before you hide.</p>';
+ }else{body=game.pages.length?game.pages.map(id=>'<div class="journal-objective" style="margin-bottom:14px"><div class="smallcaps gold">'+PAGES[id].title+'</div><p style="font-size:.85rem;margin-top:8px">'+PAGES[id].journal+'</p></div>').join(''):'<p class="lead">There are no memories on these pages yet.</p><p>Look for letters and photographs. The house has left three things unsaid.</p>';}
+ $('modalPanel').innerHTML=panelHeader('Mara’s journal',titles[journalPage],(journalPage+1)+' / 3')+'<div class="tabs">'+['Belongings','House map','Memories'].map((t,i)=>'<button class="tab nav '+(i===journalPage?'active':'')+'" data-action="journalTab" data-page="'+i+'">'+t+'</button>').join('')+'</div>'+body+'<div class="panel-actions"><span class="backhint">The night is paused.<br>△ / Tab or ○ / Esc · Return</span><button class="btn nav" data-action="close">Close journal <span class="pad round">✕</span></button></div>';focusUI(0);}
+
+function openMusic(){musicDials=game.flags.musicSolved?[3,1,4]:musicDials;renderMusic();}
+function renderMusic(focus=0,message=''){modalKind='music';$('modal').hidden=false;$('context').hidden=true;$('modalPanel').innerHTML=panelHeader('An unfinished lullaby','The little music box')+'<p class="puzzle-desc">Three brass dials. Five small pictures. A tune Mother would never sing after dark.</p><div class="dials">'+musicDials.map((v,i)=>'<button class="dial nav" data-action="dial" data-dial="'+i+'" aria-label="Dial '+(i+1)+': '+SYMBOLS[v].name+'"><span>'+glyph(SYMBOLS[v].name)+'</span>'+SYMBOLS[v].name+'</button>').join('')+'</div><div class="puzzle-message" id="puzzleMessage">'+(message||(game.pages.includes('letter')?'Her letter: MOTH · MOON · BELL':'A scratched inscription: “The wing. The night. The voice of the house.”'))+'</div><div class="panel-actions"><button class="btn secondary nav" data-action="close">Leave it</button><button class="btn nav" data-action="playMusic">Play the melody <span class="pad round">✕</span></button></div><p class="journal-bottom">D-pad / arrows to choose · ✕ / Enter to turn a dial or play.</p>';focusUI(focus);}
+function playMusic(){if(musicDials.join(',')==='3,1,4'){game.flags.musicSolved=true;game.items.key=true;audio.play('pickup');[440,392,330,440,523].forEach((f,i)=>audio.tone(f,1,'sine',.14,0,false,i*.3));modalKind='';$('modal').hidden=true;toast('The nursery key lay beneath the dancer','THE EASTERN DOOR IS NOW YOURS TO OPEN');subtitle('I remember the tune. I wish I did not.');wakeKeeper();checkpoint();updateObjectVisibility();}else{audio.play('wrong');hearNoise(player.group.position,5);$('puzzleMessage').textContent='The dancer will not turn. The pictures are in the wrong order.';}}
+function openBell(reset=true){modalKind='bell';$('modal').hidden=false;$('context').hidden=true;if(reset){ringHits=0;ringPhase=.05;ringCooldown=0;}$('modalPanel').innerHTML=panelHeader('The minute that would not end','Let the house hear you.')+'<p class="lead">The gear turns. The clapper finds its voice.</p><p>Press ✕ / E when the hand crosses the gold mark.<br>Three chimes. One for the living. Two for the dead.</p><div id="ringTrack"><div class="ring-zone" style="left:'+(settings.gentleTiming?'48':'61')+'%;width:'+(settings.gentleTiming?'39':'19')+'%"></div><div id="ringNeedle"></div></div><div id="ringCount">'+[0,1,2].map(i=>'<span class="ring-dot '+(i<ringHits?'lit':'')+'"></span>').join('')+'</div><div class="puzzle-message" id="ringMessage">Wait for the gold. There is time.</div><div class="panel-actions"><button class="btn secondary nav" data-action="close">Step back</button><button class="btn nav" data-action="ring">Ring the bell <span class="pad round">✕</span></button></div>';focusUI(1);}
+function ringBell(){if(ringCooldown>0)return;const lo=settings.gentleTiming?.48:.61,hi=settings.gentleTiming?.87:.8;if(ringPhase>=lo&&ringPhase<=hi){ringHits++;ringCooldown=.75;audio.play('bell');vibrate(300,.2,.45);const dots=$('ringCount').children;for(let n=0;n<dots.length;n++)dots[n].classList.toggle('lit',n<ringHits);$('ringMessage').textContent=['','For the living.','For the lost.','For Elsie.'][ringHits];if(ringHits>=3){game.flags.bellRung=true;modalKind='';$('modal').hidden=true;toast('The front doors are opening','GO BACK TO THE ENTRANCE HALL. LEAVE.');subtitle(game.pages.length===3?'Elsie. You can go home now.':'Whatever you are… let me leave.','Mara',6);keeper.active=true;keeper.room='foyer';keeper.state='chase';keeper.stateTime=0;keeper.travelTo=room;keeper.travelTimer=6;checkpoint();updateObjectVisibility();}}else{audio.play('wrong');ringCooldown=.4;$('ringMessage').textContent='Too soon, or too late. Breathe. Try again.';}}
+
+function startRun(isAttract=false,resume=false){if(!ready||hubEnded)return;transitionToken++;transitioning=false;$('fade').classList.remove('on');attract=isAttract;attractTime=0;attractStage=-1;mode='play';modalKind='';$('modal').hidden=true;$('letter').hidden=true;$('grip').hidden=true;$('titleScreen').hidden=true;$('supportPanel').hidden=true;$('hud').hidden=false;$('attractBanner').hidden=!isAttract;$('quickSettings').hidden=isAttract;game=resume&&saved?structuredClone(saved):freshGame();totalTime=game.duration||0;simTime=0;physicsAcc=0;grip=0;gripCooldown=5;hidden=null;holdProgress=0;keeper.active=!!game.items.key;keeper.state='dormant';keeper.stun=0;keeper.stateTime=0;keeper.travelTo=null;keeper.room='library';keeper.x=5.5;keeper.z=.5;keeper.group.visible=false;keeper.vx=keeper.vz=0;if(keeper.active){keeper.travelTo=game.room||'foyer';keeper.travelTimer=15;keeper.state='investigate';}setRoom(game.room||'foyer',game.spawn||[0,3.25]);player.yaw=Math.PI;player.group.rotation.y=Math.PI;keys.clear();pressed.clear();$('toast').hidden=true;$('subtitle').hidden=true;$('panicVeil').style.opacity=0;arrivalUntil=isAttract||hubSession?0:performance.now()+3900;$('arrival').hidden=isAttract||hubSession;if(!isAttract&&!hubSession){audio.init();checkpoint();if(resume)subtitle('The house remembers where I left off.','Mara',4);else setTimeout(()=>{if(mode==='play'&&!attract)subtitle('Mother said the house was empty. She said a great many things.','Mara',6);},3900);}updateHUD();}
+function showTitle(){transitionToken++;mode='title';modalKind='';attract=false;grip=0;hidden=null;transitioning=false;$('fade').classList.remove('on');for(const id of ['modal','letter','hud','context','grip','attractBanner','arrival','chaseLabel','subtitle','toast'])$(id).hidden=true;$('titleScreen').hidden=false;$('quickSettings').hidden=false;$('panicVeil').style.opacity=0;idleTime=performance.now();if(ready){keeper.active=false;keeper.group.visible=false;game=null;setRoom('foyer',[1.2,1.1]);player.yaw=-1.3;player.group.rotation.y=-1.3;player.moveSpeed=0;}updateContinue();focusUI(0);}
+function endGame(won){if(mode==='over')return;if(attract){toast('THE MINUTE AFTER','THE HOUSE WILL REMEMBER YOU');return;}mode='over';modalKind='ending';$('grip').hidden=true;$('context').hidden=true;$('chaseLabel').hidden=true;$('subtitle').hidden=true;grip=0;game.flags.escaped=won;if(won)audio.play('bell');else audio.play('wrong');const trueEnding=won&&game.pages.length===3;const title=won?(trueEnding?'The minute after':'Borrowed morning'):'The house keeps its time.';const text=won?(trueEnding?'Outside, the tower strikes midnight. Somewhere behind you, a little girl says thank you. For the first time in sixty-eight years, the Keeper lays down his hands.':'You do not look back. In the nursery window, a small hand rests against the glass. You never learned whose. The road is empty, and it is almost morning.'):'A cold hand. A soft click. The clock returns to eleven fifty-three. Somewhere in the house, your footsteps begin again.';
+ if(hubSession&&!hubReported){hubReported=true;AIHub.result({score:scoreGame(),stats:{memories:game.pages.length,hides:game.hides,catches:game.grabs,time:formatTime(totalTime)},awards:trueEnding?[{title:'The minute after',detail:'Heard every memory and freed the house'}]:[]});}
+ if(won&&!hubSession){saved=null;try{localStorage.removeItem(SAVE_KEY);}catch{}updateContinue();}
+ $('modal').hidden=false;$('modalPanel').innerHTML=panelHeader(won?'Dawn · an ending':'11:53 PM · Again',title)+'<p class="lead">'+text+'</p><div class="ending-stats"><div><strong>'+formatTime(totalTime)+'</strong><span>Time in the house</span></div><div><strong>'+game.pages.length+' / 3</strong><span>Memories recovered</span></div><div><strong>'+game.grabs+'</strong><span>Close encounters</span></div></div><p class="journal-bottom">'+(hubSession?'Your result is with AI Hub. Waiting for the other nights to end.':trueEnding?'The house has nothing left to ask of you.':won?'Three memories reveal why the Keeper could not leave.':'Your recovered items and memories are waiting at the last checkpoint.')+'</p>'+(hubSession?'':'<div class="panel-actions"><button class="btn secondary nav" data-action="title">Return to title</button><button class="btn nav" data-action="'+(won?'new':'retry')+'">'+(won?'Enter another night':'Try the last checkpoint')+' <span class="pad round">✕</span></button></div>');focusUI(1);}
+function formatTime(s){return Math.floor(s/60)+':'+Math.floor(s%60).toString().padStart(2,'0');}
+
+$('modalPanel').addEventListener('click',e=>{const b=e.target.closest('button[data-action]');if(!b)return;const a=b.dataset.action;if(a==='close')closeModal();else if(a==='settingsTab'){settingsTab=+b.dataset.page;renderSettings(settingsTab);}else if(a==='setting')adjustSetting(b.dataset.key);else if(a==='closeSettings')closeSettings();else if(a==='fullscreen'){const p=document.fullscreenElement?document.exitFullscreen():document.documentElement.requestFullscreen?.();p?.then(()=>{if(modalKind==='settings')renderSettings(uiIndex);}).catch(()=>toast('Fullscreen is unavailable in this window'));}else if(a==='how')openHow();else if(a==='aboutNext'){aboutPage=Math.min(3,aboutPage+1);renderAbout();}else if(a==='aboutPrev'){aboutPage=Math.max(0,aboutPage-1);renderAbout();}else if(a==='journalTab'){journalPage=+b.dataset.page;renderJournal();focusUI(journalPage);}else if(a==='dial'){const n=+b.dataset.dial;musicDials[n]=(musicDials[n]+1)%SYMBOLS.length;audio.tone(290+n*100,.1,'triangle',.1);renderMusic(n);}else if(a==='playMusic')playMusic();else if(a==='ring')ringBell();else if(a==='title')showTitle();else if(a==='new'){startRun();}else if(a==='retry')startRun(false,true);});
+$('beginButton').onclick=()=>startRun();$('continueButton').onclick=()=>startRun(false,true);$('settingsButton').onclick=openSettings;$('quickSettings').onclick=openSettings;$('howButton').onclick=openHow;$('aboutButton').onclick=openAbout;$('letterClose').onclick=closeLetter;$('journalButton').onclick=openJournal;$('retryButton').onclick=()=>location.reload();$('supportAboutButton').onclick=openAbout;
+$('interactButton').addEventListener('pointerdown',e=>{e.preventDefault();holdingPointer=true;interact();});window.addEventListener('pointerup',()=>holdingPointer=false);window.addEventListener('pointercancel',()=>holdingPointer=false);
+document.addEventListener('pointermove',e=>{if(Math.abs(e.movementX)+Math.abs(e.movementY)<.5)return;const b=e.target.closest('button.nav');if(b&&!b.disabled){const i=navButtons().indexOf(b);if(i>=0){uiIndex=i;document.querySelectorAll('.focused').forEach(e=>e.classList.remove('focused'));b.classList.add('focused');}}});
+
+function activity(event){idleTime=performance.now();if(attract){stopAttract();event?.preventDefault?.();event?.stopImmediatePropagation?.();return true;}return false;}
+window.addEventListener('pointerdown',e=>{if(activity(e))return;audio.init();},true);
+window.addEventListener('wheel',e=>activity(e),{passive:false});
+window.addEventListener('pointermove',e=>{if(Math.abs(e.movementX)+Math.abs(e.movementY)>.5)activity(e);},{passive:false});
+window.addEventListener('keydown',e=>{if(activity(e))return;trace('key',{code:e.code,repeat:e.repeat});audio.init();keys.add(e.code);$('touchNotice').hidden=true;if(e.repeat)return;const menu=!!modalKind||mode==='title';
+ if(e.code==='Escape'){e.preventDefault();if(modalKind==='settings')closeSettings();else if(modalKind&&modalKind!=='ending')closeModal();else if(mode!=='over')openSettings();return;}
+ if(e.code==='Tab'||e.code==='KeyJ'){e.preventDefault();if(modalKind==='journal')closeModal();else if(!modalKind&&mode==='play')openJournal();else if(menu&&e.code==='Tab')moveUI(e.shiftKey?-1:1);return;}
+ if(menu){if(modalKind&&(e.code==='PageDown'||e.code==='PageUp')){e.preventDefault();const panel=modalKind==='letter'?$('letter').querySelector('.panel'):$('modalPanel');panel.scrollTop+=(e.code==='PageDown'?1:-1)*panel.clientHeight*.75;return;}if(['ArrowUp','KeyW','ArrowDown','KeyS','ArrowLeft','KeyA','ArrowRight','KeyD'].includes(e.code)){e.preventDefault();const dir=['ArrowUp','KeyW','ArrowLeft','KeyA'].includes(e.code)?-1:1;const b=navButtons()[uiIndex];if(modalKind==='settings'&&b?.dataset.action==='setting'&&['ArrowLeft','ArrowRight','KeyA','KeyD'].includes(e.code)){adjustSetting(b.dataset.key,dir);}else moveUI(dir);}else if(['Enter','Space','KeyE'].includes(e.code)){e.preventDefault();if(modalKind==='bell'&&e.code==='KeyE')ringBell();else activateUI();}else if(['Backspace','KeyB'].includes(e.code)){e.preventDefault();if(modalKind)closeModal();}return;}
+ if(['KeyE','Space','Enter'].includes(e.code)){e.preventDefault();interact();}if(e.code==='KeyQ'&&!hubWaiting&&!hubEnded)throwBird();if(e.code.startsWith('Arrow'))e.preventDefault();
+});
+window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();holdingPointer=false;});
+window.addEventListener('gamepadconnected',()=>{padConnected=true;$('touchNotice').hidden=true;toast('Controller connected','LEFT STICK TO MOVE · ✕ TO INTERACT');});
+window.addEventListener('gamepaddisconnected',()=>{padConnected=false;keys.clear();toast('Controller disconnected','KEYBOARD: WASD · E · SHIFT · C · Q · TAB');});
+function pollInput(dt){const pads=navigator.getGamepads?.()||[];let pad=null;for(const p of pads)if(p?.connected){pad=p;break;}let ax=0,ay=0,run=false,sneak=false,fire=false,lx=0,ly=0;
+ if(pad){padConnected=true;const b=pad.buttons.map(x=>x.pressed||x.value>.5),edge=n=>b[n]&&!lastPadButtons[n];const rawX=pad.axes[0]||0,rawY=pad.axes[1]||0;const length=Math.hypot(rawX,rawY);if(length>.17){const scale=(Math.min(1,length)-.17)/(.83*length);ax=rawX*scale;ay=rawY*scale;}if(b[14])ax=-1;if(b[15])ax=1;if(b[12])ay=-1;if(b[13])ay=1;
+ const active=b.some(Boolean)||Math.abs(ax)>.25||Math.abs(ay)>.25||Math.abs(pad.axes[2]||0)>.3||Math.abs(pad.axes[3]||0)>.3;
+ if(active){idleTime=performance.now();$('touchNotice').hidden=true;if(attract){lastPadButtons=b;stopAttract();return;}}
+ if(edge(9)&&!b[8]&&mode!=='over')openSettings();else if(modalKind||mode==='title'){const dir=b[12]||ay<-.5?'up':b[13]||ay>.5?'down':b[14]||ax<-.5?'left':b[15]||ax>.5?'right':'';padRepeat-=dt;if(dir&&(padDir!==dir||padRepeat<=0)){const sign=dir==='up'||dir==='left'?-1:1;const target=navButtons()[uiIndex];if(modalKind==='settings'&&target?.dataset.action==='setting'&&(dir==='left'||dir==='right'))adjustSetting(target.dataset.key,sign);else moveUI(sign);padRepeat=padDir===dir?.19:.34;}padDir=dir;if(edge(0))activateUI();if(edge(1)&&modalKind)closeModal();if(edge(3)&&modalKind==='journal')closeModal();if(modalKind){const scrollY=pad.axes[3]||0;if(Math.abs(scrollY)>.3)(modalKind==='letter'?$('letter').querySelector('.panel'):$('modalPanel')).scrollTop+=scrollY*dt*450;}}
+ else if(mode==='play'){if(edge(0))interact();if(edge(5)&&!hubWaiting&&!hubEnded)throwBird();if(edge(3))openJournal();if(edge(1)&&hidden)leaveHide();}
+ run=!!b[7];sneak=!!b[6];fire=!!b[0];lx=pad.axes[2]||0;ly=pad.axes[3]||0;if(settings.invertX){ax=-ax;lx=-lx;}if(settings.invertY){ay=-ay;ly=-ly;}lastPadButtons=b;
+ }else{padConnected=false;lastPadButtons=[];}
+ const keyX=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),keyY=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0);
+ input={x:clamp(ax+keyX,-1,1),y:clamp(ay+keyY,-1,1),run:run||keys.has('ShiftLeft')||keys.has('ShiftRight'),sneak:sneak||keys.has('KeyC')||keys.has('ControlLeft')||keys.has('ControlRight'),fire:fire||keys.has('KeyE')||keys.has('Space')||keys.has('Enter')||holdingPointer,lookX:lx,lookY:ly};
+}
+
+// The attract performance deliberately uses the real puzzles, props and endings.
+let tourEvents=new Set();
+function atEvent(id,condition,fn){if(condition&&!tourEvents.has(id)){tourEvents.add(id);fn();}}
+function tourWalk(x,z,dt,speed=2.4){const p=player.group.position,d=Math.hypot(x-p.x,z-p.z);if(d>.12){const amount=Math.min(d,speed*dt),dx=(x-p.x)/d,dz=(z-p.z)/d;teleport(p.x+dx*amount,p.z+dz*amount);player.moveSpeed=speed;player.yaw=Math.atan2(dx,dz);player.walk+=dt*speed*4;}else player.moveSpeed=0;}
+function tourKeeper(x,z,dt,speed=1.8){const d=Math.hypot(x-keeper.x,z-keeper.z);if(d>.1){keeper.vx=(x-keeper.x)/d*speed;keeper.vz=(z-keeper.z)/d*speed;keeper.x+=keeper.vx*dt;keeper.z+=keeper.vz*dt;keeper.yaw=Math.atan2(keeper.vx,keeper.vz);keeper.walk+=dt*5;}keeper.group.position.set(keeper.x,0,keeper.z);keeperBody.setTranslation({x:keeper.x,y:.95,z:keeper.z},true);}
+function attractUpdate(dt){attractTime+=dt;totalTime+=dt;simTime+=dt;const t=attractTime;const st=t<12?0:t<26?1:t<40?2:t<53?3:t<67?4:t<83?5:6;
+ if(st!==attractStage){attractStage=st;modalKind='';$('modal').hidden=true;$('letter').hidden=true;hidden=null;player.group.visible=true;if(st===0){tourEvents=new Set();subtitle('Some houses keep their dead. This one keeps the time.','',7);}if(st===1){setRoom('library',[5.2,.5]);subtitle('A tune she would never sing after dark.','',5);}if(st===2){setRoom('library',[-1.5,1.7]);keeper.active=true;keeper.room='library';keeper.x=5.5;keeper.z=.4;keeper.state='chase';keeper.group.visible=true;subtitle('Run only when you must. He follows the sound.','',5);}if(st===3){keeper.room='library';keeper.group.visible=false;setRoom('nursery',[-5.2,.5]);subtitle('The nursery belonged to someone the family forgot.','',5);}if(st===4){keeper.room='nursery';setRoom('conservatory',[0,3.5]);subtitle('Every useful thing in this house makes a noise.','',5);}if(st===5){keeper.room='library';setRoom('belfry',[0,3.5]);subtitle('Return what was taken. Ring three times.','',5);}if(st===6){setRoom('foyer',[0,-3.6]);keeper.active=true;keeper.room='foyer';keeper.x=4;keeper.z=-3.5;keeper.state='chase';keeper.group.visible=true;subtitle('The minute after is waiting outside.','',6);}}
+ input={x:0,y:0,run:false,sneak:false,fire:false,lookX:0,lookY:0};game.composure=100;game.stamina=100;
+ if(st===0){tourWalk(-3.9,2.9,dt);atEvent('letter',t>5,()=>readPage('letter'));}
+ if(st===1){if(t<18)tourWalk(-.6,.8,dt);atEvent('music-open',t>18,()=>openMusic());atEvent('dial1',t>20,()=>{musicDials[0]=3;renderMusic(0);});atEvent('dial2',t>21.5,()=>{musicDials[1]=1;renderMusic(1);});atEvent('dial3',t>23,()=>{musicDials[2]=4;renderMusic(2);});atEvent('play',t>24,()=>playMusic());}
+ if(st===2){if(t<31){tourWalk(-4,2,dt,3.7);tourKeeper(-3.5,2,dt,1.3);}atEvent('bird',t>28,()=>{throwBird();});atEvent('fall',t>30,()=>topple(ROOM_DEFS.library.objects.find(o=>o.type==='barricade')));atEvent('hide',t>32,()=>{hidden=ROOM_DEFS.library.objects.find(o=>o.type==='hide');player.group.visible=false;game.hides++;keeper.state='search';subtitle('Break his sight. Hide. Hold your breath.','',5);});if(t>32){keeper.state='search';tourKeeper(1.8,2.5,dt,1);}}
+ if(st===3){tourWalk(1.4,-1.45,dt);atEvent('clapper',t>46,()=>{game.items.clapper=true;audio.play('pickup');toast('Silver clapper recovered');updateObjectVisibility();});atEvent('portrait',t>49,()=>readPage('portrait'));}
+ if(st===4){tourWalk(3,1,dt);if(t>57&&t<62){holdProgress=Math.min(4,t-57);if(roomProps.wheel)roomProps.wheel.rotation.z+=dt*2;if(roomProps.water)roomProps.water.position.y=.78-holdProgress*.1;}$('holdbar').style.width=holdProgress/4*100+'%';atEvent('gear',t>62,()=>drained());atEvent('garden',t>63.5,()=>readPage('garden'));}
+ if(st===5){tourWalk(0,.2,dt);atEvent('bell-open',t>70,()=>openBell());for(let n=0;n<3;n++)atEvent('bell'+n,t>73+n*3,()=>{ringPhase=.7;ringCooldown=0;ringBell();});}
+ if(st===6){if(t<90){tourWalk(0,4.3,dt,3.4);tourKeeper(0,3,dt,1.5);}atEvent('dawn',t>91,()=>{keeper.state='stunned';toast('THE MINUTE AFTER','THREE MEMORIES. ONE HOUSE FINALLY AT REST.');subtitle('Elsie. You can go home now.','Mara',6);});}
+ world.timestep=dt;world.step();for(const b of decoys){b.age+=dt;const p=b.body.translation();b.group.position.set(p.x,p.y,p.z);}for(const p of physicsProps){const v=p.body.translation(),q=p.body.rotation();p.group.position.set(v.x,v.y,v.z);p.group.quaternion.set(q.x,q.y,q.z,q.w);}if(roomProps.fall){const f=roomProps.fall;f.time=Math.min(1.2,f.time+dt);if(f.object)f.object.rotation.x=Math.min(1.35,f.time*2);}updateNearby();updateHUD(st===2||st===6,st===2?4:100);if(t>98){startRun(true);}}
+function stopAttract(){if(!attract)return;keys.clear();pressed.clear();holdingPointer=false;showTitle();}
+
+let cameraTarget=null;
+function resize(){if(!renderer)return;const w=innerWidth,h=innerHeight,a=w/h;renderer.setSize(w,h);const v=a<.85?21:a<1.3?16:14.3;camera.left=-v*a/2;camera.right=v*a/2;camera.top=v/2;camera.bottom=-v/2;camera.updateProjectionMatrix();}
+window.addEventListener('resize',resize);
+function sceneryUpdate(dt,time){for(let n=0;n<flames.length;n++){const f=flames[n];f.scale.y=1.7+Math.sin(time*8+n)*.18;f.rotation.z=Math.sin(time*5+n)*.08;}for(let n=0;n<candleLights.length;n++)candleLights[n].intensity=1.65+Math.sin(time*6+n)*.16;for(let n=0;n<pendulums.length;n++)pendulums[n].rotation.z=Math.sin(time*1.2+n)*.12;if(dust){dust.rotation.y=Math.sin(time*.03)*.02;dust.position.y=Math.sin(time*.15)*.12;}if(room==='belfry')for(let n=0;n<5;n++)if(roomProps['gear'+n])roomProps['gear'+n].rotation.z+=dt*(n%2?-.12:.12)*(game?.flags.bellRung?3:1);if(roomProps.bell&&game?.flags.bellRung)roomProps.bell.rotation.z=Math.sin(time*2)*.08;
+ const p=player.group.position;let tx=mode==='title'?-3.5:p.x*.19,tz=mode==='title'?.3:p.z*.13;const look=modalKind||settings.reducedMotion?0:.65;tx+=input.lookX*look;tz+=input.lookY*look;cameraTarget.x=lerp(cameraTarget.x,tx,Math.min(1,dt*2));cameraTarget.z=lerp(cameraTarget.z,tz,Math.min(1,dt*2));const sway=settings.reducedMotion?0:Math.sin(time*.13)*.06;const shakeVal=settings.reducedMotion?0:shake*.13;shake=Math.max(0,shake-dt*.65);camera.position.set(cameraTarget.x+12+sway+(Math.random()-.5)*shakeVal,14+(Math.random()-.5)*shakeVal,cameraTarget.z+18);camera.lookAt(cameraTarget.x,.8,cameraTarget.z);}
+function renderFrame(now){if(!ready)return;const dt=Math.min(.06,(now-lastFrame)/1000||.016);lastFrame=now;try{if(hubWaiting&&AIHub.time()>=0){hubWaiting=false;$('hubReady').hidden=true;audio.init();}
+ if(attract)attractUpdate(dt);else if(mode==='play'&&!modalKind&&!transitioning&&!hubWaiting&&!hubEnded)gameUpdate(dt);
+ if(modalKind==='bell'){ringPhase=(ringPhase+dt*.36)%1;ringCooldown=Math.max(0,ringCooldown-dt);if($('ringNeedle'))$('ringNeedle').style.left=ringPhase*100+'%';}
+ if(mode==='title'&&!modalKind&&now-idleTime>=10000&&!hubSession)startRun(true);
+ if(now>toastUntil)$('toast').hidden=true;if(now>subtitleUntil)$('subtitle').hidden=true;if(arrivalUntil&&now>arrivalUntil){$('arrival').hidden=true;arrivalUntil=0;}
+ if(!modalKind){animateActor(player,dt);animateActor(keeper,dt,true);}sceneryUpdate(dt,now/1000);audio.update(now/1000);renderer.render(scene,camera);pressed.clear();
+ }catch(error){fatal(error);}}
+function menuOnlyFrame(now){if(!failed)return;pressed.clear();requestAnimationFrame(menuOnlyFrame);}
+function fatal(error){if(failed)return;failed=true;if(navigator.gpu)console.error('[Deadtime Stories]',error);else console.warn('[Deadtime Stories] WebGPU required; displaying support screen.');document.body.classList.add('gpu-unavailable');requestAnimationFrame(menuOnlyFrame);ready=false;if(renderer)renderer.setAnimationLoop(null);$('engineStatus').textContent='The house could not open.';$('loadingLine').hidden=true;$('supportPanel').hidden=false;$('supportMessage').textContent=(!navigator.gpu?'This browser does not expose WebGPU. Use a WebGPU-enabled browser on localhost or HTTPS.':'WebGPU could not start. Check browser GPU support and the network connection, then try again. Details: '+(error?.message||'unknown'));$('beginButton').disabled=true;$('continueButton').disabled=true;for(const id of ['hud','context','grip','attractBanner','arrival'])$(id).hidden=true;if(hubSession||AIHub.active)AIHub.fail('WebGPU could not initialize: '+(error?.message||'unknown'));}
+
+const connectPromise=AIHub.active?AIHub.connect({mode:'parallel',seats:[1,4]}):Promise.resolve(null);
+AIHub.probe(()=>({scene:mode==='title'?(modalKind?'menu':'title'):hubWaiting?'ready':mode==='over'?'over':'play',menu:modalKind==='settings',world:simTime,input:{x:input.x,y:input.y,fire:input.fire}}));
+AIHub.on('start',()=>{audio.init();});
+AIHub.on('time-up',()=>{if(hubSession&&!hubReported&&game)endGame(false);});
+AIHub.on('end',()=>{hubEnded=true;audio.muted=true;audio.apply();keys.clear();pressed.clear();if(game&&mode!=='over'){mode='over';$('hubReady').hidden=false;$('hubReadyMessage').textContent='The session has ended. Your night is with the hub.';}});
+
+async function init(){try{if(!navigator.gpu)throw new Error('WebGPU is not available in this browser.');$('engineStatus').textContent='Lighting the rooms…';const modules=await Promise.all([import('three/webgpu'),import('three/tsl'),import('https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs')]);[THREE,TSL]=modules;RAPIER=modules[2].default;await RAPIER.init();
+ const adapter=await navigator.gpu.requestAdapter({powerPreference:'high-performance'});if(!adapter)throw new Error('No WebGPU adapter is available.');const device=await adapter.requestDevice();renderer=new THREE.WebGPURenderer({canvas:$('world'),antialias:true,alpha:false,device});renderer._getFallback=null;device.addEventListener('uncapturederror',e=>fatal(e.error)); // r180: explicitly disable its automatic WebGL backend.
+ await renderer.init();if(!renderer.backend.isWebGPUBackend)throw new Error('A WebGPU backend is required.');device.lost.then(info=>{fatal(new Error('The graphics device was lost. Reload to resume your checkpoint.'));});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.14;
+ scene=new THREE.Scene();scene.background=new THREE.Color(0x101b1e);scene.fog=new THREE.FogExp2(0x101b1e,.018);camera=new THREE.OrthographicCamera(-10,10,7,-7,.1,120);cameraTarget=new THREE.Vector3(-3.5,0,.3);
+ inkMat=new THREE.MeshBasicNodeMaterial({color:0x0b1b1c,side:THREE.BackSide});contactMat=new THREE.MeshBasicNodeMaterial({color:0x0b1b19,transparent:true,opacity:.3,depthWrite:false});world=new RAPIER.World({x:0,y:-9.81,z:0});
+ player=buildActor();keeper=buildActor(true);scene.add(player.group,keeper.group);playerBody=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0,.8,3));playerCollider=world.createCollider(RAPIER.ColliderDesc.capsule(.43,.27).setFriction(0),playerBody);keeperBody=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(30,.95,30));keeperCollider=world.createCollider(RAPIER.ColliderDesc.capsule(.55,.36),keeperBody);pc=world.createCharacterController(.035);kc=world.createCharacterController(.035);pc.enableAutostep(.18,.2,false);pc.enableSnapToGround(.15);kc.enableSnapToGround(.15);keeper.group.visible=false;setRoom('foyer',[1.2,1.1]);player.group.rotation.y=-1.3;resize();sceneryUpdate(1,performance.now()/1000);await renderer.compileAsync(scene,camera);await renderer.renderAsync(scene,camera);
+ ready=true;lastFrame=performance.now();idleTime=lastFrame;$('engineStatus').textContent='Left stick / WASD · ✕ / E to enter';$('loadingLine').hidden=true;$('beginButton').disabled=false;updateContinue();focusUI(0);renderer.setAnimationLoop(renderFrame);
+ const info=await connectPromise;if(info){hubSession=true;hubWaiting=true;startRun();$('hubReady').hidden=false;$('hubReadyMessage').textContent=info.splash?'Waiting for the shared countdown…':'Press any key or controller button when you are ready.';if(info.splash)AIHub.ready();else{const makeReady=()=>{AIHub.ready();$('hubReadyMessage').textContent='Waiting for the other players…';window.removeEventListener('keydown',makeReady);window.removeEventListener('pointerdown',makeReady);};window.addEventListener('keydown',makeReady);window.addEventListener('pointerdown',makeReady);const padReady=setInterval(()=>{if([...navigator.getGamepads()].some(p=>p?.buttons.some(b=>b.pressed))){makeReady();clearInterval(padReady);}if(hubEnded)clearInterval(padReady);},150);}}else if(new URLSearchParams(location.search).has('tour'))startRun(true);
+ }catch(error){fatal(error);}}
+const touchOnly=matchMedia('(pointer: coarse)').matches||(navigator.maxTouchPoints>0&&!matchMedia('(hover: hover) and (pointer: fine)').matches);if(touchOnly){document.body.classList.add('touch-device');$('touchNotice').hidden=false;}
+// Read-only state and schema form the inspection surface for designers and QA.
+window.Deadtime={get ready(){return ready;},get state(){return {mode,room,modal:modalKind,attract,attractTime,simTime,position:player?{x:player.group.position.x,z:player.group.position.z}:null,keeper:keeper?{room:keeper.room,state:keeper.state,x:keeper.x,z:keeper.z,active:keeper.active,seenHide:keeper.seenHide,target:keeper.target}:null,nearby:nearby?.id||null,hidden:hidden?.id||null,grip,game:game?structuredClone(game):null,settings:{...settings},backend:renderer?.backend?.isWebGPUBackend?'WebGPU':'unavailable'};},rooms:ROOM_DEFS};
+if(new URLSearchParams(location.search).get('qa')==='1')window.Deadtime.qa={get traces(){return traces;},start:(demo=false,resume=false)=>startRun(demo,resume),teleport,room:(id,spawn)=>setRoom(id,spawn),interact,readPage,solveMusic:()=>{musicDials=[3,1,4];playMusic();},wakeKeeper,enemy:options=>{Object.assign(keeper,options);keeperBody.setTranslation({x:keeper.x,y:.95,z:keeper.z},true);keeper.group.position.set(keeper.x,0,keeper.z);keeper.group.visible=keeper.active&&keeper.room===room;},advance:seconds=>{for(let t=0;t<seconds;t+=1/60){if(attract)attractUpdate(1/60);else if(mode==='play'&&!modalKind)gameUpdate(1/60);}},ring:()=>{ringPhase=.7;ringCooldown=0;ringBell();},bird:throwBird,hold:value=>{holdingPointer=value;},catch:caught,finish:()=>endGame(true),set:(key,value)=>{game[key]=value;},modal:closeModal,stepTour:t=>{attractTime=t;attractStage=-1;attractUpdate(.016);}};
+// Sampling input independently keeps menus responsive during GPU compilation.
+setInterval(()=>{if(ready||failed)pollInput(1/60);},16);
+init();
+
+</script>
+</body>
+</html>

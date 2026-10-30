@@ -1,0 +1,1 @@
+I’m exercising the full game loop and checking settings navigation.

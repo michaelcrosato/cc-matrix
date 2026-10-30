@@ -1,0 +1,13 @@
+Created [**Popultide — single HTML game**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-high__Populous__tech-v3__art-cel__ani-free__aud-free__mp-ai-hub__test-eff__on/work/Popultide-Populous-gpt-6.1-sol-high-20261029-1547.html).
+
+Includes terrain sculpting, settlement growth, six powers, rival AI, shrine pilgrimages, tides, victory/defeat, save/resume, controller menus, and looping attract mode. Serve through localhost or HTTPS; CDN dependencies require internet.
+
+**Source Information:** 2026-10-29 16:05, America/Vancouver. Inspired by **Populous**. Title randomly selected from 50 candidates. Three.js **r180**, **WebGPU only**, Rapier **0.19.3**, Gamepad API, and Web Audio. Procedural cel-shaded art; procedural character/environment animation and physics effects. Original synthesized music and effects; no voice. Online: AI Hub Protocol v1, client 1.3.0, **1–4-player parallel competition**. Environment: Codex CLI headless, Linux, browser unknown. Model: OpenAI **gpt-6.1-sol**, high reasoning. Session approximately **17 minutes**; API cost and token counts unknown.
+
+**Testing Feedback:** Five UI defects caught and corrected; zero game-breaking product defects. A separate headless GPU configuration blocker was corrected. Lightweight testing covered every power through victory, save/resume, attract mode, emulated controller input, and official AI Hub checks at one, two, and four players—including departures. Phone, tablet, desktop, and ultrawide checks found no horizontal overflow or JavaScript errors. WebKit verified the WebGPU requirement screen and Settings; gameplay requires WebGPU. Most helpful: accelerated progression to three shrines and 79 followers. Least helpful: syntax-only checks.
+
+**Engine Feedback:** Three.js’s scene graph and toon materials worked particularly well. The initial obstacle was the headless GPU configuration. The main custom work was coupling editable terrain, settlements, pathfinding, and faith. Coordinating asynchronous rendering initialization with physics updates was hardest. I would overhaul implicit renderer fallback and improve WebGPU initialization diagnostics.
+
+**Prompt Feedback:** The controller-first direction and complete gameplay-loop requirement were useful. Multiplayer scope was ambiguous; I chose supported competitive parallel sessions. Combining all systems with readable controls in one HTML was hardest. The additional test I’d want is a full round using physical DualSense controllers across mixed hardware, including real Safari.
+
+These notes are also included in the game’s About screen and opening HTML comment.
