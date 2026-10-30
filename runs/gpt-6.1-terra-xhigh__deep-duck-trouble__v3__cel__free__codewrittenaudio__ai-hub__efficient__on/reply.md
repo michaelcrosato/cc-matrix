@@ -1,0 +1,13 @@
+Created [The Treasure of Tangle Isle](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v10__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/The Treasure of Tangle Isle-Deep Duck Trouble Starring Donald Duck-gpt-6.1-terra-xhigh-20261029-0931.html>). The title was selected randomly from 50 candidates. Development files are in the matching subfolder.
+
+The demo includes an island course, kickable crates, enemies, moonstones, checkpoints, a crown encounter, attract mode, local two-controller play, and [AI Hub](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) side-by-side sessions. It requires WebGPU and an internet connection to load its CDN dependencies.
+
+**Verification:** The two-player AI Hub protocol harness passed, and a separate emulated gamepad check confirmed stick, Square, and Options input. Two critical issues were identified and fixed: a JavaScript syntax error and insufficient jump height for a moonstone platform. The syntax check and course reachability review were the most helpful checks; the least helpful was an initial timed input check that coincided with attract mode.
+
+Headless Chrome captured a blank WebGPU scene, as it also did for an independent minimal WebGPU test. **Visual rendering and a complete gameplay playthrough remain unverified** on a WebGPU-capable device.
+
+**Source information:** 2026-10-29 09:31; source: *Deep Duck Trouble Starring Donald Duck*. The game uses Three.js r180 WebGPU, Rapier 0.19.3, Gamepad API, Web Audio API, and AI Hub Session Protocol 1.3.0. Art is procedural cel-shaded 3D; animation uses procedural transforms and physics; music, effects, and gibberish voices are code-generated. The environment was Codex CLI on headless Linux with Chrome; model: OpenAI gpt-6.1-terra, xhigh. API cost, token usage, and session time: unknown.
+
+**Engine feedback:** Three.js made the colorful scene straightforward to assemble. WebGPU availability and headless diagnostics were the hardest parts; the blank capture was initially misleading. Platforming, interactions, and level logic had to be built for the game. No engine feature was selected for removal; clearer WebGPU diagnostics would help.
+
+**Prompt feedback:** The source and controller-first direction gave a clear creative target. Standalone multiplayer needed interpretation, and fitting the gameplay slice and multiplayer into one HTML file was the hardest part. The most useful additional test would be a full controller playthrough on a WebGPU-capable device.

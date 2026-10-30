@@ -1,0 +1,13 @@
+Created **[Riftfang: The Lost Seeds](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v5__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Riftfang-The-Lost-Seeds-Turok-2-Seeds-of-Evil-gpt-6.1-terra-xhigh-20261029-0930.html>)**, a playable lost-world hunt with three seed shrines, a sealed gate, a Warden encounter, two weapons, dash, pickups, synthesized audio, controller settings, and attract mode. The HTML loads its engine dependencies from CDNs and requires WebGPU.
+
+**Scope limit:** This is a compact playable slice, not a complete designer-facing game engine. AI Hub multiplayer is side-by-side scoring; standalone score comparison works between same-origin browser tabs, not remote standalone devices.
+
+The [AI Hub session harness](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) passed one- and two-player checks, including an emulated controller. Headless gameplay checks covered seed collection, gate opening, an enemy defeat, settings, the end screen, and attract-mode entry and exit. A physical DualSense and a full human playthrough remain untested.
+
+**Source information:** Turok 2: Seeds of Evil; 2026-10-29 09:30. Three.js r180 WebGPU, Rapier 0.19.3, Web Audio, Gamepad API, AI Hub client 1.3.0, and BroadcastChannel. Art is procedurally built and cel-shaded; animation uses procedural transforms; music, effects, and gibberish voice are synthesized. Testing used headless Chrome 154 on Linux with Vulkan/SwiftShader, with no FPS target. Environment: Codex CLI, headless Linux; browser was unknown at authoring. Model: OpenAI gpt-6.1-terra, xhigh reasoning. Token and cost estimates: unknown.
+
+**Testing feedback:** Five issues were caught and corrected, one of them critical: the renderer could otherwise silently fall back from WebGPU. The most helpful test was the rendered browser interaction and hub harness; the least helpful was the initial headless graphics run with an incompatible ANGLE configuration.
+
+**Engine feedback:** Three.js made procedural world building flexible. I initially chose a headless graphics configuration that produced blank WebGPU captures. The most important custom work was the game loop, AI, collision integration, and controller UX. WebGPU availability made testing the hardest part; I would overhaul implicit renderer fallback into an explicit capability decision with clearer errors.
+
+**Prompt feedback:** The creative constraints and controller-first direction were useful. The boundary between a complete engine and a vertical slice was ambiguous, and integrating the systems into a coherent game was the hardest part. The most valuable additional test would be a long physical-controller and multiplayer playthrough.

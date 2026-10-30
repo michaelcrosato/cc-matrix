@@ -1,0 +1,11 @@
+Created [Gilded Whacks II](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v16__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Gilded Whacks II-Golden Axe II-gpt-6.1-terra-xhigh-20261029-0935.html>), a three-chapter arcade fantasy demo with melee, jumping attacks, dodges, magic, healing flasks, a boss, local two-player co-op, and an attract mode. AI Hub sessions use parallel score competition for up to four players.
+
+The file loads its engine libraries from a CDN and requires a WebGPU-capable browser. The campaign progression was tested with accelerated combat; a full human playthrough, physical DualSense, and multi-device session remain untested.
+
+**Source information:** Golden Axe II; 2026-10-29 09:35. The game uses Three.js r180 WebGPU, Rapier 0.19.3, Web Audio, the Gamepad API, and AI Hub Session Protocol v1. Its art is original geometric cel shading; animation uses procedural articulated characters and physics-driven fragments. Music and effects are synthesized in code; there is no voice. Testing used headless Chrome 154 on Linux. Environment: Codex CLI, headless. Model: OpenAI gpt-6.1-terra, reasoning effort xhigh. API cost, token count, and session time: unknown.
+
+**Testing feedback:** Testing caught one issue: the initial headless Chrome graphics configuration produced a blank canvas; Vulkan/SwiftShader corrected the test environment. No game-breaking issue was identified in the checks. The most helpful test was the two-player AI Hub harness, which passed. The least helpful was the initial blank-canvas screenshot. A simulated gamepad and the touch-only notice were also checked.
+
+**Engine feedback:** Three.js made scene composition approachable. I initially chose the wrong headless GPU flags. The most important custom work was the combat, animation, and campaign flow; WebGPU initialization and headless compatibility were the hardest parts. I would overhaul the implicit renderer fallback for WebGPU-only projects and improve initialization diagnostics.
+
+**Prompt feedback:** The controller-first and attract-mode requirements were especially useful. “Feature-complete” left room for interpretation, and fitting combat, campaign, and multiplayer into one portable file was the hardest part. The most valuable additional test would be a complete playthrough with a physical DualSense.

@@ -31,7 +31,7 @@ Create a feature-complete demo inspired by {{source}}. Capture what makes the so
 
 Attract Mode: After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game. 
 
-Multiplayer: Include the option to be able to play the game demo up to 4-player multiplayer.
+Multiplayer: Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.
 
 Narrative tone: Use a writing style similar to the {{source}}.
 

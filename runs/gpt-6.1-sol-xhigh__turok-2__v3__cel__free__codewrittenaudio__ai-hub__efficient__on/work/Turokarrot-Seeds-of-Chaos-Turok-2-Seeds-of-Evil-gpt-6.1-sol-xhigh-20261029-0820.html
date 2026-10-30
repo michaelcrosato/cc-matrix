@@ -1,0 +1,1004 @@
+<!doctype html>
+<!--
+SOURCE INFORMATION
+Date: 2026-10-29 08:58 (America/Vancouver)
+Source inspiration: Turok 2: Seeds of Evil. Original spiritual-successor demo; no source-game assets or dialogue used.
+Game: Turokarrot: Seeds of Chaos. Selected by Node.js crypto.randomInt from 50 original title candidates (index 24).
+Tech: Three.js 0.180.0 (r180), WebGPURenderer / WebGPU only, MeshToonNodeMaterial; Rapier 3D compat 0.19.3; browser Gamepad API; vanilla JavaScript, HTML and CSS. PeerJS 1.5.5; AI Hub Session Protocol v1, session client 1.3.0.
+Art direction: original procedural cel-shaded jungle ruins, four-band toon lighting, dark silhouette shells, angular creatures, warm stone, jade water and ember accents. All 3D geometry generated in code.
+Animation: procedural hierarchical joint rigs, gait cycles, wing flaps, attack telegraphs, weapon recoil, camera motion, shader-independent world animation, Rapier dynamic fragments.
+Audio: code-written adaptive pentatonic music, synthesized percussion, oscillator/noise sound effects, procedural gibberish voice acting with written subtitles; Web Audio API. No recorded audio.
+Online: 1–4 player host-authoritative co-op. AI Hub transport inside hub sessions; PeerJS/WebRTC room codes standalone. Shared enemies, wards, pickups, progression and endings; local player prediction and remote interpolation. No chat or voice transmission.
+Testing parameters: efficient, lightweight browser smoke tests; static syntax checks; focused gameplay and protocol checks. 26 focused gameplay checks passed. Official AI Hub harness: 97 checks passed across 4-player, 3-player, host-leave and dedicated-server scenarios with 150 ms latency, 50 ms jitter and 5% unreliable-packet loss. Standalone PeerJS/WebRTC: 8 checks passed with two browser peers using the public signaling broker. Rendering was checked separately; logic/protocol tests disabled drawing after initialization for efficient software-GPU testing. Physical PS5 controller unknown. Cross-device NAT traversal unknown.
+Environment: Codex CLI (headless); Linux (Ubuntu / WSL2); Google Chrome 154.0.8037.57 via Playwright 1.56.1, Xvfb and SwiftShader Vulkan WebGPU.
+Model: OpenAI, gpt-6.1-sol, reasoning effort xhigh.
+Usage: estimated API cost unknown; total tokens unknown; session time approximately 40 minutes (estimate).
+
+TESTING FEEDBACK
+Issue count: 5 implementation issues found during testing and review, and fixed (waterfall dimensions, WebGPU-only fallback guard, asynchronous pointer-lock rejection handling, the standalone binary-message handshake, and shared weapon-unlock propagation). Critical/game-breaking count: 1 (failed co-op joining). Additional review improved boss telegraphs, surface breathing and replay cleanup.
+Most helpful test: the two-browser standalone co-op smoke test exposed a handshake failure that the hub adapter did not exercise.
+Least helpful test: syntax-only checks; they could not reveal visual, gameplay or transport defects.
+
+ENGINE FEEDBACK
+Liked most: Three.js's scene graph and node-based toon materials make procedural art straightforward; Rapier supplies useful character stepping and collision queries.
+Got stuck or guessed wrong: the Rapier 0.19.3 package uses rapier.mjs, not the older rapier.es.js filename; package metadata resolved this before integration. PeerJS default binary serialization failed the standalone welcome handshake; explicit JSON serialization passed the two-peer test. Headless WebGPU screenshots also needed an Xvfb/Vulkan presentation setup; a minimal raw-WebGPU clear isolated that test-environment problem.
+Most important custom system: the expedition's host-authoritative game-state layer, progression and controller-driven interface.
+Hardest part: coordinating predicted player movement, physics, and a synchronized world through a single HTML release.
+Remove or overhaul: automatic renderer fallback for applications that explicitly require WebGPU.
+One change: an explicit WebGPU-only renderer option with a stable initialization failure contract.
+
+PROMPT FEEDBACK
+Liked most: a clear artistic identity, complete-demo scope, and controller-first requirements.
+Confusing: the scope of "all features" is open-ended; this demo defines its mechanics through the controls, field atlas and complete expedition.
+Hardest: delivering traversal, distinct combat, narrative, standalone networking and hub integration as one cohesive single-file game.
+One additional test: a four-person expedition on physical DualSense controllers across separate networks, with latency and a mid-fight disconnect.
+
+-->
+<html lang="en"><head><meta charset="utf-8">
+<script>/*! aihub-session 1.3.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.3.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#172d2c">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="co-op">
+<meta name="hub:session-minutes" content="8">
+<meta name="hub:session-goal" content="Break three seals. Defeat the Rootbound. Escape together.">
+<meta name="hub:session-howto" content="Sticks/WASD move & aim; R2/click fire; Cross/Space jump; Square/E use">
+<meta name="hub:webgpu" content="required">
+<link rel="icon" href="data:,">
+<title>Turokarrot: Seeds of Chaos</title>
+<style>@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=Barlow:wght@400;500;600;700&display=swap');
+:root{--ink:#152d2a;--paper:#fff2d7;--orange:#f16d3c;--mint:#a5ebc3;--line:rgba(255,242,215,.23)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#173c38;color:var(--paper);font-family:'Barlow',sans-serif;user-select:none}button,input,select{font:inherit}button{cursor:pointer;color:inherit;border:0;background:transparent;text-align:left;transition:background .15s,color .15s,transform .15s}button:focus-visible,.pad-focus{outline:3px solid var(--mint)!important;outline-offset:4px!important}button:hover{color:var(--mint)}.hidden{display:none!important}#viewport,#viewport canvas{position:absolute;inset:0;width:100%;height:100%;display:block}#vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 60% 45%,transparent 35%,#09272566 100%)}#damage{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 130px 40px #ea482f;opacity:0;z-index:3}#underwater{position:absolute;inset:0;pointer-events:none;background:#05949b55;backdrop-filter:blur(1px);display:none}#loading{position:absolute;inset:0;background:#152d2a;display:flex;flex-direction:column;justify-content:center;align-items:center;z-index:50}.seal-logo{font-size:100px;color:var(--orange)}.eyebrow{font-size:13px;font-weight:700;letter-spacing:.23em;display:block;line-height:1.6}.loadline{width:260px;height:2px;background:#ffffff20;margin-top:30px}.loadline i{display:block;height:100%;width:35%;background:var(--orange);animation:load 1.2s infinite}@keyframes load{50%{transform:translateX(180%)}}#loadText{opacity:.6;font-size:14px}#title{position:absolute;inset:0;padding:36px 4.5vw;background:linear-gradient(90deg,#0e2e2bf5 0%,#102e2bdc 30%,#102e2b40 57%,transparent 80%)}.title-top,.title-bottom{display:flex;justify-content:space-between;font-size:11px;font-weight:600;letter-spacing:.2em}.title-top{padding-bottom:20px;border-bottom:1px solid var(--line)}.title-copy{position:absolute;left:4.5vw;top:20%;width:43%;max-width:620px}.title-copy .eyebrow{color:var(--mint);font-size:11px}.small-line{width:27px;height:2px;background:var(--orange);display:inline-block;vertical-align:middle;margin-right:12px}h1{font-family:'Barlow Condensed','Arial Narrow',sans-serif;font-weight:900;font-size:clamp(62px,7.8vw,122px);letter-spacing:-.025em;line-height:.9;margin:25px 0 0;filter:drop-shadow(0 4px 0 #08211e)}h1>span{display:block;font-size:.32em;font-weight:600;letter-spacing:.35em;margin-top:18px;color:#f69862}.intro{font-size:18px;line-height:1.55;opacity:.8;margin:28px 0 30px}nav{max-width:410px}nav button{width:100%;font-size:14px;letter-spacing:.06em;font-weight:700;padding:17px 14px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line)}.primary{background:var(--orange);color:#152b28!important;border:1px solid #ffb57a;font-weight:800;font-size:15px;letter-spacing:.07em;padding:19px 22px;box-shadow:0 4px 0 #883f2b}.primary:hover{background:#ffad6e;transform:translateY(-1px)}.btn-icon{font-size:20px;margin-right:14px}.nav-pair{display:flex;gap:24px}.nav-pair button{font-size:11px;white-space:nowrap;padding:19px 0;border:0;width:auto}nav small{font-size:10px;opacity:.65}.continue-row button{font-size:11px;padding:12px 0;letter-spacing:.12em;color:var(--mint)}.title-location{position:absolute;right:5%;bottom:14%;display:flex;gap:18px;font-size:14px;font-weight:700;letter-spacing:.12em}.title-location i{display:block;width:3px;background:var(--orange)}.title-location small{display:block;font-size:10px;opacity:.65;margin-top:10px}.title-bottom{position:absolute;bottom:28px;left:4.5vw;right:4.5vw;border-top:1px solid var(--line);padding-top:21px;font-size:10px}.title-bottom b{color:var(--orange)}#hud{position:absolute;inset:0;pointer-events:none;background:linear-gradient(0deg,#0b242a88,transparent 25%,transparent 80%,#0b242a55);text-shadow:0 2px 3px #102d2c99}.hud-top{position:absolute;top:29px;left:34px;right:34px;display:flex;justify-content:space-between}.objective .eyebrow{font-size:10px;opacity:.65;letter-spacing:.18em}.objective strong{display:block;font-size:19px;margin:4px 0 14px;font-weight:600}#sealDots{display:flex;align-items:center;gap:9px}#sealDots i{width:10px;height:10px;transform:rotate(45deg);border:1px solid var(--paper)}#sealDots i.on{background:var(--orange);border-color:var(--orange)}#sealText{margin-left:9px;font-size:10px;letter-spacing:.1em}#compass{display:flex;gap:28px;font-size:11px;position:absolute;left:50%;transform:translateX(-50%);opacity:.7;padding-top:6px}#compass b{color:var(--mint)}.mission-stats{text-align:right}.mission-stats span{font-size:10px;letter-spacing:.1em;display:block}.mission-stats strong{font-family:'Barlow Condensed',sans-serif;font-size:30px;font-weight:500;letter-spacing:.05em;display:block;margin:5px 0}.hud-bottom{position:absolute;bottom:62px;left:35px;right:35px;display:flex;align-items:end;justify-content:space-between}.vitals{display:flex;align-items:center;gap:14px}.vital-icon{font-size:28px;color:var(--orange)}.vitals span,.weapon-info>span{font-size:10px;letter-spacing:.2em;display:block}.vitals strong{font-family:'Barlow Condensed',sans-serif;font-size:54px;line-height:1.15}.vitals small{align-self:end;margin-bottom:8px;color:var(--mint);font-size:17px}.health-track{width:140px;height:4px;background:#f2efdb33}.health-track i{display:block;height:100%;background:var(--orange);width:100%;transition:width .15s}.ability{position:absolute;left:50%;transform:translateX(-50%);display:flex;gap:42px;text-align:center}.ability>div{display:flex;flex-direction:column;align-items:center;gap:3px}.ability span{font-size:28px;color:var(--mint)}.ability b{font-size:9px;letter-spacing:.15em}.ability small{font-size:9px;opacity:.55}.weapon-info{text-align:right}.weapon-info>div{display:flex;align-items:baseline;gap:8px;justify-content:end}.weapon-info strong{font-size:58px;font-family:'Barlow Condensed',sans-serif;line-height:1.15}.weapon-info small{font-size:10px;opacity:.6}.weapon-info div small{font-size:20px}.weapon-info i{font-style:normal;font-size:30px;color:var(--orange);margin-left:8px}#tip{position:absolute;bottom:0;left:0;right:0;padding:15px 35px;background:#0b252b90;display:flex;justify-content:space-between;font-size:11px;letter-spacing:.05em}#tip>span+span{font-size:10px;opacity:.7}#crosshair{position:absolute;left:50%;top:50%;width:36px;height:36px;transform:translate(-50%,-50%);filter:drop-shadow(0 1px 1px #152d2a)}#crosshair i{position:absolute;background:var(--paper);height:2px;width:7px}#crosshair i:nth-child(1){left:0;top:17px}#crosshair i:nth-child(2){right:0;top:17px}#crosshair i:nth-child(3){top:0;left:17px;transform:rotate(90deg)}#crosshair i:nth-child(4){bottom:0;left:17px;transform:rotate(90deg)}#crosshair b{position:absolute;left:17px;top:17px;width:2px;height:2px;background:var(--orange)}#hitmarker{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:45px;color:var(--orange);opacity:0}#targetName{position:absolute;top:55%;width:100%;text-align:center;color:var(--orange);font-size:10px;letter-spacing:.12em}#interact{position:absolute;top:65%;left:50%;transform:translateX(-50%);padding:12px 18px;background:#102b28dc;border:1px solid #e2f5cd55;display:flex;gap:15px;align-items:center;white-space:nowrap;font-size:14px}.key{color:var(--mint);font-size:13px}#grappleHint{position:absolute;top:59%;width:100%;text-align:center;font-size:12px;color:var(--mint)}#grappleHint b{margin-left:10px;font-size:10px;letter-spacing:.15em}#toast{position:absolute;top:22%;left:50%;transform:translateX(-50%);text-align:center;max-width:580px;border-top:1px solid var(--orange);padding:15px 30px;background:linear-gradient(90deg,transparent,#102b28e0,transparent);animation:toast .3s ease-out}#toast span{display:block;font-size:10px;letter-spacing:.2em;color:var(--mint)}#toast strong{display:block;font-family:'Barlow Condensed',sans-serif;font-size:35px;letter-spacing:.04em;margin:5px 0}#toast small{font-size:13px}#subtitle{position:absolute;bottom:175px;left:50%;transform:translateX(-50%);text-align:center;background:#102b28d9;padding:13px 24px;max-width:650px;width:max-content}#subtitle b{display:block;font-size:9px;letter-spacing:.22em;color:var(--mint);margin-bottom:6px}#subtitle span{font-size:17px;line-height:1.4}#bossHud{position:absolute;top:115px;left:30%;width:40%}#bossHud>div:first-child{display:flex;justify-content:space-between;align-items:baseline;font-size:13px;letter-spacing:.16em}#bossHud small{font-size:9px;opacity:.65}.boss-track{height:6px;margin-top:10px;background:#092420a0}.boss-track i{height:100%;background:var(--orange);display:block;width:100%;transition:width .2s}#oxygen{position:absolute;bottom:250px;left:50%;transform:translateX(-50%);width:180px;text-align:center;font-size:10px;letter-spacing:.2em}#oxygen div{height:4px;background:#152d2a;margin-top:8px}#oxygen i{height:100%;display:block;width:100%;background:var(--mint)}#worldMarkers .marker{position:absolute;transform:translate(-50%,-100%);text-align:center;color:var(--mint);font-size:11px;white-space:nowrap}.marker b{display:block;font-size:22px;font-weight:400}.marker span{background:#163c3899;padding:3px 6px;display:block;font-size:9px;letter-spacing:.08em}.marker.done{color:var(--orange)}#attractBanner{position:absolute;top:0;left:0;right:0;padding:14px 35px;display:flex;align-items:center;justify-content:center;gap:18px;background:#102d29e8;font-size:11px;letter-spacing:.13em;pointer-events:none;z-index:5}.live-dot{width:6px;height:6px;background:var(--orange);border-radius:50%;animation:blink 1s infinite}@keyframes blink{50%{opacity:.3}}#attractBanner+*{}#panel{position:absolute;inset:0;background:#092724b8;backdrop-filter:blur(12px);display:flex;align-items:center;justify-content:center;z-index:20}.panel-shell{background:#16312ef5;border:1px solid #9ecab447;width:min(850px,90vw);max-height:90vh;display:flex;flex-direction:column;box-shadow:20px 25px 100px #051c1c77;padding:34px 40px}.panel-header{display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:20px}.panel-header .eyebrow{font-size:10px;color:var(--orange)}h2{font-family:'Barlow Condensed',sans-serif;font-size:48px;line-height:1;margin:9px 0 0;letter-spacing:.02em}.panel-header button{font-size:12px;padding:15px}.panel-footer{display:flex;justify-content:space-between;font-size:9px;letter-spacing:.1em;opacity:.5;border-top:1px solid var(--line);padding-top:19px;margin-top:22px}#panelBody{overflow:auto;padding:20px 3px 4px;scrollbar-color:#a5ebc3 #16312e;font-size:16px;line-height:1.6}.setting{display:flex;justify-content:space-between;align-items:center;width:100%;padding:12px 8px;border-bottom:1px solid #ffffff0d;font-size:16px}.setting strong{font-size:13px;color:var(--mint);font-weight:500}.setting small{display:block;font-size:11px;opacity:.5}.settings-grid{display:grid;grid-template-columns:1fr 1fr;column-gap:30px}.menu-actions{display:flex;gap:20px;margin-top:20px}.menu-actions button{font-size:12px;padding:12px 0;color:var(--orange)}.control-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 30px;font-size:13px;margin-top:12px}.control-grid p{display:flex;justify-content:space-between;border-bottom:1px solid var(--line);padding-bottom:6px;margin:7px 0}.control-grid b{color:var(--mint);font-weight:500}.panel-copy{font-size:15px;line-height:1.6;color:#d2dbc5}.panel-copy h3{font-family:'Barlow Condensed',sans-serif;font-size:24px;color:var(--paper);margin:20px 0 6px}.panel-copy p{margin:8px 0}.panel-copy a{color:var(--mint)}.map-layout{display:grid;grid-template-columns:1.2fr 1fr;gap:22px}.map-layout canvas{width:100%;border:1px solid var(--line);background:#0c2826}.map-legend{font-size:13px}.map-legend h3{font-size:18px;margin:0 0 10px}.map-legend p{margin:8px 0}.map-legend small{font-size:11px;color:#a7c1ad}.room-code{font-family:monospace;font-size:38px;letter-spacing:.2em;color:var(--mint);padding:10px 0}.code-input{display:flex;gap:8px;margin:15px 0}.code-input button{border:1px solid var(--line);font-family:'Barlow Condensed',sans-serif;font-size:32px;width:48px;height:60px;text-align:center}.code-input .active{background:var(--orange);color:var(--ink)}.room-state{color:var(--mint);font-size:13px}.co-op-buttons{display:flex;gap:25px;margin-top:20px}.co-op-buttons button{font-size:13px;flex:1;text-align:center}#ending{position:absolute;inset:0;background:linear-gradient(90deg,#102d2bf5,#102d2baa);z-index:12;display:flex;align-items:center;padding:7%}#ending>div{max-width:650px}#ending h2{font-size:100px;font-weight:800}#ending .eyebrow{color:var(--orange)}#ending p{font-size:18px;line-height:1.5;max-width:500px}#endStats{display:flex;gap:38px;margin:35px 0}#endStats strong{font-family:'Barlow Condensed',sans-serif;font-size:40px;display:block}#endStats small{font-size:10px;letter-spacing:.1em;opacity:.6}#ending button{display:block;width:360px;text-align:center;margin-bottom:16px;padding:15px}.death-title{color:#ff9c76}#touchNotice{position:absolute;bottom:80px;left:50%;transform:translateX(-50%);background:#142d2cee;padding:20px;z-index:30;text-align:center}#touchNotice button{display:block;margin:12px auto 0;color:var(--orange)}#fault{position:absolute;inset:0;background:#152d2a;z-index:100;padding:12%;display:flex;flex-direction:column;justify-content:center}#fault p{max-width:650px;line-height:1.7}#fault button{color:var(--orange);margin-top:25px}#panelBody button{scroll-margin:15px}#panelBody .room-player{padding:8px;border-bottom:1px solid var(--line);font-size:16px}.muted{opacity:.55}
+@keyframes toast{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}@media(max-height:750px){.title-copy{top:17%}h1{font-size:78px}.intro{margin:22px 0;font-size:16px}nav button{padding:14px}.panel-shell{padding:24px 32px}#panelBody{padding-top:12px}.setting{padding:9px 8px}.panel-footer{margin-top:14px}.hud-top{top:20px}#ending h2{font-size:75px}}@media(max-width:800px){.title-copy{width:65%}.title-location{display:none}h1{font-size:70px}.title-top span+span{display:none}.hud-top{left:20px;right:20px}.objective strong{font-size:16px}#compass{display:none}.hud-bottom{left:20px;right:20px}.ability{gap:15px}.ability b{font-size:8px}#subtitle{max-width:90%;width:max-content;bottom:170px}#subtitle span{font-size:14px}.settings-grid{column-gap:18px}.setting{font-size:14px}.panel-shell{width:94vw;padding:20px}.title-bottom{font-size:8px}.title-copy .eyebrow{font-size:9px}.map-layout{grid-template-columns:1fr 1fr}.panel-footer{font-size:8px}.control-grid{font-size:11px}#endStats{gap:20px}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"}}</script>
+</head><body>
+<div id="viewport"></div><div id="vignette"></div><div id="damage"></div><div id="underwater"></div>
+<div id="loading"><div class="seal-logo">✦</div><p class="eyebrow">OPENING THE LOST WORLD</p><div class="loadline"><i></i></div><p id="loadText">Awakening the citadel…</p></div>
+<main id="title" class="hidden">
+ <div class="title-top"><span>THORN ARCHIVE / VOL. 01</span><span>WEBGPU EXPEDITION</span></div>
+ <div class="title-copy"><div class="eyebrow"><i class="small-line"></i>A LOST WORLD. A HUNGRY GOD.</div><h1>TUROKARROT<span>SEEDS OF CHAOS</span></h1><p class="intro">The roots remember your blood.<br>Give them something else to fear.</p>
+ <nav id="titleNav"><button class="primary" data-action="start"><span class="btn-icon">✕</span> ENTER THE LOST WORLD <span>↗</span></button><button data-action="coop"><span class="btn-icon">◎</span> EXPEDITION CO-OP <small>1–4 HUNTERS</small></button><div class="nav-pair"><button data-action="settings">SETTINGS</button><button data-action="about">FIELD NOTES & CREDITS</button></div></nav>
+ <div class="continue-row"><button id="continueBtn" data-action="continue" class="hidden">CONTINUE FROM CHECKPOINT ↗</button></div></div>
+ <div class="title-location"><i></i><span>01 / THE DROWNED CITADEL<small>A COMPLETE EXPEDITION · 8–12 MIN</small></span></div>
+ <div class="title-bottom"><span id="deviceHint">CONTROLLER READY / KEYBOARD + MOUSE</span><span><b id="idleCount">10</b> / LIVE EXPEDITION REPLAY</span></div>
+</main>
+<div id="hud" class="hidden">
+ <div class="hud-top"><div class="objective"><span class="eyebrow">THE DROWNED CITADEL</span><strong id="objective">Break the three ward seals</strong><div id="sealDots"><i></i><i></i><i></i><span id="sealText">0 / 3 SEALS</span></div></div><div id="compass"><span>W</span><span>NW</span><b>N</b><span>NE</span><span>E</span></div><div class="mission-stats"><span id="networkBadge">SOLO EXPEDITION</span><strong id="timer">00:00</strong><span id="scoreText">0 ESSENCE</span></div></div>
+ <div id="bossHud" class="hidden"><div><span>THE ROOTBOUND</span><small id="bossPhase">THE HUNGER BENEATH</small></div><div class="boss-track"><i id="bossFill"></i></div></div>
+ <div id="worldMarkers"></div><div id="crosshair"><i></i><i></i><i></i><i></i><b></b></div><div id="hitmarker">×</div><div id="targetName"></div>
+ <div id="interact" class="hidden"><span class="key">□ / E</span><strong id="interactText">Attune ward seal</strong></div>
+ <div id="grappleHint" class="hidden">L1 / Q <b>VINE LATCH</b></div>
+ <div id="toast" class="hidden"><span id="toastKicker">ARCHIVE</span><strong id="toastText"></strong><small id="toastSub"></small></div>
+ <div id="subtitle" class="hidden"><b>THE ORACLE</b><span></span></div>
+ <div id="oxygen" class="hidden"><span>OXYGEN</span><div><i></i></div></div>
+ <div class="hud-bottom"><div class="vitals"><div class="vital-icon">✚</div><div><span>VITALITY</span><strong id="health">100</strong><div class="health-track"><i id="healthFill"></i></div></div><small id="armor">◆ 50</small></div><div class="ability"><div><span id="dashReady">○</span><b>DASH</b><small>○ / SHIFT</small></div><div><span id="pulseReady">✦</span><b>SPIRIT PULSE</b><small>△ / F</small></div></div><div class="weapon-info"><span id="weaponName">01 / THORNCASTER</span><div><strong id="ammo">80</strong><small id="ammoMax">/ 160</small><i>↟</i></div><small id="weaponHint">R2 FIRE · L2 AIM · R1 SWITCH</small></div></div>
+ <div id="tip"><span id="tipText">LS / WASD move · RS / mouse look · ✕ / Space jump</span><span>MAP <b>▤ / M</b></span></div>
+</div>
+<div id="attractBanner" class="hidden"><span class="live-dot"></span><strong>LIVE EXPEDITION</strong><span>AI HUNTER / PRESS ANY BUTTON TO RETURN</span></div>
+<div id="panel" class="hidden"><div class="panel-shell"><div class="panel-header"><div><span class="eyebrow" id="panelKicker">EXPEDITION</span><h2 id="panelTitle">Settings</h2></div><button id="panelClose" aria-label="Close menu">○ BACK</button></div><div id="panelBody"></div><div class="panel-footer">↑ ↓ / D-PAD SELECT <span>← → ADJUST · ✕ CONFIRM · ○ BACK</span></div></div></div>
+<div id="ending" class="hidden"><div><span class="eyebrow" id="endKicker">THE ROOTS FALL SILENT</span><h2 id="endTitle">DAYLIGHT.<br>AT LAST.</h2><p id="endText">The citadel is free. What sleeps beneath it is not.</p><div id="endStats"></div><button class="primary" data-action="restart">ANOTHER EXPEDITION ↗</button><button data-action="title">RETURN TO TITLE</button></div></div>
+<div id="touchNotice" class="hidden"><strong>Controller or keyboard required</strong><button data-action="settings">SETTINGS</button></div>
+<div id="fault" class="hidden"><h2>The gate cannot open.</h2><p></p><button onclick="location.reload()">RETRY</button></div>
+<template id="creditsContent"><div class="panel-copy">
+<h3>The Drowned Citadel</h3><p>The first hunters buried a god beneath this city. They sealed it with sun, tide and bone. Then the roots began to speak.</p><p>You are the last of the Thornbound. Clear each district, shatter its ward, and carry the hunger’s last seed into the light. A complete expedition includes three weapons and their alternate attacks, double jump, dash, vine latch, swimming, spirit pulse, four enemy archetypes, three optional relics, checkpoints and a three-phase guardian.</p>
+<h3>Source information</h3><p><b>Turokarrot: Seeds of Chaos</b> — an original spiritual successor inspired by <b>Turok 2: Seeds of Evil</b>. No original game assets or dialogue. Title chosen by a real cryptographic random draw from 50 candidates.</p><p>Date: 2026-10-29 08:58, America/Vancouver. Model: OpenAI, gpt-6.1-sol, reasoning effort xhigh. Environment: Codex CLI (headless), Linux / Ubuntu / WSL2. Browser: Google Chrome 154.0.8037.57, Playwright 1.56.1, Xvfb / SwiftShader Vulkan. API cost and token count: unknown. Session time: approximately 40 minutes (estimate).</p>
+<h3>Built from code</h3><p>Three.js r180 (0.180.0), WebGPU only; Rapier 0.19.3 physics; Gamepad API; Web Audio API; PeerJS 1.5.5; AI Hub Session Protocol v1 / client 1.3.0. All geometry and artwork are procedural. Four-band cel shading, dark silhouette shells and angular silhouettes.</p><p>Hierarchical procedural animation drives locomotion, wings, attacks and weapon recoil. Rapier animates fragments. Adaptive pentatonic music, percussion, sound effects and gibberish voices are synthesized in code. Voice dialogue is rendered as subtitles.</p>
+<h3>Online expedition</h3><p>One to four hunters share a host-authoritative world. AI Hub supplies session transport, clock and results. Standalone rooms use PeerJS / WebRTC with six-digit invite codes. Local movement is predicted; remote actors interpolate. No chat or voice transmission. Physical-controller testing and cross-device NAT traversal: unknown.</p>
+<h3>Testing feedback</h3><p>Parameters: lightweight syntax, browser, gameplay and multiplayer protocol checks. 26 focused gameplay checks passed; the official AI Hub harness passed 97 checks across 4-player, 3-player, host-leave and dedicated-server rounds at 150 ms latency, 50 ms jitter and 5% packet loss. Eight standalone WebRTC checks passed with two browser peers over the public broker. Rendering was checked separately; logic/protocol tests disabled drawing after initialization for efficient software-GPU testing.</p>
+<p><b>Issues found during testing and review, and fixed:</b> 5 — waterfall dimensions, the WebGPU-only fallback guard, asynchronous pointer-lock rejection handling, the standalone binary-message handshake, and shared weapon-unlock propagation. One was game-breaking: failed co-op joining.</p><p><b>Most helpful:</b> the two-browser standalone test exposed the handshake failure. <b>Least helpful:</b> syntax-only checks did not reveal graphics, gameplay or transport defects.</p><h3>Engine feedback</h3><p><b>Best:</b> the scene graph and toon node materials suit procedural art, while Rapier handles collision queries and character stepping.</p><p><b>Wrong guess:</b> Rapier’s package filename changed to rapier.mjs. Package metadata resolved the initial wrong URL. PeerJS default binary messages failed the standalone welcome handshake; explicit JSON passed. The visual-test setup needed Xvfb and explicit SwiftShader Vulkan presentation.</p><p><b>Built ourselves:</b> the expedition state machine, controller menus, procedural rigs, audio sequencer and shared-world networking.</p><p><b>Hardest:</b> keeping local movement, physics and synchronized progression coherent in a single-file release.</p><p><b>Overhaul / change:</b> provide an explicit WebGPU-only initialization contract instead of automatic backend fallback.</p>
+<h3>Prompt feedback</h3><p><b>Best:</b> the specific artistic and controller-first direction. <b>Confusing:</b> “all features” is open-ended, so the game states its complete mechanic set through the controls and atlas. <b>Hardest:</b> combining traversal, combat, narrative and two networking adapters into one expedition.</p><p><b>One more test:</b> four physical DualSense controllers across separate networks, including latency and a mid-battle disconnect.</p>
+<h3>Credits & licenses</h3><p>Original game design, writing, geometry, animation and audio: generated for this demo. Three.js (MIT), Rapier (Apache-2.0), PeerJS (MIT). Fonts: Barlow and Barlow Condensed, by Jeremy Tribby (SIL Open Font License). AI Hub protocol: github.com/michaelcrosato/ai-hub, lib/hub.</p>
+</div>
+</template>
+<script type="module" onerror="document.getElementById('loading').classList.add('hidden');document.getElementById('fault').classList.remove('hidden');document.querySelector('#fault p').textContent='The engine libraries could not load. Connect to the internet and retry.';AIHub.fail('Engine dependencies could not load.');">import * as THREE from 'three/webgpu';
+import RAPIER from 'rapier';
+
+const $=id=>document.getElementById(id), V=(x=0,y=0,z=0)=>new THREE.Vector3(x,y,z);
+const clamp=THREE.MathUtils.clamp, lerp=THREE.MathUtils.lerp, TAU=Math.PI*2;
+const TITLE='Turokarrot: Seeds of Chaos';
+const cfg={volume:.65,music:.55,sensitivity:1,invertX:false,invertY:false,deadzone:.16,fov:82,shake:true,assist:true,difficulty:1,subtitles:true};
+try{Object.assign(cfg,JSON.parse(localStorage.getItem('turokarrot-settings')||'{}'));}catch{}
+const saveSettings=()=>{try{localStorage.setItem('turokarrot-settings',JSON.stringify(cfg));}catch{}};
+const g={screen:'title',mode:'solo',time:0,elapsed:0,seals:[false,false,false],secrets:[],kills:0,score:0,unlocked:1,checkpoint:[0,1.05,23],bossActive:false,won:false,ended:false,deaths:0,shots:0,hits:0,region:-1};
+let scene,camera,renderer,world,controller,body,collider,weaponRoot,weaponModels=[],sun,worldRoot;
+let ready=false,menu=null,menuIndex=0,previousScreen='title',lastInput=performance.now(),lastTime=0,netTimer=0,simTime=0;
+let yaw=0,pitch=0,vy=0,grounded=false,jumps=0,dashTime=0,dashCooldown=0,pulseCooldown=0,grapple=null,grappleCooldown=0;
+let fireCooldown=0,altCooldown=0,recoil=0,hitFlash=0,damageFlash=0,toastTime=0,subTime=0,aiming=false,moving=0,bob=0,autoTime=0;
+let local={id:0,pos:V(0,1.05,23),health:100,armor:50,oxygen:100,weapon:0,ammo:[100,30,8],kills:0},input={x:0,y:0,fire:false};
+const keys=new Set(),pressed=new Set(),mouse={dx:0,dy:0,left:false,right:false},padPrev=[],padEdges=[];
+let pad=null,axisMenuTime=0,lockRequested=false,consumeUntil=0,shotId=0;
+const meshes=[],fixed=[],enemies=[],projectiles=[],particles=[],pickups=[],decor=[],waterMeshes=[],remotes=new Map(),debris=[];
+const gates=[],relays=[],anchors=[],lore=[],enemyMeshes=new Map();
+const tempVec=V(),tempDir=V(),raycaster=new THREE.Raycaster();
+const C={sand:0xd6ba80,stone:0x567767,dark:0x193e39,deep:0x102c2a,orange:0xf17c44,gold:0xffc570,mint:0x9ef3c6,water:0x389e98,leaf:0x34866e,leaf2:0x88af68,pink:0xd17c66,bone:0xf5ddb0};
+const matCache=new Map();
+let gradient,outlineMat;
+function toon(color,emissive=0){const key=color+':'+emissive;if(matCache.has(key))return matCache.get(key);const m=new THREE.MeshToonNodeMaterial({color,gradientMap:gradient,emissive:emissive?color:0,emissiveIntensity:emissive});matCache.set(key,m);return m;}
+function flat(color,opacity=1){const m=new THREE.MeshBasicNodeMaterial({color,transparent:opacity<1,opacity,depthWrite:opacity>=1});m.userData.ephemeral=true;return m;}
+function mesh(geo,mat,parent=worldRoot,outline=false){const m=new THREE.Mesh(geo,mat);m.castShadow=true;m.receiveShadow=true;parent.add(m);if(outline){const o=new THREE.Mesh(geo,outlineMat);o.scale.setScalar(1.035);m.add(o);}return m;}
+function box(x,y,z,w,h,d,color,parent=worldRoot,solid=false,outline=false){const m=mesh(new THREE.BoxGeometry(w,h,d),toon(color),parent,outline);m.position.set(x,y,z);if(solid)solidBox(x,y,z,w,h,d);return m;}
+function solidBox(x,y,z,w,h,d){const b=world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(x,y,z));const c=world.createCollider(RAPIER.ColliderDesc.cuboid(w/2,h/2,d/2),b);fixed.push({body:b,collider:c});return c;}
+function cylinder(x,y,z,r,h,color,parent=worldRoot,segments=8,top=r){const m=mesh(new THREE.CylinderGeometry(top,r,h,segments),toon(color),parent);m.position.set(x,y,z);return m;}
+function ball(x,y,z,r,color,parent=worldRoot,detail=0){const m=mesh(new THREE.IcosahedronGeometry(r,detail),toon(color),parent);m.position.set(x,y,z);return m;}
+function beam(a,b,r,color,parent=worldRoot){const d=b.clone().sub(a),m=mesh(new THREE.CylinderGeometry(r,r,d.length(),6),toon(color),parent);m.position.copy(a).add(b).multiplyScalar(.5);m.quaternion.setFromUnitVectors(V(0,1,0),d.normalize());return m;}
+function ring(x,y,z,r,color,parent=worldRoot){const m=mesh(new THREE.TorusGeometry(r,.07,5,32),toon(color,.5),parent);m.position.set(x,y,z);return m;}
+function seeded(seed){return()=>{seed=(seed+0x6d2b79f5)|0;let t=Math.imul(seed^seed>>>15,1|seed);t^=t+Math.imul(t^t>>>7,61|t);return((t^t>>>14)>>>0)/4294967296;};}
+let rand=seeded(72631);
+
+class Soundscape{
+ constructor(){this.ctx=null;this.tick=0;this.next=0;this.master=null;this.musicGain=null;}
+ start(){if(this.ctx){this.ctx.resume();return;}const A=window.AudioContext||window.webkitAudioContext;if(!A)return;this.ctx=new A();this.master=this.ctx.createGain();this.master.gain.value=cfg.volume*.5;this.master.connect(this.ctx.destination);this.musicGain=this.ctx.createGain();this.musicGain.gain.value=cfg.music*.32;this.musicGain.connect(this.master);this.noise=this.ctx.createBuffer(1,this.ctx.sampleRate,this.ctx.sampleRate);let a=this.noise.getChannelData(0);for(let i=0;i<a.length;i++)a[i]=Math.random()*2-1;const delay=this.ctx.createDelay();delay.delayTime.value=.27;const echo=this.ctx.createGain();echo.gain.value=.2;this.musicGain.connect(delay);delay.connect(echo);echo.connect(this.master);this.next=this.ctx.currentTime+.1;}
+ tone(freq,dur,type='sine',vol=.2,at=0,dest=null,endFreq=null){if(!this.ctx||this.ctx.state!=='running')return;let t=this.ctx.currentTime+at,o=this.ctx.createOscillator(),a=this.ctx.createGain();o.type=type;o.frequency.setValueAtTime(freq,t);if(endFreq)o.frequency.exponentialRampToValueAtTime(Math.max(10,endFreq),t+dur);a.gain.setValueAtTime(.001,t);a.gain.exponentialRampToValueAtTime(Math.max(.002,vol),t+.007);a.gain.exponentialRampToValueAtTime(.001,t+dur);o.connect(a);a.connect(dest||this.master);o.start(t);o.stop(t+dur+.02);}
+ hiss(dur=.1,vol=.1,freq=1400,at=0){if(!this.ctx||this.ctx.state!=='running')return;const t=this.ctx.currentTime+at,s=this.ctx.createBufferSource(),f=this.ctx.createBiquadFilter(),a=this.ctx.createGain();s.buffer=this.noise;f.type='bandpass';f.frequency.value=freq;f.Q.value=.8;a.gain.setValueAtTime(vol,t);a.gain.exponentialRampToValueAtTime(.001,t+dur);s.connect(f);f.connect(a);a.connect(this.master);s.start(t);s.stop(t+dur);}
+ sfx(kind){if(kind==='shot'){this.tone(310,.09,'sawtooth',.13,0,null,80);this.hiss(.08,.16,2400);}if(kind==='scatter'){this.hiss(.22,.45,700);this.tone(95,.2,'triangle',.6,0,null,30);}if(kind==='seeker'){this.tone(280,.38,'sawtooth',.18,0,null,900);this.tone(510,.3,'sine',.12);}if(kind==='hit'){this.hiss(.06,.15,1700);this.tone(140,.08,'square',.05);}if(kind==='kill'){this.tone(160,.16,'sawtooth',.12,0,null,40);this.hiss(.22,.15,600);}if(kind==='jump')this.hiss(.12,.12,500);if(kind==='dash'){this.hiss(.3,.16,2800);this.tone(120,.2,'sine',.1,0,null,490);}if(kind==='pickup'){this.tone(440,.2,'sine',.18);this.tone(660,.3,'sine',.14,.08);}if(kind==='seal'){[220,330,440,660,880].forEach((f,i)=>this.tone(f,.8,'triangle',.15,i*.1));this.hiss(1,.16,350);}if(kind==='hurt'){this.tone(75,.2,'sawtooth',.25,0,null,35);this.hiss(.15,.2,400);}if(kind==='boom'){this.tone(110,.65,'sine',.5,0,null,22);this.hiss(.55,.5,300);}if(kind==='click')this.tone(600,.05,'sine',.07);}
+ voice(seed=1){if(!this.ctx)return;const r=seeded(seed);for(let i=0;i<12;i++){let f=100+r()*130;this.tone(f,.07+r()*.09,'sawtooth',.022,i*.095,null,f*(.8+r()*.7));this.tone(f*2.7,.06,'sine',.026,i*.095);}}
+ update(){if(!this.ctx)return;this.master.gain.setTargetAtTime(g.ended?0:cfg.volume*.5,this.ctx.currentTime,.1);this.musicGain.gain.setTargetAtTime(cfg.music*.32,this.ctx.currentTime,.1);if(this.ctx.state!=='running'||g.ended)return;let count=0;while(this.next<this.ctx.currentTime+.15&&count++<6){let at=this.next-this.ctx.currentTime,n=this.tick++,hot=g.bossActive||enemies.some(e=>!e.dead&&e.alert);const scale=[0,3,5,7,10,12,10,7],root=hot?55:65.406;this.tone(root*(n%16<8?1:.75),.4,'triangle',.14,at,this.musicGain);if(n%2===0)this.tone(root*4*Math.pow(2,scale[Math.floor(n/2)%8]/12),.32,'sine',.15,at,this.musicGain);if(n%4===0)this.tone(90,.16,'sine',hot?.35:.18,at,this.musicGain,28);if(n%4===2)this.hiss(.08,hot?.055:.025,1100,at);if(n%16===0)this.tone(root*8,2,'sine',.035,at,this.musicGain);this.next+=hot?.19:.27;}if(this.next<this.ctx.currentTime)this.next=this.ctx.currentTime+.1;}
+ quiet(){if(this.master)this.master.gain.setTargetAtTime(0,this.ctx.currentTime,.1);}
+}
+const audio=new Soundscape();
+
+const ZONES=[
+ {name:'Pilgrim’s Approach',center:[0,8],region:0},
+ {name:'The Drowned Garden',center:[-41,-17],region:1},
+ {name:'Archive of Teeth',center:[38,-22],region:2},
+ {name:'The Rootbound Sanctum',center:[0,-67],region:3}
+];
+const LEVEL={
+ relays:[{name:'SUN WARD',x:0,y:0,z:-16,region:0},{name:'TIDE WARD',x:-43,y:2,z:-25,region:1},{name:'BONE WARD',x:39,y:2,z:-26,region:2}],
+ anchors:[[-24,8,-9],[-43,8.5,-23],[25,10,-13],[39,10,-25],[0,11,-49]],
+ foes:[
+ ['raptor',-7,0,9,0],['raptor',7,0,3,0],['sentinel',-8,0,-9,0],['sentinel',7,0,-18,0],
+ ['raptor',-30,-2.8,-10,1],['raptor',-46,2,-22,1],['sentinel',-39,2,-27,1],['flyer',-36,4,-17,1],['raptor',-50,-2.8,-6,1],
+ ['raptor',26,2,-13,2],['sentinel',35,2,-29,2],['sentinel',45,2,-20,2],['flyer',38,7,-13,2],['raptor',44,2,-31,2],
+ ['sentinel',-8,0,-53,3],['sentinel',8,0,-57,3],['raptor',-10,0,-66,3],['raptor',10,0,-70,3],['boss',0,0,-75,3]
+ ],
+ pickups:[['health',-10,1,19],['ammo',8,1,17],['armor',-9,1,-22],['scatter',0,1,-19],['ammo',-30,1.1,-5],['health',-43,3,-22],['armor',-51,0,-30],['ammo',27,3,-18],['seeker',39,3,-23],['health',46,3,-25],['ammo',-9,1,-45],['health',10,1,-49],['ammo',-10,1,-70],['health',10,1,-72]],
+ secrets:[{x:-54,y:-1.9,z:-30,name:'THE FIRST ROOT',text:'Before there were gods, there was hunger. The first seed was a tooth.'},{x:47,y:3,z:-35,name:'THE WATCHERS',text:'We carved our eyes in stone, so that something would witness the end.'},{x:-12,y:1,z:-79,name:'THE LAST HUNTER',text:'The spear will break. The sun will fail. Still, hunter, you must rise.'}]
+};
+
+function makeTree(x,y,z,s=1){const group=new THREE.Group();group.position.set(x,y,z);group.rotation.y=rand()*TAU;worldRoot.add(group);const trunk=cylinder(0,s*2,0,s*.35,s*4,C.dark,group,6,s*.17);trunk.rotation.z=.13;for(let j=0;j<5;j++){const a=j*TAU/5+.4;beam(V(0,s*3.8,0),V(Math.cos(a)*s*2,s*(4+rand()),Math.sin(a)*s*2),s*.11,C.dark,group);const leaf=mesh(new THREE.ConeGeometry(s*2.3,s*.75,5),toon(j%2?C.leaf:C.leaf2),group);leaf.position.set(Math.cos(a)*s*1.7,s*4.1,Math.sin(a)*s*1.7);leaf.rotation.z=Math.sin(a)*.2;leaf.rotation.x=Math.cos(a)*.15;}solidBox(x,y+s*1.7,z,s*.45,s*3.4,s*.45);}
+function plant(x,y,z,s=1,color=C.leaf){const p=new THREE.Group();p.position.set(x,y,z);p.rotation.y=rand()*TAU;worldRoot.add(p);for(let i=0;i<5;i++){const a=i*TAU/5,m=mesh(new THREE.ConeGeometry(.25*s,1.8*s,3),toon(i%2?color:C.leaf2),p);m.position.set(Math.cos(a)*s*.35,s*.6,Math.sin(a)*s*.35);m.rotation.set(Math.sin(a)*.7,0,-Math.cos(a)*.7);}return p;}
+function arch(x,y,z,w=8,h=8,rot=0){const group=new THREE.Group();group.position.set(x,y,z);group.rotation.y=rot;worldRoot.add(group);for(const side of [-1,1]){box(side*w/2,h/2,0,1.7,h,2.4,C.stone,group,false,true);box(side*w/2,h*.3,0,2,.6,2.7,C.sand,group);box(side*w/2,h*.76,0,2,.5,2.7,C.sand,group);for(let i=0;i<3;i++)box(side*w/2,h*.45+i*.7,-1.23,.22,.35,.07,C.orange,group);}box(0,h,0,w+2.6,1.4,3,C.sand,group,false,true);box(0,h+.8,0,w+.8,.3,2,C.dark,group);const eye=ball(0,h,1.6,.65,C.orange,group);eye.scale.set(1,.6,.2);for(const side of [-1,1]){const p=V(side*w/2,0,0).applyAxisAngle(V(0,1,0),rot);solidBox(x+p.x,y+h/2,z+p.z,rot?2.4:1.7,h,rot?1.7:2.4);}return group;}
+function pillar(x,y,z,h=7){box(x,y+h/2,z,1.6,h,1.6,C.stone,worldRoot,true,true);box(x,y+.3,z,2.4,.6,2.4,C.dark);box(x,y+h,z,2.3,.5,2.3,C.sand);box(x,y+h+.6,z,.9,.9,.9,C.orange);for(let i=0;i<3;i++)box(x,y+h*.4+i*.6,z+.82,.45,.25,.06,C.sand);}
+function statue(x,y,z,s=1){const p=new THREE.Group();p.position.set(x,y,z);worldRoot.add(p);box(0,s*.35,0,3*s,.7*s,3*s,C.stone,p);box(0,2*s,0,1.7*s,3*s,1.4*s,C.dark,p,false,true);const head=ball(0,4*s,0,1.25*s,C.sand,p);head.scale.set(.85,1.2,.85);box(0,4*s,s*.95,1.45*s,.35*s,.2*s,C.deep,p);for(const i of [-1,1])ball(i*.44*s,4*s,1.1*s,.14*s,C.orange,p);for(let i=0;i<5;i++){const f=mesh(new THREE.ConeGeometry(.22*s,1.5*s,4),toon(C.sand),p);f.position.set((i-2)*s*.43,5.3*s,0);f.rotation.z=(2-i)*.2;}solidBox(x,y+2*s,z,2*s,4*s,2*s);}
+function torch(x,y,z){cylinder(x,y+1,z,.14,2,C.deep);const f=ball(x,y+2.1,z,.4,C.orange);f.material=toon(C.orange,1.1);f.scale.set(.65,1.5,.65);decor.push({type:'flame',mesh:f,base:y+2.1});const l=new THREE.PointLight(C.orange,12,10,1.8);l.position.set(x,y+2.4,z);worldRoot.add(l);}
+function buildWorld(){
+ worldRoot=new THREE.Group();scene.add(worldRoot);rand=seeded(72631);
+ // The level is built from this data and geometric kits; gameplay state stays separate.
+ box(0,-.65,-25,38,1.3,112,C.sand,worldRoot,true);
+ box(-41,-3.5,-16,45,1,48,C.stone,worldRoot,true);box(40,.9,-23,38,2.2,42,C.sand,worldRoot,true);
+ // Ramps use small walkable risers and Rapier's automatic stepping.
+ for(let i=0;i<12;i++)box(18+i*.85,i*.085,-12,1,.17*(i+1),9,C.stone,worldRoot,true);
+ for(let i=0;i<12;i++)box(-20-i*.85,-.12-i*.12,-4,1,.35,7,C.stone,worldRoot,true);
+ for(let i=0;i<16;i++)box(-33-i*.7,-2.8+i*.31,-19,1,.4,4,C.stone,worldRoot,true);
+ box(-44,1.4,-25,16,1.2,13,C.sand,worldRoot,true);
+ box(-25,-.25,-14,14,.5,3,C.dark,worldRoot,true);box(-32,.3,-14,1.2,1.1,4,C.sand);
+ // Sunken terraces, walkways, and a shortcut that opens with the wards.
+ for(let i=0;i<7;i++)box(-56,-2.7+i*.36,-3-i*2.4,6,.5,2.5,C.stone,worldRoot,true);
+ for(const x of [-18.5,18.5]){box(x,1,-26,1.1,2,109,C.stone,worldRoot,true);for(let z=25;z>-80;z-=12)box(x,2.5,z,1.8,1.2,2,C.sand);}
+ // Openings from the central avenue into the two annexes.
+ for(const item of fixed.slice()){const t=item.body.translation();if(Math.abs(t.x)===18.5&&t.y===1){world.removeRigidBody(item.body);fixed.splice(fixed.indexOf(item),1);}}
+ for(const x of [-18.5,18.5])for(const [z,len] of [[18,20],[-28,18],[-66,28]])box(x,1,z,1.1,2,len,C.stone,worldRoot,true);
+ // Remove the visual continuous parapets; shorter sections match the colliders.
+ for(const m of [...worldRoot.children])if(m.isMesh&&Math.abs(m.position.x)===18.5&&m.position.y===1){m.geometry.dispose();worldRoot.remove(m);}
+ for(const x of [-18.5,18.5])for(const [z,len] of [[18,20],[-28,18],[-66,28]])box(x,1,z,1.1,2,len,C.stone);
+ box(0,4,30,40,8,2,C.dark,worldRoot,true);box(0,4,-82,40,8,2,C.dark,worldRoot,true);
+ box(-63,4,-17,3,14,53,C.dark,worldRoot,true);box(60,4,-23,3,12,49,C.dark,worldRoot,true);
+ box(-42,2,-41,43,10,3,C.stone,worldRoot,true);box(40,4,-45,40,8,3,C.stone,worldRoot,true);
+ box(-43,2,9,41,10,3,C.stone,worldRoot,true);box(41,4,0,38,8,3,C.stone,worldRoot,true);
+ // Route markings in the avenue.
+ for(let z=25;z>-80;z-=4){box(0,.018,z,4,.03,.12,C.dark);for(const x of [-11,11])box(x,.018,z,.1,.03,2,C.orange);}
+ arch(0,0,14,10,8);arch(0,0,-28,12,10);arch(-21,-.1,-6,8,8,Math.PI/2);arch(23,1.2,-12,8,9,Math.PI/2);arch(0,0,-48,14,12);
+ for(const x of [-12,12])for(const z of [20,-3,-23,-42,-58,-78])pillar(x,0,z,5+rand()*4);
+ statue(-9,0,-31,1.15);statue(9,0,-31,1.15);statue(-52,2,-27,1);statue(50,2,-34,1.3);
+ // Gate: a single authoritative collider, visually dissolved when all wards fall.
+ const gate=box(0,5,-48,12,10,1.2,C.dark,worldRoot,false,true);const gc=solidBox(0,5,-48,12,10,1.2);for(let i=0;i<7;i++){box(-5+i*1.67,0,0,.15,9.5,1.3,C.orange,gate);}
+ gates.push({mesh:gate,collider:gc,open:false});
+ // Tiered sanctum and the enormous broken solar crown.
+ for(let i=0;i<4;i++){box(0,8+i*.9,-83,31-i*4,1,4,C.stone);}
+ const crown=ring(0,14,-81,8.5,C.gold);crown.scale.z=.8;
+ for(let i=0;i<16;i++){const a=i*TAU/16;beam(V(Math.cos(a)*9,14+Math.sin(a)*9,-81),V(Math.cos(a)*10.8,14+Math.sin(a)*10.8,-81),.14,C.orange);}
+ for(const x of [-7,7])torch(x,0,-46);for(const x of [-8,8])torch(x,0,10);for(const x of [-11,11])torch(x,0,-73);
+ // Water's flat facets and hand-drawn contour lines give it an illustrated surface.
+ const water=mesh(new THREE.PlaneGeometry(40,46,12,12),flat(C.water,.8));water.rotation.x=-Math.PI/2;water.position.set(-42,-.22,-16);water.castShadow=false;waterMeshes.push(water);
+ for(let i=0;i<28;i++){const m=ring(-59+rand()*34,-.17,4-rand()*39,.5+rand()*1.5,C.mint);m.rotation.x=-Math.PI/2;m.scale.set(2,.5,1);decor.push({type:'ripple',mesh:m,base:rand()*TAU});}
+ for(const [x,z] of [[-59,-35],[55,-39]]){const m=mesh(new THREE.PlaneGeometry(3.3,15),flat(C.mint,.65));m.position.set(x,6,z);decor.push({type:'waterfall',mesh:m,base:6});for(let i=0;i<7;i++)box(x-1.2+i*.4,6,z+.04,.08,12,.04,C.water);}
+ LEVEL.relays.forEach((r,i)=>{const group=new THREE.Group();group.position.set(r.x,r.y,r.z);worldRoot.add(group);cylinder(0,.2,0,2.8,.4,C.dark,group,10);cylinder(0,.6,0,1.5,.8,C.stone,group,6);const crystal=mesh(new THREE.OctahedronGeometry(.8,0),toon(i===1?C.mint:C.orange,.6),group,true);crystal.position.y=2.2;const halo=ring(0,2.2,0,1.4,C.gold,group);halo.rotation.y=Math.PI/4;const light=mesh(new THREE.CylinderGeometry(.09,.6,24,8),flat(i===1?C.mint:C.orange,.14),group);light.position.y=13;light.castShadow=false;relays.push({...r,id:i,mesh:group,crystal,halo,light});solidBox(r.x,r.y+.45,r.z,2,.9,2);});
+ LEVEL.anchors.forEach((p,i)=>{const group=new THREE.Group();group.position.set(...p);worldRoot.add(group);const m=mesh(new THREE.OctahedronGeometry(.7),toon(C.mint,1),group,true);const halo=ring(0,0,0,1.15,C.mint,group);for(let n=0;n<4;n++){const a=n*TAU/4;beam(V(Math.cos(a)*.7,0,Math.sin(a)*.7),V(Math.cos(a)*1.6,1.5,Math.sin(a)*1.6),.08,C.dark,group);}beam(V(0,.5,0),V(0,7,0),.07,C.leaf,group);anchors.push({id:i,pos:V(...p),mesh:group,halo});});
+ LEVEL.secrets.forEach((s,i)=>{const m=mesh(new THREE.OctahedronGeometry(.55),toon(C.gold,.8),worldRoot,true);m.position.set(s.x,s.y,s.z);lore.push({...s,id:i,mesh:m});});
+ // Crumbling ruins, root buttresses and exaggerated jungle silhouettes.
+ for(let i=0;i<42;i++){let x=(rand()<.5?-1:1)*(20+rand()*37),z=8-rand()*86,y=x<0?-3:2;if(z<-43)y=0;let w=1+rand()*3,h=1+rand()*5;const rock=mesh(new THREE.DodecahedronGeometry(w*.6,0),toon(i%3?C.stone:C.sand));rock.position.set(x,y+h*.25,z);rock.scale.set(1,h/w,1);rock.rotation.set(rand(),rand(),rand());if(i<14)solidBox(x,y+h*.25,z,w*.8,h*.6,w*.8);}
+ for(let i=0;i<46;i++){let side=i%2?-1:1,x=side*(22+rand()*40),z=25-rand()*115;makeTree(x,x<-20&&z<7&&z>-40?-2:0,z,1+rand()*1.4);}
+ for(let i=0;i<150;i++){let x=(rand()-.5)*120,z=28-rand()*112;if(Math.abs(x)<14)continue;let y=x<-22&&z<7&&z>-39?-2.6:x>22&&z<0&&z>-44?2:0;plant(x,y,z,.4+rand()*.9,i%7===0?C.pink:C.leaf);}
+ for(let i=0;i<8;i++){const x=(i%2?-1:1)*(19+rand()*5),z=20-i*12;beam(V(x,0,z),V(x*.5,9+rand()*4,z-3),.5,C.dark);}
+ for(let i=0;i<22;i++){const p=ball((rand()-.5)*100,8+rand()*25,-90-rand()*40,7+rand()*7,C.dark);p.scale.set(.5,2.8,.7);}
+ // Illustrated sun and drifting motes, all original geometry.
+ const sunDisc=mesh(new THREE.CircleGeometry(12,64),flat(0xf5b56e));sunDisc.position.set(22,35,-112);sunDisc.castShadow=false;
+ for(let i=0;i<85;i++){const m=ball((rand()-.5)*100,rand()*12,28-rand()*105,.025+rand()*.035,C.gold);m.material=toon(C.gold,1);decor.push({type:'mote',mesh:m,base:m.position.y,phase:rand()*TAU});}
+ LEVEL.foes.forEach((e,i)=>spawnEnemy(e[0],e[1],e[2],e[3],e[4],i));
+ LEVEL.pickups.forEach((p,i)=>makePickup(p[0],p[1],p[2],p[3],i));
+}
+
+function limb(parent,x,y,z,w,h,d,color){const joint=new THREE.Group();joint.position.set(x,y,z);parent.add(joint);box(0,-h/2,0,w,h,d,color,joint,false,true);return joint;}
+function creature(kind,color=C.orange){
+ const root=new THREE.Group(),rig={legs:[],arms:[],head:null,tail:null,wings:[]};root.userData.rig=rig;
+ if(kind==='raptor'){
+  const torso=ball(0,1.35,0,.85,color,root);torso.scale.set(.65,.8,1.25);const neck=beam(V(0,1.4,-.5),V(0,2,-1),.3,color,root);
+  rig.head=new THREE.Group();rig.head.position.set(0,1.95,-.9);root.add(rig.head);box(0,0,-.3,.8,.6,1,C.bone,rig.head,false,true);box(0,-.27,-.5,.7,.12,.9,C.dark,rig.head);for(const s of [-1,1]){ball(s*.41,.07,-.4,.13,C.orange,rig.head);for(let i=0;i<3;i++){const t=mesh(new THREE.ConeGeometry(.075,.22,3),toon(C.bone),rig.head);t.rotation.z=Math.PI;t.position.set(s*.24,-.28,-.3-i*.22);}}
+  for(const s of [-1,1]){const l=limb(root,s*.43,1.3,.3,.34,.8,.4,C.dark);const foot=box(0,-.8,-.18,.4,.25,.8,C.sand,l);rig.legs.push(l);const a=limb(root,s*.55,1.7,-.4,.18,.5,.18,color);box(0,-.45,-.18,.15,.12,.4,C.bone,a);rig.arms.push(a);}
+  rig.tail=new THREE.Group();rig.tail.position.set(0,1.3,.6);root.add(rig.tail);const tail=mesh(new THREE.ConeGeometry(.4,2.4,5),toon(color),rig.tail);tail.rotation.x=Math.PI/2;tail.position.z=1;
+  for(let i=0;i<5;i++){const t=mesh(new THREE.ConeGeometry(.2,.6,4),toon(C.dark),root);t.position.set(0,2.05-i*.05,.65-i*.4);}
+ }else if(kind==='sentinel'||kind==='hunter'){
+  box(0,1.6,0,1.1,1.2,.65,color,root,false,true);box(0,1.13,0,1.25,.25,.8,C.dark,root);rig.head=new THREE.Group();rig.head.position.y=2.5;root.add(rig.head);const h=ball(0,0,0,.51,C.bone,rig.head);h.scale.set(.85,1.25,.8);box(0,.02,-.4,.65,.15,.18,C.deep,rig.head);for(const s of [-1,1])ball(s*.2,.02,-.51,.09,C.mint,rig.head);
+  for(const s of [-1,1]){const l=limb(root,s*.32,1.05,0,.35,.9,.4,C.dark);box(0,-.8,-.1,.4,.2,.65,C.sand,l);rig.legs.push(l);const a=limb(root,s*.73,2,0,.35,.8,.38,color);ball(0,0,0,.38,C.sand,a);rig.arms.push(a);}
+  beam(V(.8,1.2,0),V(.8,1.2,-1.5),.18,C.deep,root);ball(.8,1.2,-1.5,.22,C.mint,root);
+  for(let i=0;i<5;i++){const t=mesh(new THREE.ConeGeometry(.13,.8,4),toon(C.orange),rig.head);t.position.set((i-2)*.2,.65,0);t.rotation.z=(2-i)*.25;}
+ }else if(kind==='flyer'){
+  const b=ball(0,.2,0,.7,C.dark,root);b.scale.set(.7,1.1,1.3);box(0,.2,-.65,.7,.4,.4,C.bone,root,false,true);ball(0,.25,-.9,.22,C.orange,root);
+  for(const s of [-1,1]){const w=new THREE.Group();w.position.set(s*.4,.2,0);root.add(w);const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.Float32BufferAttribute([0,0,0,s*2.5,.2,.8,s*1.2,0,-.8],3));geo.computeVertexNormals();const m=mesh(geo,toon(C.pink),w);m.material.side=THREE.DoubleSide;beam(V(),V(s*2.5,.2,.8),.08,C.bone,w);rig.wings.push(w);}
+ }else if(kind==='boss'){
+  const b=ball(0,3,0,2.8,C.dark,root,1);b.scale.set(.9,1.1,.7);const chest=ball(0,3.4,-1.8,1.2,C.orange,root);chest.scale.set(.8,1.3,.35);rig.head=new THREE.Group();rig.head.position.set(0,5.8,-.6);root.add(rig.head);box(0,0,0,2,1.8,1.7,C.bone,rig.head,false,true);box(0,-.5,-1,1.5,.7,.4,C.deep,rig.head);for(const s of [-1,1]){ball(s*.55,.15,-.9,.27,C.orange,rig.head);beam(V(s*.8,.5,0),V(s*2.2,2,-.4),.28,C.sand,rig.head);const a=limb(root,s*2.4,4.6,0,1,3,1,C.stone);ball(0,-2.5,0,.8,C.orange,a);rig.arms.push(a);const l=limb(root,s*1.2,1.7,0,.9,1.8,1,C.stone);rig.legs.push(l);}for(let i=0;i<9;i++){const t=mesh(new THREE.ConeGeometry(.4,2.5,4),toon(C.dark),root);t.position.set(Math.sin(i*2.3)*2.2,4+Math.cos(i*2)*1.5,1);t.rotation.z=Math.sin(i)*.5;}
+ }
+ return root;
+}
+function spawnEnemy(kind,x,y,z,region,id=enemies.length){const m=creature(kind);m.position.set(x,y,z);worldRoot.add(m);const health={raptor:65,sentinel:100,flyer:50,boss:1800}[kind];const rb=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x,y+1,z));const co=world.createCollider(RAPIER.ColliderDesc.capsule(.6,kind==='boss'?1.5:.5).setSensor(true),rb);const e={id,kind,pos:V(x,y,z),home:V(x,y,z),mesh:m,health,maxHealth:health,region,dead:false,alert:false,attack:1+id*.11,windup:0,stagger:0,phase:0,vy:0,rb,co,flash:0};enemies.push(e);enemyMeshes.set(id,e);return e;}
+function makePickup(kind,x,y,z,id){const m=new THREE.Group();m.position.set(x,y,z);worldRoot.add(m);const color=kind==='health'?C.orange:kind==='armor'?C.mint:kind==='ammo'?C.gold:C.bone;const b=box(0,0,0,.6,.65,.6,C.dark,m,false,true);if(kind==='health'){box(0,.05,-.32,.38,.13,.05,color,m);box(0,.05,-.33,.13,.4,.05,color,m);}else if(kind==='armor'){const d=mesh(new THREE.OctahedronGeometry(.4),toon(color,.6),m);d.position.z=-.1;}else if(kind==='ammo'){for(let j=0;j<3;j++)cylinder((j-1)*.2,.16,0,.06,.7,color,m,6);}else{m.scale.setScalar(1.5);beam(V(-.5,0,0),V(.5,0,0),.18,C.orange,m);const r=ring(0,0,0,.7,C.gold,m);r.rotation.y=Math.PI/2;}const r=ring(0,-.5,0,.7,color,m);r.rotation.x=-Math.PI/2;pickups.push({id,kind,pos:V(x,y,z),mesh:m,taken:false,respawn:0});}
+
+function buildWeapons(){
+ weaponRoot=new THREE.Group();weaponRoot.scale.setScalar(.7);camera.add(weaponRoot);scene.add(camera);
+ const armMat=toon(0x896d54);for(const s of [-1,1]){const hand=box(s*.44,-.42,-.45,.2,.23,.38,0xa47b58,weaponRoot);hand.rotation.x=-.2;box(s*.45,-.51,-.15,.22,.25,.6,C.dark,weaponRoot);}
+ for(let i=0;i<3;i++){const root=new THREE.Group();weaponRoot.add(root);weaponModels.push(root);root.position.set(.28,-.34,-.5);
+  if(i===0){box(0,0,-.1,.25,.28,.8,C.dark,root,false,true);box(0,.13,-.25,.33,.09,.55,C.sand,root);for(const s of [-1,1]){beam(V(s*.1,0,-.35),V(s*.42,.2,-.65),.06,C.orange,root);beam(V(s*.42,.2,-.65),V(s*.52,-.1,-.95),.045,C.bone,root);}cylinder(0,.22,-.25,.04,.13,C.mint,root);const bar=beam(V(0,.01,-.5),V(0,.01,-1.2),.065,C.orange,root);for(let j=0;j<3;j++)box(0,.18,-.1-j*.14,.08,.05,.07,C.orange,root);}
+  if(i===1){box(0,0,-.15,.32,.36,.8,C.dark,root,false,true);for(const s of [-1,1]){beam(V(s*.11,.08,-.3),V(s*.11,.08,-1.05),.11,C.stone,root);const muzzle=ring(s*.11,.08,-1.05,.12,C.gold,root);}box(0,-.14,-.6,.45,.13,.33,C.orange,root);box(0,.23,-.1,.08,.09,.25,C.bone,root);}
+  if(i===2){const skull=ball(0,.05,-.3,.32,C.bone,root,1);skull.scale.set(1,.9,1.3);for(const s of [-1,1]){ball(s*.13,.09,-.59,.09,C.deep,root);ball(s*.13,.09,-.66,.045,C.mint,root);}box(0,-.16,-.5,.32,.13,.25,C.dark,root);for(const s of [-1,1])beam(V(s*.2,.15,-.2),V(s*.39,.4,-.08),.06,C.orange,root);for(let j=0;j<3;j++){const r=ring(0,0,-.75-j*.12,.18-j*.03,C.mint,root);r.rotation.z=j;}box(0,-.15,.1,.17,.38,.25,C.orange,root);}
+ }
+ weaponRoot.traverse(m=>{if(m.isMesh){m.castShadow=false;m.receiveShadow=false;m.renderOrder=10;}});
+}
+
+function emit(pos,color,count=12,speed=4,size=.09){for(let i=0;i<count;i++){const m=mesh(new THREE.IcosahedronGeometry(size*(.5+Math.random()),0),flat(color),scene);m.position.copy(pos);m.castShadow=false;particles.push({mesh:m,vel:V((Math.random()-.5)*speed,Math.random()*speed,(Math.random()-.5)*speed),life:.35+Math.random()*.6,max:1});}}
+function tracer(a,b,color=C.gold,r=.025){const m=beam(a,b,r,color,scene);m.material=flat(color);m.castShadow=false;particles.push({mesh:m,vel:V(),life:.08,max:.08,static:true});}
+function shock(pos,radius=4,color=C.mint){const m=ring(pos.x,pos.y,pos.z,.5,color,scene);m.rotation.x=-Math.PI/2;m.material=flat(color,.8);particles.push({mesh:m,vel:V(),life:.5,max:.5,ring:true,radius});}
+function explode(pos,radius,damage,owner){audio.sfx('boom');emit(pos,C.orange,32,10,.15);shock(pos,radius,C.orange);if(authority())for(const e of enemies)if(!e.dead&&e.pos.distanceTo(pos)<radius+1)hurtEnemy(e,damage*(1-e.pos.distanceTo(pos)/(radius+2)),owner,false);}
+function fragment(e){for(let i=0;i<(e.kind==='boss'?15:5);i++){const m=mesh(new THREE.DodecahedronGeometry(.18+Math.random()*.18),toon(i%2?C.bone:C.dark),scene);const p=e.pos.clone().add(V((Math.random()-.5),1+Math.random(),(Math.random()-.5)));m.position.copy(p);const rb=world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x,p.y,p.z).setLinearDamping(.4).setAngularDamping(.5));world.createCollider(RAPIER.ColliderDesc.ball(.2).setRestitution(.45),rb);rb.applyImpulse({x:(Math.random()-.5)*2,y:1+Math.random()*2,z:(Math.random()-.5)*2},true);rb.setAngvel({x:Math.random()*5,y:3,z:2},true);debris.push({mesh:m,rb,life:6});}}
+function disposeMesh(m){m.removeFromParent();if(m.geometry)m.geometry.dispose();if(m.material?.userData.ephemeral)m.material.dispose();}
+function authority(){return !net||net.isHost;}
+function allPlayers(){const a=[];if(!AIHub.server)a.push({...local,pos:local.pos,id:net?net.me:0});for(const p of remotes.values())a.push(p);return a.filter(p=>p.health>0);}
+function damagePlayer(id,amount,source){if(g.mode==='attract')return;if(net&&id!==net.me){net.send({t:'hurt',id,n:amount,s:source},{to:id});return;}if(local.health<=0||g.ended)return;let absorbed=Math.min(local.armor,amount*.65);local.armor-=absorbed;local.health=Math.max(0,local.health-amount+absorbed);damageFlash=.65;audio.sfx('hurt');if(local.health<=0)die();}
+function hurtEnemy(e,n,owner,head=false){if(e.dead||!authority())return;if(e.kind==='boss'&&!g.bossActive)return;e.health-=n;e.stagger=e.kind==='boss'?.06:.25;e.flash=.1;g.hits++;if(owner===(net?net.me:0)){hitFlash=.17;audio.sfx('hit');$('hitmarker').style.color=head?'#a5ebc3':'#f16d3c';}else if(net)net.send({t:'hit',id:owner,head},{to:owner});if(e.health<=0){e.health=0;e.dead=true;e.mesh.visible=false;g.kills++;g.score+=e.kind==='boss'?3000:head?150:100;fragment(e);emit(e.pos.clone().add(V(0,1,0)),C.orange,18,5);audio.sfx('kill');if(net)net.send({t:'dead',id:e.id,score:g.score,kills:g.kills});if(e.kind==='boss'){g.won=true;announce('THE ROOTBOUND FALLS','The eastern gate is open. Return to the sun.','SANCTUM SILENCED');say('A god can die, hunter. Now prove that you can live.',6);}}}
+function targetForRay(origin,dir,range,wide=.0){let hit=null,best=range;for(const e of enemies){if(e.dead||(e.kind==='boss'&&!g.bossActive))continue;const center=e.pos.clone().add(V(0,e.kind==='boss'?3.6:e.kind==='flyer'?.3:1.35,0));const d=center.clone().sub(origin),t=d.dot(dir);if(t<0||t>best)continue;const radius=(e.kind==='boss'?2.6:e.kind==='flyer'?.8:.8)+wide;if(d.lengthSq()-t*t<radius*radius){best=t;hit=e;}}return hit?{e:hit,dist:best}:null;}
+function wallDistance(origin,dir,max){const hit=world.castRay(new RAPIER.Ray(origin,dir),max,true,RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,undefined,collider,body);return hit?hit.timeOfImpact:max;}
+function fireRay(origin,dir,weapon,alt,owner,charge=1){let count=weapon===1?(alt?1:8):1;const range=weapon===1&&!alt?33:100;let any=false;for(let i=0;i<count;i++){let d=dir.clone();if(count>1)d.add(V((Math.random()-.5)*.13,(Math.random()-.5)*.13,(Math.random()-.5)*.13)).normalize();const wall=wallDistance(origin,d,range),hit=targetForRay(origin,d,Math.min(range,wall)+.1,weapon===1?.18:0);const end=origin.clone().addScaledVector(d,hit?hit.dist:wall);tracer(origin.clone().add(V(0,-.1,0)),end,weapon===1?C.orange:C.gold,weapon===1?.03:.022);if(hit){const height=origin.y+d.y*hit.dist-hit.e.pos.y;const head=hit.e.kind!=='boss'&&height>1.8&&hit.e.kind!=='flyer';const damage=weapon===0?(alt?75:22):alt?105:16;hurtEnemy(hit.e,damage*(head?1.6:1)*charge,owner,head);emit(end,head?C.mint:C.orange,4,2,.06);any=true;}else emit(end,C.sand,3,1.5,.045);}return any;}
+function spawnShot(origin,dir,weapon,alt,owner){if(weapon===2||weapon===0&&alt){let target=targetForRay(origin,dir,100,weapon===2?5:0)?.e;const m=ball(origin.x,origin.y,origin.z,weapon===2?.19:.13,weapon===2?C.mint:C.orange,scene);m.material=toon(weapon===2?C.mint:C.orange,1);const p={pos:origin.clone(),vel:dir.clone().multiplyScalar(weapon===2?22:30),mesh:m,life:5,owner,weapon,alt,target:target?.id,enemy:false};projectiles.push(p);}else fireRay(origin,dir,weapon,alt,owner);}
+function shoot(alt=false){if(fireCooldown>0||local.health<=0||g.ended)return;let w=local.weapon,cost=alt?(w===2?2:4):1;if(local.ammo[w]<cost){fireCooldown=.3;audio.sfx('click');announce('THE CHAMBER IS EMPTY','Find an essence cache, or switch with R1 / C.','AMMUNITION');return;}local.ammo[w]-=cost;fireCooldown=w===0?(alt?.8:.16):w===1?.78:1;recoil=w===1?.15:.065;g.shots++;audio.sfx(w===0?'shot':w===1?'scatter':'seeker');const origin=camera.position.clone(),dir=V(0,0,-1).applyQuaternion(camera.quaternion);if(cfg.assist&&pad){const hit=targetForRay(origin,dir,60,1.2);if(hit){const td=hit.e.pos.clone().add(V(0,hit.e.kind==='boss'?3.5:1.5,0)).sub(origin).normalize();dir.lerp(td,.2).normalize();}}if(authority())spawnShot(origin,dir,w,alt,net?net.me:0);else{net.send({t:'shot',id:net.me,o:origin.toArray(),d:dir.toArray(),w,a:alt});tracer(origin,origin.clone().addScaledVector(dir,25),C.gold);}
+ emit(origin.clone().addScaledVector(dir,.8).add(V(.15,-.2,0)),w===2?C.mint:C.orange,4,2,.045);
+}
+function switchWeapon(delta=1){local.weapon=(local.weapon+delta+g.unlocked)%g.unlocked;audio.sfx('click');fireCooldown=Math.max(fireCooldown,.16);}
+function spiritPulse(){if(pulseCooldown>0)return;pulseCooldown=12;audio.sfx('seal');shock(local.pos.clone().add(V(0,-.5,0)),12);emit(local.pos,C.mint,35,10);const evt={t:'pulse',id:net?net.me:0,p:local.pos.toArray()};if(authority())applyPulse(evt);else net.send(evt);announce('SPIRIT PULSE','Nearby enemies stagger. Wards and relics answer your call.','ANCESTRAL POWER');}
+function applyPulse(m){const p=V(...m.p);for(const e of enemies)if(!e.dead&&e.pos.distanceTo(p)<12){hurtEnemy(e,45,m.id);e.stagger=2.4;}if(net)net.send({t:'fx',p:m.p,kind:'pulse'});}
+
+function stepEnemies(dt){const players=allPlayers();for(const e of enemies){if(e.dead)continue;const rig=e.mesh.userData.rig;e.flash=Math.max(0,e.flash-dt);e.stagger=Math.max(0,e.stagger-dt);let nearest=null,dist=Infinity;for(const p of players){const d=p.pos.distanceTo(e.pos);if(d<dist){nearest=p;dist=d;}}if(!nearest)continue;
+  if(e.region===3&&!g.seals.every(Boolean))continue;
+  if(e.kind==='boss'){
+   if(!g.bossActive&&nearest.pos.z<-55){g.bossActive=true;announce('THE ROOTBOUND','The seed that learned to hunger.','GUARDIAN AWAKENED');say('You cut the branches. I am the root.',5,'THE ROOTBOUND');if(net)net.send({t:'boss'});}
+   if(!g.bossActive)continue;
+   e.phase=e.health/e.maxHealth<.34?2:e.health/e.maxHealth<.68?1:0;e.attack-=dt;e.mesh.rotation.y=Math.atan2(e.pos.x-nearest.pos.x,e.pos.z-nearest.pos.z);
+   if(e.attack<.9&&e.attack>0){if(!e.warned){e.warned=true;e.attackKind=(e.cycle||0)%3;e.cycle=(e.cycle||0)+1;announce(['JUMP — THE GROUND WILL BREAK','DASH — THORN VOLLEY','THE ROOTS CALL FOR BLOOD'][e.attackKind],['Clear the shockwave with a jump.','Keep moving across its aim.','The guardian summons its brood.'][e.attackKind],'GUARDIAN / WARNING',2);}rig.arms.forEach((a,i)=>a.rotation.x=-1.9+Math.sin(simTime*20)*.05);if(Math.random()<dt*30)emit(e.pos.clone().add(V(0,4,0)),C.orange,1,1,.14);}
+   if(e.attack<=0){const attack=e.attackKind||0;e.warned=false;e.attack=3.9-e.phase*.55;rig.arms.forEach(a=>a.rotation.x=0);audio.sfx('boom');if(attack===0){shock(e.pos.clone().add(V(0,.12,0)),18,C.orange);for(const p of players)if(p.pos.distanceTo(e.pos)<18&&p.pos.y<2.7)damagePlayer(p.id,26*cfg.difficulty,'groundwave');announce('THE GROUND WILL BREAK','Jump over the shockwave.','GUARDIAN / SLAM');}else if(attack===1){for(let j=0;j<5+e.phase*2;j++){const dir=nearest.pos.clone().sub(e.pos).add(V((j-3)*1.8,0,0)).normalize();enemyProjectile(e.pos.clone().add(V(0,4,-1)),dir,11+e.phase*2,16);}announce('SEEDS OF CHAOS','Keep moving. The thorns follow your last position.','GUARDIAN / VOLLEY');}else{const n=enemies.filter(x=>!x.dead&&x.region===3&&x.kind!=='boss').length;if(n<5){const id=enemies.length;spawnEnemy('raptor',-7,0,-65,3,id);spawnEnemy('raptor',7,0,-65,3,id+1);if(net)net.send({t:'spawn',list:[['raptor',-7,0,-65,3,id],['raptor',7,0,-65,3,id+1]]});}else{for(const p of players)if(p.pos.distanceTo(e.pos)<35)enemyProjectile(e.pos.clone().add(V(0,4,0)),p.pos.clone().sub(e.pos).normalize(),18,20);}}}
+   if(dist>9&&e.attack>1)e.pos.addScaledVector(nearest.pos.clone().sub(e.pos).setY(0).normalize(),dt*(1.1+e.phase*.4));e.pos.z=clamp(e.pos.z,-77,-58);e.pos.x=clamp(e.pos.x,-9,9);
+  }else{
+   e.alert=dist<(e.kind==='flyer'?30:25)||e.health<e.maxHealth;if(!e.alert){e.mesh.rotation.y=Math.sin(simTime*.3+e.id)*.4;continue;}e.attack-=dt;if(e.stagger>0)continue;
+   const d=nearest.pos.clone().sub(e.pos);d.y=0;d.normalize();e.mesh.rotation.y=Math.atan2(-d.x,-d.z);
+   const desired=e.kind==='raptor'?1.8:10;
+   if(dist>desired){let speed=e.kind==='raptor'?4.4:e.kind==='flyer'?3.8:2.5;let dir=d.clone();const ahead=e.pos.clone().add(V(0,1,0));if(wallDistance(ahead,dir,1.8)<1.5){const sign=Math.sin(e.id*9.7)>0?1:-1;dir.set(-d.z*sign,0,d.x*sign);}for(const other of enemies)if(other!==e&&!other.dead){const diff=e.pos.clone().sub(other.pos);diff.y=0;if(diff.length()<1.5&&diff.length()>.01)dir.addScaledVector(diff.normalize(),.65);}
+    if(e.kind==='flyer'){e.pos.addScaledVector(dir.normalize(),dt*speed);e.pos.y=4.8+Math.sin(simTime*2+e.id)*.8;}
+    else{e.vy=Math.max(-18,e.vy-24*dt);controller.computeColliderMovement(e.co,{x:dir.x*dt*speed,y:e.vy*dt,z:dir.z*dt*speed},RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,undefined,c=>c!==collider);const m=controller.computedMovement();e.pos.add(V(m.x,m.y,m.z));if(controller.computedGrounded())e.vy=0;}
+   }
+   if(e.attack<=0&&dist<(e.kind==='raptor'?3:24)){if(e.kind==='raptor'){e.windup=.5;e.attack=1.7;audio.tone(90,.25,'sawtooth',.06,0,null,220);}else if(wallDistance(e.pos.clone().add(V(0,1.7,0)),nearest.pos.clone().sub(e.pos).normalize(),dist)>dist-2){e.attack=e.kind==='flyer'?2:2.5;enemyProjectile(e.pos.clone().add(V(0,e.kind==='flyer'?.2:1.6,0)),nearest.pos.clone().add(V(0,.3,0)).sub(e.pos.clone().add(V(0,1.6,0))).normalize(),e.kind==='flyer'?13:17,e.kind==='flyer'?12:18);}}
+   if(e.windup>0){e.windup-=dt;if(e.windup<=0&&dist<3.7){damagePlayer(nearest.id,18*cfg.difficulty,'claw');e.pos.addScaledVector(d,.5);}}
+  }
+  e.mesh.position.copy(e.pos);e.rb.setNextKinematicTranslation({x:e.pos.x,y:e.pos.y+1,z:e.pos.z});
+  rig.legs.forEach((leg,i)=>leg.rotation.x=Math.sin(simTime*(e.kind==='raptor'?12:7)+i*Math.PI)*(dist>3?.55:.08));rig.arms.forEach((a,i)=>{if(e.kind!=='boss')a.rotation.x=e.windup>0?-1.6:Math.sin(simTime*7+i*Math.PI)*.15;});if(rig.head)rig.head.rotation.z=Math.sin(simTime*2+e.id)*.05;if(rig.tail)rig.tail.rotation.y=Math.sin(simTime*5)*.18;rig.wings.forEach((w,i)=>w.rotation.z=Math.sin(simTime*12)*(i?1:-1)*.5);
+ }
+}
+function enemyProjectile(pos,dir,speed,damage){const m=ball(pos.x,pos.y,pos.z,.17,C.orange,scene);m.material=toon(C.orange,1);projectiles.push({pos:pos.clone(),vel:dir.multiplyScalar(speed),mesh:m,life:5,enemy:true,damage});audio.tone(300,.15,'triangle',.06,0,null,90);}
+function stepProjectiles(dt){for(let i=projectiles.length-1;i>=0;i--){const p=projectiles[i];p.life-=dt;let gone=p.life<=0;if(p.target!==undefined){const e=enemyMeshes.get(p.target);if(e&&!e.dead){let desired=e.pos.clone().add(V(0,e.kind==='boss'?3.5:1.4,0)).sub(p.pos).normalize().multiplyScalar(p.weapon===2?24:30);p.vel.lerp(desired,1-Math.exp(-dt*5));}}
+ const distance=p.vel.length()*dt,dir=p.vel.clone().normalize();if(wallDistance(p.pos,dir,distance+.1)<distance)gone=true;p.pos.addScaledVector(p.vel,dt);p.mesh.position.copy(p.pos);
+ if(p.enemy){for(const player of allPlayers())if(player.pos.distanceTo(p.pos)<.85){damagePlayer(player.id,p.damage*cfg.difficulty,'thorn');gone=true;break;}}
+ else if(authority())for(const e of enemies)if(!e.dead&&p.pos.distanceTo(e.pos.clone().add(V(0,e.kind==='boss'?3.5:1.2,0)))<(e.kind==='boss'?2.6:1)){hurtEnemy(e,p.weapon===2?(p.alt?250:150):90,p.owner,true);gone=true;if(p.weapon===2){explode(p.pos,p.alt?6:3.2,p.alt?90:35,p.owner);audio.voice(54);}break;}
+ if(Math.random()<dt*25)emit(p.pos,p.enemy?C.orange:p.weapon===2?C.mint:C.gold,1,.5,.04);
+ if(gone){if(!p.enemy&&p.weapon===0&&p.alt)explode(p.pos,4,55,p.owner);else emit(p.pos,p.enemy?C.orange:C.mint,5,2,.05);disposeMesh(p.mesh);projectiles.splice(i,1);}
+}}
+
+function announce(title,sub='',kicker='EXPEDITION',duration=4){$('toastText').textContent=title;$('toastSub').textContent=sub;$('toastKicker').textContent=kicker;toastTime=duration;$('toast').classList.remove('hidden');}
+function say(text,duration=5,who='THE ORACLE'){if(cfg.subtitles){$('subtitle').classList.remove('hidden');$('subtitle').querySelector('b').textContent=who;$('subtitle').querySelector('span').textContent=text;subTime=duration;}audio.voice(text.length*19);}
+function resetRun(mode='solo',saved=null){
+ Object.assign(g,{screen:'play',mode,time:0,elapsed:0,seals:[false,false,false],secrets:[],kills:0,score:0,unlocked:1,checkpoint:[0,1.05,23],bossActive:false,won:false,ended:false,deaths:0,shots:0,hits:0,region:-1});
+ if(saved)Object.assign(g,saved,{screen:'play',mode,ended:false});
+ local.health=100;local.armor=50;local.oxygen=100;local.weapon=0;local.ammo=[100,30,8];local.pos.set(...g.checkpoint);if(net)local.pos.x+=(net.me-1.5)*1.5;
+ yaw=0;pitch=0;vy=0;dashTime=0;dashCooldown=0;pulseCooldown=0;grapple=null;fireCooldown=0;autoTime=0;toastTime=0;subTime=0;
+ body.setTranslation(local.pos,true);body.setNextKinematicTranslation(local.pos);collider.setEnabled(!AIHub.server);world.step();
+ for(const p of projectiles)disposeMesh(p.mesh);projectiles.length=0;
+ for(const p of particles)disposeMesh(p.mesh);particles.length=0;
+ for(const d of debris){world.removeRigidBody(d.rb);disposeMesh(d.mesh);}debris.length=0;
+ for(let i=enemies.length-1;i>=LEVEL.foes.length;i--){const e=enemies[i];world.removeRigidBody(e.rb);e.mesh.traverse(m=>{if(m.isMesh)m.geometry.dispose();});e.mesh.removeFromParent();enemyMeshes.delete(e.id);enemies.splice(i,1);}
+ for(const e of enemies){e.phase=0;e.warned=false;e.cycle=0;e.pos.copy(e.home);e.dead=saved?!!saved.dead?.includes(e.id):false;e.health=e.maxHealth;e.alert=false;e.stagger=0;e.windup=0;e.attack=1.5;e.vy=0;e.mesh.visible=!e.dead;e.mesh.position.copy(e.pos);e.rb.setTranslation({x:e.pos.x,y:e.pos.y+1,z:e.pos.z},true);}
+ for(const p of pickups){p.taken=false;p.respawn=0;p.mesh.visible=true;}
+ for(const r of relays){r.crystal.material=toon(g.seals[r.id]?C.mint:r.id===1?C.mint:C.orange,.6);r.light.visible=!g.seals[r.id];}
+ for(const l of lore)l.mesh.visible=!g.secrets.includes(l.id);
+ for(const gate of gates){gate.open=false;gate.mesh.visible=true;gate.collider.setEnabled(true);}
+ updateGate();closePanel();$('title').classList.add('hidden');$('ending').classList.add('hidden');$('hud').classList.remove('hidden');$('attractBanner').classList.toggle('hidden',mode!=='attract');
+ if(mode!=='attract'){say('Three wards bind the hunger below. Break them, hunter. Before it learns your name.',7);announce('THE DROWNED CITADEL','Break the Sun, Tide, and Bone wards. Then enter the sanctum.','EXPEDITION / 01',6);}
+ if(mode==='attract'){g.unlocked=3;local.ammo=[999,999,999];}
+ updateHud();
+}
+function startSolo(saved=null){if(!ready)return;disconnectNet();audio.start();resetRun('solo',saved);requestLock();}
+function saveRun(){if(g.mode!=='solo')return;try{const data={seals:g.seals,secrets:g.secrets,kills:g.kills,score:g.score,unlocked:g.unlocked,checkpoint:g.checkpoint,elapsed:g.elapsed,dead:enemies.filter(e=>e.dead).map(e=>e.id)};localStorage.setItem('turokarrot-save',JSON.stringify(data));}catch{}}
+function loadRun(){try{return JSON.parse(localStorage.getItem('turokarrot-save')||'null');}catch{return null;}}
+function showTitle(){if(AIHub.active)return;disconnectNet();g.screen='title';g.mode='solo';g.ended=false;menu=null;lastInput=performance.now();$('title').classList.remove('hidden');$('hud').classList.add('hidden');$('panel').classList.add('hidden');$('ending').classList.add('hidden');$('attractBanner').classList.add('hidden');$('continueBtn').classList.toggle('hidden',!loadRun());document.exitPointerLock?.();menuIndex=0;focusMenu();}
+function requestLock(){if(!pad&&!AIHub.server&&g.screen==='play'&&!menu){try{const result=renderer.domElement.requestPointerLock?.();result?.catch(()=>{lockRequested=false;});lockRequested=true;}catch{}}}
+function die(){g.deaths++;g.screen='dead';document.exitPointerLock?.();$('ending').classList.remove('hidden');$('endKicker').textContent='THE CITADEL TAKES ITS DUE';$('endTitle').innerHTML='RISE AGAIN,<br>HUNTER.';$('endText').textContent=net?'Your expedition continues. Return at the last ward.':'Your wards and discoveries remain. Return at the last checkpoint.';$('endStats').innerHTML='<div><strong>'+g.kills+'</strong><small>CREATURES SLAIN</small></div><div><strong>'+g.seals.filter(Boolean).length+'/3</strong><small>WARDS BROKEN</small></div>';$('ending').querySelector('[data-action="restart"]').textContent='RETURN TO CHECKPOINT ↗';$('ending').querySelector('[data-action="title"]').classList.toggle('hidden',!!AIHub.active);menuIndex=0;}
+function respawn(){local.health=100;local.armor=40;local.oxygen=100;local.ammo=local.ammo.map((n,i)=>Math.max(n,[65,16,5][i]));local.pos.set(...g.checkpoint);body.setTranslation(local.pos,true);body.setNextKinematicTranslation(local.pos);vy=0;g.screen='play';$('ending').classList.add('hidden');announce('THE HUNT CONTINUES','Checkpoint restored. The broken wards remain silent.','ANCESTRAL MEMORY');requestLock();}
+function finish(won=true){if(g.ended)return;g.ended=true;g.won=won;g.screen='over';if(AIHub.active&&authority())AIHub.finish({standings:[AIHub.players.map(p=>p.id)],won,scores:Object.fromEntries(AIHub.players.map(p=>[p.id,g.score])),stats:Object.fromEntries(AIHub.players.map(p=>[p.id,{'Wards':g.seals.filter(Boolean).length,'Kills':g.kills,'Secrets':g.secrets.length}]))});if(net&&authority())net.send({t:'finish',won,score:g.score,kills:g.kills,secrets:g.secrets});showEnding(won);}
+function showEnding(won){g.ended=true;g.screen='over';$('ending').classList.remove('hidden');$('hud').classList.add('hidden');$('endKicker').textContent=won?'THE ROOTS FALL SILENT':'THE HUNT WILL BE REMEMBERED';$('endTitle').innerHTML=won?'DAYLIGHT.<br>AT LAST.':'THE SUN<br>MUST WAIT.';$('endText').textContent=won?'The citadel is free. What sleeps beneath it is not. You carry its last seed into the light.':'The expedition has ended. Your deeds will outlive this dark place.';$('endStats').innerHTML='<div><strong>'+formatTime(g.elapsed)+'</strong><small>EXPEDITION TIME</small></div><div><strong>'+g.kills+'</strong><small>CREATURES SLAIN</small></div><div><strong>'+g.secrets.length+'/3</strong><small>RELICS FOUND</small></div>';$('ending').querySelector('[data-action="restart"]').textContent='ANOTHER EXPEDITION ↗';for(const b of $('ending').querySelectorAll('button'))b.classList.toggle('hidden',!!AIHub.active);document.exitPointerLock?.();audio.sfx('seal');if(won&&g.mode==='solo'){try{localStorage.removeItem('turokarrot-save');}catch{}}}
+function updateGate(){const open=g.seals.every(Boolean);for(const gate of gates)if(gate.open!==open){gate.open=open;gate.mesh.visible=!open;gate.collider.setEnabled(!open);if(open){emit(V(0,5,-48),C.mint,70,12,.2);audio.sfx('seal');}}}
+function interact(){if(g.won&&local.pos.distanceTo(V(0,1,-77))<6){if(authority())finish(true);else net.send({t:'escape'});return;}let closest=relays.find(r=>!g.seals[r.id]&&local.pos.distanceTo(V(r.x,r.y+1,r.z))<4.5);if(closest){if(authority())attune(closest.id,net?net.me:0);else net.send({t:'attune',id:closest.id});return;}const l=lore.find(l=>!g.secrets.includes(l.id)&&local.pos.distanceTo(V(l.x,l.y,l.z))<4);if(l){if(authority())takeLore(l.id);else net.send({t:'lore',id:l.id});}}
+function attune(id,player){const r=relays[id];if(!r||g.seals[id])return;const guards=enemies.filter(e=>e.region===r.region&&!e.dead);if(guards.length){if(!net||player===net.me)announce('THE WARD IS GUARDED',guards.length+' guardians remain in this district.','ANCIENT LOCK');else net.send({t:'notice',title:'THE WARD IS GUARDED',sub:guards.length+' guardians remain.'},{to:player});return;}g.seals[id]=true;g.score+=600;g.unlocked=Math.max(g.unlocked,Math.min(3,g.seals.filter(Boolean).length+1));g.checkpoint=[r.x+3,r.y+1.05,r.z+2];applyAttunement(id);if(net)net.send({t:'ward',id,score:g.score,checkpoint:g.checkpoint,unlocked:g.unlocked});saveRun();}
+function applyAttunement(id){g.seals[id]=true;relays[id].crystal.material=toon(C.mint,.9);relays[id].light.visible=false;local.health=100;local.armor=75;local.ammo=local.ammo.map((n,i)=>Math.max(n,[100,30,10][i]));audio.sfx('seal');emit(V(relays[id].x,relays[id].y+2,relays[id].z),C.mint,45,8,.13);announce(relays[id].name+' SHATTERED','Checkpoint bound · vitality and ammunition restored','WARD '+g.seals.filter(Boolean).length+' / 3',5);say(['The sun remembers. Two roots still drink.','The drowned have given up their dead. Keep walking.','The last ward is ash. Go below, hunter. Make a god afraid.'][g.seals.filter(Boolean).length-1],5);updateGate();}
+function takeLore(id){if(g.secrets.includes(id))return;g.secrets.push(id);g.score+=250;lore[id].mesh.visible=false;announce(lore[id].name,lore[id].text,'RELIC '+g.secrets.length+' / 3',8);say(lore[id].text,7,'ECHO OF THE FIRST HUNTER');audio.sfx('pickup');if(net&&authority())net.send({t:'relic',id,score:g.score});saveRun();}
+function collect(p,player){if(p.taken)return;const isLocal=!net||player===net.me;let person=isLocal?local:remotes.get(player);if(!person)return;if(p.kind==='health'&&person.health>=100)return;if(p.kind==='armor'&&person.armor>=100)return;if(p.kind==='scatter')g.unlocked=Math.max(g.unlocked,2);if(p.kind==='seeker')g.unlocked=3;p.taken=true;p.respawn=g.time+45;p.mesh.visible=false;const event={t:'pickup',id:p.id,player,kind:p.kind};if(isLocal)applyPickup(event);if(net)net.send(event);}
+function applyPickup(m){if(net&&m.player!==net.me)return;const kind=m.kind;if(kind==='health')local.health=Math.min(100,local.health+35);else if(kind==='armor')local.armor=Math.min(100,local.armor+45);else if(kind==='ammo'){local.ammo=local.ammo.map((n,i)=>Math.min([180,60,24][i],n+[45,12,4][i]));}else{const w=kind==='scatter'?1:2;g.unlocked=Math.max(g.unlocked,w+1);local.weapon=w;local.ammo[w]=Math.max(local.ammo[w],w===1?30:10);announce(w===1?'SUNBREAK SCATTERGUN':'CEREBRAL WISP',w===1?'A close-range storm. R3 / Alt fires a focused slug.':'Guided spirit drills. Aim near a target to bind its soul.','WEAPON ACQUIRED',6);}audio.sfx('pickup');}
+function inWater(pos){return pos.x<-22&&pos.x>-62&&pos.z<7&&pos.z>-39&&pos.y<.85;}
+function stepPlayer(dt){if(AIHub.server||g.screen!=='play')return;const blocked=!!menu||document.hidden;const x=blocked?0:input.x,y=blocked?0:input.y;moving=Math.hypot(x,y);const swim=inWater(local.pos);const padJump=padEdges[0],jump=pressed.has('Space')||padJump;
+ if(!blocked){let dx=mouse.dx*.002*cfg.sensitivity,dy=mouse.dy*.002*cfg.sensitivity;if(pad){dx+=dead(pad.axes[2]||0)*2.5*dt*cfg.sensitivity;dy+=dead(pad.axes[3]||0)*2.15*dt*cfg.sensitivity;}yaw-=dx*(cfg.invertX?-1:1);pitch-=dy*(cfg.invertY?-1:1);pitch=clamp(pitch,-1.4,1.4);}
+ mouse.dx=mouse.dy=0;
+ const direction=V(x,0,y).applyAxisAngle(V(0,1,0),yaw);if(direction.length()>1)direction.normalize();let speed=aiming?4:7.2;if(keys.has('ControlLeft')||pad?.buttons[10]?.pressed)speed=10;
+ dashCooldown=Math.max(0,dashCooldown-dt);grappleCooldown=Math.max(0,grappleCooldown-dt);pulseCooldown=Math.max(0,pulseCooldown-dt);dashTime=Math.max(0,dashTime-dt);
+ if(!blocked&&(pressed.has('ShiftLeft')||padEdges[1])&&dashCooldown===0){dashCooldown=1.7;dashTime=.19;audio.sfx('dash');if(direction.length()<.1)direction.set(0,0,-1).applyAxisAngle(V(0,1,0),yaw);local.dashDir=direction.clone();}
+ if(!blocked&&(pressed.has('KeyQ')||padEdges[4])&&grappleCooldown===0){const a=bestAnchor();if(a){grapple={target:a.pos.clone().add(V(0,-1,0)),life:1.9};grappleCooldown=2.8;audio.sfx('dash');announce('VINE LATCH','Release into a jump, or ride the vine to the anchor.','TRAVERSAL',2);}}
+ if(grapple){grapple.life-=dt;const d=grapple.target.clone().sub(local.pos);const pull=d.clone().normalize().multiplyScalar(19);direction.copy(pull);speed=1;vy=pull.y;direction.y=0;tracer(local.pos.clone().add(V(.3,.1,0)),grapple.target,C.mint,.035);if(d.length()<1.7||grapple.life<=0||jump){grapple=null;vy=jump?9:3;}}
+ if(swim){vy=lerp(vy,blocked?0:jump||keys.has('Space')||pad?.buttons[0]?.pressed?5:keys.has('KeyZ')||pad?.buttons[1]?.pressed?-4:-.35,dt*4);speed*=.65;local.oxygen=local.pos.y+.62<-.22?Math.max(0,local.oxygen-dt*5):Math.min(100,local.oxygen+dt*20);if(local.oxygen===0)damagePlayer(net?net.me:0,dt*8,'drowning');jumps=0;}
+ else{local.oxygen=Math.min(100,local.oxygen+dt*20);if(!grapple)vy=Math.max(-30,vy-25*dt);if(grounded){jumps=0;if(vy<0)vy=-2;}if(!blocked&&jump&&jumps<2){vy=jumps===0?9.5:8.2;jumps++;audio.sfx('jump');if(jumps===2){emit(local.pos.clone().add(V(0,-.6,0)),C.mint,10,4);shock(local.pos.clone().add(V(0,-.8,0)),1.5);}}}
+ let move=direction.multiplyScalar(speed*dt);move.y=vy*dt;if(dashTime>0){move.x=local.dashDir.x*24*dt;move.z=local.dashDir.z*24*dt;move.y=Math.max(move.y,0);}
+ controller.computeColliderMovement(collider,move,RAPIER.QueryFilterFlags.EXCLUDE_SENSORS);const actual=controller.computedMovement();grounded=controller.computedGrounded();local.pos.add(V(actual.x,actual.y,actual.z));body.setNextKinematicTranslation(local.pos);
+ if(local.pos.y<-15){local.pos.set(...g.checkpoint);body.setTranslation(local.pos,true);vy=0;damagePlayer(net?net.me:0,20,'fall');}
+ if(!blocked){if(pressed.has('KeyC')||padEdges[5])switchWeapon();if(pressed.has('Digit1'))local.weapon=0;if(pressed.has('Digit2')&&g.unlocked>1)local.weapon=1;if(pressed.has('Digit3')&&g.unlocked>2)local.weapon=2;if(pressed.has('KeyE')||padEdges[2])interact();if(pressed.has('KeyF')||padEdges[3])spiritPulse();if(pressed.has('KeyM')||keys.has('Tab')&&!menu)openPanel('map');aiming=mouse.right||!!pad?.buttons[6]?.pressed;input.fire=mouse.left||!!pad?.buttons[7]?.pressed||keys.has('KeyJ');if(input.fire)shoot();if(pressed.has('AltLeft')||padEdges[11])shoot(true);}else{input.fire=false;aiming=false;}
+ if(authority())for(const p of pickups){if(!p.taken&&p.pos.distanceTo(local.pos)<1.7)collect(p,net?net.me:0);}
+ const region=local.pos.z<-50?3:local.pos.x<-22?1:local.pos.x>22?2:0;if(region!==g.region){g.region=region;announce(ZONES[region].name,'','DISTRICT '+String(region+1).padStart(2,'0'),3);if(region===1)say('Even the water has teeth. Watch your breath. Seek the green anchors above.',6);if(region===2)say('They kept their history in bone. Take what still remembers how to kill.',5);}
+}
+function bestAnchor(){let best=null,score=.81;const dir=V(0,0,-1).applyEuler(new THREE.Euler(pitch,yaw,0,'YXZ'));for(const a of anchors){const d=a.pos.clone().sub(local.pos);if(d.length()>37||d.length()<2)continue;const dot=d.normalize().dot(dir);if(dot>score){score=dot;best=a;}}return best;}
+
+function noteInput(){lastInput=performance.now();if(g.mode==='attract'){showTitle();consumeUntil=performance.now()+250;return true;}return false;}
+function dead(x){return Math.abs(x)<cfg.deadzone?0:Math.sign(x)*(Math.abs(x)-cfg.deadzone)/(1-cfg.deadzone);}
+function pollPad(dt){pad=Array.from(navigator.getGamepads?.()||[]).find(p=>p&&p.mapping==='standard')||null;padEdges.fill(false);if(!pad)return;for(let i=0;i<pad.buttons.length;i++){const v=pad.buttons[i].pressed;padEdges[i]=v&&!padPrev[i];padPrev[i]=v;}const active=padEdges.some(Boolean)||pad.axes.some(x=>Math.abs(x)>.3);if(active){audio.start();if(noteInput())return;}if(performance.now()<consumeUntil)return;
+ if(padEdges[9]&&!pad.buttons[8]?.pressed)toggleSettings();if(menu||g.screen==='title'||g.screen==='dead'||g.screen==='over'){
+  axisMenuTime-=dt;let vertical=dead(pad.axes[1]||0),horizontal=dead(pad.axes[0]||0);if(padEdges[12]||vertical<-.5&&axisMenuTime<=0){navMenu(-1);axisMenuTime=.2;}if(padEdges[13]||vertical>.5&&axisMenuTime<=0){navMenu(1);axisMenuTime=.2;}
+  if(padEdges[14]||horizontal<-.5&&axisMenuTime<=0){adjustFocused(-1);axisMenuTime=.2;}if(padEdges[15]||horizontal>.5&&axisMenuTime<=0){adjustFocused(1);axisMenuTime=.2;}
+  if(padEdges[0])focusedButton()?.click();if(padEdges[1]&&menu)closePanel();if(menu==='about'&&Math.abs(vertical)>.2)$('panelBody').scrollTop+=vertical*dt*450;
+ }
+}
+function menuButtons(){let root=menu?$('panel'):g.screen==='title'?$('title'):['dead','over'].includes(g.screen)?$('ending'):null;return root?[...root.querySelectorAll('button:not([disabled])')].filter(b=>!b.closest('.hidden')&&b.offsetParent!==null):[];}
+function focusedButton(){const buttons=menuButtons();return buttons[clamp(menuIndex,0,buttons.length-1)];}
+function focusMenu(){document.querySelectorAll('.pad-focus').forEach(b=>b.classList.remove('pad-focus'));const b=focusedButton();if(b&&pad){b.classList.add('pad-focus');b.scrollIntoView({block:'nearest'});}}
+function navMenu(delta){const buttons=menuButtons();if(!buttons.length)return;menuIndex=(menuIndex+delta+buttons.length)%buttons.length;focusMenu();audio.sfx('click');}
+function adjustFocused(delta){const b=focusedButton();if(b?.dataset.setting)changeSetting(b.dataset.setting,delta);else if(b?.dataset.digit!==undefined)changeDigit(Number(b.dataset.digit),delta);}
+function toggleSettings(){if(!ready||g.ended)return;if(menu)closePanel();else openPanel('settings');}
+function openPanel(type){if(g.mode==='attract')showTitle();previousScreen=g.screen;menu=type;menuIndex=1;$('panel').classList.remove('hidden');document.exitPointerLock?.();const body=$('panelBody');$('panelKicker').textContent=type==='map'?'FIELD ATLAS / 01':type==='about'?'THORN ARCHIVE':'EXPEDITION';$('panelTitle').textContent={settings:'Settings',about:'Field notes & credits',map:'The Drowned Citadel',coop:'Expedition co-op'}[type];
+ if(type==='settings'){body.innerHTML='<div class="settings-grid">'+['volume','music','sensitivity','deadzone','invertX','invertY','fov','shake','assist','subtitles','difficulty'].filter(k=>!AIHub.active||k!=='difficulty').map(k=>'<button class="setting" data-setting="'+k+'"><span>'+settingName(k)+'</span><strong></strong></button>').join('')+'</div><div class="menu-actions"><button data-panel="controls">CONTROLS & ARSENAL ↗</button>'+(!AIHub.active&&g.screen!=='title'?'<button data-action="title">RETURN TO TITLE</button>':'')+'<button data-action="fullscreen">FULLSCREEN ↗</button></div>';refreshSettings();}
+ if(type==='about'){body.innerHTML=$('creditsContent').innerHTML;}
+ if(type==='map'){body.innerHTML='<div class="map-layout"><canvas id="mapCanvas" width="520" height="540"></canvas><div class="map-legend"><h3>Break the old world.</h3><p>Clear each district’s guardians, then attune its ward with <b>□ / E</b>.</p><p style="color:#ffc570">◆ Sun ward — Pilgrim’s Approach</p><p style="color:#a5ebc3">◆ Tide ward — Drowned Garden</p><p style="color:#f69968">◆ Bone ward — Archive of Teeth</p><p>All three wards open the northern sanctum. Defeat the Rootbound and use the sun gate.</p><p>✦ Green anchors accept your vine latch. Look toward one, then press <b>L1 / Q</b>.</p><small>Wards restore health, armour and ammo, and bind a checkpoint. Relics are optional. Double jump, dash, and swim anywhere.</small></div></div>';drawMap();}
+ if(type==='coop')renderCoop();focusMenu();}
+function closePanel(){if(!menu)return;menu=null;$('panel').classList.add('hidden');mouse.dx=mouse.dy=0;menuIndex=0;if(g.screen==='play'&&!pad&&navigator.userActivation?.isActive)requestLock();focusMenu();}
+function settingName(k){return({volume:'Master volume',music:'Music',sensitivity:'Look sensitivity',deadzone:'Stick dead zone',invertX:'Invert horizontal look',invertY:'Invert vertical look',fov:'Field of view',shake:'Camera motion',assist:'Controller aim assist',subtitles:'Voice subtitles',difficulty:'Difficulty'})[k];}
+function refreshSettings(){for(const b of document.querySelectorAll('[data-setting]')){const k=b.dataset.setting,v=cfg[k];b.querySelector('strong').textContent=typeof v==='boolean'?(v?'ON':'OFF'):k==='difficulty'?['EXPLORER','HUNTER','NIGHTMARE'][[.65,1,1.45].indexOf(v)]:k==='fov'?v+'°':k==='sensitivity'?v.toFixed(1)+'×':Math.round(v*100)+'%';}}
+function changeSetting(k,delta=1){if(typeof cfg[k]==='boolean')cfg[k]=!cfg[k];else if(k==='difficulty'){const a=[.65,1,1.45];cfg[k]=a[(a.indexOf(cfg[k])+delta+3)%3];}else if(k==='fov')cfg[k]=clamp(cfg[k]+delta*5,65,105);else if(k==='sensitivity')cfg[k]=Math.round(clamp(cfg[k]+delta*.1,.3,2.5)*10)/10;else if(k==='deadzone')cfg[k]=Math.round(clamp(cfg[k]+delta*.02,.04,.4)*100)/100;else cfg[k]=Math.round(clamp(cfg[k]+delta*.1,0,1)*100)/100;saveSettings();refreshSettings();audio.sfx('click');}
+function showControls(){menu='controls';$('panelTitle').textContent='Instinct is a weapon';$('panelBody').innerHTML='<div class="control-grid">'+[['Move / look','LS, RS','WASD, mouse'],['Jump / double jump','✕','Space'],['Fire / aim','R2 / L2','Click / right click'],['Alternate fire','R3','Left Alt'],['Switch weapon','R1','C / 1–3'],['Vine latch','L1','Q'],['Dash / dive','○','Shift / Z'],['Spirit pulse','△','F'],['Use / read','□','E'],['Field atlas','D-pad ↑','M'],['Settings','Options','Esc'],['Sprint','L3','Ctrl']].map(r=>'<p><span>'+r[0]+'</span><b>'+r[1]+' · '+r[2]+'</b></p>').join('')+'</div><div class="panel-copy"><h3>Three answers to an ancient problem.</h3><p><b>Thorncaster:</b> rapid, precise bone spikes. Alternate fire launches an explosive seed.</p><p><b>Sunbreak:</b> eight-pellet close-range scattergun. Alternate fire channels a single heavy slug.</p><p><b>Cerebral Wisp:</b> a homing spirit drill. Aim near a creature to acquire it. Alternate fire spends two souls for a wider detonation.</p><p>Spirit pulse staggers nearby enemies for a moment. Armour absorbs damage first. The second jump and vine latch reach raised paths. Hold jump to surface while swimming.</p></div>';menuIndex=0;focusMenu();}
+function drawMap(){const canvas=$('mapCanvas');if(!canvas)return;const c=canvas.getContext('2d'),w=canvas.width,h=canvas.height;const pt=(x,z)=>[w*.5+x*3.7,74+(z+83)*3.7];c.fillStyle='#102d29';c.fillRect(0,0,w,h);c.strokeStyle='#254a40';c.lineWidth=1;for(let i=0;i<w;i+=30){c.beginPath();c.moveTo(i,0);c.lineTo(i,h);c.stroke();}for(let i=0;i<h;i+=30){c.beginPath();c.moveTo(0,i);c.lineTo(w,i);c.stroke();}function rect(x,z,sx,sz,color){let p=pt(x-sx/2,z-sz/2);c.fillStyle=color;c.fillRect(...p,sx*3.7,sz*3.7);}rect(0,-26,36,112,'#416451');rect(-42,-16,41,47,'#2a7974');rect(40,-23,36,42,'#687d59');rect(-42,-25,16,13,'#baad78');rect(23,-12,15,8,'#baad78');rect(-25,-14,16,3,'#baad78');rect(0,-48,35,2,g.seals.every(Boolean)?'#a5ebc3':'#e67b49');for(const r of relays){const [x,y]=pt(r.x,r.z);c.save();c.translate(x,y);c.rotate(Math.PI/4);c.fillStyle=g.seals[r.id]?'#a5ebc3':'#ffa26a';c.fillRect(-6,-6,12,12);c.restore();}for(const a of anchors){const [x,y]=pt(a.pos.x,a.pos.z);c.strokeStyle='#a5ebc3';c.beginPath();c.arc(x,y,4,0,TAU);c.stroke();}for(const l of lore){if(g.secrets.includes(l.id))continue;const [x,y]=pt(l.x,l.z);c.fillStyle='#ffdc82';c.fillRect(x-2,y-2,4,4);}const [x,y]=pt(local.pos.x,local.pos.z);c.save();c.translate(x,y);c.rotate(-yaw);c.fillStyle='#fff5dc';c.beginPath();c.moveTo(0,-9);c.lineTo(6,7);c.lineTo(0,4);c.lineTo(-6,7);c.fill();c.restore();c.fillStyle='#dfebce';c.font='600 12px sans-serif';c.fillText('N ↑',w-42,30);c.fillStyle='#ffa26a';c.fillText('ROOTBOUND',w/2-40,45);c.fillStyle='#8ea68f';c.fillText('YOU ARE HERE / ▲',15,h-16);}
+
+window.addEventListener('keydown',e=>{if(['Space','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','AltLeft'].includes(e.code))e.preventDefault();audio.start();if(noteInput())return;if(!keys.has(e.code))pressed.add(e.code);keys.add(e.code);if(e.repeat)return;if(e.code==='Escape'){toggleSettings();return;}if(menu||g.screen==='title'||g.screen==='dead'||g.screen==='over'){if(e.code==='ArrowDown')navMenu(1);if(e.code==='ArrowUp')navMenu(-1);if(e.code==='ArrowLeft')adjustFocused(-1);if(e.code==='ArrowRight')adjustFocused(1);if(e.code==='Enter'&&document.activeElement?.tagName!=='BUTTON')focusedButton()?.click();}});
+window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();mouse.left=false;mouse.right=false;});
+window.addEventListener('mousemove',e=>{if(Math.abs(e.movementX)+Math.abs(e.movementY)>.1){if(noteInput())return;}if(document.pointerLockElement&&!menu){mouse.dx+=e.movementX;mouse.dy+=e.movementY;}});
+window.addEventListener('mousedown',e=>{audio.start();if(noteInput())return;if(menu||g.screen!=='play')return;if(!document.pointerLockElement&&!pad){requestLock();}if(e.button===0)mouse.left=true;if(e.button===2)mouse.right=true;if(e.button===1)pressed.add('AltLeft');});
+window.addEventListener('mouseup',e=>{if(e.button===0)mouse.left=false;if(e.button===2)mouse.right=false;});window.addEventListener('contextmenu',e=>e.preventDefault());
+window.addEventListener('wheel',e=>{noteInput();if(g.screen==='play'&&!menu)switchWeapon(Math.sign(e.deltaY));},{passive:true});
+document.addEventListener('pointerlockerror',()=>{lockRequested=false;});
+$('panelClose').onclick=()=>closePanel();
+document.addEventListener('click',e=>{const b=e.target.closest('button');if(!b)return;audio.start();lastInput=performance.now();if(b.dataset.setting){changeSetting(b.dataset.setting);return;}if(b.dataset.digit!==undefined){menuIndex=menuButtons().indexOf(b);changeDigit(Number(b.dataset.digit),1);return;}if(b.dataset.panel==='controls'){showControls();return;}switch(b.dataset.action){case'start':startSolo();break;case'continue':startSolo(loadRun());break;case'settings':openPanel('settings');break;case'about':openPanel('about');break;case'coop':openPanel('coop');break;case'title':closePanel();showTitle();break;case'restart':if(g.screen==='dead')respawn();else if(net&&net.isHost){net.send({t:'restart'});resetRun('coop');}else startSolo();break;case'fullscreen':if(document.fullscreenElement)document.exitFullscreen?.();else document.documentElement.requestFullscreen?.();break;case'host':hostRoom();break;case'join':joinRoom();break;case'launch':if(net?.isHost){net.send({t:'begin'});resetRun('coop');requestLock();}break;}});
+
+let net=null,peer=null,connections=new Map(),roomCode='',roomStatus='',joinDigits=[0,0,0,0,0,0],lastSnapshot=-Infinity,peerLoading=false;
+const seatColors=[0xe8995e,0x6aace0,0x81d19a,0xe2c972];
+function makeRemote(id,name,color){if(remotes.has(id))return remotes.get(id);const m=creature('hunter',color||seatColors[id%4]);m.scale.setScalar(.8);worldRoot.add(m);const p={id,name,mesh:m,pos:V((id-1.5)*1.5,1.05,23),target:V(),yaw:0,health:100,armor:50,weapon:0,at:0};p.target.copy(p.pos);remotes.set(id,p);return p;}
+function removeRemote(id){const p=remotes.get(id);if(p){p.mesh.traverse(m=>{if(m.isMesh)m.geometry.dispose();});p.mesh.removeFromParent();remotes.delete(id);}}
+function disconnectNet(){if(peer){peer.destroy();peer=null;}connections.clear();net=null;for(const id of [...remotes.keys()])removeRemote(id);roomCode='';roomStatus='';lastSnapshot=-Infinity;}
+function sendPeer(conn,data){if(conn?.open)conn.send(data);}
+function roster(){return[{id:0,name:'Hunter One',color:seatColors[0]},...[...connections.keys()].map(id=>({id,name:['','Hunter Two','Hunter Three','Hunter Four'][id],color:seatColors[id]}))];}
+function peerRoster(){const list=roster();net.players=list;for(const p of list)if(p.id!==net.me)makeRemote(p.id,p.name,p.color);net.send({t:'roster',players:list});if(menu==='coop')renderCoop();}
+async function peerClass(){if(AIHub.active)throw Error('Hub transport owns this expedition.');const module=await import('https://esm.sh/peerjs@1.5.5?bundle');return module.Peer||module.default;}
+function renderCoop(){if(menu!=='coop')return;const body=$('panelBody'),index=menuIndex;body.innerHTML='<p class="panel-copy">A shared world for up to four hunters. Break the wards together. No friendly fire. Each hunter returns at the last bound checkpoint.</p>'+(roomCode?'<span class="eyebrow">INVITE CODE</span><div class="room-code">'+roomCode+'</div>':'<div class="eyebrow">JOIN AN EXPEDITION / SELECT DIGITS WITH ← →</div><div class="code-input">'+joinDigits.map((n,i)=>'<button data-digit="'+i+'">'+n+'</button>').join('')+'</div>')+'<div class="room-state" id="roomStatus"></div><div id="roomPlayers"></div><div class="co-op-buttons">'+(net?.isHost?'<button class="primary" data-action="launch">BEGIN EXPEDITION ↗</button>':net?'':'<button class="primary" data-action="host">HOST EXPEDITION</button><button class="primary" data-action="join">JOIN CODE ↗</button>')+'</div><p class="muted" style="font-size:11px">Room codes use PeerJS 1.5.5 / WebRTC. Internet required. In AI Hub, your party joins automatically.</p>';$('roomStatus').textContent=roomStatus||'Create an expedition or enter a friend’s six-digit code.';if(net)for(const p of net.players){const el=document.createElement('div');el.className='room-player';el.textContent=p.name+(p.id===net.me?' / YOU':'')+(p.id===0?' / HOST':'');$('roomPlayers').append(el);}menuIndex=index;focusMenu();}
+function changeDigit(i,delta){joinDigits[i]=(joinDigits[i]+delta+10)%10;const b=document.querySelector('[data-digit="'+i+'"]');if(b)b.textContent=joinDigits[i];audio.sfx('click');}
+async function hostRoom(){if(peerLoading)return;peerLoading=true;disconnectNet();roomStatus='Opening the gate…';renderCoop();try{const Peer=await peerClass();const number=new Uint32Array(1);crypto.getRandomValues(number);roomCode=String(100000+number[0]%900000);peer=new Peer('turokarrot-v1-'+roomCode);peer.on('open',()=>{net={me:0,isHost:true,players:roster(),send(data,opts={}){for(const [id,c] of connections)if(opts.to===undefined||opts.to===id)sendPeer(c,data);}};local.id=0;roomStatus='Gate open. Share this code, then begin when your party is ready.';renderCoop();peerLoading=false;});peer.on('connection',c=>{if(connections.size>=3){c.on('open',()=>{sendPeer(c,{t:'full'});setTimeout(()=>c.close(),400);});return;}let id=[1,2,3].find(id=>!connections.has(id));connections.set(id,c);c.on('open',()=>{sendPeer(c,{t:'welcome',me:id,players:roster(),running:g.screen==='play'});makeRemote(id,roster().find(p=>p.id===id).name,seatColors[id]);peerRoster();if(g.screen==='play')sendPeer(c,snapshot());});c.on('data',m=>receive(m,id));c.on('close',()=>{connections.delete(id);removeRemote(id);if(net?.isHost)peerRoster();announce('A HUNTER HAS DEPARTED','The expedition continues.','CO-OP');});});peer.on('error',e=>{peerLoading=false;roomStatus='Unable to open the gate: '+e.type+'. Try hosting again.';renderCoop();});}catch(e){peerLoading=false;roomStatus='Connection unavailable: '+e.message;renderCoop();}}
+async function joinRoom(){if(peerLoading)return;peerLoading=true;disconnectNet();const code=joinDigits.join('');roomStatus='Seeking expedition '+code+'…';renderCoop();try{const Peer=await peerClass();peer=new Peer();peer.on('open',()=>{const conn=peer.connect('turokarrot-v1-'+code,{reliable:true,serialization:'json'});connections.set(0,conn);conn.on('data',m=>{if(m.t==='welcome'){local.id=m.me;net={me:m.me,isHost:false,players:m.players,send(data){sendPeer(conn,data);}};roomCode=code;roomStatus='Joined. Waiting for the expedition leader.';for(const p of m.players)if(p.id!==net.me)makeRemote(p.id,p.name,p.color);peerLoading=false;renderCoop();if(m.running)resetRun('coop');}else if(m.t==='full'){roomStatus='This expedition already has four hunters.';peerLoading=false;renderCoop();}else receive(m,0);});conn.on('close',()=>{if(net&&!net.isHost){roomStatus='The expedition leader disconnected.';if(g.screen==='play'){showEnding(false);$('endText').textContent='The expedition leader disconnected. Begin a new expedition to continue the hunt.';}else renderCoop();net=null;}});});peer.on('error',e=>{roomStatus='No gate answered ('+e.type+'). Check the code and try again.';peerLoading=false;renderCoop();});setTimeout(()=>{if(peerLoading){peerLoading=false;roomStatus='Connection timed out. Check the code and your network, then retry.';renderCoop();}},12000);}catch(e){peerLoading=false;roomStatus='Connection unavailable: '+e.message;renderCoop();}}
+function rounded(n){return Math.round(n*100)/100;}
+function playerState(p){return[p.id,...p.pos.toArray().map(rounded),rounded(p.id===(net?.me??0)?yaw:p.yaw||0),rounded(p.health),rounded(p.armor||0),p.weapon||0];}
+function snapshot(){return{t:'snap',at:AIHub.active?AIHub.time():simTime*1000,g:[rounded(g.time),rounded(g.elapsed),g.seals.map(Boolean),g.kills,g.score,g.unlocked,g.bossActive,g.won,g.ended],e:enemies.map(e=>[e.id,e.kind,...e.pos.toArray().map(rounded),Math.round(e.health),e.dead?1:0,e.phase,e.region]),p:allPlayers().map(playerState),k:pickups.filter(p=>p.taken).map(p=>p.id),l:g.secrets,cp:g.checkpoint,b:projectiles.slice(0,32).map(p=>[...p.pos.toArray().map(rounded),...p.vel.toArray().map(rounded),p.enemy?1:0,p.weapon||0])};}
+function receive(m,from){if(!m||typeof m.t!=='string'||!net)return;const host=net.isHost;
+ if(m.t==='p'){if(!host)return;const p=remotes.get(from)||makeRemote(from,'Hunter '+(from+1),seatColors[from]);if(!Array.isArray(m.p)||m.p.length<8)return;p.pos.set(...m.p.slice(1,4));p.target.copy(p.pos);p.yaw=m.p[4];p.health=m.p[5];p.armor=m.p[6];p.weapon=m.p[7];p.at=simTime;if(authority())for(const k of pickups)if(!k.taken&&k.pos.distanceTo(p.pos)<1.7)collect(k,from);return;}
+ if(m.t==='shot'&&host){if(m.o?.length===3&&m.d?.length===3&&m.w>=0&&m.w<3)spawnShot(V(...m.o),V(...m.d).normalize(),m.w,!!m.a,from);return;}
+ if(m.t==='attune'&&host){attune(m.id,from);return;}if(m.t==='lore'&&host){takeLore(m.id);return;}if(m.t==='pulse'&&host){applyPulse({...m,id:from});return;}if(m.t==='escape'&&host&&g.won){finish(true);return;}
+ if(m.t==='snap'&&!host){if(m.at<lastSnapshot)return;lastSnapshot=m.at;const oldSeals=[...g.seals];[g.time,g.elapsed,g.seals,g.kills,g.score,g.unlocked,g.bossActive,g.won]=m.g;g.checkpoint=m.cp;for(const data of m.e){let e=enemyMeshes.get(data[0]);if(!e)e=spawnEnemy(data[1],data[2],data[3],data[4],data[8],data[0]);e.target=V(data[2],data[3],data[4]);if(data[6]&&!e.dead){fragment(e);emit(e.pos.clone().add(V(0,1,0)),C.orange,12,4);}e.health=data[5];e.dead=!!data[6];e.mesh.visible=!e.dead;e.phase=data[7];}
+  for(const a of m.p){if(a[0]===net.me)continue;const p=remotes.get(a[0])||makeRemote(a[0],net.players.find(p=>p.id===a[0])?.name||'Hunter',seatColors[a[0]]);p.target.set(...a.slice(1,4));p.yaw=a[4];p.health=a[5];p.armor=a[6];p.weapon=a[7];}
+  for(const k of pickups){k.taken=m.k.includes(k.id);k.mesh.visible=!k.taken;}g.secrets=m.l;for(const l of lore)l.mesh.visible=!g.secrets.includes(l.id);for(let i=0;i<3;i++)if(g.seals[i]&&!oldSeals[i]){relays[i].light.visible=false;relays[i].crystal.material=toon(C.mint,.9);}updateGate();
+  for(const b of m.b){const col=b[6]?C.orange:b[7]===2?C.mint:C.gold;const dot=ball(b[0],b[1],b[2],.17,col,scene);dot.material=toon(col,1);particles.push({mesh:dot,vel:V(b[3],b[4],b[5]),life:.1,max:.1,projectile:true});}return;
+ }
+ if(m.t==='hurt'&&m.id===net.me){damagePlayer(net.me,m.n,m.s);return;}if(m.t==='hit'&&m.id===net.me){hitFlash=.15;audio.sfx('hit');return;}
+ if(m.t==='dead'&&!host){const e=enemyMeshes.get(m.id);if(e&&!e.dead){e.dead=true;e.mesh.visible=false;fragment(e);audio.sfx('kill');}g.score=m.score;g.kills=m.kills;return;}
+ if(m.t==='ward'&&!host){g.score=m.score;g.checkpoint=m.checkpoint;g.unlocked=m.unlocked;applyAttunement(m.id);return;}
+ if(m.t==='pickup'){const p=pickups.find(p=>p.id===m.id);if(p){p.taken=true;p.mesh.visible=false;}applyPickup(m);return;}
+ if(m.t==='relic'&&!host){if(!g.secrets.includes(m.id)){g.secrets.push(m.id);lore[m.id].mesh.visible=false;announce(lore[m.id].name,lore[m.id].text,'TEAM RELIC FOUND',6);}g.score=m.score;return;}
+ if(m.t==='fx'&&m.kind==='pulse'){shock(V(...m.p),12);return;}if(m.t==='notice'){announce(m.title,m.sub,'EXPEDITION');return;}
+ if(m.t==='boss'){g.bossActive=true;announce('THE ROOTBOUND','The seed that learned to hunger.','GUARDIAN AWAKENED');return;}
+ if(m.t==='spawn'&&!host){for(const a of m.list)if(!enemyMeshes.has(a[5]))spawnEnemy(...a);return;}
+ if(m.t==='roster'){net.players=m.players;for(const p of m.players)if(p.id!==net.me)makeRemote(p.id,p.name,p.color);for(const id of [...remotes.keys()])if(!m.players.some(p=>p.id===id))removeRemote(id);if(menu==='coop')renderCoop();return;}
+ if(m.t==='begin'||m.t==='restart'){resetRun(AIHub.active?'session':'coop');return;}if(m.t==='finish'&&!host){g.score=m.score;g.kills=m.kills;g.secrets=m.secrets;showEnding(m.won);}
+}
+async function connectHub(){const info=await AIHub.connect({mode:'co-op',seats:[1,4]});if(!info){showTitle();return;}net={me:info.me,isHost:info.isHost,players:info.players,send:(data,opts)=>AIHub.send(data,opts)};local.id=info.me;for(const p of info.players)if(p.id!==info.me)makeRemote(p.id,p.name,new THREE.Color(p.color).getHex());AIHub.on('start',()=>audio.start());AIHub.on('message',receive);AIHub.on('leave',({id})=>{removeRemote(id);net.players=AIHub.players;if(id===AIHub.host&&!net.isHost){g.ended=true;showEnding(false);}});AIHub.on('time-up',()=>{if(authority())finish(g.won);});AIHub.on('end',()=>{g.ended=true;if(g.screen!=='over')showEnding(g.won);audio.quiet();});resetRun('session');g.screen='ready';$('objective').textContent='Awaiting the expedition…';AIHub.ready();}
+
+const replayKeys=[
+ [0,0,1.05,23],[8,-4,1.05,9],[15,-11,1.05,-12],[20,-29,-1.8,-6],[27,-48,-1.8,-12],[33,-43,5,-23],[38,-42,3.05,-23],[44,-9,2,-13],[49,24,3.05,-12],[56,41,3.05,-24],[63,32,6,-21],[68,0,1.05,-39],[75,0,1.05,-56],[83,8,1.05,-64],[94,-6,3.2,-70],[104,0,1.05,-76]
+];
+function stepAttract(dt){autoTime+=dt;local.health=100;local.armor=100;local.ammo=[999,999,999];let index=replayKeys.findIndex(p=>p[0]>autoTime);if(index<1)index=replayKeys.length-1;const a=replayKeys[index-1],b=replayKeys[index],t=clamp((autoTime-a[0])/(b[0]-a[0]),0,1),s=t*t*(3-2*t);local.pos.set(lerp(a[1],b[1],s),lerp(a[2],b[2],s),lerp(a[3],b[3],s));body.setTranslation(local.pos,true);body.setNextKinematicTranslation(local.pos);moving=1;
+ const region=autoTime<20?0:autoTime<44?1:autoTime<68?2:3;const targets=enemies.filter(e=>!e.dead&&e.region===region&&!(e.kind==='boss'&&!g.bossActive)).sort((a,b)=>a.pos.distanceTo(local.pos)-b.pos.distanceTo(local.pos));const target=targets[0];let at=target?target.pos.clone().add(V(0,target.kind==='boss'?3.5:1.5,0)):V(b[1],b[2]+1,b[3]-5);const d=at.sub(local.pos.clone().add(V(0,.6,0)));const targetYaw=Math.atan2(-d.x,-d.z);yaw+=Math.atan2(Math.sin(targetYaw-yaw),Math.cos(targetYaw-yaw))*Math.min(1,dt*3);pitch=lerp(pitch,Math.atan2(d.y,Math.hypot(d.x,d.z)),dt*3);local.weapon=autoTime<44?0:autoTime<68?1:2;camera.position.copy(local.pos).add(V(0,.6,0));camera.rotation.set(pitch,yaw,0,'YXZ');if(target&&Math.abs(Math.atan2(Math.sin(targetYaw-yaw),Math.cos(targetYaw-yaw)))<.2)shoot(Math.floor(autoTime)%9===0);
+ if(autoTime>16&&!g.seals[0]){for(const e of enemies.filter(e=>e.region===0&&!e.dead))hurtEnemy(e,2000,0);attune(0,0);}
+ if(autoTime>40&&!g.seals[1]){for(const e of enemies.filter(e=>e.region===1&&!e.dead))hurtEnemy(e,2000,0);attune(1,0);takeLore(0);}
+ if(autoTime>64&&!g.seals[2]){for(const e of enemies.filter(e=>e.region===2&&!e.dead))hurtEnemy(e,2000,0);attune(2,0);takeLore(1);}
+ if(autoTime>29&&autoTime<34){tracer(local.pos,anchors[1].pos,C.mint,.045);$('tipText').textContent='VINE LATCH / A second path through the drowned world';}
+ if(autoTime>98){const boss=enemies.find(e=>e.kind==='boss');if(boss&&!boss.dead)hurtEnemy(boss,10000,0);}if(autoTime>108)resetRun('attract');
+}
+
+function formatTime(n){n=Math.max(0,n|0);return String(Math.floor(n/60)).padStart(2,'0')+':'+String(n%60).padStart(2,'0');}
+const weaponNames=['01 / THORNCASTER','02 / SUNBREAK','03 / CEREBRAL WISP'];
+const tips=['R2 / CLICK fire · L2 / RIGHT CLICK aim · R3 / ALT alternate fire','L1 / Q vine latch · ✕ / SPACE double jump · ○ / SHIFT dash','△ / F spirit pulse staggers nearby enemies · 12 second recharge','Ward seals bind checkpoints and fully resupply your expedition','Three relics tell the story of the hunters who came before you'];
+function updateHud(){
+ $('health').textContent=Math.ceil(local.health);$('armor').textContent='◆ '+Math.ceil(local.armor);$('healthFill').style.width=local.health+'%';$('ammo').textContent=local.ammo[local.weapon];$('ammoMax').textContent='/ '+[180,60,24][local.weapon];$('weaponName').textContent=weaponNames[local.weapon];$('timer').textContent=formatTime(g.elapsed);$('scoreText').textContent=g.score+' ESSENCE';$('networkBadge').textContent=AIHub.active?'AI HUB / '+AIHub.players.length+' HUNTERS':net?'CO-OP / '+net.players.length+' HUNTERS':g.mode==='attract'?'AI HUNTER / REPLAY':'SOLO EXPEDITION';
+ const seals=g.seals.filter(Boolean).length;$('sealText').textContent=seals+' / 3 SEALS';[...$('sealDots').querySelectorAll('i')].forEach((m,i)=>m.classList.toggle('on',g.seals[i]));$('objective').textContent=g.screen==='ready'?'Expedition begins on the hub clock':g.won?'Use the sun gate in the sanctum':seals===3?'Enter the sanctum. End the hunger.':'Break the three ward seals';
+ $('dashReady').textContent=dashCooldown>0?dashCooldown.toFixed(1):'○';$('pulseReady').textContent=pulseCooldown>0?Math.ceil(pulseCooldown):'✦';$('dashReady').style.opacity=dashCooldown>0?.4:1;$('pulseReady').style.opacity=pulseCooldown>0?.4:1;
+ const boss=enemies.find(e=>e.kind==='boss');$('bossHud').classList.toggle('hidden',!g.bossActive||boss?.dead);if(boss){$('bossFill').style.width=100*boss.health/boss.maxHealth+'%';$('bossPhase').textContent=['THE HUNGER BENEATH','THE ROOTS AWAKEN','A STARVING GOD'][boss.phase||0];}
+ const swim=inWater(local.pos);$('underwater').style.display=swim&&local.pos.y+.62<-.22?'block':'none';$('oxygen').classList.toggle('hidden',!swim);$('oxygen').querySelector('i').style.width=local.oxygen+'%';
+ let prompt='';if(g.won&&local.pos.distanceTo(V(0,1,-77))<6)prompt='Leave through the sun gate';else{const r=relays.find(r=>!g.seals[r.id]&&local.pos.distanceTo(V(r.x,r.y+1,r.z))<4.5);if(r){const n=enemies.filter(e=>e.region===r.region&&!e.dead).length;prompt=n?r.name+' · '+n+' guardians remain':'Shatter '+r.name+' / Bind checkpoint';}const l=lore.find(l=>!g.secrets.includes(l.id)&&local.pos.distanceTo(V(l.x,l.y,l.z))<4);if(l)prompt='Read relic / '+l.name;}
+ $('interact').classList.toggle('hidden',!prompt);$('interactText').textContent=prompt;$('grappleHint').classList.toggle('hidden',!bestAnchor()||grappleCooldown>0);
+ $('hitmarker').style.opacity=hitFlash>0?1:0;$('damage').style.opacity=damageFlash;const aim=targetForRay(camera.position,V(0,0,-1).applyQuaternion(camera.quaternion),70);$('targetName').textContent=aim?(aim.e.kind==='boss'?'THE ROOTBOUND':aim.e.kind==='raptor'?'ASH RAPTOR':aim.e.kind==='flyer'?'CARRION WING':'BONE SENTINEL'):'';
+ if(!(g.mode==='attract'&&autoTime>29&&autoTime<34))$('tipText').textContent=swim?'✕ / SPACE surface · ○ / Z dive · Oxygen restores above water':tips[Math.floor(g.time/12)%tips.length];
+ $('compass').style.opacity=.65;const deg=((yaw*180/Math.PI)%360+360)%360;$('compass').innerHTML='<span>'+Math.round(deg)+'°</span><span>◁</span><b>'+(['N','NW','W','SW','S','SE','E','NE'][Math.round(deg/45)%8])+'</b><span>▷</span><span>◆ '+seals+'/3</span>';
+ updateMarkers();if(menu==='map')drawMap();
+}
+const markerEls=[];
+function updateMarkers(){if(!markerEls.length){for(let i=0;i<4;i++){const el=document.createElement('div');el.className='marker';el.innerHTML='<b>◇</b><span></span>';$('worldMarkers').append(el);markerEls.push(el);}}const items=[...relays.map(r=>({pos:V(r.x,r.y+4,r.z),name:r.name,done:g.seals[r.id]})),{pos:V(0,8,-77),name:g.won?'SUN GATE':'SANCTUM',done:!g.seals.every(Boolean)}];for(let i=0;i<items.length;i++){const r=items[i],el=markerEls[i],p=r.pos.clone().project(camera),visible=p.z<1&&p.z>0&&Math.abs(p.x)<.94&&Math.abs(p.y)<.8&&(!r.done||i===3&&g.won)&&(i!==3||!g.bossActive||g.won);el.style.display=visible?'block':'none';if(visible){el.style.left=(p.x*.5+.5)*innerWidth+'px';el.style.top=(-p.y*.5+.5)*innerHeight+'px';el.querySelector('span').textContent=r.name+' / '+Math.round(r.pos.distanceTo(local.pos))+'m';}}}
+
+function stepEffects(dt){for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.life-=dt;if(p.life<=0){disposeMesh(p.mesh);particles.splice(i,1);continue;}if(p.ring){p.mesh.scale.setScalar(lerp(1,p.radius*2,1-p.life/p.max));p.mesh.material.opacity=p.life/p.max;}else if(!p.static){if(!p.projectile)p.vel.y-=dt*9;p.mesh.position.addScaledVector(p.vel,dt);p.mesh.rotation.x+=dt*3;p.mesh.rotation.z+=dt*2;}}
+ for(let i=debris.length-1;i>=0;i--){const d=debris[i];d.life-=dt;if(d.life<=0){world.removeRigidBody(d.rb);disposeMesh(d.mesh);debris.splice(i,1);}else{const p=d.rb.translation(),q=d.rb.rotation();d.mesh.position.set(p.x,p.y,p.z);d.mesh.quaternion.set(q.x,q.y,q.z,q.w);}}
+ for(const d of decor){if(d.type==='flame'){d.mesh.scale.y=1.4+Math.sin(simTime*9+d.base)*.25;d.mesh.rotation.y=simTime;}if(d.type==='mote'){d.mesh.position.y=d.base+Math.sin(simTime*.7+d.phase)*.4;d.mesh.position.x+=Math.sin(simTime*.2+d.phase)*dt*.12;}if(d.type==='ripple')d.mesh.scale.set(1.7+Math.sin(simTime+d.base)*.4,1,1);if(d.type==='waterfall')d.mesh.material.opacity=.55+Math.sin(simTime*4)*.1;}
+ for(const r of relays){r.crystal.rotation.y=simTime*.7;r.crystal.position.y=2.2+Math.sin(simTime*2+r.id)*.15;r.halo.rotation.z=simTime*.25;}
+ for(const a of anchors){a.mesh.rotation.y=simTime*.3;a.halo.rotation.x=simTime;}
+ for(const l of lore){l.mesh.rotation.y=simTime;l.mesh.position.y=l.y+Math.sin(simTime*2)*.15;}
+ for(const p of pickups){p.mesh.rotation.y=simTime*.7;p.mesh.position.y=p.pos.y+Math.sin(simTime*2+p.id)*.12;if(p.taken&&g.time>p.respawn&&p.kind!=='seeker'&&p.kind!=='scatter'&&authority()){p.taken=false;p.mesh.visible=true;}}
+ for(const p of remotes.values()){if(!authority())p.pos.lerp(p.target,1-Math.exp(-dt*14));p.mesh.position.copy(p.pos).add(V(0,-1,0));p.mesh.rotation.y=p.yaw;p.mesh.visible=p.health>0;p.mesh.userData.rig.legs.forEach((l,i)=>l.rotation.x=Math.sin(simTime*9+i*Math.PI)*.35);}
+ if(!authority())for(const e of enemies){if(e.target)e.pos.lerp(e.target,1-Math.exp(-dt*13));e.mesh.position.copy(e.pos);if(e.target&&e.pos.distanceTo(local.pos)>1){const dir=local.pos.clone().sub(e.pos);e.mesh.rotation.y=Math.atan2(-dir.x,-dir.z);}const rig=e.mesh.userData.rig;rig.legs.forEach((l,i)=>l.rotation.x=Math.sin(simTime*8+i*Math.PI)*.3);rig.wings.forEach((w,i)=>w.rotation.z=Math.sin(simTime*12)*(i?1:-1)*.5);}
+}
+function updateCamera(dt){if(g.screen==='title'){const t=simTime*.04;camera.position.set(28+Math.sin(t)*2,18+Math.sin(t*.7),30+Math.cos(t));camera.lookAt(-1,3,-23);weaponRoot.visible=false;camera.fov=62;camera.updateProjectionMatrix();return;}
+ if(AIHub.server){weaponRoot.visible=false;return;}weaponRoot.visible=true;bob+=dt*moving*10;const motion=cfg.shake&&g.mode!=='attract';camera.position.copy(local.pos).add(V(0,.62+(motion?Math.sin(bob)*moving*.028:0),0));camera.rotation.set(pitch+(motion?recoil*.12:0),yaw,motion?Math.sin(bob*.5)*moving*.007:0,'YXZ');camera.fov=lerp(camera.fov,aiming?cfg.fov-17:dashTime>0?cfg.fov+7:cfg.fov,1-Math.exp(-dt*9));camera.updateProjectionMatrix();weaponRoot.position.lerp(V(aiming?-.16:.1,aiming?-.035:-.12-recoil,aiming?-.48:-.4+recoil*.7),1-Math.exp(-dt*12));weaponRoot.rotation.z=motion?Math.sin(bob*.5)*moving*.015:0;for(let i=0;i<3;i++)weaponModels[i].visible=i===local.weapon;}
+function fail(error){console.error(error);$('loading').classList.add('hidden');$('fault').classList.remove('hidden');$('fault').querySelector('p').textContent=error.message||String(error);AIHub.fail(error.message||String(error));}
+
+async function init(){
+ if(!navigator.gpu)throw Error('This expedition requires WebGPU. Open it in a WebGPU-enabled browser on HTTPS or localhost.');
+ const adapter=await navigator.gpu.requestAdapter();if(!adapter)throw Error('No WebGPU adapter is available. Enable GPU acceleration and reopen the expedition.');
+ $('loadText').textContent='Carving the world / Three.js r180 + Rapier 0.19.3';
+ await RAPIER.init();world=new RAPIER.World({x:0,y:-25,z:0});controller=world.createCharacterController(.035);controller.enableAutostep(.45,.3,true);controller.enableSnapToGround(.25);controller.setApplyImpulsesToDynamicBodies(true);
+ const colors=new Uint8Array([65,115,185,255]);gradient=new THREE.DataTexture(colors,4,1,THREE.RedFormat);gradient.needsUpdate=true;gradient.minFilter=THREE.NearestFilter;gradient.magFilter=THREE.NearestFilter;
+ outlineMat=new THREE.MeshBasicNodeMaterial({color:0x142e2b,side:THREE.BackSide});
+ scene=new THREE.Scene();scene.background=new THREE.Color(0xa3c7ac);scene.fog=new THREE.Fog(0xa3c7ac,38,150);camera=new THREE.PerspectiveCamera(cfg.fov,innerWidth/innerHeight,.07,240);camera.rotation.order='YXZ';
+ renderer=new THREE.WebGPURenderer({antialias:true,alpha:false,forceWebGL:false});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.setSize(innerWidth,innerHeight);renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.16;renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;
+ // Do not let Three's automatic backend fallback violate the WebGPU-only contract.
+ renderer._getFallback=null;await renderer.init();if(!renderer.backend.isWebGPUBackend)throw Error('WebGPU initialization failed. This game has no WebGL fallback.');$('viewport').append(renderer.domElement);
+ scene.add(new THREE.HemisphereLight(0xfaf0c9,0x23463c,2.1));sun=new THREE.DirectionalLight(0xffd295,3.1);sun.position.set(-30,55,20);sun.target.position.set(0,0,-30);scene.add(sun,sun.target);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-90,right:90,top:90,bottom:-90,near:1,far:160});sun.shadow.bias=-.0004;sun.shadow.normalBias=.04;const rim=new THREE.DirectionalLight(0x75e8d1,1.3);rim.position.set(30,12,-55);scene.add(rim);
+ buildWorld();body=world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0,1.05,23));collider=world.createCollider(RAPIER.ColliderDesc.capsule(.55,.38).setFriction(0),body);buildWeapons();world.step();
+ $('loadText').textContent='Waking the hunter…';updateCamera(1);await renderer.compileAsync(scene,camera);await renderer.renderAsync(scene,camera);ready=true;$('loading').classList.add('hidden');
+ if(AIHub.active)await connectHub();else showTitle();
+ if(matchMedia('(pointer: coarse)').matches&&!matchMedia('(any-pointer: fine)').matches)$('touchNotice').classList.remove('hidden');
+ window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+ AIHub.probe(()=>({scene:g.screen==='dead'||g.screen==='over'?'over':g.screen==='ready'?'ready':g.screen==='title'?'title':'play',menu:!!menu,world:g.time,input}));
+ window.expedition={scene,renderer,camera,world,get connections(){return [...connections.entries()].map(([id,c])=>({id,open:c.open,serialization:c.serialization,state:c.dataChannel?.readyState}));},state:g,player:local,level:LEVEL,enemies,relays,anchors,settings:cfg,get network(){return net;},look(y,p){yaw=y;pitch=p;},seekReplay(t){autoTime=t;},inspect:()=>({screen:g.screen,mode:g.mode,menu,position:local.pos.toArray(),health:local.health,seals:g.seals,kills:g.kills,projectiles:projectiles.length,backend:renderer.backend.isWebGPUBackend?'WebGPU':'unknown'}),warp(x,y,z){local.pos.set(x,y,z);body.setTranslation(local.pos,true);body.setNextKinematicTranslation(local.pos);vy=0;},start:()=>startSolo(),replay:()=>{disconnectNet();resetRun('attract');},damageEnemy:(id,n=100)=>hurtEnemy(enemyMeshes.get(id),n,net?.me||0),attune,finish,respawn};
+ lastTime=performance.now();renderer.setAnimationLoop(frame);
+}
+function frame(now){try{const raw=Math.max(0,(now-lastTime)/1000),dt=Math.min(raw,.05);lastTime=now;simTime+=dt;pollPad(dt);
+ if(g.screen==='title'&&!menu){const idle=(now-lastInput)/1000;$('idleCount').textContent=Math.max(0,Math.ceil(10-idle));if(idle>=10)resetRun('attract');}
+ const sessionWaiting=AIHub.active&&AIHub.time()<0;if(g.screen==='ready'&&!sessionWaiting){g.screen='play';announce('THE EXPEDITION BEGINS','Find the wards. Free the citadel.','AI HUB');}
+ const running=ready&&!g.ended&&g.screen!=='title'&&!sessionWaiting&&(!menu||!!net)&&!(g.screen==='dead'&&!net);
+ input.x=clamp((keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0)+(pad?dead(pad.axes[0]||0):0),-1,1);input.y=clamp((keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0)+(pad?dead(pad.axes[1]||0):0),-1,1);input.fire=false;
+ fireCooldown=Math.max(0,fireCooldown-dt);recoil=Math.max(0,recoil-dt*.6);hitFlash=Math.max(0,hitFlash-dt);damageFlash=Math.max(0,damageFlash-dt*1.5);toastTime=Math.max(0,toastTime-dt);subTime=Math.max(0,subTime-dt);if(!toastTime)$('toast').classList.add('hidden');if(!subTime)$('subtitle').classList.add('hidden');
+ if(running){g.time+=dt;g.elapsed=AIHub.active?Math.max(0,AIHub.time()/1000):g.elapsed+dt;if(g.mode==='attract')stepAttract(dt);else stepPlayer(dt);if(authority()){stepEnemies(dt);stepProjectiles(dt);}world.timestep=dt;world.step();netTimer+=dt;if(net&&netTimer>=1/12){netTimer=0;if(net.isHost)net.send(snapshot(),{reliable:false});else net.send({t:'p',p:playerState({...local,id:net.me})},{to:AIHub.active?AIHub.host:0,reliable:false});if(AIHub.active)AIHub.progress({score:g.score,label:g.won?'Sun gate open':g.seals.filter(Boolean).length+'/3 wards · '+g.kills+' slain'});}}
+ stepEffects(dt);updateCamera(dt);if(g.screen!=='title')updateHud();audio.update();if(pad)$('touchNotice').classList.add('hidden');if(padEdges[12]&&!menu&&g.screen==='play')openPanel('map');renderer.render(scene,camera);pressed.clear();
+ }catch(e){renderer.setAnimationLoop(null);fail(e);}}
+init().catch(fail);
+</script>
+</body></html>

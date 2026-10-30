@@ -1,0 +1,11 @@
+Created [Shells Across Time — playable HTML](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v14__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Shells-Across-Time-Turtles-in-Time-gpt-6.1-terra-xhigh-20261029-0933.html>), with its development files in the adjacent folder.
+
+The demo includes three eras, enemy waves, a boss, local two-controller co-op, attract mode, axis inversion settings, and AI Hub side-by-side sessions. **Standalone online multiplayer is not implemented**, and the complete game has not been visually or fully playtested.
+
+**Source information:** 2026-10-29 09:33; inspired by *Turtles in Time*. Built with Three.js r180 WebGPU, Rapier 0.19.3, the Gamepad API, Web Audio and AI Hub Session Protocol v1. The art is procedural cel-shaded 3D; animation is procedural; music, effects and gibberish vocal sounds are synthesized in code. Online play uses AI Hub parallel sessions; standalone co-op is local. Environment: Codex CLI headless on Linux; browser for deployment unknown. Model: OpenAI gpt-6.1-terra, reasoning effort xhigh. Usage: unknown.
+
+**Testing feedback:** Lightweight syntax and headless Chrome smoke checks were run. They caught one environment issue: Chrome lost its software WebGPU device, preventing visual verification; confirmed game-breaking code issues: none, though a full playthrough remains unverified. The most helpful test exercised start, pause, settings and resume in the browser. The least helpful was syntax checking alone.
+
+**Engine feedback:** Three.js made procedural scene construction approachable. The headless WebGPU device loss was the main obstacle, with its cause unknown. Combat and character animation were the most important systems built from scratch. WebGPU initialization and deployment were the hardest parts; clearer initialization and device-loss diagnostics would help. An engine feature to remove or overhaul: unknown.
+
+**Prompt feedback:** The controller-first arcade direction was the strongest part of the brief. The standalone online deployment environment was unclear, and the breadth of the vertical slice and multiplayer requirements was the hardest part. The most valuable remaining test would be a real multi-device playtest with controllers and a working WebGPU device.

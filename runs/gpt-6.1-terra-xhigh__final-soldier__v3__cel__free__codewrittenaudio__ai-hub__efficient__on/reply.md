@@ -1,0 +1,11 @@
+Built [Final Squadron](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v12__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Final Squadron-SOURCE-gpt-6.1-terra-xhigh-20261029-0932.html>), a vertical shooter with a two-sector campaign, two bosses, configurable weapons, pod bombs, a two-minute Caravan mode, and attract mode. It supports local two-controller play and [AI Hub](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) side-by-side online sessions. Standalone remote multiplayer is not included.
+
+Serve the file from localhost or another secure origin in a WebGPU-capable browser. Its libraries and fonts load from CDNs.
+
+**Testing feedback:** Two code issues were caught and corrected; neither was game-breaking in the tested configuration. The most helpful test was the browser smoke test; the least helpful was the syntax check alone. The AI Hub two-player conformance run passed 20/20 checks, and accelerated checks reached both boss defeats. A simulated gamepad was tested, but a physical controller and a complete human playthrough were not. Headless Chrome’s WebGPU swapchain failed in this environment; the scene rendered under Xvfb.
+
+**Source information:** Date: 2026-10-29 09:32. Source: [Final Soldier](https://shmups.wiki/library/Final_Soldier). Tech: Three.js r180 WebGPU, Rapier 0.19.3, Gamepad API, Web Audio API, and AI Hub Session Protocol v1. Art: procedural cel-shaded geometry. Animation: procedural transforms and particles. Audio: code-generated music, effects, and gibberish radio voice. Environment: Codex CLI headless on Linux; initial browser unknown, tested with Chrome 154. Model: OpenAI gpt-6.1-terra, reasoning effort xhigh. Usage: unknown.
+
+**Engine feedback:** Three.js made procedural 3D geometry and materials straightforward. WebGPU availability and headless rendering were the main difficulties. The arcade encounter, control, and scoring systems had to be built for the game. Clearer device-loss diagnostics and simpler WebGPU-plus-physics deployment would help.
+
+**Prompt feedback:** The arcade and controller-first direction was clear and useful. The standalone online transport was unspecified; the hardest part was fitting the complete slice into one HTML file. The most valuable additional test would be a full two-player session with physical controllers.

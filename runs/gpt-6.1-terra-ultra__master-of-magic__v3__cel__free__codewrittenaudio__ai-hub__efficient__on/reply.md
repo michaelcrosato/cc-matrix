@@ -1,0 +1,11 @@
+Built [Realms of Runes](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-ultra__v6__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Realms of Runes-Master of Magic-gpt-6.1-terra-ultra-20261029-0920.html>), a turn-based magic strategy demo with two planes, cities, armies, research, spells, rival AI, attract mode, saving, and controller settings. It supports AI Hub parallel sessions, local hot-seat play, and direct WebRTC score challenges.
+
+The single HTML file loads its libraries from CDNs and requires WebGPU. Development files are in the matching subfolder.
+
+**Source information:** Master of Magic; 2026-10-29 09:20. Three.js r180, WebGPU, Rapier 0.19.3, Gamepad API, Web Audio API, and AI Hub Session Protocol 1.3.0. The art uses procedural cel-shaded miniatures; animation uses procedural transforms and physics particles. Music and effects are synthesized in code; there is no voice. Environment: Codex CLI headless on Linux; browser unknown. Model: OpenAI gpt-6.1-terra, reasoning effort ultra. Usage and cost: unknown.
+
+**Testing feedback:** Testing and review caught seven issues, including one critical AI Hub handshake timeout; all were fixed. The most helpful test was the two-player AI Hub harness, which passed all 20 checks after the fix. The least helpful was syntax checking, which cannot assess gameplay. A 100-campaign rules simulation reached victory in every run, and the 3D world rendered in headless Chrome with software Vulkan. Physical controller input and a real two-device WebRTC connection remain unverified.
+
+**Engine feedback:** Three.js’s scene graph and toon materials were useful. I initially missed its automatic WebGL fallback and added an explicit WebGPU check. WebGPU initialization and browser support were the hardest parts; the strategy systems and controller UI had to be built for the game. I would overhaul fallback behavior for WebGPU-required games and improve capability and failure reporting.
+
+**Prompt feedback:** The controller-first direction and distinctive source were useful constraints. “Feature-complete demo” and the intended standalone multiplayer topology left room for interpretation. Integrating the strategy systems, presentation, and multiplayer in one file was the hardest part. The most valuable additional test would be a real multi-device controller and network playtest.

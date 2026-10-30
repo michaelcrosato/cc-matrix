@@ -1,0 +1,11 @@
+Built [Road Ruckus Roadshow](</home/micha/dev/cc-matrix/runs/gpt-6.1-terra-xhigh__v17__v3__cel__free__codewrittenaudio__ai-hub__efficient__on/work/Road Ruckus Roadshow-Road Rash II-gpt-6.1-terra-xhigh-20261029-0937.html>), a single HTML file with a race, rival combat, traffic, pickups, procedural audio, controller settings, and attract mode. It loads its libraries from CDNs and requires WebGPU.
+
+**The demo is not fully verified or complete against the multiplayer requirement.** Headless Chrome lost its WebGPU device, so I could not verify the rendered 3D scene. Standalone multiplayer works between tabs in the same browser profile and origin; it does not connect separate devices over the internet. AI Hub side-by-side play was tested with a mock session, not the official harness.
+
+**Testing feedback:** Testing caught one critical issue: the headless WebGPU presentation failure. Automated checks passed for race start, obstacle collision, rival knockout, settings, finish, a mock hub exchange, and same-origin tab discovery. The browser smoke test was most helpful; syntax checking alone was least helpful. A real GPU, physical-controller, multi-device playtest remains needed.
+
+**Source information:** 2026-10-29 09:37; source: *Road Rash II*. Tech: Three.js r180 WebGPU, Rapier 0.19.3, Gamepad API, Web Audio, BroadcastChannel, and AI Hub Session Protocol v1. Art: cel-shaded comic-book highway; animation: procedural rigid-part motion; audio: synthesized music, effects, and gibberish voices. Environment: Codex CLI, headless Linux, Chrome. Model: OpenAI gpt-6.1-terra, xhigh. Usage and cost: unknown.
+
+**Engine feedback:** Three.js made scene construction straightforward. Headless WebGPU validation was the hardest part; the road, racing, AI, combat, and audio systems had to be built for the demo. An explicit WebGPU-only initialization option would make the renderer easier to use for this requirement.
+
+**Prompt feedback:** The controller-first arcade direction was the strongest part. Standalone multiplayer scope was ambiguous, and combining the race with networking was the hardest part. The most valuable additional test would be a real multi-device controller playtest.

@@ -195,35 +195,76 @@ function selectionArgs(sel = {}) {
   for (const [dim, ids] of Object.entries(sel.only ?? {})) a.push('--only', `${dim}=${ids.join(',')}`);
   if (sel.repeat > 1) a.push('--repeat', String(sel.repeat));
   if (sel.rerunFailed) a.push('--rerun-failed');
+  if (sel.resumeFailed) a.push('--resume-failed');
   return a;
 }
 
 // ------------------------------------------------------------- run state
 let runner = null;
-// active: run id -> start time
-const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Map(), finished: 0, planned: null, settings: null };
+// active: run id -> start time. state: what the runner last said about itself (its settings as they
+// are now, spend, paused, runs left per CLI); see control() in run-matrix.mjs.
+const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Map(), finished: 0, planned: null, settings: null, state: null };
+const stateWaiters = []; // /api/adjust calls waiting for the runner to answer
 function logLine(line) {
   if (!line) return;
+  if (line.startsWith('@state ')) {
+    try { run.state = JSON.parse(line.slice(7)); } catch { return; }
+    // Runs this batch will do, now that limits, Retry failed or a skipped CLI can change it mid-batch.
+    run.planned = run.finished + run.active.size + Object.values(run.state.left ?? {}).reduce((a, b) => a + b, 0);
+    stateWaiters.splice(0).forEach((w) => w(run.state));
+    return;
+  }
   run.log.push(line);
   if (run.log.length > 3000) run.log.splice(0, run.log.length - 3000);
-  const m = line.match(/^(▶|✔|✘|■) (\S+)/);
-  if (m) { if (m[1] === '▶') run.active.set(m[2], new Date().toISOString()); else { run.active.delete(m[2]); if (m[1] !== '■') run.finished++; } }
+  // ▶ started · ✔ ✘ finished · ■ stopped (discarded) · ↺ ended to start over later
+  const m = line.match(/^(▶|✔|✘|■|↺) (\S+)/);
+  if (m) { if (m[1] === '▶') run.active.set(m[2], new Date().toISOString()); else { run.active.delete(m[2]); if (m[1] === '✔' || m[1] === '✘') run.finished++; } }
   else { const p = line.match(/^(\d+) runs(?: \((\d+) already done\))? → /); if (p) run.planned = p[1] - (p[2] ?? 0); } // runs this batch will do
 }
 
+// A change to the running batch from the page, checked before it goes to the runner. Empty (or 0)
+// perCli, budget or timeout = none; requeue and drop name runs that are running.
+function adjustment(b) {
+  b = b && typeof b === 'object' ? b : {};
+  const s = b.set && typeof b.set === 'object' ? b.set : {}, set = {};
+  const num = (k, min) => {
+    if (s[k] === '' || s[k] == null) return null;
+    const n = +s[k];
+    if (!Number.isFinite(n) || n < min) throw new HttpError(400, `${k} must be a number, at least ${min}.`);
+    return n;
+  };
+  if ('concurrency' in s) { const n = num('concurrency', 1); if (n == null) throw new HttpError(400, 'concurrency must be a number, at least 1.'); set.concurrency = Math.floor(n); }
+  if ('perCli' in s) { const n = num('perCli', 0); set.perCli = n >= 1 ? Math.floor(n) : null; }
+  if ('budget' in s) set.budget = num('budget', 0) || null;
+  if ('timeout' in s) set.timeout = num('timeout', 0) || null;
+  for (const k of ['rerunFailed', 'resumeFailed', 'paused']) if (k in s) set[k] = !!s[k];
+  const ids = (x) => (Array.isArray(x) ? x : []).filter((id) => typeof id === 'string' && run.active.has(id));
+  return { set, timeoutRunning: !!b.timeoutRunning, requeue: ids(b.requeue), drop: ids(b.drop),
+    skipCli: (Array.isArray(b.skipCli) ? b.skipCli : []).filter((p) => typeof p === 'string' && /^\w+$/.test(p)) };
+}
+// Hands the change to the runner (a line on its stdin) and answers with its state once it has applied it.
+function adjustRun(msg) {
+  return new Promise((resolve) => {
+    const t = setTimeout(() => resolve(run.state), 5000);
+    stateWaiters.push((st) => { clearTimeout(t); resolve(st); });
+    runner.stdin.write(JSON.stringify(msg) + '\n');
+  });
+}
+
 function startRun(s) {
-  const a = [RUNNER, ...selectionArgs(s), '-j', String(Math.max(1, +s.concurrency || 1))];
+  const a = [RUNNER, ...selectionArgs(s), '-j', String(Math.max(1, +s.concurrency || 1)), '--control'];
   if (+s.perCli > 0) a.push('--per-cli', String(+s.perCli));
   if (+s.budget > 0) a.push('--budget', String(+s.budget));
   if (+s.timeout > 0) a.push('--timeout', String(+s.timeout));
   Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null,
-    active: new Map(), finished: 0, planned: null, settings: s });
+    active: new Map(), finished: 0, planned: null, settings: s, state: null });
   runner = spawn(process.execPath, a, { cwd: HERE });
+  runner.stdin.on('error', () => {}); // the runner may have just exited
   let buf = '';
   const onData = (d) => { buf += d; const lines = buf.split(/\r?\n/); buf = lines.pop(); lines.forEach(logLine); };
   runner.stdout.on('data', onData); runner.stderr.on('data', onData);
   runner.on('close', (code) => { logLine(buf); buf = ''; run.exitCode = code; run.finishedAt = new Date().toISOString();
-    run.active.clear(); runner = null; });
+    run.active.clear(); runner = null; stateWaiters.splice(0).forEach((w) => w(run.state)); });
 }
 
 // ------------------------------------------------------------------ results
@@ -263,6 +304,21 @@ const SCORES = path.join(OUT, 'scores.json');
 const reviewOf = (scores, r) => { const s = scores[r.id]; if (!s || (s.startedAt && s.startedAt !== r.startedAt)) return {};
   const { startedAt, ...rest } = s; return rest; };
 
+// Whether Resume failed would carry on with this failed run's session instead of starting it over, as
+// canResume() in run-matrix.mjs decides before any time limit: a Claude Code run that got partway, in the
+// folder it ran in, whose session is still on disk (claudeTranscript is the same as there).
+function resumable(dir, r) {
+  return r.status !== 'ok' && r.provider === 'claude' && !!r.sessionId && r.outputTokens > 0 && path.basename(dir) === r.id
+    && !!claudeTranscript(r.sessionId, path.join(dir, 'work'));
+}
+function claudeTranscript(sessionId, cwd) {
+  const root = path.join(process.env.CLAUDE_CONFIG_DIR || path.join(HOME, '.claude'), 'projects'), file = `${sessionId}.jsonl`;
+  const own = path.join(root, cwd.replace(/[^a-zA-Z0-9]/g, '-'), file);
+  if (fs.existsSync(own)) return own;
+  try { for (const d of fs.readdirSync(root)) if (fs.existsSync(path.join(root, d, file))) return path.join(root, d, file); } catch {}
+  return null;
+}
+
 function results() {
   const scores = readJSON(SCORES, {});
   const dims = readJSON(CONFIG, {}).dimensions ?? {};
@@ -273,6 +329,7 @@ function results() {
     const dir = path.join(OUT, d.name), r = readJSON(path.join(dir, 'result.json'), null);
     if (!r?.id) continue;
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
+    if (resumable(dir, r)) r.resumable = true;
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;
     // A run from before a dimension was added counts as its olderRuns variant (else its first), as in
@@ -354,7 +411,8 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(req, res, p.slice(6));
     if (p === '/api/audit' && m === 'GET') return send(res, 200, readJSON(AUDIT, null));
 
-    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true) });
+    // canResume: this server takes Resume failed (a page newer than its server hides it).
+    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true), canResume: true });
     if (p === '/api/config' && m === 'PUT') {
       const c = await body(req);
       if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });
@@ -385,6 +443,11 @@ const server = http.createServer(async (req, res) => {
       startRun(await body(req));
       return send(res, 200, { ok: true });
     }
+    if (p === '/api/adjust' && m === 'POST') {
+      const msg = adjustment(await body(req));
+      if (!runner) return send(res, 409, { error: 'No batch is running.' });
+      return send(res, 200, { ok: true, state: await adjustRun(msg) });
+    }
     if (p === '/api/stop' && m === 'POST') {
       if (runner) fs.writeFileSync(path.join(OUT, '.stop'), new Date().toISOString());
       return send(res, 200, { ok: true });
@@ -393,7 +456,7 @@ const server = http.createServer(async (req, res) => {
       const since = +(url.searchParams.get('since') ?? 0), known = url.searchParams.get('smokes');
       return send(res, 200, { running: !!runner, stopping: fs.existsSync(path.join(OUT, '.stop')),
         startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...run.active.keys()],
-        activeSince: Object.fromEntries(run.active), finished: run.finished, planned: run.planned, settings: run.settings, logTotal: run.log.length,
+        activeSince: Object.fromEntries(run.active), finished: run.finished, planned: run.planned, settings: run.settings, state: run.state, logTotal: run.log.length,
         log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), updating, rev: revs(),
         ...(known === String(smokesRev) ? {} : { smokes }) }); // the tests only when they changed
     }
@@ -448,9 +511,17 @@ server.listen(opts.port, '127.0.0.1', () => {
   }
 });
 
-// Quitting the dashboard stops a running batch cleanly too.
-const quit = () => {
-  if (runner) { fs.writeFileSync(path.join(OUT, '.stop'), 'quit'); runner.on('close', () => process.exit(0)); setTimeout(() => process.exit(0), 15000); }
-  else process.exit(0);
+// Quitting the dashboard stops a running batch cleanly too. That ends its running agents and throws their
+// work away, so with agents running Ctrl-C asks to be pressed again (the runner leaves Ctrl-C to us).
+let ctrlCAt = 0;
+const quit = (sig) => {
+  if (!runner) process.exit(0);
+  if (sig === 'SIGINT' && run.active.size && Date.now() - ctrlCAt > 5000) {
+    ctrlCAt = Date.now();
+    console.log(`\nA batch is running with ${run.active.size} agent(s) going: quitting ends them and throws away what they've done so far.\n`
+      + 'Press Ctrl-C again within 5 seconds to quit anyway, or Pause the batch in the dashboard to let them finish first.');
+    return;
+  }
+  fs.writeFileSync(path.join(OUT, '.stop'), 'quit'); runner.on('close', () => process.exit(0)); setTimeout(() => process.exit(0), 15000);
 };
-process.on('SIGINT', quit); process.on('SIGTERM', quit);
+process.on('SIGINT', () => quit('SIGINT')); process.on('SIGTERM', () => quit('SIGTERM'));
