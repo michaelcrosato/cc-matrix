@@ -200,17 +200,26 @@
   "stages": [
     {
       "id": "plan",
+      "models": [
+        "claude-opus-5-5:max"
+      ],
       "game": false,
       "text": "Read TASK.md in this folder: it describes a game to build. Don't build it yet: plan it. Write PLAN.md in this folder for the developers who will build it from TASK.md and your plan; they may be other AI models, working without you. Start PLAN.md with the game's title, picked as TASK.md says. Cover the architecture and modules, every system and mechanic TASK.md asks for, the content (levels, enemies, items, story beats), the order to build in with milestones, the riskiest parts and how to de-risk them, and how to test each part. Be specific enough that a capable developer can build the whole demo from TASK.md and PLAN.md alone. Then reply with a short summary of the plan.",
       "goal": "PLAN.md exists in this folder and covers the title, architecture, every system, the content, the build order and testing for everything TASK.md asks for."
     },
     {
       "id": "build",
+      "models": [
+        "claude-opus-5-5:xhigh"
+      ],
       "text": "Read TASK.md (what to build) and PLAN.md (how to build it, written by {{parentModel}} at {{parentEffort}} effort) in this folder. Build the game TASK.md describes, following the plan and using the title it gives; where they disagree, TASK.md wins. Deliver everything TASK.md asks for, including its file name, and the sections it asks for in your final reply.",
       "goal": "the bundled single .html file exists in this folder's root, every feature in TASK.md is implemented with no TODOs, placeholders or stubs, and your final reply contains the Source Information, Engine Feedback and Prompt Feedback sections."
     },
     {
       "id": "content",
+      "models": [
+        "claude-sonnet-5-5:medium"
+      ],
       "text": "The game in this folder was built from TASK.md and PLAN.md; the steps so far: {{chain}}. Its framework is done. Your job is content and polish on top of it: more of what TASK.md asks for (levels, enemies, items, quests, music, effects, story) and fixes for anything broken. Keep the game's title, engine and architecture, and extend them rather than starting over. Save the result as a new bundled single .html in this folder's root, named as TASK.md says but with the game's current title, and in your final reply list what you added and give the sections TASK.md asks for.",
       "goal": "a new bundled single .html with the added content exists in this folder's root, nothing that worked before is broken, and your final reply lists what you added and contains the Source Information, Engine Feedback and Prompt Feedback sections."
     }
@@ -239,21 +248,11 @@
     "agy": "agy",
     "muse": "muse"
   },
-  "omitFromName": [
-    "gameTitle",
-    "package",
-    "workspace",
-    "performance",
-    "premise",
-    "scope",
-    "attractMode",
-    "multiplayer",
-    "tone",
-    "uiux",
-    "done",
-    "sourceInfo",
-    "testingFeedback",
-    "engineFeedback",
-    "promptFeedback"
-  ]
+  "folderName": {
+    "fields": [
+      "source"
+    ],
+    "date": true,
+    "title": true
+  }
 }

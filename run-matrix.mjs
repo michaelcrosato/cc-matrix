@@ -29,6 +29,8 @@
 //        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
 //        --stage <stage>=agent:effort,...   run in stages instead (repeatable; see stageRuns): each stage in the config's
 //                                     "stages" continues from the finished runs of the stage before
+//        --stages                     run in stages with the models each stage has in the config ("models"); a
+//                                     --stage given too replaces that stage's
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -40,7 +42,7 @@ import { pathToFileURL } from 'node:url';
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [] };
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -52,6 +54,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--only') args.only.push(next());
   else if (a === '--pick') args.pick.push(...next().split(',').filter(Boolean));
   else if (a === '--stage') args.stage.push(next());
+  else if (a === '--stages') args.stages = true;
   else if (a === '--limit') args.limit = +next();
   else if (a === '--repeat') args.repeat = +next();
   else if (a === '--timeout') args.timeout = +next();
@@ -111,28 +114,31 @@ const picks = new Set(args.pick);
 const matches = (fields) => (!picks.size || picks.has(`${fields.agent}:${fields.effort}`))
   && filters.every(([k, set]) => set.has(String(fields[k])));
 
-// A run's folder name (its id) is its model-effort and one variant per dimension, except the dimensions
-// listed in omitFromName (Setup: "in folder name" unticked). Runs are matched by the fields in their
-// result.json (runKey), not by folder name, so changing this only renames runs made from then on. The left-out
-// variants become a short code at the end (x + 6 hex), so runs that differ only in them never share a folder:
-// not now, and not after a left-out variant is replaced by another.
-const omitted = new Set(cfg.omitFromName ?? []);
-function runName(agentEffort, combo, rep) {
-  const left = dimNames.filter((d) => omitted.has(d));
-  const code = left.length ? 'x' + crypto.createHash('sha1').update(left.map((d) => `${d}=${combo[d].id}`).join('|')).digest('hex').slice(0, 6) : null;
-  return [agentEffort, ...dimNames.filter((d) => !omitted.has(d)).map((d) => combo[d].id), code, rep].filter(Boolean).join('__');
-}
-
 // Runs in stages (see stageRuns) are known by their chain: the stage, model and effort of each step from the first
 // stage to theirs (plan:claude-opus-5-5-max>build:claude-opus-5-5-xhigh), plus the brief (one variant per dimension).
 const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join('>');
-// A stage run's folder name: its model-effort and stage, the variants in folder names, and one code for the rest:
-// the variants left out and the steps before it, so the same model building two different plans gets two folders.
-function stageRunName(agentEffort, stage, combo, before) {
-  const seed = [...dimNames.filter((d) => omitted.has(d)).map((d) => `${d}=${combo[d].id}`), ...(before.length ? [`from=${chainKey(before)}`] : [])];
-  const code = seed.length ? 'x' + crypto.createHash('sha1').update(seed.join('|')).digest('hex').slice(0, 6) : null;
-  return [`${agentEffort}.${stage}`, ...dimNames.filter((d) => !omitted.has(d)).map((d) => combo[d].id), code].filter(Boolean).join('__');
+
+// A run's folder name (its id) starts with its model-effort (and stage). With "folderName" in the config (Setup · Basic
+// → Folder names): then the variants of the dimensions in folderName.fields, the date and time the run started
+// (date: true) and, once it has made its game, the game's title (title: true; see withTitle). Without it, the older
+// scheme: every dimension's variant except those in omitFromName. Runs are matched by the fields in their result.json
+// (runKey), never by folder name, so changing this only names runs made from then on. Variants left out become a
+// short code (x + 6 hex) where runs could otherwise share a folder: always in the older scheme; with folderName when a
+// left-out dimension has more than one variant (runs of one batch can start the same minute), and for a stage run
+// after the first, which also encodes the steps before it (the same builder on two plans gets two folders).
+const FN = cfg.folderName ?? null, omitted = new Set(cfg.omitFromName ?? []);
+const inName = (d) => FN ? (FN.fields ?? []).includes(d) : !omitted.has(d);
+const stampOf = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-`
+  + `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+function runName(head, combo, rep, when, before = []) {
+  const left = dimNames.filter((d) => !inName(d));
+  const seed = [...left.map((d) => `${d}=${combo[d].id}`), ...(before.length ? [`from=${chainKey(before)}`] : [])];
+  const coded = FN ? before.length > 0 || left.some((d) => cfg.dimensions[d].length > 1) : seed.length > 0;
+  const code = coded ? 'x' + crypto.createHash('sha1').update(seed.join('|')).digest('hex').slice(0, 6) : null;
+  return [head, ...dimNames.filter(inName).map((d) => combo[d].id), FN?.date ? stampOf(when ?? new Date()) : null, code, rep].filter(Boolean).join('__');
 }
+// A run's name when it starts (runOne): with the date in it, the queue's names are only what they'd be now.
+const nameOf = (run, when) => runName(run.head, run.combo, run.rep, when, run.chain ? run.chain.slice(0, -1) : []);
 
 const runs = [];
 for (const agent of cfg.agents) {
@@ -144,10 +150,11 @@ for (const agent of cfg.agents) {
         ...Object.fromEntries(dimNames.map((d) => [d, combo[d].id])) };
       if (!matches(fields)) continue;
       for (let r = 1; r <= args.repeat; r++) {
-        const rep = args.repeat > 1 ? `r${r}` : null;
+        const rep = args.repeat > 1 ? `r${r}` : null, head = `${agent.id}-${effort}`;
         // key: every dimension, what finished runs are matched by (runKey); id: the folder name.
-        const key = [`${agent.id}-${effort}`, ...dimNames.map((d) => combo[d].id), rep].filter(Boolean).join('__');
-        runs.push({ id: runName(`${agent.id}-${effort}`, combo, rep), key, agent, effort: pe.base, ultracode: pe.ultracode, combo, fields });
+        const key = [head, ...dimNames.map((d) => combo[d].id), rep].filter(Boolean).join('__');
+        runs.push({ id: runName(head, combo, rep), head, rep, key, agent, effort: pe.base, ultracode: pe.ultracode, combo,
+          fields: { ...fields, ...(rep ? { rep } : {}) } });
       }
     }
   }
@@ -250,9 +257,10 @@ function olderVariant(d) { return (cfg.dimensions[d].find((v) => v.olderRuns) ??
 const briefKey = (r) => dimNames.map((d) => r[d] ?? olderVariant(d)).join('__');
 function runKey(r) {
   if (r.chain) return `${chainKey(r.chain)}__${briefKey(r)}`;
-  const parts = r.id.split('__'), last = parts.at(-1);
-  const rep = parts.length > 1 && /^r\d+$/.test(last) && !dimNames.some((d) => r[d] === last) ? last : null;
-  return [parts[0], ...dimNames.map((d) => r[d] ?? olderVariant(d)), rep].filter(Boolean).join('__');
+  // Model-effort and repeat from the saved fields; runs from before they were saved, from the folder name.
+  const parts = r.id.split('__'), last = parts.at(-1), head = r.agent && r.effort ? `${r.agent}-${r.effort}` : parts[0];
+  const rep = r.rep ?? (parts.length > 1 && /^r\d+$/.test(last) && !dimNames.some((d) => r[d] === last) ? last : null);
+  return [head, ...dimNames.map((d) => r[d] ?? olderVariant(d)), rep].filter(Boolean).join('__');
 }
 // Finished runs by key, read once. Two with the same key (a dimension was removed) count as one:
 // an OK one if there is one, else the latest. An unreadable result.json counts as not done.
@@ -305,19 +313,24 @@ const isDone = (run) => { const p = prevRun(run); return !!p && (p.r.status === 
 // waits for its parent: it starts once the parent has finished OK, and is left out if the parent fails (see pool).
 // It starts from a copy of the parent's work folder, gets TASK.md (the prompt, filled for this run) and is sent its
 // stage's text, or with a stage goal on a CLI that has /goal, a /goal that points at STAGE.md (see prepareStage).
+// Each stage's models ("agent:effort"): the config's with --stages (Setup · Advanced), a --stage replacing a stage's.
 const STAGES = cfg.stages ?? [];
 const stagePicks = new Map();
-for (const s of args.stage) {
-  const [id, list = ''] = s.split('='), st = STAGES.find((x) => x.id === id);
+function pickStage(id, list, fromConfig) {
+  const st = STAGES.find((x) => x.id === id), out = [];
   if (!st) { console.error(`No stage named "${id}" (the config has ${STAGES.map((x) => x.id).join(', ') || 'none'})`); process.exit(1); }
-  for (const pick of list.split(',').filter(Boolean)) {
+  for (const pick of list) {
     const [aid, eff] = pick.split(':'), agent = cfg.agents.find((a) => a.id === aid), pe = parseEffort(eff);
+    if (!agent && fromConfig) { console.error(`Note: stage ${id} names "${aid}", which isn't in Models; left out.`); continue; }
     if (!agent) { console.error(`No model named "${aid}" for stage ${id}`); process.exit(1); }
     if (pe.ultracode && agent.provider !== 'claude') continue; // Ultracode is Claude Code only
-    (stagePicks.get(id) ?? stagePicks.set(id, []).get(id)).push({ agent, pe });
+    out.push({ agent, pe });
   }
+  stagePicks.set(id, out);
 }
-const stageMode = args.stage.length > 0;
+if (args.stages) for (const st of STAGES) if (st.models?.length) pickStage(st.id, st.models, true);
+for (const s of args.stage) { const [id, list = ''] = s.split('='); pickStage(id, list.split(',').filter(Boolean), false); }
+const stageMode = args.stage.length > 0 || args.stages;
 const infoOf = (r) => ({ agent: r.agent, model: r.model, effort: r.effort, stage: r.stage });
 function stageRuns() {
   const picksAt = STAGES.map((s) => stagePicks.get(s.id) ?? []), last = picksAt.findLastIndex((p) => p.length), out = [];
@@ -337,7 +350,8 @@ function stageRuns() {
         if (!picksAt[k].length) { next.push(...(have.get(`${bk}|${chainKey(p.chain)}|${st.id}`) ?? [])); continue; }
         for (const { agent, pe } of picksAt[k]) {
           const chain = [...p.chain, { stage: st.id, agent: agent.id, effort: pe.label }];
-          const node = { id: stageRunName(`${agent.id}-${pe.label}`, st.id, combo, p.chain), key: `${chainKey(chain)}__${bk}`, chain, agent,
+          const head = `${agent.id}-${pe.label}.${st.id}`;
+          const node = { id: runName(head, combo, null, undefined, p.chain), head, key: `${chainKey(chain)}__${bk}`, chain, agent,
             effort: pe.base, ultracode: pe.ultracode, combo, stage: st, parentKey: p.key, parentInfo: p.info, parentDir: p.id ?? null,
             info: { agent: agent.id, model: agent.model, effort: pe.label, stage: st.id },
             fields: { agent: agent.id, provider: agent.provider, effort: pe.label, ultracode: pe.ultracode, ...dims, stage: st.id, chain } };
@@ -352,7 +366,7 @@ function stageRuns() {
 if (stageMode) {
   const ids = STAGES.map((s) => s.id);
   if (new Set(ids).size !== ids.length || ids.some((id) => !/^\w+$/.test(id))) { console.error(`Stage names must be unique letters, numbers or _ (${ids.join(', ')})`); process.exit(1); }
-  if (args.repeat > 1) console.log('Note: Repeat isn\'t used for runs in stages.');
+  if (args.repeat > 1) console.error('Note: Repeat isn\'t used for runs in stages.');
   queue = stageRuns().slice(0, args.limit);
 }
 
@@ -1005,9 +1019,12 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null) {
 
 // Runs not done yet (pool skips the others first).
 async function runOne(run) {
-  const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   const prev = prevRun(run);
   if (canResume(run, prev)) return resumeOne(run, prev);
+  // The start time names the folder (with folderName.date) and fills the prompt's {{stamp}}: the two match.
+  run.when = new Date(); run.texts = null;
+  if (FN?.date) run.id = nameOf(run, run.when);
+  const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   // Never clear a folder that holds another combination's run (see runName); left as it is, this one doesn't start.
   const there = readResult(run.id);
   if (there?.id && runKey(there) !== run.key) { done++; console.log(`✘ ${run.id}  not started: its folder holds a different run`); return; }
@@ -1022,11 +1039,10 @@ async function runOne(run) {
       parent = run.parentKey ? finished().get(run.parentKey) ?? null : null;
       if (run.parentKey && parent?.r.status !== 'ok') throw new Error('the run it continues from hasn\'t finished OK');
       if (parent) run.parentInfo = infoOf(parent.r); // the run it actually continues from
-      run.when = new Date(); run.texts = null;
       given = prepareStage(run, dir, buildPrompt(run, run.when), parent);
       prompt = stageTexts(run).text;
     } else {
-      prompt = buildPrompt(run);
+      prompt = buildPrompt(run, run.when);
       prepare(run, dir, prompt);
     }
   } catch (e) { // e.g. a placeholder this variant's text leaves unfilled, or a /goal over the limit: fail this run, keep the batch going
@@ -1060,17 +1076,47 @@ async function runOne(run) {
   const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed';
   // goalSkipped: a goal (a goal variant, or a stage's goal) on a CLI without headless /goal, so it got the plain text.
   const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
-  const result = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
+  const measured = measureOutput(work, given), end = Date.now();
+  const id = status === 'ok' ? withTitle(run.id, measured, run) : run.id, home = path.join(outDir, id);
+  const result = { id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
     variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
-    wallMinutes: (Date.now() - start) / 60000, ...metrics, ...measureOutput(work, given), ...stageFields(run, work, parent, given),
-    startedAt: new Date(start).toISOString(), finishedAt: new Date().toISOString() };
-  fs.writeFileSync(resFile, JSON.stringify(result, null, 2));
-  finished().set(run.key, { r: result, dir: run.id }); // so the runs continuing from it can start
-  stampGame(dir, result, run.combo);
+    wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...stageFields(run, path.join(home, 'work'), parent, given),
+    startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString() };
+  fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
+  finished().set(run.key, { r: result, dir: id }); // so the runs continuing from it can start
+  stampGame(home, result, run.combo);
   spent += metrics.costUsd ?? 0; done++;
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  ${result.wallMinutes.toFixed(1)}m  ` +
-    `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok`);
+    `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
   writeReport();
+}
+
+// With folderName.title, a run that has made its game gets the game's title at the end of its folder's name: the
+// agent picks the title as it works, so it isn't known when the folder is made. Renames the folder and points
+// `measured.entry` into it; returns the folder's name now (the old one if there's no title or the name is taken).
+function withTitle(id, measured, run) {
+  if (!FN?.title || !measured.delivered || !measured.entry) return id;
+  const t = titleOf(path.basename(measured.entry), run), nid = t ? `${id}__${t}` : null;
+  if (!nid || fs.existsSync(path.join(outDir, nid))) return id;
+  try { fs.renameSync(path.join(outDir, id), path.join(outDir, nid)); } catch { return id; }
+  measured.entry = nid + measured.entry.slice(id.length);
+  return nid;
+}
+// The game's title from its file name, GameTitle-SOURCE-model-effort-stamp.html as the prompt asks for: what's left
+// once the stamp, the model and effort, and the source are taken off its end. Letters, digits, . _ - only.
+function titleOf(file, run) {
+  const norm = (x) => String(x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let tokens = file.replace(/\.html?$/i, '').split(/[-\s]+/).filter(Boolean);
+  const dropEnd = (target) => { const t = norm(target); if (!t) return false;
+    for (let k = 1; k <= tokens.length; k++) if (norm(tokens.slice(-k).join('')) === t) { tokens = tokens.slice(0, -k); return true; }
+    return false; };
+  if (/^\d{8}$/.test(tokens.at(-2) ?? '') && /^\d{4}$/.test(tokens.at(-1) ?? '')) tokens = tokens.slice(0, -2);
+  const v = runVars(run, run.when);
+  if (!dropEnd(`${v.model}${v.effort}`)) dropEnd(v.model);
+  const src = run.combo.source;
+  if (src && !dropEnd(variantText(src))) dropEnd(src.id);
+  const t = tokens.join('-').replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 60).replace(/[-.]+$/, '');
+  return t && !/^(index|game|main)$/i.test(t) ? t : null;
 }
 
 // A resumed run's output: the first part's in agent.out and agent.err, part n's in agent.<n>.out and .err.
@@ -1084,6 +1130,7 @@ const RESUME_MESSAGE = 'Your session stopped before the task was finished. Conti
 // `parts` lists each part's times and `resumes` counts them. Ended mid-way (Stop, ↻, ✕), the new part is
 // thrown away and the run stays as it was, so it can be resumed again.
 async function resumeOne(run, prev) {
+  run.id = prev.dir; // it carries on in its own folder, whatever a new run would be named now
   const dir = path.join(outDir, prev.dir), work = path.join(dir, 'work'), r = prev.r;
   const parts = r.parts ?? [{ startedAt: r.startedAt, finishedAt: r.finishedAt, wallMinutes: r.wallMinutes, exitCode: r.exitCode, cliVersion: r.cliVersion }];
   const n = parts.length, since = claudeCostState(claudeTranscript(r.sessionId, work));
@@ -1115,16 +1162,17 @@ async function resumeOne(run, prev) {
   const given = r.givenHtml ? new Map(Object.entries(r.givenHtml)) : null;
   const kept = Object.fromEntries(['parentId', 'parentStartedAt', 'expectsGame', 'givenHtml'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
   let planChars; try { if (r.stage) planChars = fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').length; } catch {}
-  const result = { id: r.id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
+  const measured = measureOutput(work, given), id = status === 'ok' ? withTitle(prev.dir, measured, run) : prev.dir, home = path.join(outDir, id);
+  const result = { id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
     variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode,
-    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measureOutput(work, given), ...kept, ...(planChars != null ? { planChars } : {}),
+    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measured, ...kept, ...(planChars != null ? { planChars } : {}),
     startedAt: r.startedAt, finishedAt: part.finishedAt, resumes: n, parts: all };
-  fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(result, null, 2));
-  stampGame(dir, result, run.combo);
-  finished().set(run.key, { r: result, dir: prev.dir });
+  fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
+  stampGame(home, result, run.combo);
+  finished().set(run.key, { r: result, dir: id });
   spent += metrics.costUsd ?? 0; done++;
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
-    `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok`);
+    `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
   writeReport();
 }
 
