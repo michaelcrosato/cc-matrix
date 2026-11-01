@@ -83,7 +83,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .xbar { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; } .xbar > div { height: 1px; } .xbar[hidden] { display: none; }
 /* Results uses the whole window, so a table with many variant columns fits instead of scrolling. */
 body[data-tab="results"] main { max-width: none; }
-/* Setup → Stages: one box per stage. Run → In stages: a picked model is a tag with ✕. */
+/* Setup · Advanced: one box per stage. Run → Advanced: a picked model is a tag with ✕. */
 .stagebox { border-top: 1px solid var(--line); padding: 12px 0 4px; } .stagebox:first-of-type { border-top: 0; }
 .stagebox textarea { width: 100%; margin-top: 6px; display: block; }
 .tag.on { background: var(--chip-on, var(--chip)); color: var(--ink); }
@@ -353,7 +353,8 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
 <header>
   <h1>Matrix Dashboard</h1>
   <nav>
-    <button data-tab="setup">Setup</button>
+    <button data-tab="setup" title="The 1-shot prompt: CLIs, models, its sections and the prompt">Setup · Basic</button>
+    <button data-tab="advanced" title="Multistage runs: the stages that hand the work from one model or lab to the next">Setup · Advanced</button>
     <button data-tab="run">Run</button>
     <button data-tab="results">Results</button>
     <button data-tab="insights">Insights</button>
@@ -364,6 +365,7 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
 </header>
 <main>
   <section class="tab" id="tab-setup"></section>
+  <section class="tab" id="tab-advanced"></section>
   <section class="tab" id="tab-run"></section>
   <section class="tab" id="tab-results"></section>
   <section class="tab" id="tab-insights"></section>
@@ -495,7 +497,7 @@ const RUN_VARS = {
   stamp: 'when the run started, to the minute, as YYYYMMDD-HHMM in this computer\'s time zone (20261029-0753 = Oct 29, 2026, 7:53 am); the same everywhere in one run, so it ties the game\'s file name to its run',
   date: 'the same moment as {{stamp}}, written YYYY-MM-DD HH:MM (2026-10-29 07:53)',
 };
-// Runs in stages (Setup → Stages, Run → In stages; stageRuns in run-matrix.mjs). Besides the dimensions and RUN_VARS,
+// Runs in stages (Setup · Advanced, Run → Advanced; stageRuns in run-matrix.mjs). Besides the dimensions and RUN_VARS,
 // a stage's text and goal can use the step its run continues from.
 const STAGE_VARS = {
   parentModel: 'the model of the run this one continues from (claude-opus-5-5)',
@@ -564,7 +566,7 @@ const cached = (k, fn) => k in cache ? cache[k] : (cache[k] = fn());
 const dirty = () => JSON.stringify(cfg) !== savedCfg || tmpl !== savedTmpl;
 
 // tabs
-const TABS = ['setup', 'run', 'results', 'insights', 'audit'];
+const TABS = ['setup', 'advanced', 'run', 'results', 'insights', 'audit'];
 let tab = location.hash.slice(1) || store.get('matrix.tab', 'run');
 const tabOk = (t) => TABS.includes(t) && (t !== 'audit' || !!audit);
 function showTab(t) {
@@ -582,6 +584,7 @@ function showTab(t) {
 function render() {
   if (!cfg) return;
   if (tab === 'setup') renderSetup();
+  else if (tab === 'advanced') renderAdvanced();
   else if (tab === 'run') renderRun();
   else if (tab === 'results') renderResults();
   else if (tab === 'insights') renderInsights();
@@ -949,7 +952,7 @@ function modelsCard() {
     h('p', { class: 'hint' }, 'Pick Custom at the bottom of the model list to type any model ID for that CLI. Each effort dropdown lists only the levels that model takes (as its CLI reports them). Add several to sweep them; "default" leaves it to the CLI. On Claude Code each level also has a "+ Ultracode" version. Time limit is optional, per run.'));
 }
 
-// Setup → Stages: the steps of runs in stages (Run → In stages; stageRuns in run-matrix.mjs). Each has a name, a
+// Setup · Advanced → Stages: the steps of runs in stages (Run → Advanced; stageRuns in run-matrix.mjs). Each has a name, a
 // text (what its runs are asked to do; TASK.md beside it holds the prompt above, filled for the run), an optional
 // goal (sent as /goal) and whether it makes a game. A stage after the first continues from the one before it.
 function stagesCard() {
@@ -963,9 +966,7 @@ function stagesCard() {
   };
   return h('div', { class: 'card', key: 'stages' },
     h('h2', {}, 'Stages'),
-    h('p', { class: 'sub' }, 'For runs in stages (Run → In stages): a plan by one model, builds of that plan by others, content added to each build by others again. '
-      + 'Every stage\'s run finds TASK.md in its folder (the prompt above, filled for that run) and is sent the stage\'s text. A stage after the first starts from a copy '
-      + 'of the folder of the run it continues from (without node_modules and .git), so a build sees PLAN.md and a content pass sees the game.'),
+    h('p', { class: 'sub' }, 'In order: each continues from the one before it. Untick "makes a game" for a stage that only plans, so its sessions aren\'t flagged for leaving no game.'),
     list.map((x, i) => h('div', { class: 'stagebox', key: 'stage:' + i },
       h('div', { class: 'dim-head' },
         h('span', { class: 'tag' }, String(i + 1)),
@@ -984,8 +985,34 @@ function stagesCard() {
     h('div', { class: 'row', style: 'margin-top:10px' },
       list.length ? null : h('button', { class: 'btn primary', title: 'Plan, build and content stages with texts to start from', onclick: () => edit((l) => l.push(...structuredClone(DEFAULT_STAGES))) }, 'Add plan → build → content'),
       h('button', { class: 'btn', onclick: () => edit((l) => { let n = l.length + 1; while (l.some((y) => y.id === `stage${n}`)) n++; l.push({ id: `stage${n}`, text: '' }); }) }, '+ Add stage')),
-    list.length ? [h('p', { class: 'hint', style: 'margin:12px 0 4px' }, 'Besides the dimensions and the placeholders above, a stage\'s text and goal can use:'),
+    list.length ? [h('p', { class: 'hint', style: 'margin:12px 0 4px' }, 'Besides the dimensions and the placeholders in Setup · Basic ({{source}}, {{model}}, {{stamp}} …), a stage\'s text and goal can use:'),
       h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, Object.entries(STAGE_VARS).map(([n, what]) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${what}`)))] : null);
+}
+
+const onDiskBanner = () => onDisk ? h('div', { class: 'banner', key: 'ondisk' },
+  h('span', { class: 'grow' }, 'The config or prompt changed on disk while you had unsaved edits here.'),
+  h('button', { class: 'btn', onclick: async () => { if (!confirm('Load the config and prompt from disk? Your unsaved edits here are discarded.')) return; await loadSetup(); render(); } }, 'Load from disk'),
+  h('span', { class: 'muted' }, 'or Save to keep yours.')) : null;
+
+// Setup · Advanced: multistage runs. A basic run is one terminal session; a multistage run is several in a row, each
+// a model (often another lab's CLI) picking up a copy of the folder the one before left, with the next stage's text.
+function renderAdvanced() {
+  if (!cfg) return;
+  morph($('#tab-advanced'),
+    onDiskBanner(),
+    h('div', { class: 'card', key: 'how' },
+      h('h2', {}, 'Multistage runs'),
+      h('p', { class: 'sub' }, 'A basic run is one terminal session: one CLI and model, given the prompt from Setup · Basic in a fresh folder. A multistage run is several sessions in a row in the same project, '
+        + 'the way you\'d hand the work from one lab to another: plan in Claude Code with Opus at max, close it, open Codex in a copy of that folder and build with GPT-6.1 Sol, then open Claude Code '
+        + 'again and add content with Sonnet. Each stage below is one of those sessions.'),
+      h('ul', { class: 'sub', style: 'margin:0; padding-left:20px' },
+        h('li', {}, 'What a stage\'s model is told is its text; when it\'s done, optionally, its goal (sent as /goal).'),
+        h('li', {}, 'Every session finds TASK.md in its folder: the prompt from Setup · Basic, filled for its own model, so its file name and Source Information name that model.'),
+        h('li', {}, 'A stage after the first starts in a copy of the folder of the session before it (without node_modules and .git): a build sees PLAN.md, a content pass sees the game.'),
+        h('li', {}, 'Which models do each stage you pick when you queue them, in Run → Advanced. Every pick runs on every session of the stage before, so the stages branch, and a stage left empty continues from sessions already done.'),
+        h('li', {}, 'Run → Preview shows the queue as the terminal commands it stands for.'))),
+    stagesCard(),
+    savebar());
 }
 
 function renderSetup() {
@@ -1053,10 +1080,7 @@ function renderSetup() {
   });
   cfg.bins ??= {}; cfg.extraArgs ??= {};
   morph($('#tab-setup'),
-    onDisk ? h('div', { class: 'banner', key: 'ondisk' },
-      h('span', { class: 'grow' }, 'The config or prompt changed on disk while you had unsaved edits here.'),
-      h('button', { class: 'btn', onclick: async () => { if (!confirm('Load the config and prompt from disk? Your unsaved edits here are discarded.')) return; await loadSetup(); render(); } }, 'Load from disk'),
-      h('span', { class: 'muted' }, 'or Save to keep yours.')) : null,
+    onDiskBanner(),
     clisCard(),
     modelsCard(),
     h('div', { class: 'card', key: 'dims', style: 'margin-bottom:8px' },
@@ -1082,10 +1106,9 @@ function renderSetup() {
       h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Click a chip to insert it at the cursor. Filled automatically for every run, here and in variants\' text:'),
       h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, RESERVED.map((n) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${RUN_VARS[n]}`)))),
     historyCard(),
-    stagesCard(),
-    // Advanced
-    h('div', { class: 'card', key: 'advanced' },
-      h('h2', {}, 'Advanced'),
+    // Each CLI's command and extra flags
+    h('div', { class: 'card', key: 'clicmds' },
+      h('h2', {}, 'CLI commands and flags'),
       h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
       h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', { key: p },
         h('strong', {}, n),
@@ -1182,11 +1205,11 @@ function historyCard() {
 const updateHistory = () => repaint('historycard', historyCard());
 
 // Errors block saving and always show; warnings fold into a count you can open (open by default on wide screens).
-const updateSavebar = () => repaint('savebar', savebar());
+const updateSavebar = () => { const el = document.querySelector('section.tab.on .savebar'); if (el) patch(el, savebar()); };
 function savebar() {
   const v = validate(), d = dirty(), n = v.errors.length + v.warnings.length;
   const open = n > 0 && (ui.saveOpen ?? matchMedia('(min-width: 900px)').matches);
-  return h('div', { class: 'savebar', id: 'savebar', key: 'savebar' },
+  return h('div', { class: 'savebar', key: 'savebar' },
     h('div', { class: 'msgs' },
       open ? h('div', { class: 'list' },
         v.errors.length ? h('div', { class: 'errs' }, v.errors.map((e) => h('div', {}, e))) : null,
@@ -1247,7 +1270,7 @@ function selection() {
   return { pick, only, repeat, count, done, doneOld, resume, combos };
 }
 
-// Run → In stages: per stage, the models picked (sel.stagePicks[stage] = ['agent:effort']). Mirrors stageRuns() in
+// Run → Advanced: per stage, the models picked (sel.stagePicks[stage] = ['agent:effort']). Mirrors stageRuns() in
 // run-matrix.mjs: each pick runs on every run of the stage before it (new in this batch, or finished before when
 // that stage has no picks). byStage[i]: runs it would make, of those already done, and how many it continues from.
 function stageSelection() {
@@ -1298,7 +1321,7 @@ function chip(label, on, toggle, title, key) {
 }
 const setOff = (arr, key, off) => { const i = arr.indexOf(key); if (off && i < 0) arr.push(key); if (!off && i >= 0) arr.splice(i, 1); };
 
-// Run → In stages instead of the matrix (Setup must have stages).
+// Run → Advanced (multistage) instead of Basic (the matrix); Setup · Advanced must have stages.
 const inStages = () => sel.mode === 'stages' && (cfg.stages ?? []).length > 0;
 function renderRun() {
   if (!cfg) return;
@@ -1312,9 +1335,9 @@ function renderRun() {
   const summary = h('div', { class: 'card', key: 'summary' },
     (cfg.stages ?? []).length ? h('div', { class: 'row', style: 'gap:6px; margin-bottom:12px', role: 'group', 'aria-label': 'How to run' },
       h('button', { class: 'btn' + (staged ? '' : ' primary'), 'aria-pressed': String(!staged), title: 'Every model and effort ticked below runs every combination of variants',
-        onclick: () => { sel.mode = 'matrix'; rerender(); } }, 'Matrix'),
+        onclick: () => { sel.mode = 'matrix'; rerender(); } }, 'Basic · 1-shot'),
       h('button', { class: 'btn' + (staged ? ' primary' : ''), 'aria-pressed': String(staged), title: 'A model per stage (plan, build, content…), each continuing from the stage before',
-        onclick: () => { sel.mode = 'stages'; rerender(); } }, 'In stages')) : null,
+        onclick: () => { sel.mode = 'stages'; rerender(); } }, 'Advanced · multistage')) : null,
     h('div', { class: 'stats' },
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Will run'), h('span', { class: 'big' }, (s.count - s.done).toLocaleString())),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Selected'), h('span', {}, staged ? plural(s.count, 'run') : `${s.count.toLocaleString()} combinations`)),
@@ -1407,14 +1430,15 @@ function renderRun() {
   const pre = $('#logpre'); if (pre && logFollow) pre.scrollTop = pre.scrollHeight;
 }
 
-// Run → In stages: the models picked for each stage. A pick runs on every run of the stage before it; a stage left
+// Run → Advanced: the models picked for each stage. A pick runs on every run of the stage before it; a stage left
 // empty contributes the runs it already has (a plan made yesterday), and stages after the last pick don't run.
 function stagePicker(s, rerender) {
   const stages = cfg.stages ?? [], label = (k) => { const [a, e] = k.split(':'); return `${a} · ${effortLabel(e)}`; };
   return h('div', { class: 'card', key: 'stagepick' },
-    h('h2', {}, 'Stages'),
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Stages'),
+      h('button', { class: 'icon', title: 'Edit the stages and what each is told', onclick: () => showTab('advanced') }, 'edit stages')),
     h('p', { class: 'sub' }, 'Pick models for any stage: each pick runs on every run of the stage before it, starting from a copy of that run\'s folder. '
-      + 'A stage left empty continues from the runs it already has, so you can build from plans made in an earlier batch. The stages\' texts are in Setup → Stages.'),
+      + 'A stage left empty continues from the runs it already has, so you can build from plans made in an earlier batch. The stages\' texts are in Setup · Advanced.'),
     h('table', { class: 'stack runmodels' }, srHead('Stage', 'Models', 'Add a model'), h('tbody', {}, stages.map((st, i) => {
       const picks = sel.stagePicks[st.id] ??= [], b = s.byStage[i], prev = stages[i - 1]?.id;
       const note = picks.length ? `${plural(b.count, 'run')}${b.done ? `, ${b.done} done already` : ''}`
@@ -1515,6 +1539,11 @@ async function preview() {
       r.note ? h('p', { class: 'warns' }, r.note) : null,
       r.missingClis?.length ? h('p', { class: 'warns' }, `Not installed, so their runs will be skipped: ${r.missingClis.join(', ')}`) : null,
       r.error ? h('p', { class: 'errs' }, r.error) : null,
+      r.terminal?.length ? h('details', { open: true, style: 'margin-bottom:12px' },
+        h('summary', {}, `In a terminal: ${r.terminal.length === r.terminalTotal ? `the ${plural(r.terminalTotal, 'session')} this batch queues` : `the first ${r.terminal.length} of the ${r.terminalTotal} sessions this batch queues`}`),
+        h('p', { class: 'hint' }, 'Each run as you\'d type it from this folder. prompt.md beside each work folder holds what it\'s sent (as in the sample below) and TASK.md in it the prompt filled for that run. '
+          + 'The batch runs these for you, up to Parallel runs at a time, a later stage once the run it continues from has finished OK.'),
+        h('pre', { class: 'mono', style: 'background:var(--code);padding:12px;border-radius:8px;white-space:pre;overflow-x:auto;font-size:12px' }, r.terminal.join('\n\n'))) : null,
       h('p', { class: 'muted' }, 'Sample prompt for ', h('span', { class: 'mono' }, r.sampleId || '—')),
       h('pre', { class: 'mono', style: 'background:var(--code);padding:12px;border-radius:8px' }, r.sample || ''),
       h('details', { style: 'margin-top:12px' }, h('summary', {}, `All ${r.ids.length} run names`),
