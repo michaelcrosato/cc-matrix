@@ -14,6 +14,7 @@
 //   FAKE:limit            claude: work a while (a dev file, tokens), then stop on the 5-hour usage limit
 //   FAKE:limit=start      claude: stop on the usage limit at the first request, having done nothing
 //   FAKE:plan             write PLAN.md instead of a game (a planning stage)
+//   FAKE:game=<name>      name the game file <name>.html (default Fake-Game-<model>.html)
 // A run in stages gets its stage's text as the message (or in STAGE.md, with /goal) and the brief in TASK.md;
 // both are read. Given a game already (a later stage), the fake adds to it, so the game it leaves is its own.
 // FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
@@ -86,7 +87,7 @@ export async function run(cli) {
     const given = fs.readdirSync('.').filter((f) => /\.html$/.test(f)).length; // a later stage adds content to the game it was given
     const body = `<!doctype html><title>Fake</title><script>${'let x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}`
       + `${given ? `// content added by ${cli} ${model}\n` : ''}</script>`;
-    fs.writeFileSync(`Fake-Game-${model}.html`, body);
+    fs.writeFileSync(`${prompt.match(/FAKE:game=(\S+)/)?.[1] ?? `Fake-Game-${model}`}.html`, body);
   }
   if (/FAKE:noreply/.test(prompt)) reply = '';
   const tok = { input: 1200, cacheRead: 9000, cacheWrite: 800, output: 640, reasoning: 120 };

@@ -520,6 +520,13 @@ const DEFAULT_STAGES = [
 const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join('>');
 // The efforts a stage can pick for a model: all it takes (not only the ones ticked for the matrix), with Ultracode on Claude Code.
 const stageEfforts = (a) => effortOptions(a).filter((e) => !e.startsWith('default'));
+const pickLabel = (k) => { const [a, e] = k.split(':'); return `${a} · ${effortLabel(e)}`; };
+const validPick = (k) => { const [a, e] = k.split(':'), ag = cfg.agents.find((x) => x.id === a); return !!ag && stageEfforts(ag).includes(e); };
+// "+ add model…": every model in Setup · Basic → Models, at every effort it takes.
+const pickSelect = (have, add, label) => h('select', { 'aria-label': label, style: 'max-width:240px', onchange: (e) => { const k = e.target.value; if (k && !have.includes(k)) add(k); } },
+  h('option', { value: '' }, '+ add model…'),
+  cfg.agents.map((a) => h('optgroup', { label: `${a.id} (${PROVIDERS[a.provider] ?? a.provider})` },
+    stageEfforts(a).map((e) => h('option', { value: `${a.id}:${e}`, disabled: have.includes(`${a.id}:${e}`) }, `${a.id} · ${effortLabel(e)}`)))));
 const PROVIDERS = { claude: 'Claude Code', codex: 'Codex', grok: 'Grok', agy: 'Antigravity (agy)', muse: 'Muse Code' };
 const SHORT = { claude: 'Claude', codex: 'Codex', grok: 'Grok', agy: 'agy', muse: 'Muse' };
 // Mirrors run-matrix.mjs. Effort levels each CLI accepts; agy and Muse narrow them per model (see the CLIs card).
@@ -812,6 +819,8 @@ function validate() {
     for (const [part, text] of [['text', st.text ?? ''], ['goal', st.goal ?? '']]) for (const [, u] of text.matchAll(/\{\{(\w+)\}\}/g))
       if (u === GOAL_DIM || (!dimNames.includes(u) && !RESERVED.includes(u) && !(u in STAGE_VARS))) errors.push(`Stage "${st.id}" ${part} uses {{${u}}}, which isn't a dimension or a stage placeholder`);
     if ((st.goal || '').length > 3800) errors.push(`Stage "${st.id}" goal is too long (${st.goal.length} characters; /goal allows about 3,800 here)`);
+    const gone = (st.models ?? []).filter((k) => !validPick(k));
+    if (gone.length) warnings.push(`Stage "${st.id}" has ${gone.map(pickLabel).join(', ')}, which ${gone.length === 1 ? 'isn\'t' : 'aren\'t'} in Models at that effort, so ${gone.length === 1 ? 'it\'s' : 'they\'re'} left out`);
   });
   for (const d of dimNames) if (d !== GOAL_DIM && !used.has(d)) warnings.push(`Dimension "${d}" isn't used in the prompt (add {{${d}}})`);
   const secs = promptSections(tmpl, dimNames.filter((d) => d !== GOAL_DIM));
@@ -961,12 +970,13 @@ function stagesCard() {
   const rename = (x, e) => {
     const n = e.target.value.trim();
     if (!/^\w+$/.test(n) || list.some((y) => y !== x && y.id === n)) { alert('Use letters, numbers or _ only, and a name no other stage has.'); e.target.value = x.id; return; }
-    if (sel.stagePicks?.[x.id]) { sel.stagePicks[n] = sel.stagePicks[x.id]; delete sel.stagePicks[x.id]; saveSel(); }
+    sel.offStagePicks = (sel.offStagePicks ?? []).map((k) => k.startsWith(`${x.id}|`) ? n + k.slice(x.id.length) : k); saveSel();
     x.id = n; changed(true);
   };
   return h('div', { class: 'card', key: 'stages' },
     h('h2', {}, 'Stages'),
-    h('p', { class: 'sub' }, 'In order: each continues from the one before it. Untick "makes a game" for a stage that only plans, so its sessions aren\'t flagged for leaving no game.'),
+    h('p', { class: 'sub' }, 'In order: each continues from the one before it. A stage\'s models each run it on every session of the stage before (models come from Setup · Basic → Models, at any effort they take). '
+      + 'Untick "makes a game" for a stage that only plans, so its sessions aren\'t flagged for leaving no game.'),
     list.map((x, i) => h('div', { class: 'stagebox', key: 'stage:' + i },
       h('div', { class: 'dim-head' },
         h('span', { class: 'tag' }, String(i + 1)),
@@ -977,6 +987,14 @@ function stagesCard() {
         h('button', { class: 'icon', title: 'Move up', 'aria-label': `Move stage ${x.id} up`, disabled: i === 0, onclick: () => edit((l) => moveIn(l, i, -1)) }, '↑'),
         h('button', { class: 'icon', title: 'Move down', 'aria-label': `Move stage ${x.id} down`, disabled: i === list.length - 1, onclick: () => edit((l) => moveIn(l, i, 1)) }, '↓'),
         h('button', { class: 'icon', title: 'Remove stage', 'aria-label': `Remove stage ${x.id}`, onclick: () => { if (confirm(`Remove stage "${x.id}"? Its finished runs stay.`)) edit((l) => l.splice(i, 1)); } }, '✕')),
+      h('div', { class: 'row', style: 'gap:6px; margin:8px 0 2px' },
+        h('span', { class: 'muted', style: 'min-width:56px' }, 'Models'),
+        (x.models ?? []).map((k) => h('span', { class: 'tag' + (validPick(k) ? ' on' : ' bad'), key: k, style: 'font-size:13px; padding:3px 4px 3px 10px',
+            title: validPick(k) ? null : 'Not in Setup · Basic → Models (or not at this effort): left out' }, pickLabel(k),
+          h('button', { class: 'icon', title: `Take ${pickLabel(k)} out of ${x.id}`, 'aria-label': `Remove ${pickLabel(k)} from ${x.id}`, style: 'min-height:20px; padding:0 4px',
+            onclick: () => { x.models = x.models.filter((y) => y !== k); if (!x.models.length) delete x.models; changed(true); } }, '✕'))),
+        pickSelect(x.models ?? [], (k) => { (x.models ??= []).push(k); changed(true); }, `Add a model to ${x.id}`),
+        (x.models ?? []).length ? null : h('span', { class: 'hint', style: 'margin:0' }, 'none yet')),
       h('textarea', { rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
         placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt above filled for the run, is in their folder.', oninput: (e) => { x.text = e.target.value; changed(); } }),
       h('textarea', { rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
@@ -994,6 +1012,36 @@ const onDiskBanner = () => onDisk ? h('div', { class: 'banner', key: 'ondisk' },
   h('button', { class: 'btn', onclick: async () => { if (!confirm('Load the config and prompt from disk? Your unsaved edits here are discarded.')) return; await loadSetup(); render(); } }, 'Load from disk'),
   h('span', { class: 'muted' }, 'or Save to keep yours.')) : null;
 
+// Setup · Advanced → Who runs each stage: the stages' models in order, how many sessions each stage makes per brief
+// (each model on every session of the stage before) and every path a brief takes through them.
+function pipelineCard() {
+  const stages = cfg.stages ?? [];
+  if (!stages.length) return null;
+  const rows = [];
+  let paths = [[]], stopped = false;
+  for (const [i, st] of stages.entries()) {
+    const ms = (st.models ?? []).filter(validPick);
+    if (!stopped && ms.length) paths = paths.flatMap((p) => ms.map((m) => [...p, m]));
+    rows.push({ st, i, ms, count: stopped || !ms.length ? 0 : paths.length, from: i && !stopped ? stages[i - 1].id : null });
+    if (!ms.length) stopped = true;
+  }
+  const made = rows.filter((r) => r.count), total = made.reduce((n, r) => n + r.count, 0);
+  const briefs = Object.values(cfg.dimensions).reduce((n, vs) => n * vs.length, 1);
+  const short = (k) => { const [a, e] = k.split(':'); return `${a} ${effortLabel(e)}`; };
+  return h('div', { class: 'card', key: 'pipeline' },
+    h('h2', {}, 'Who runs each stage'),
+    h('table', { class: 'stack' }, srHead('Stage', 'Models', 'Sessions per brief'), h('tbody', {}, rows.map((r) => h('tr', { key: r.st.id },
+      h('td', { style: 'white-space:nowrap; width:1%' }, h('strong', {}, `${r.i + 1} · ${r.st.id}`), r.st.game === false ? h('span', { class: 'tag', style: 'margin-left:6px' }, 'no game') : null),
+      h('td', {}, r.ms.length ? r.ms.map((k, j) => [j ? ', ' : '', h('span', { class: 'mono' }, short(k))]) : h('span', { class: 'muted' }, 'no models yet'),
+        r.from && r.ms.length ? h('div', { class: 'hint', style: 'margin:2px 0 0' }, `each on every ${r.from} session`) : null),
+      h('td', { class: 'num', style: 'white-space:nowrap' }, r.count ? plural(r.count, 'session') : '—'))))),
+    made.length ? h('p', { style: 'margin:10px 0 4px' }, 'Per brief: ', h('strong', {}, made.map((r) => `${r.count} × ${r.st.id}`).join(' → ')), `, ${plural(total, 'session')}`,
+      briefs > 1 ? ` (× ${briefs} briefs, the combinations of the variants in Setup · Basic)` : '', '.') : null,
+    paths.length && paths[0].length ? h('details', { open: paths.length <= 6 }, h('summary', { class: 'hint' }, `${plural(paths.length, 'path')} a brief takes`),
+      h('ul', { class: 'hint', style: 'margin:4px 0 0; padding-left:20px' }, paths.slice(0, 50).map((p) => h('li', { class: 'mono' }, p.map(short).join(' → '))))) : null,
+    stopped && made.length ? h('p', { class: 'hint', style: 'margin:6px 0 0' }, `A stage without models stops the chain there; in Run → Advanced, its sessions already done can still carry on to the stages after it.`) : null);
+}
+
 // Setup · Advanced: multistage runs. A basic run is one terminal session; a multistage run is several in a row, each
 // a model (often another lab's CLI) picking up a copy of the folder the one before left, with the next stage's text.
 function renderAdvanced() {
@@ -1009,10 +1057,36 @@ function renderAdvanced() {
         h('li', {}, 'What a stage\'s model is told is its text; when it\'s done, optionally, its goal (sent as /goal).'),
         h('li', {}, 'Every session finds TASK.md in its folder: the prompt from Setup · Basic, filled for its own model, so its file name and Source Information name that model.'),
         h('li', {}, 'A stage after the first starts in a copy of the folder of the session before it (without node_modules and .git): a build sees PLAN.md, a content pass sees the game.'),
-        h('li', {}, 'Which models do each stage you pick when you queue them, in Run → Advanced. Every pick runs on every session of the stage before, so the stages branch, and a stage left empty continues from sessions already done.'),
+        h('li', {}, 'Each stage has its models: every one of them runs the stage on every session of the stage before, so the stages branch. Run → Advanced ticks which of them to queue.'),
         h('li', {}, 'Run → Preview shows the queue as the terminal commands it stands for.'))),
+    pipelineCard(),
     stagesCard(),
     savebar());
+}
+
+// Setup · Basic → Run folder names: model-effort, the dimensions ticked "in folder name", the start date and time,
+// and the game's title once it's made (cfg.folderName; runName in run-matrix.mjs). Without folderName, the older
+// scheme: every dimension except those unticked (omitFromName), no date or title.
+function folderNameCard() {
+  const fn = cfg.folderName, dims = Object.keys(cfg.dimensions), a = cfg.agents[0];
+  const adopt = () => { if (!cfg.folderName) { cfg.folderName = { fields: dims.filter(inFolderName) }; delete cfg.omitFromName; } return cfg.folderName; };
+  // Rebuilt in one key order, so ticking back undoes the change.
+  const set = (k, on) => { const f = { ...adopt(), [k]: on };
+    cfg.folderName = { fields: f.fields ?? [], ...(f.date ? { date: true } : {}), ...(f.title ? { title: true } : {}) }; changed(true); };
+  const now = new Date(), two = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
+  const left = dims.filter((d) => !inFolderName(d)), coded = fn ? left.some((d) => cfg.dimensions[d].length > 1) : left.length > 0;
+  const example = [a ? `${a.id}-${effortsOf(a)[0]}` : 'model-effort', ...dims.filter(inFolderName).map((d) => cfg.dimensions[d][0]?.id),
+    fn?.date ? stamp : null, coded ? 'x1a2b3c' : null, fn?.title ? 'GameTitle' : null].filter(Boolean).join('__');
+  return h('div', { class: 'card', key: 'foldernames' },
+    h('h2', {}, 'Run folder names'),
+    h('p', { class: 'sub' }, 'Each run gets a folder in runs/, named by its model and effort, then the variant of each dimension ticked "in folder name" below, then:'),
+    h('div', { class: 'chips' },
+      chip('date and time it started', !!fn?.date, (on) => set('date', on), 'Its start, the same YYYYMMDD-HHMM as {{stamp}} in the game\'s file name'),
+      chip('game title, once made', !!fn?.title, (on) => set('title', on), 'The agent picks the title while it works, so the folder gets it added when the run has finished OK with its game')),
+    h('p', { class: 'hint', style: 'margin:10px 0 0' }, 'Like ', h('span', { class: 'mono', style: 'overflow-wrap:anywhere' }, example), '. '
+      + 'Finished runs are recognised by what they were made with (their result.json), not by folder name, so changing this only names new runs. '
+      + 'Dimensions left out become a short code (x and 6 characters) when two runs could otherwise share a folder: always with no date, else when one of them has more than one variant.'));
 }
 
 function renderSetup() {
@@ -1022,6 +1096,7 @@ function renderSetup() {
     for (const k of Object.keys(cfg.dimensions)) next[k === oldName ? newName : k] = cfg.dimensions[k];
     cfg.dimensions = next;
     if (cfg.omitFromName) cfg.omitFromName = cfg.omitFromName.map((x) => x === oldName ? newName : x);
+    if (cfg.folderName?.fields) cfg.folderName.fields = cfg.folderName.fields.map((x) => x === oldName ? newName : x);
     if (sel.offOnly[oldName]) { sel.offOnly[newName] = sel.offOnly[oldName]; delete sel.offOnly[oldName]; saveSel(); }
   };
   const dimCards = dimNames.map((d, di) => {
@@ -1051,15 +1126,17 @@ function renderSetup() {
         d === GOAL_DIM ? h('span', { class: 'tag' }, 'sent as /goal · Codex*') : h('span', { class: 'tag mono' }, `{{${d}}}`),
         h('span', { class: 'muted' }, `${vs.length} variant${vs.length === 1 ? '' : 's'}`),
         // omitFromName: left out of run folder names (see runName in run-matrix.mjs). Runs are matched by their saved fields either way.
-        chip('in folder name', !cfg.omitFromName?.includes(d), (on) => { // kept in dimension order, so ticking back undoes the change
-          cfg.omitFromName = Object.keys(cfg.dimensions).filter((x) => x === d ? !on : cfg.omitFromName?.includes(x));
-          if (!cfg.omitFromName.length) delete cfg.omitFromName; changed(true); },
+        chip('in folder name', inFolderName(d), (on) => { // kept in dimension order, so ticking back undoes the change
+          if (cfg.folderName) cfg.folderName.fields = Object.keys(cfg.dimensions).filter((x) => x === d ? on : inFolderName(x));
+          else { cfg.omitFromName = Object.keys(cfg.dimensions).filter((x) => x === d ? !on : cfg.omitFromName?.includes(x)); if (!cfg.omitFromName.length) delete cfg.omitFromName; }
+          changed(true); },
           'Whether this field\'s short name is part of each run\'s folder name. Finished runs are recognised by their saved fields either way, so changing this only renames runs made from now on. Fields left out become one short code (x + 6 characters) at the end of the name.'),
         h('span', { class: 'grow' }),
         h('button', { class: 'icon', title: 'Move up (its section in the prompt too)', 'aria-label': `Move ${d} up`, disabled: di === 0, onclick: () => moveDim(di, di - 1) }, '↑'),
         h('button', { class: 'icon', title: 'Move down (its section in the prompt too)', 'aria-label': `Move ${d} down`, disabled: di === dimNames.length - 1, onclick: () => moveDim(di, di + 1) }, '↓'),
         h('button', { class: 'icon', title: 'Remove dimension', 'aria-label': `Remove ${d}`, onclick: () => { if (confirm(`Remove "${d}" and its ${vs.length} variants?`)) { delete cfg.dimensions[d];
-          if (cfg.omitFromName) { cfg.omitFromName = cfg.omitFromName.filter((x) => x !== d); if (!cfg.omitFromName.length) delete cfg.omitFromName; } changed(true); } } }, '✕')),
+          if (cfg.omitFromName) { cfg.omitFromName = cfg.omitFromName.filter((x) => x !== d); if (!cfg.omitFromName.length) delete cfg.omitFromName; }
+          if (cfg.folderName?.fields) cfg.folderName.fields = cfg.folderName.fields.filter((x) => x !== d); changed(true); } } }, '✕')),
       d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and the agent gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until the condition is checked as met. Add "or stop after N turns" to cap it. Claude Code, Grok, agy and Muse all run /goal headless (each with its own goal loop: Grok plans, builds and verifies with extra agents, so it takes longer). * Codex has no headless /goal, so its runs of a goal variant get the same prompt without /goal.') : null,
       older && vs.length ? h('div', { class: 'row hint', style: 'margin:-4px 0 10px' },
         h('label', { for: 'older-' + d }, `${plural(older, 'finished run')} ${older === 1 ? 'is' : 'are'} from before {{${d}}} existed. They count as`),
@@ -1083,6 +1160,7 @@ function renderSetup() {
     onDiskBanner(),
     clisCard(),
     modelsCard(),
+    folderNameCard(),
     h('div', { class: 'card', key: 'dims', style: 'margin-bottom:8px' },
       h('h2', {}, 'Dimensions'),
       h('p', { class: 'sub', style: 'margin:0' }, 'Each dimension fills its {{placeholder}} in the prompt with one variant per run. Every combination gets run. The prompt is built in this order: drag a dimension by ⠿ (or use ↑ ↓) and its section moves in the prompt too. Order variants however you like; Results follow this order.')),
@@ -1233,9 +1311,13 @@ const briefKeyOf = (r) => Object.keys(cfg.dimensions).map((d) => r[d] == null ||
 function runKey(r) {
   if (r.chain) return `${chainKey(r.chain)}__${briefKeyOf(r)}`;
   const parts = r.id.split('__'), last = parts.at(-1), dims = Object.keys(cfg.dimensions);
-  const rep = parts.length > 1 && /^r\d+$/.test(last) && !dims.some((d) => r[d] === last) ? last : null;
-  return [parts[0], ...dims.map((d) => r[d] == null || r.predates?.includes(d) ? olderVariant(d) : r[d]), rep].filter(Boolean).join('__');
+  const rep = r.rep ?? (parts.length > 1 && /^r\d+$/.test(last) && !dims.some((d) => r[d] === last) ? last : null);
+  return [r.agent && r.effort ? `${r.agent}-${r.effort}` : parts[0], ...dims.map((d) => r[d] == null || r.predates?.includes(d) ? olderVariant(d) : r[d]), rep].filter(Boolean).join('__');
 }
+// A run's model-effort (and stage), from its fields; a run still going has only its folder name, which starts with it.
+const headOf = (r) => r.agent && r.effort ? `${r.agent}-${r.effort}${r.stage ? `.${r.stage}` : ''}` : r.id.split('__')[0];
+// Whether a dimension's variant is part of run folder names (see runName in run-matrix.mjs).
+const inFolderName = (d) => cfg.folderName ? (cfg.folderName.fields ?? []).includes(d) : !cfg.omitFromName?.includes(d);
 
 function selection() {
   const offP = new Set(sel.offPick), pick = [], only = {};
@@ -1270,15 +1352,14 @@ function selection() {
   return { pick, only, repeat, count, done, doneOld, resume, combos };
 }
 
-// Run → Advanced: per stage, the models picked (sel.stagePicks[stage] = ['agent:effort']). Mirrors stageRuns() in
+// Run → Advanced: per stage, its models from Setup · Advanced that are ticked (sel.offStagePicks: 'stage|agent:effort' unticked). Mirrors stageRuns() in
 // run-matrix.mjs: each pick runs on every run of the stage before it (new in this batch, or finished before when
 // that stage has no picks). byStage[i]: runs it would make, of those already done, and how many it continues from.
 function stageSelection() {
   const stages = cfg.stages ?? [], only = {}, dims = Object.keys(cfg.dimensions);
   for (const [d, vs] of Object.entries(cfg.dimensions)) { const off = new Set(sel.offOnly[d] || []); only[d] = vs.filter((v) => !off.has(v.id)).map((v) => v.id); }
-  sel.stagePicks ??= {};
-  const valid = new Set(cfg.agents.flatMap((a) => stageEfforts(a).map((e) => `${a.id}:${e}`)));
-  const picks = stages.map((st) => (sel.stagePicks[st.id] ?? []).filter((k) => valid.has(k)));
+  const off = new Set(sel.offStagePicks ??= []);
+  const picks = stages.map((st) => (st.models ?? []).filter((k) => validPick(k) && !off.has(`${st.id}|${k}`)));
   const last = picks.findLastIndex((p) => p.length), byStage = stages.map(() => ({ count: 0, done: 0, from: 0, fromNew: false }));
   let count = 0, done = 0, resume = 0;
   const lists = dims.map((d) => only[d]), combos = lists.reduce((n, l) => n * l.length, 1);
@@ -1433,31 +1514,29 @@ function renderRun() {
 // Run → Advanced: the models picked for each stage. A pick runs on every run of the stage before it; a stage left
 // empty contributes the runs it already has (a plan made yesterday), and stages after the last pick don't run.
 function stagePicker(s, rerender) {
-  const stages = cfg.stages ?? [], label = (k) => { const [a, e] = k.split(':'); return `${a} · ${effortLabel(e)}`; };
+  const stages = cfg.stages ?? [], off = sel.offStagePicks ??= [];
   return h('div', { class: 'card', key: 'stagepick' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Stages'),
-      h('button', { class: 'icon', title: 'Edit the stages and what each is told', onclick: () => showTab('advanced') }, 'edit stages')),
-    h('p', { class: 'sub' }, 'Pick models for any stage: each pick runs on every run of the stage before it, starting from a copy of that run\'s folder. '
-      + 'A stage left empty continues from the runs it already has, so you can build from plans made in an earlier batch. The stages\' texts are in Setup · Advanced.'),
-    h('table', { class: 'stack runmodels' }, srHead('Stage', 'Models', 'Add a model'), h('tbody', {}, stages.map((st, i) => {
-      const picks = sel.stagePicks[st.id] ??= [], b = s.byStage[i], prev = stages[i - 1]?.id;
-      const note = picks.length ? `${plural(b.count, 'run')}${b.done ? `, ${b.done} done already` : ''}`
+      h('button', { class: 'icon', title: 'Edit the stages, their models and what each is told', onclick: () => showTab('advanced') }, 'edit stages')),
+    h('p', { class: 'sub' }, 'Each stage\'s models from Setup · Advanced: untick any to leave it out of this batch. Each runs on every run of the stage before, starting from a copy of its folder. '
+      + 'A stage with nothing ticked continues from the runs it already has, so you can build from plans made in an earlier batch.'),
+    h('table', { class: 'stack runmodels' }, srHead('Stage', 'Models to run', 'Tick all or none'), h('tbody', {}, stages.map((st, i) => {
+      const ms = (st.models ?? []).filter(validPick), keys = ms.map((k) => `${st.id}|${k}`), b = s.byStage[i], prev = stages[i - 1]?.id;
+      const on = keys.filter((k) => !off.includes(k)).length;
+      const note = !ms.length ? 'no models set: add them in Setup · Advanced'
+        : on ? `${plural(b.count, 'run')}${b.done ? `, ${b.done} done already` : ''}`
           + (i ? ` · on ${b.fromNew ? `each ${prev} run above` : plural(b.from, `finished ${prev} run`)}` : s.combos > 1 ? ` · one per brief (${s.combos})` : '')
-        : i < s.last ? `not picked: continues from its ${plural(s.byStage[i + 1].from, 'finished run')}` : i > s.last && s.last >= 0 ? 'not in this batch' : '';
+        : i < s.last ? `none ticked: continues from its ${plural(s.byStage[i + 1].from, 'finished run')}` : 'none ticked: not in this batch';
       return h('tr', { key: st.id },
         h('td', { style: 'min-width:150px' }, h('div', { class: 'row', style: 'gap:2px 6px' }, h('strong', {}, `${i + 1} · ${st.id}`),
           st.game === false ? h('span', { class: 'tag', title: 'Its runs aren\'t expected to leave a game' }, 'no game') : null),
-          note ? h('div', { class: 'muted', style: 'font-size:12.5px' }, note) : null),
-        h('td', {}, h('div', { class: 'chips' },
-          picks.map((k) => h('span', { class: 'tag on', key: k, style: 'font-size:13px; padding:3px 4px 3px 10px' }, label(k),
-            h('button', { class: 'icon', title: `Take ${label(k)} out of ${st.id}`, 'aria-label': `Remove ${label(k)} from ${st.id}`, style: 'min-height:20px; padding:0 4px',
-              onclick: () => { picks.splice(picks.indexOf(k), 1); rerender(); } }, '✕'))),
-          h('select', { 'aria-label': `Add a model to ${st.id}`, style: 'max-width:240px', onchange: (e) => { const k = e.target.value; if (k && !picks.includes(k)) picks.push(k); rerender(); } },
-            h('option', { value: '' }, '+ add model…'),
-            cfg.agents.map((a) => h('optgroup', { label: `${a.id} (${PROVIDERS[a.provider] ?? a.provider})` },
-              stageEfforts(a).map((e) => h('option', { value: `${a.id}:${e}`, disabled: picks.includes(`${a.id}:${e}`) }, `${a.id} · ${effortLabel(e)}`))))))));
+          h('div', { class: 'muted', style: 'font-size:12.5px' }, note)),
+        h('td', {}, h('div', { class: 'chips' }, ms.map((k, j) => chip(pickLabel(k), !off.includes(keys[j]), (v) => { setOff(off, keys[j], !v); rerender(); }, null, k)))),
+        h('td', { style: 'width:1%; white-space:nowrap' }, ms.length > 1 ? [
+          h('button', { class: 'icon', title: `Tick every model of ${st.id}`, onclick: () => { keys.forEach((k) => setOff(off, k, false)); rerender(); } }, 'all'),
+          h('button', { class: 'icon', title: `Untick every model of ${st.id}`, onclick: () => { keys.forEach((k) => setOff(off, k, true)); rerender(); } }, 'none')] : null));
     }))),
-    s.last < 0 ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Nothing picked yet. Example: plan with Opus at max, build with Opus at xhigh, add content with Sonnet at medium.') : null);
+    s.last < 0 ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Nothing ticked. Each stage\'s models are set in Setup · Advanced.') : null);
 }
 
 const renderLive = () => repaint('live', liveCard());
@@ -1850,7 +1929,7 @@ const FLAG_METRICS = ['wallMinutes', 'costUsd', 'outputTokens', 'kb', 'loc'];
 const usualFits = () => cached('usual', () => {
   const ok = results.filter((r) => r.status === 'ok');
   const dims = Object.keys(cfg.dimensions).filter((d) => new Set(ok.map((r) => r[d] ?? '')).size > 1);
-  const facs = [(r) => r.id.split('__')[0], ...dims.map((d) => (r) => String(r[d] ?? '')), (r) => r.promptVersion ?? ''];
+  const facs = [headOf, ...dims.map((d) => (r) => String(r[d] ?? '')), (r) => r.promptVersion ?? ''];
   return Object.fromEntries(FLAG_METRICS.map((k) => {
     const data = ok.filter((r) => r[k] > 0).map((r) => ({ y: Math.log(r[k]), lv: facs.map((f) => f(r)) }));
     if (data.length < 6) return [k, null];
@@ -1897,7 +1976,7 @@ function typicalPicks(rows) {
   const off = (r) => { let s = 0, n = 0;
     for (const k of FLAG_METRICS) { const u = fits[k]?.usual(r); if (u && r[k] > 0) { s += Math.abs(Math.log(r[k] / u)) / fits[k].scale; n++; } }
     return n >= 3 ? s / n : null; };
-  for (const rs of groupBy(rows.filter((r) => r.status === 'ok'), (r) => r.id.split('__')[0]).values()) {
+  for (const rs of groupBy(rows.filter((r) => r.status === 'ok'), headOf).values()) {
     const scored = rs.filter((r) => r.score != null).length, cand = rs.filter((r) => !reviewed(r) && !flags.has(r.id));
     if (scored >= 3 || !cand.length) continue;
     const t = median(rs.map((r) => r.wallMinutes)) || 1; // too few runs to judge: the one nearest the median time
@@ -1911,11 +1990,11 @@ function typicalPicks(rows) {
 // Usual time for a run that's still going, from its id: model-effort, then one variant per dimension in its folder
 // name (see runName in run-matrix.mjs). A field left out of the name is known when it has a single variant.
 function usualMinutes(id) {
-  const parts = id.split('__'), dims = Object.keys(cfg.dimensions), omit = new Set(cfg.omitFromName ?? []);
-  const named = dims.filter((d) => !omit.has(d)), one = dims.filter((d) => omit.has(d) && cfg.dimensions[d].length === 1);
+  const parts = id.split('__'), dims = Object.keys(cfg.dimensions);
+  const named = dims.filter(inFolderName), one = dims.filter((d) => !inFolderName(d) && cfg.dimensions[d].length === 1);
   const r = { id, promptVersion: meta.promptVersion, ...Object.fromEntries([...named.map((d, i) => [d, parts[i + 1]]), ...one.map((d) => [d, cfg.dimensions[d][0].id])]) };
   return usualFits().wallMinutes?.usual(r)
-    ?? median(results.filter((x) => x.status === 'ok' && x.id.split('__')[0] === parts[0]).map((x) => x.wallMinutes));
+    ?? median(results.filter((x) => x.status === 'ok' && headOf(x) === parts[0]).map((x) => x.wallMinutes));
 }
 
 // Side A vs side B on measure k. Runs pair up when everything else that defines them matches (key);
