@@ -128,6 +128,23 @@ test('a batch from the page runs through the fake CLIs and reports progress', as
   assert.equal((await d.api('/api/run', 'POST', { pick: [] })).status, 200); // nothing ticked = nothing runs
 });
 
+test('a batch in stages from the page: picks per stage go to the runner, and the results say who continued from whom', async (t) => {
+  const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'variant A' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }],
+    stages: [{ id: 'plan', text: 'Read TASK.md and plan it. FAKE:plan', game: false }, { id: 'build', text: 'Build TASK.md from PLAN.md by {{parentModel}}.' }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const sel = { stages: { plan: ['opus:max'], build: ['opus:high', 'opus:low', 'bad pick'] }, only: { testing: ['a'] } };
+  const pre = (await dd.api('/api/preview', 'POST', sel)).json;
+  assert.deepEqual([pre.count, pre.byStage], [3, { plan: 1, build: 2 }]);
+  assert.equal((await dd.api('/api/preview', 'POST', { stages: {} })).json.count, 0); // nothing picked: nothing runs
+  assert.equal((await dd.api('/api/run', 'POST', { ...sel, concurrency: 3 })).status, 200);
+  const done = await waitFor(async () => { const st = (await dd.api('/api/status?since=0')).json; return !st.running && st.finishedAt ? st : null; });
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.deepEqual([done.planned, done.finished], [3, 3]);
+  const rows = (await dd.api('/api/results')).json, plan = rows.find((r) => r.stage === 'plan');
+  assert.deepEqual(rows.filter((r) => r.stage === 'build').map((r) => [r.parentId, r.chain.length, r.status]), [[plan.id, 2, 'ok'], [plan.id, 2, 'ok']]);
+});
+
 test('Resume failed: the page hears which failed runs can carry on with their session, and a batch from it resumes them', async (t) => {
   const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:limit' }, { id: 'b', text: 'FAKE:limit=start' }] },
     agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });

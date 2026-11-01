@@ -24,8 +24,11 @@
 //        --resume-failed              a failed Claude Code run that got partway continues its session instead of
 //                                     starting over (canResume); with --rerun-failed the others start over
 //        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
-//                                     logs (after parser or price changes)
+//                                     logs (after parser or price changes); games already holding their record get the new figures
+//        --stamp                      write each finished run's record into its game file (stampGame); new runs get it as they end
 //        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
+//        --stage <stage>=agent:effort,...   run in stages instead (repeatable; see stageRuns): each stage in the config's
+//                                     "stages" continues from the finished runs of the stage before
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -37,7 +40,7 @@ import { pathToFileURL } from 'node:url';
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false };
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [] };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -48,6 +51,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--smoke-goal') args.smokeGoal = true;
   else if (a === '--only') args.only.push(next());
   else if (a === '--pick') args.pick.push(...next().split(',').filter(Boolean));
+  else if (a === '--stage') args.stage.push(next());
   else if (a === '--limit') args.limit = +next();
   else if (a === '--repeat') args.repeat = +next();
   else if (a === '--timeout') args.timeout = +next();
@@ -56,6 +60,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--json') args.json = true;
   else if (a === '--report') args.report = true;
   else if (a === '--reparse') args.reparse = true;
+  else if (a === '--stamp') args.stamp = true;
   else if (a === '--rerun-failed') args.rerunFailed = true;
   else if (a === '--resume-failed') args.resumeFailed = true;
   else if (a === '--control') args.control = true;
@@ -106,6 +111,29 @@ const picks = new Set(args.pick);
 const matches = (fields) => (!picks.size || picks.has(`${fields.agent}:${fields.effort}`))
   && filters.every(([k, set]) => set.has(String(fields[k])));
 
+// A run's folder name (its id) is its model-effort and one variant per dimension, except the dimensions
+// listed in omitFromName (Setup: "in folder name" unticked). Runs are matched by the fields in their
+// result.json (runKey), not by folder name, so changing this only renames runs made from then on. The left-out
+// variants become a short code at the end (x + 6 hex), so runs that differ only in them never share a folder:
+// not now, and not after a left-out variant is replaced by another.
+const omitted = new Set(cfg.omitFromName ?? []);
+function runName(agentEffort, combo, rep) {
+  const left = dimNames.filter((d) => omitted.has(d));
+  const code = left.length ? 'x' + crypto.createHash('sha1').update(left.map((d) => `${d}=${combo[d].id}`).join('|')).digest('hex').slice(0, 6) : null;
+  return [agentEffort, ...dimNames.filter((d) => !omitted.has(d)).map((d) => combo[d].id), code, rep].filter(Boolean).join('__');
+}
+
+// Runs in stages (see stageRuns) are known by their chain: the stage, model and effort of each step from the first
+// stage to theirs (plan:claude-opus-5-5-max>build:claude-opus-5-5-xhigh), plus the brief (one variant per dimension).
+const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join('>');
+// A stage run's folder name: its model-effort and stage, the variants in folder names, and one code for the rest:
+// the variants left out and the steps before it, so the same model building two different plans gets two folders.
+function stageRunName(agentEffort, stage, combo, before) {
+  const seed = [...dimNames.filter((d) => omitted.has(d)).map((d) => `${d}=${combo[d].id}`), ...(before.length ? [`from=${chainKey(before)}`] : [])];
+  const code = seed.length ? 'x' + crypto.createHash('sha1').update(seed.join('|')).digest('hex').slice(0, 6) : null;
+  return [`${agentEffort}.${stage}`, ...dimNames.filter((d) => !omitted.has(d)).map((d) => combo[d].id), code].filter(Boolean).join('__');
+}
+
 const runs = [];
 for (const agent of cfg.agents) {
   for (const e of agent.efforts?.length ? agent.efforts : ['default']) {
@@ -116,9 +144,10 @@ for (const agent of cfg.agents) {
         ...Object.fromEntries(dimNames.map((d) => [d, combo[d].id])) };
       if (!matches(fields)) continue;
       for (let r = 1; r <= args.repeat; r++) {
-        const id = [`${agent.id}-${effort}`, ...dimNames.map((d) => combo[d].id),
-          args.repeat > 1 ? `r${r}` : null].filter(Boolean).join('__');
-        runs.push({ id, agent, effort: pe.base, ultracode: pe.ultracode, combo, fields });
+        const rep = args.repeat > 1 ? `r${r}` : null;
+        // key: every dimension, what finished runs are matched by (runKey); id: the folder name.
+        const key = [`${agent.id}-${effort}`, ...dimNames.map((d) => combo[d].id), rep].filter(Boolean).join('__');
+        runs.push({ id: runName(`${agent.id}-${effort}`, combo, rep), key, agent, effort: pe.base, ultracode: pe.ultracode, combo, fields });
       }
     }
   }
@@ -155,6 +184,13 @@ function runVars(run, d = new Date()) {
 // /goal command (a command must start the message, and everything after it is
 // the condition, capped at 4,000 characters).
 function goalMessage(run) {
+  if (run.stage) { // a stage's goal: its text is STAGE.md, the brief TASK.md
+    const g = stageTexts(run).goal;
+    if (!g || !GOAL_CLIS.has(run.agent.provider)) return null;
+    const msg = `/goal Read STAGE.md in the current folder and do what it says (TASK.md describes the game). Done when: ${g}`;
+    if (msg.length > 4000) throw new Error(`Stage ${run.stage.id}'s goal is ${msg.length} characters with its preamble; /goal allows 4,000`);
+    return msg;
+  }
   const g = goalText(run.combo);
   if (!g || !GOAL_CLIS.has(run.agent.provider)) return null;
   const msg = `/goal Read TASK.md in the current folder and complete the task it describes. Done when: ${g}`;
@@ -163,14 +199,32 @@ function goalMessage(run) {
 }
 
 // A function, not a string, as the replacement: in a string, $& $' $` and $$ are patterns, so a
-// variant text like "$$" or "$'" would be sent changed.
+// variant text like "$$" or "$'" would be sent changed. A variant's text can hold placeholders too (a
+// section saying "a spiritual successor to {{source}}", a file name with {{model}}), so it fills again
+// until nothing changes; a few rounds cover any nesting, and a text that names itself stays unfilled.
 function buildPrompt(run, when) {
-  let p = template;
-  for (const d of dimNames) if (d !== GOAL_DIM) p = p.replaceAll(`{{${d}}}`, () => variantText(run.combo[d]).trim());
-  for (const [k, v] of Object.entries(runVars(run, when))) p = p.replaceAll(`{{${k}}}`, () => v);
+  return fillText(template, run, when, 'prompt').replace(/\n{3,}/g, '\n\n').trim() + '\n';
+}
+// Fills a text's placeholders: the dimensions, the run's own (runVars) and, for a stage's text, the step before it.
+function fillText(text, run, when, what, extra = {}) {
+  const fill = { ...Object.fromEntries(dimNames.filter((d) => d !== GOAL_DIM).map((d) => [d, variantText(run.combo[d]).trim()])), ...runVars(run, when), ...extra };
+  let p = text;
+  for (let i = 0; i < 5; i++) { const next = p.replace(/\{\{(\w+)\}\}/g, (m, k) => fill[k] ?? m); if (next === p) break; p = next; }
   const left = [...new Set(p.match(/\{\{\w+\}\}/g) ?? [])];
-  if (left.length) throw new Error(`Unfilled placeholders in prompt: ${left.join(' ')}`);
-  return p.replace(/\n{3,}/g, '\n\n').trim() + '\n';
+  if (left.length) throw new Error(`Unfilled placeholders in ${what}: ${left.join(' ')}`);
+  return p;
+}
+// A stage's text and goal, filled for this run. Besides the dimensions and the run's own placeholders they can use
+// the step this run continues from: {{parentModel}} {{parentEffort}} {{parentStage}} {{parentAgent}}, and {{chain}},
+// every step so far (empty in the first stage). Worked out once per attempt (runOne resets them).
+const modelOf = (agentId) => cfg.agents.find((a) => a.id === agentId)?.model ?? agentId;
+function stageTexts(run) {
+  if (run.texts) return run.texts;
+  const p = run.parentInfo ?? {}, extra = { parentModel: p.model ?? '', parentEffort: p.effort ?? '', parentStage: p.stage ?? '', parentAgent: p.agent ?? '',
+    chain: run.chain.map((c) => `${c.stage}: ${modelOf(c.agent)} ${c.effort}`).join(' → ') };
+  const text = fillText(run.stage.text ?? '', run, run.when, `stage ${run.stage.id}'s text`, extra).trim();
+  if (!text) throw new Error(`Stage ${run.stage.id} has no text`);
+  return run.texts = { text: text + '\n', goal: fillText(run.stage.goal ?? '', run, run.when, `stage ${run.stage.id}'s goal`, extra).trim() };
 }
 
 // --------------------------------------------------------------- CLIs
@@ -193,7 +247,9 @@ function readResult(id) { try { return JSON.parse(fs.readFileSync(path.join(outD
 // every finished run. A dimension removed since is left out, so its runs count for what's left.
 // A declaration too: the report fills these in.
 function olderVariant(d) { return (cfg.dimensions[d].find((v) => v.olderRuns) ?? cfg.dimensions[d][0])?.id; }
+const briefKey = (r) => dimNames.map((d) => r[d] ?? olderVariant(d)).join('__');
 function runKey(r) {
+  if (r.chain) return `${chainKey(r.chain)}__${briefKey(r)}`;
   const parts = r.id.split('__'), last = parts.at(-1);
   const rep = parts.length > 1 && /^r\d+$/.test(last) && !dimNames.some((d) => r[d] === last) ? last : null;
   return [parts[0], ...dimNames.map((d) => r[d] ?? olderVariant(d)), rep].filter(Boolean).join('__');
@@ -201,7 +257,7 @@ function runKey(r) {
 // Finished runs by key, read once. Two with the same key (a dimension was removed) count as one:
 // an OK one if there is one, else the latest. An unreadable result.json counts as not done.
 let finishedRuns = null;
-function prevRun(run) {
+function finished() {
   if (!finishedRuns) {
     finishedRuns = new Map();
     const better = (a, b) => (a.status === 'ok') !== (b.status === 'ok') ? a.status === 'ok' : (a.startedAt ?? '') > (b.startedAt ?? '');
@@ -212,16 +268,18 @@ function prevRun(run) {
       if (!cur || better(r, cur.r)) finishedRuns.set(k, { r, dir });
     }
   }
-  return finishedRuns.get(run.id) ?? null;
+  return finishedRuns;
 }
+function prevRun(run) { return finished().get(run.key) ?? null; }
 // --resume-failed: a failed run that got partway continues its CLI session where it stopped instead of
-// starting over (resumeOne). Claude Code only (`claude -p --resume`). It needs the same folder and model,
+// starting over (resumeOne). Claude Code only (`claude -p --resume`). It carries on in the folder it ran in
+// (whatever that folder is named now) and needs the same model,
 // output already made (one that failed on its first request, like on a usage limit, just starts over),
 // its session still on disk and, with a time limit, time left of it.
 const RESUMABLE = new Set(['claude']);
 function canResume(run, p = prevRun(run)) {
   const r = p?.r;
-  if (!args.resumeFailed || !r || r.status === 'ok' || !RESUMABLE.has(run.agent.provider) || p.dir !== run.id) return false;
+  if (!args.resumeFailed || !r || r.status === 'ok' || !RESUMABLE.has(run.agent.provider)) return false;
   if (!r.sessionId || !(r.outputTokens > 0) || r.model !== run.agent.model) return false;
   const limit = +(run.agent.timeout || args.timeout || 0);
   if (limit && (r.wallMinutes ?? 0) >= limit) return false;
@@ -238,14 +296,81 @@ function claudeTranscript(sessionId, cwd) {
 }
 const isDone = (run) => { const p = prevRun(run); return !!p && (p.r.status === 'ok' || !(args.rerunFailed || canResume(run, p))); };
 
+// ------------------------------------------------------------------ stages
+// Runs in stages (--stage plan=claude-opus-5-5:max --stage build=claude-opus-5-5:xhigh,gpt-6.1-sol:max …), the
+// config's "stages" in order: [{ id, text, goal?, game? }]. Every stage after the first continues from a finished
+// run of the stage before it, for each brief (one variant per dimension, filtered by --only). A stage's picks
+// branch every run of the stage before (1 plan × 2 builders × 2 content passes = 4 games); a stage without picks
+// contributes the runs it already has, so a later stage can continue from plans made in an earlier batch. A run
+// waits for its parent: it starts once the parent has finished OK, and is left out if the parent fails (see pool).
+// It starts from a copy of the parent's work folder, gets TASK.md (the prompt, filled for this run) and is sent its
+// stage's text, or with a stage goal on a CLI that has /goal, a /goal that points at STAGE.md (see prepareStage).
+const STAGES = cfg.stages ?? [];
+const stagePicks = new Map();
+for (const s of args.stage) {
+  const [id, list = ''] = s.split('='), st = STAGES.find((x) => x.id === id);
+  if (!st) { console.error(`No stage named "${id}" (the config has ${STAGES.map((x) => x.id).join(', ') || 'none'})`); process.exit(1); }
+  for (const pick of list.split(',').filter(Boolean)) {
+    const [aid, eff] = pick.split(':'), agent = cfg.agents.find((a) => a.id === aid), pe = parseEffort(eff);
+    if (!agent) { console.error(`No model named "${aid}" for stage ${id}`); process.exit(1); }
+    if (pe.ultracode && agent.provider !== 'claude') continue; // Ultracode is Claude Code only
+    (stagePicks.get(id) ?? stagePicks.set(id, []).get(id)).push({ agent, pe });
+  }
+}
+const stageMode = args.stage.length > 0;
+const infoOf = (r) => ({ agent: r.agent, model: r.model, effort: r.effort, stage: r.stage });
+function stageRuns() {
+  const picksAt = STAGES.map((s) => stagePicks.get(s.id) ?? []), last = picksAt.findLastIndex((p) => p.length), out = [];
+  // Finished OK stage runs by brief, the steps before them and their stage: what a stage without picks contributes.
+  const have = new Map();
+  for (const { r, dir } of finished().values()) if (r.chain?.length && r.status === 'ok') {
+    const k = `${briefKey(r)}|${chainKey(r.chain.slice(0, -1))}|${r.chain.at(-1).stage}`;
+    (have.get(k) ?? have.set(k, []).get(k)).push({ key: runKey(r), chain: r.chain, dir, info: infoOf(r) });
+  }
+  for (const combo of product()) {
+    if (!filters.every(([k, set]) => !dimNames.includes(k) || set.has(combo[k].id))) continue;
+    const bk = dimNames.map((d) => combo[d].id).join('__'), dims = Object.fromEntries(dimNames.map((d) => [d, combo[d].id]));
+    let level = [{ chain: [], key: null, info: null }]; // the brief itself, before any stage
+    for (let k = 0; k <= last; k++) {
+      const st = STAGES[k], next = [];
+      for (const p of level) {
+        if (!picksAt[k].length) { next.push(...(have.get(`${bk}|${chainKey(p.chain)}|${st.id}`) ?? [])); continue; }
+        for (const { agent, pe } of picksAt[k]) {
+          const chain = [...p.chain, { stage: st.id, agent: agent.id, effort: pe.label }];
+          const node = { id: stageRunName(`${agent.id}-${pe.label}`, st.id, combo, p.chain), key: `${chainKey(chain)}__${bk}`, chain, agent,
+            effort: pe.base, ultracode: pe.ultracode, combo, stage: st, parentKey: p.key, parentInfo: p.info,
+            info: { agent: agent.id, model: agent.model, effort: pe.label, stage: st.id },
+            fields: { agent: agent.id, provider: agent.provider, effort: pe.label, ultracode: pe.ultracode, ...dims, stage: st.id, chain } };
+          out.push(node); next.push(node);
+        }
+      }
+      level = next;
+    }
+  }
+  return out;
+}
+if (stageMode) {
+  const ids = STAGES.map((s) => s.id);
+  if (new Set(ids).size !== ids.length || ids.some((id) => !/^\w+$/.test(id))) { console.error(`Stage names must be unique letters, numbers or _ (${ids.join(', ')})`); process.exit(1); }
+  if (args.repeat > 1) console.log('Note: Repeat isn\'t used for runs in stages.');
+  queue = stageRuns().slice(0, args.limit);
+}
+
 if (args.dryRun) {
   const byAgent = {}, resuming = queue.filter((r) => canResume(r));
   for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
   let sample = '', error = null;
-  try { if (queue[0]) { sample = buildPrompt(queue[0]); const g = goalMessage(queue[0]);
-    if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; } } catch (e) { error = e.message; }
+  try {
+    const r0 = queue[0];
+    if (r0?.stage) { // a later stage's parent may not exist yet: its text names the model picked for it
+      const brief = buildPrompt(r0), g = goalMessage(r0), t = stageTexts(r0).text;
+      sample = `Message sent:\n${g ?? t}\n\n${g ? `--- STAGE.md ---\n${t}\n` : ''}--- TASK.md ---\n${brief}`;
+    } else if (r0) { sample = buildPrompt(r0); const g = goalMessage(r0); if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; }
+  } catch (e) { error = e.message; }
+  const byStage = {};
+  for (const r of queue) if (r.stage) byStage[r.stage.id] = (byStage[r.stage.id] ?? 0) + 1;
   if (args.json) {
-    console.log(JSON.stringify({ count: queue.length, byAgent, alreadyDone: queue.filter(isDone).length, resumes: resuming.length,
+    console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length,
       ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf) }));
   } else {
     console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
@@ -791,6 +916,34 @@ function prepare(run, dir, prompt) {
   if (goal) { fs.writeFileSync(path.join(dir, 'work', 'TASK.md'), prompt); fs.writeFileSync(path.join(dir, 'goal.md'), goal + '\n'); }
 }
 
+// A stage run's folder: its parent's work folder copied (without node_modules and .git: they can be big, and are
+// made again), TASK.md (the prompt, filled for this run, so its file name and Source Information name this model),
+// prompt.md beside work/ (the stage's text, what it's sent) and, with a /goal, that text as STAGE.md and the
+// command as goal.md. Returns the parent's root .html files (name -> hash), so measureOutput can tell the game
+// this run made from the ones it was given.
+const NOT_COPIED = new Set(['node_modules', '.git']);
+function prepareStage(run, dir, brief, parent) {
+  const work = path.join(dir, 'work');
+  if (parent) fs.cpSync(path.join(outDir, parent.dir, 'work'), work, { recursive: true, filter: (src) => !NOT_COPIED.has(path.basename(src)) });
+  fs.mkdirSync(work, { recursive: true });
+  fs.writeFileSync(path.join(work, 'TASK.md'), brief);
+  const { text } = stageTexts(run), goal = goalMessage(run);
+  fs.writeFileSync(path.join(dir, 'prompt.md'), text);
+  if (goal) { fs.writeFileSync(path.join(work, 'STAGE.md'), text); fs.writeFileSync(path.join(dir, 'goal.md'), goal + '\n'); }
+  else fs.rmSync(path.join(work, 'STAGE.md'), { force: true }); // the parent's
+  return parent ? rootHtml(work) : null;
+}
+const rootHtml = (work) => new Map(fs.readdirSync(work).filter((f) => /\.html?$/i.test(f) && fs.statSync(path.join(work, f)).isFile())
+  .map((f) => [f, crypto.createHash('sha1').update(fs.readFileSync(path.join(work, f))).digest('hex')]));
+// What a stage run records besides the usual: its parent (folder and start, so a later redo of the parent shows),
+// whether its stage makes a game (a plan's doesn't), the parent's games it was given, and PLAN.md's size.
+function stageFields(run, work, parent, given) {
+  if (!run.stage) return {};
+  let planChars; try { planChars = fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').length; } catch {}
+  return { parentId: parent?.dir ?? null, parentStartedAt: parent?.r.startedAt ?? null, ...(run.stage.game === false ? { expectsGame: false } : {}),
+    ...(given?.size ? { givenHtml: Object.fromEntries(given) } : {}), ...(planChars != null ? { planChars } : {}) };
+}
+
 const lastLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').pop().trim().slice(0, 500); } catch { return ''; } };
 
 // Start the agent in dir/work, wait for it to exit (or hit `limit` minutes) and parse its output. A resumed
@@ -833,21 +986,34 @@ async function runOne(run) {
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   const prev = prevRun(run);
   if (canResume(run, prev)) return resumeOne(run, prev);
+  // Never clear a folder that holds another combination's run (see runName); left as it is, this one doesn't start.
+  const there = readResult(run.id);
+  if (there?.id && runKey(there) !== run.key) { done++; console.log(`✘ ${run.id}  not started: its folder holds a different run`); return; }
   fs.rmSync(dir, { recursive: true, force: true });
   // A failed run being retried that was made before a dimension was added: the new attempt replaces it.
   if (prev && prev.dir !== run.id) fs.rmSync(path.join(outDir, prev.dir), { recursive: true, force: true });
-  if (prev) finishedRuns.delete(run.id); // its old result is gone, so it isn't done if it's requeued
+  if (prev) finished().delete(run.key); // its old result is gone, so it isn't done if it's requeued
   const work = path.join(dir, 'work');
-  let prompt;
+  let prompt, parent = null, given = null;
   try {
-    prompt = buildPrompt(run);
-    prepare(run, dir, prompt);
+    if (run.stage) {
+      parent = run.parentKey ? finished().get(run.parentKey) ?? null : null;
+      if (run.parentKey && parent?.r.status !== 'ok') throw new Error('the run it continues from hasn\'t finished OK');
+      if (parent) run.parentInfo = infoOf(parent.r); // the run it actually continues from
+      run.when = new Date(); run.texts = null;
+      given = prepareStage(run, dir, buildPrompt(run, run.when), parent);
+      prompt = stageTexts(run).text;
+    } else {
+      prompt = buildPrompt(run);
+      prepare(run, dir, prompt);
+    }
   } catch (e) { // e.g. a placeholder this variant's text leaves unfilled, or a /goal over the limit: fail this run, keep the batch going
     fs.mkdirSync(dir, { recursive: true });
     const now = new Date().toISOString();
     let hashes; try { hashes = variantHashes(run.combo); } catch {} // a variant whose file can't be read is why we're here
     fs.writeFileSync(resFile, JSON.stringify({ id: run.id, ...run.fields, model: run.agent.model, promptVersion, variantHashes: hashes,
       status: 'failed', exitCode: null, error: `Not started: ${e.message}`, wallMinutes: 0, startedAt: now, finishedAt: now }, null, 2));
+    finished().set(run.key, { r: readResult(run.id), dir: run.id });
     done++; console.log(`✘ ${run.id}  not started: ${e.message}`);
     return;
   }
@@ -857,7 +1023,7 @@ async function runOne(run) {
     if (setup) spawnSync(setup, { cwd: work, shell: true, stdio: 'ignore' });
   }
 
-  console.log(`▶ ${run.id}`);
+  console.log(`▶ ${run.id}${parent ? `  (${run.stage.id}, from ${parent.dir})` : ''}`);
   const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, limitOf(run));
 
   if (stopping || run.abort) { // interrupted: throw it away so it runs fresh (later in this batch if requeued)
@@ -870,13 +1036,15 @@ async function runOne(run) {
   if (metrics.reply) fs.writeFileSync(path.join(dir, 'reply.md'), metrics.reply);
   delete metrics.reply;
   const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed';
-  // goalSkipped: a goal variant on a CLI without headless /goal, so it got the plain prompt.
-  const goalSkipped = !!goalText(run.combo) && !goalMessage(run);
+  // goalSkipped: a goal (a goal variant, or a stage's goal) on a CLI without headless /goal, so it got the plain text.
+  const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
   const result = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
     variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
-    wallMinutes: (Date.now() - start) / 60000, ...metrics, ...measureOutput(work),
+    wallMinutes: (Date.now() - start) / 60000, ...metrics, ...measureOutput(work, given), ...stageFields(run, work, parent, given),
     startedAt: new Date(start).toISOString(), finishedAt: new Date().toISOString() };
   fs.writeFileSync(resFile, JSON.stringify(result, null, 2));
+  finished().set(run.key, { r: result, dir: run.id }); // so the runs continuing from it can start
+  stampGame(dir, result, run.combo);
   spent += metrics.costUsd ?? 0; done++;
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  ${result.wallMinutes.toFixed(1)}m  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok`);
@@ -922,12 +1090,16 @@ async function resumeOne(run, prev) {
   delete m.reply;
   if (!metrics.reply) m.replyChars = r.replyChars; // reply.md is still the earlier one
   const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed', all = [...parts, part];
+  const given = r.givenHtml ? new Map(Object.entries(r.givenHtml)) : null;
+  const kept = Object.fromEntries(['parentId', 'parentStartedAt', 'expectsGame', 'givenHtml'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+  let planChars; try { if (r.stage) planChars = fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').length; } catch {}
   const result = { id: r.id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
     variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode,
-    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measureOutput(work),
+    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measureOutput(work, given), ...kept, ...(planChars != null ? { planChars } : {}),
     startedAt: r.startedAt, finishedAt: part.finishedAt, resumes: n, parts: all };
   fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify(result, null, 2));
-  finishedRuns.set(run.id, { r: result, dir: prev.dir });
+  stampGame(dir, result, run.combo);
+  finished().set(run.key, { r: result, dir: prev.dir });
   spent += metrics.costUsd ?? 0; done++;
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok`);
@@ -998,10 +1170,22 @@ function reparseAll() {
     m.replyChars = String(ms.findLast((x) => x.reply)?.reply ?? '').trim().length;
     for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k]; else delete r[k];
     if (r.status !== 'ok' && m.error) r.error = m.error; // e.g. Claude Code's usage limit, which was "exit code 1" before
-    try { if (r.entry) r.todos = markers(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch {}
+    try { if (r.entry) r.todos = markers(unstamped(fs.readFileSync(path.join(outDir, r.entry), 'utf8'))); } catch {}
     fs.writeFileSync(resFile, JSON.stringify(r, null, 2)); n++;
+    if (isStamped(r)) stampGame(path.join(outDir, d), r); // the record in the game gets the new figures too
   }
   console.log(`Reparsed ${n} run(s).`);
+}
+
+// --stamp: put the record into every finished run's game that delivered one (or refresh it).
+function stampAll() {
+  let n = 0;
+  for (const d of fs.existsSync(outDir) ? fs.readdirSync(outDir) : []) {
+    const r = readResult(d);
+    if (!r?.id || !r.delivered) continue;
+    stampGame(path.join(outDir, d), r); n++;
+  }
+  console.log(`Stamped ${n} game(s).`);
 }
 
 // TODO / FIXME left in the game file (the prompt asks for none). Only these two: "not implemented"
@@ -1009,11 +1193,14 @@ function reparseAll() {
 const markers = (t) => (t.match(/\bTODO\b|\bFIXME\b/g) ?? []).length;
 
 // The deliverable is the bundled .html in the work folder's root. Size is
-// measured on that file; dev files are counted separately.
-function measureOutput(work) {
+// measured on that file (without the run's record, see stampGame); dev files are counted separately.
+// gameSha256 is the agent's page as it left it, so a copy can be recognised once the record is in it.
+function measureOutput(work, given = null) {
   let devFiles = 0, entry = null, fallback = null;
   try {
-    const roots = fs.readdirSync(work).filter((f) => /\.html?$/i.test(f))
+    // A later stage was given its parent's game: only a root .html it made or changed is its own.
+    const now = given ? rootHtml(work) : null;
+    const roots = fs.readdirSync(work).filter((f) => /\.html?$/i.test(f) && (!given || now.get(f) !== given.get(f)))
       .map((f) => ({ f, size: fs.statSync(path.join(work, f)).size })).sort((a, b) => b.size - a.size);
     if (roots[0]) entry = path.join(work, roots[0].f);
     const walk = (d) => {
@@ -1026,11 +1213,49 @@ function measureOutput(work) {
     };
     walk(work);
   } catch {}
-  const file = entry ?? fallback;
-  let kb = null, loc = null, todos = null;
-  if (file) { const t = fs.readFileSync(file, 'utf8'); kb = Math.round(t.length / 1024); loc = t.split('\n').length; todos = markers(t); }
-  return { delivered: !!entry, kb, loc, files: devFiles, todos,
+  const file = entry ?? (given ? null : fallback);
+  let kb = null, loc = null, todos = null, gameSha256 = null;
+  if (file) {
+    const buf = fs.readFileSync(file), raw = buf.toString('utf8'), t = unstamped(raw);
+    kb = Math.round(t.length / 1024); loc = t.split('\n').length; todos = markers(t);
+    gameSha256 = crypto.createHash('sha256').update(t === raw ? buf : t).digest('hex'); // the bytes as they are, when unstamped
+  }
+  return { delivered: !!entry, kb, loc, files: devFiles, todos, gameSha256,
     entry: file ? path.relative(outDir, file).split(path.sep).join('/') : null };
+}
+
+// A second pass once a run has ended: its record goes into the game file itself, so a game passed around (or
+// put on ai-hub) says what made it and what it took. Most of it can't be in the prompt: time, tokens and cost
+// are only known at the end. It's a <script type="application/json" id="cc-matrix-run"> block just before
+// </body> (inert: the browser doesn't run it), read with JSON.parse(document.getElementById('cc-matrix-run')
+// .textContent). Stamping again replaces it (--reparse refreshes stamped games, --stamp stamps finished ones),
+// and kb, loc, todos and gameSha256 are measured without it. Left out: the session id, the plan's usage and
+// tier (the account's, not the game's) and local file paths.
+const STAMP_RE = /\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/;
+const unstamped = (t) => t.replace(STAMP_RE, '');
+const isStamped = (r) => { try { return r.delivered && STAMP_RE.test(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch { return false; } };
+const NOT_STAMPED = ['sessionId', 'plan', 'entry', 'sessionLog', 'variantHashes', 'parts', 'givenHtml'];
+function stampGame(dir, r, combo) {
+  if (!r.delivered || !r.entry) return;
+  const file = path.join(outDir, r.entry);
+  const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return null; } };
+  let page; try { page = unstamped(fs.readFileSync(file, 'utf8')); } catch { return; }
+  let history = []; try { history = JSON.parse(fs.readFileSync(path.join(outDir, 'prompt-history.json'), 'utf8')); } catch {}
+  const run = Object.fromEntries(Object.entries(r).filter(([k]) => !NOT_STAMPED.includes(k)));
+  // Each variant's text as it was sent: from the run itself, else (--stamp on an older run) the config's
+  // variant of that id, which may have been edited since; prompt.md is exact either way.
+  const variants = Object.fromEntries(dimNames.filter((d) => r[d] != null).map((d) => {
+    const v = combo?.[d] ?? cfg.dimensions[d].find((x) => x.id === r[d]);
+    let text = null; try { text = v ? variantText(v).trim() : null; } catch {}
+    return [d, { id: r[d], text }];
+  }));
+  const record = { schema: 1, tool: 'cc-matrix', stampedAt: new Date().toISOString(), lab: labOf({ model: r.model, provider: r.provider }),
+    cli: CLIS[r.provider] ?? r.provider, ...run, variants, promptNumber: history.find((e) => e.hash === r.promptVersion)?.v ?? null,
+    prompt: read('prompt.md'), goal: read('goal.md')?.trim() || null, reply: read('reply.md') };
+  // In a <script>, only "</script" (or "<!--") could end it early: escaping every < rules both out.
+  const block = `\n<script type="application/json" id="cc-matrix-run">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>\n`;
+  const at = [page.toLowerCase().lastIndexOf('</body>'), page.toLowerCase().lastIndexOf('</html>')].find((i) => i >= 0) ?? page.length;
+  fs.writeFileSync(file, page.slice(0, at) + block + page.slice(at));
 }
 
 // Take runs round-robin across CLIs so parallel slots go to different services (each keeps
@@ -1058,6 +1283,22 @@ function skip(run) {
 // again whenever a run ends or a setting changes. Lowering a limit never ends a running agent by
 // itself: no new one starts until there's room again. Once the budget is spent the ones already
 // going finish, since what they've spent so far would be thrown away otherwise.
+// A run in a later stage starts once the run it continues from has finished OK (in this batch or before). One
+// whose parent failed, was left out or was stopped can't run in this batch: it's left out too (and runs next time).
+const parentOk = (r) => !r.parentKey || finished().get(r.parentKey)?.r.status === 'ok';
+const coming = (key) => pending.some((r) => r.key === key) || [...live.values()].some((c) => c.run.key === key);
+function leaveOutOrphans() {
+  for (let again = true; again;) {
+    again = false;
+    for (const r of [...pending]) {
+      if (!r.parentKey || parentOk(r) || coming(r.parentKey)) continue;
+      pending.splice(pending.indexOf(r), 1); again = true;
+      if (isDone(r)) { skip(r); continue; }
+      skipped++; console.log(`· skip ${r.id} (the run it continues from didn't finish OK)`);
+    }
+  }
+}
+
 async function pool() {
   pending = interleave(queue);
   const busy = {}, jobs = new Set();
@@ -1068,8 +1309,9 @@ async function pool() {
         console.log(`■ Budget of $${args.budget} reached (spent ${fmtUsd(spent)}): no new runs start; ${live.size} still running will finish.`);
       }
       if (paused || overBudget || jobs.size >= Math.max(1, args.concurrency)) break;
-      const i = pending.findIndex((r) => (busy[r.agent.provider] ?? 0) < args.perCli);
-      if (i < 0) break; // every CLI left is at its limit
+      leaveOutOrphans();
+      const i = pending.findIndex((r) => (busy[r.agent.provider] ?? 0) < args.perCli && parentOk(r));
+      if (i < 0) break; // every CLI left is at its limit, or what's left waits for its parent
       const [run] = pending.splice(i, 1), p = run.agent.provider;
       if (isDone(run)) { skip(run); continue; }
       busy[p] = (busy[p] ?? 0) + 1;
@@ -1183,6 +1425,7 @@ async function smoke() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 if (args.reparse) { reparseAll(); writeReport(); process.exit(0); }
+if (args.stamp) { stampAll(); process.exit(0); }
 if (args.smoke) { await smoke(); process.exit(0); }
 
 fs.mkdirSync(outDir, { recursive: true });
@@ -1204,6 +1447,8 @@ for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provi
 // The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
 const already = queue.filter(isDone).length;
 console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
+if (stageMode) { const n = {}; for (const r of queue) n[r.stage.id] = (n[r.stage.id] ?? 0) + 1;
+  console.log(`In stages: ${STAGES.filter((s) => n[s.id]).map((s) => `${s.id} ${n[s.id]}`).join(', ')}. A run starts once the one it continues from has finished OK.`); }
 const resuming = queue.filter((r) => canResume(r)).length;
 if (resuming) console.log(`Of those, ${resuming} failed partway and resume their session where it stopped (Resume failed).`);
 if (queue.length > already) try { recordPromptVersion(); } catch (e) { console.log(`⚠ Prompt history not updated: ${e.message}`); }
@@ -1263,7 +1508,8 @@ function writeReport() {
   for (const r of rows) { const s = scores[r.id]; if (s && (!s.startedAt || s.startedAt === r.startedAt)) { const { startedAt, ...rest } = s; Object.assign(r, rest); } }
   // A run from before a dimension was added shows as the variant it counts as, like in the dashboard.
   for (const r of rows) for (const d of dims) r[d] ??= olderVariant(d);
-  const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource', 'apiCostUsd',
+  for (const r of rows) if (r.chain) r.path = r.chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join(' > ');
+  const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', 'stage', 'path', 'parentId', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource', 'apiCostUsd',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
     'apiCalls', 'toolCalls', 'toolErrors', 'compactions',
     'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt'];
@@ -1274,7 +1520,7 @@ function writeReport() {
 
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const href = (p) => esc(String(p).split('/').map(encodeURIComponent).join('/')); // a # ? or % in a game's title would break the link
-  const show = ['agent', 'effort', ...dims, 'status', 'delivered', 'wallMinutes', 'costUsd', 'apiCostUsd', 'outputTokens', 'kb', 'score'];
+  const show = ['agent', 'effort', 'stage', ...dims, 'status', 'delivered', 'wallMinutes', 'costUsd', 'apiCostUsd', 'outputTokens', 'kb', 'score'];
   const html = `<!doctype html><meta charset="utf-8"><title>Matrix runs</title>
 <style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}table{border-collapse:collapse;width:100%}
 th,td{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left;white-space:nowrap}th{cursor:pointer;background:#f4f4f4;position:sticky;top:0}

@@ -217,6 +217,170 @@ test('adding a dimension keeps finished runs done: they count as its olderRuns v
   assert.deepEqual(dry(), [1, 1]);
 });
 
+test('a variant\'s text can use placeholders: other dimensions and the run\'s own', (t) => {
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }], premise: [{ id: 'p', text: 'A successor to {{source}} by {{model}}.' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }], template: 'SOURCE: {{source}}\n\n## Goal\n\n{{premise}}\n' });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  assert.equal(fs.readFileSync(path.join(sb.out, 'opus-low__z__p', 'prompt.md'), 'utf8'), 'SOURCE: Zelda\n\n## Goal\n\nA successor to Zelda by m.\n');
+});
+
+test('fields left out of folder names: matched by their saved fields, and runs never share a folder', (t) => {
+  const agents = [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }];
+  const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'A' }], tone: [{ id: 't1', text: 'dry' }] }, agents, template: 'Testing: {{testing}}\nTone: {{tone}}\n' });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  assert.equal(result(sb, 'opus-low__a__t1').status, 'ok');
+  const cfg = JSON.parse(fs.readFileSync(sb.config, 'utf8'));
+  const set = (c) => fs.writeFileSync(sb.config, JSON.stringify({ ...cfg, ...c }));
+  const dry = () => JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim());
+  // Left out: the name ends in a code for the left-out variants instead, and the finished run still counts.
+  set({ omitFromName: ['tone'] });
+  let d = dry();
+  assert.match(d.ids[0], /^opus-low__a__x[0-9a-f]{6}$/);
+  assert.equal(d.alreadyDone, 1);
+  // Two variants of a left-out field get folders of their own.
+  set({ omitFromName: ['tone'], dimensions: { testing: [{ id: 'a', text: 'A' }], tone: [{ id: 't1', text: 'dry' }, { id: 't2', text: 'warm' }] } });
+  d = dry();
+  assert.equal(new Set(d.ids).size, 2);
+  assert.deepEqual([d.count, d.alreadyDone], [2, 1]);
+  const r = runner(sb, []);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /· skip opus-low__a__x[0-9a-f]{6} \(already ok as opus-low__a__t1\)/);
+  const t2 = d.ids.find((id) => fs.existsSync(path.join(sb.out, id, 'result.json')));
+  assert.equal(result(sb, t2).tone, 't2');
+  assert.equal(result(sb, 'opus-low__a__t1').status, 'ok'); // untouched
+  // A folder already holding another combination's run is never cleared: that run doesn't start instead.
+  set({ omitFromName: ['tone'], dimensions: { testing: [{ id: 'a', text: 'A' }], tone: [{ id: 't3', text: 'odd' }] } });
+  const t3 = dry().ids[0];
+  fs.cpSync(path.join(sb.out, t2), path.join(sb.out, t3), { recursive: true });
+  const r3 = runner(sb, []);
+  assert.match(r3.all, /✘ \S+ {2}not started: its folder holds a different run/);
+  assert.equal(result(sb, t3).tone, 't2');
+});
+
+test('each finished game gets its record: inert, complete, private bits left out, measured without it', (t) => {
+  const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'ends early? </script><b>no' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  const r = result(sb, 'opus-low__a'), file = path.join(sb.out, r.entry);
+  const page = fs.readFileSync(file, 'utf8');
+  const blocks = page.match(/<script type="application\/json" id="cc-matrix-run">([\s\S]*?)<\/script>/g);
+  assert.equal(blocks.length, 1);
+  assert.ok(!blocks[0].slice(0, -9).includes('</script'), 'a "</script" in the data would end the block early');
+  const rec = JSON.parse(blocks[0].replace(/^<script[^>]*>|<\/script>$/g, ''));
+  assert.equal(rec.tool, 'cc-matrix');
+  assert.equal(rec.model, 'm'); assert.equal(rec.effort, 'low'); assert.equal(rec.lab, 'Anthropic'); assert.equal(rec.cli, 'Claude Code CLI');
+  assert.equal(rec.outputTokens, r.outputTokens); assert.equal(rec.costUsd, r.costUsd); assert.equal(rec.wallMinutes, r.wallMinutes);
+  assert.deepEqual(rec.variants.testing, { id: 'a', text: 'ends early? </script><b>no' });
+  assert.equal(rec.prompt, fs.readFileSync(path.join(sb.out, 'opus-low__a', 'prompt.md'), 'utf8'));
+  assert.ok(rec.reply.length > 0);
+  for (const k of ['sessionId', 'plan', 'entry', 'parts']) assert.ok(!(k in rec), k);
+  // Measured on the game as the agent left it: the record doesn't count.
+  const game = page.replace(/\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/, '');
+  assert.equal(r.gameSha256, crypto.createHash('sha256').update(game).digest('hex'));
+  assert.equal(r.kb, Math.round(game.length / 1024));
+  // --stamp replaces it (one record, before </body>), and the game itself is left as it was.
+  fs.writeFileSync(file, '<!doctype html><body><p>game</p></body></html>');
+  assert.equal(runner(sb, ['--stamp']).status, 0);
+  assert.equal(runner(sb, ['--stamp']).status, 0);
+  const again = fs.readFileSync(file, 'utf8');
+  assert.equal(again.match(/id="cc-matrix-run"/g).length, 1);
+  assert.match(again, /^<!doctype html><body><p>game<\/p>\n<script type="application\/json" id="cc-matrix-run">.*<\/script>\n<\/body><\/html>$/s);
+});
+
+// Runs in stages: the config's stages, each continuing from a finished run of the one before.
+const STAGES = [
+  { id: 'plan', text: 'Read TASK.md and plan it. FAKE:plan', game: false },
+  { id: 'build', text: 'Build what TASK.md asks, from the PLAN.md {{parentModel}} ({{parentEffort}}) wrote.' },
+  { id: 'content', text: 'Add content to the game {{parentModel}} built from TASK.md. Steps: {{chain}}' },
+];
+const stageAgents = [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['medium'] },
+  { id: 'sol', provider: 'codex', model: 'gpt-6.1-sol', efforts: ['max'] }, { id: 'sonnet', provider: 'claude', model: 'claude-sonnet-5-5', efforts: ['medium'] }];
+const allResults = (sb) => fs.readdirSync(sb.out).filter((d) => fs.existsSync(path.join(sb.out, d, 'result.json'))).map((d) => result(sb, d));
+
+test('stages: a plan branches into builds and each build into content passes, each starting from its parent\'s folder once it\'s done', (t) => {
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents: stageAgents, stages: STAGES, template: 'SOURCE: {{source}}\nFile: G-{{model}}-{{effort}}.html\n' });
+  t.after(() => cleanup(sb));
+  const picks = ['--stage', 'plan=opus:max', '--stage', 'build=opus:xhigh,sol:max', '--stage', 'content=sonnet:medium'];
+  const dry = JSON.parse(runner(sb, [...picks, '--dry-run', '--json']).stdout.trim());
+  assert.deepEqual([dry.count, dry.byStage, dry.error], [5, { plan: 1, build: 2, content: 2 }, null]);
+  assert.match(dry.sample, /^Message sent:\nRead TASK.md and plan it/);
+  const r = runner(sb, picks);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /In stages: plan 1, build 2, content 2/);
+  const all = allResults(sb), of = (stage) => all.filter((x) => x.stage === stage);
+  assert.ok(all.every((x) => x.status === 'ok'), r.all);
+  // The plan: no game expected, PLAN.md measured.
+  const [plan] = of('plan');
+  assert.deepEqual([plan.expectsGame, plan.delivered, plan.planChars > 0, plan.chain.length], [false, false, true, 1]);
+  // Builds: from the plan's folder, with TASK.md filled for their own model and the stage text naming the planner.
+  for (const b of of('build')) {
+    assert.equal(b.parentId, plan.id);
+    assert.ok(b.startedAt >= plan.finishedAt, 'a build waits for its plan');
+    const work = path.join(sb.out, b.id, 'work');
+    assert.ok(fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').startsWith('# Plan by claude-opus-5-5'));
+    assert.match(fs.readFileSync(path.join(work, 'TASK.md'), 'utf8'), new RegExp(`File: G-${b.model}-${b.effort}\\.html`));
+    assert.equal(fs.readFileSync(path.join(sb.out, b.id, 'prompt.md'), 'utf8'), 'Build what TASK.md asks, from the PLAN.md claude-opus-5-5 (max) wrote.\n');
+    assert.deepEqual([b.delivered, b.entry], [true, `${b.id}/work/Fake-Game-${b.model}.html`]);
+  }
+  // Content: one per build, in folders of their own; their game is the one they made, not the one they were given.
+  const content = of('content');
+  assert.deepEqual(content.map((c) => c.parentId).sort(), of('build').map((b) => b.id).sort());
+  assert.equal(new Set(content.map((c) => c.id)).size, 2);
+  for (const c of content) {
+    const parent = all.find((x) => x.id === c.parentId);
+    assert.ok(c.startedAt >= parent.finishedAt);
+    assert.equal(c.entry, `${c.id}/work/Fake-Game-claude-sonnet-5-5.html`);
+    assert.match(fs.readFileSync(path.join(sb.out, c.entry), 'utf8'), /content added by claude claude-sonnet-5-5/);
+    assert.ok(fs.existsSync(path.join(sb.out, c.id, 'work', `Fake-Game-${parent.model}.html`)), 'the game it was given stays');
+    assert.equal(fs.readFileSync(path.join(sb.out, c.id, 'prompt.md'), 'utf8'), `Add content to the game ${parent.model} built from TASK.md. `
+      + `Steps: plan: claude-opus-5-5 max → build: ${parent.model} ${parent.effort} → content: claude-sonnet-5-5 medium\n`);
+    assert.deepEqual(c.chain.map((x) => x.stage), ['plan', 'build', 'content']);
+  }
+  // Everything is known again by its chain: the same picks find all five done.
+  assert.equal(JSON.parse(runner(sb, [...picks, '--dry-run', '--json']).stdout.trim()).alreadyDone, 5);
+  const csv = fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8');
+  assert.match(csv, /plan:opus-max > build:sol-max > content:sonnet-medium/);
+});
+
+test('stages: a later stage continues from runs of an earlier batch; a failed parent leaves its runs out; node_modules isn\'t copied', (t) => {
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }, { id: 'bad', text: 'FAKE:fail=plan broke' }] }, agents: stageAgents, stages: STAGES,
+    template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, ['--stage', 'plan=opus:max', '--only', 'source=z']).status, 0);
+  const [plan] = allResults(sb);
+  fs.mkdirSync(path.join(sb.out, plan.id, 'work', 'node_modules', 'big'), { recursive: true });
+  // Builds only: they continue from the plan already made.
+  let dry = JSON.parse(runner(sb, ['--stage', 'build=sonnet:medium', '--dry-run', '--json']).stdout.trim());
+  assert.deepEqual([dry.count, dry.byStage], [1, { build: 1 }]);
+  let r = runner(sb, ['--stage', 'build=sonnet:medium']);
+  assert.equal(r.status, 0, r.all);
+  const build = allResults(sb).find((x) => x.stage === 'build');
+  assert.deepEqual([build.status, build.parentId, build.parentStartedAt], ['ok', plan.id, plan.startedAt]);
+  assert.ok(!fs.existsSync(path.join(sb.out, build.id, 'work', 'node_modules')));
+  // Both sources: Zelda's plan and build are done; the other plan fails, so its build never starts.
+  r = runner(sb, ['--stage', 'plan=opus:max', '--stage', 'build=sonnet:medium']);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /· skip \S+\.build\S* \(the run it continues from didn't finish OK\)/);
+  const bad = allResults(sb).filter((x) => x.source === 'bad');
+  assert.deepEqual(bad.map((x) => [x.stage, x.status]), [['plan', 'failed']]);
+  assert.match(r.all, /Done\. 1 ran, 3 skipped/);
+});
+
+test('stages: a stage\'s goal goes to /goal with its text in STAGE.md; Codex gets the plain text', (t) => {
+  const stages = [{ id: 'build', text: 'Build {{source}} as TASK.md says.', goal: 'the game for {{source}} exists' }];
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents: stageAgents, stages, template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  const r = runner(sb, ['--stage', 'build=opus:high,sol:max']);
+  assert.equal(r.status, 0, r.all);
+  const [claudeRun] = allResults(sb).filter((x) => x.provider === 'claude'), [codexRun] = allResults(sb).filter((x) => x.provider === 'codex');
+  assert.equal(callFor(sb, claudeRun.id).argv[1], '/goal Read STAGE.md in the current folder and do what it says (TASK.md describes the game). Done when: the game for Zelda exists');
+  assert.equal(fs.readFileSync(path.join(sb.out, claudeRun.id, 'work', 'STAGE.md'), 'utf8'), 'Build Zelda as TASK.md says.\n');
+  assert.equal(callFor(sb, codexRun.id).stdin, 'Build Zelda as TASK.md says.\n');
+  assert.deepEqual([codexRun.goalSkipped, claudeRun.goalSkipped, codexRun.delivered], [true, undefined, true]);
+});
+
 test('retrying a failed run from before a dimension was added replaces it', (t) => {
   const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:fail=boom' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
   t.after(() => cleanup(sb));
