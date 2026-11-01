@@ -381,6 +381,27 @@ test('stages: a stage\'s goal goes to /goal with its text in STAGE.md; Codex get
   assert.deepEqual([codexRun.goalSkipped, claudeRun.goalSkipped, codexRun.delivered], [true, undefined, true]);
 });
 
+test('the dry run shows each run as the terminal session it stands for', (t) => {
+  const agents = [...stageAgents, { id: 'flash', provider: 'agy', model: 'gemini-3.8-flash', efforts: ['high'] }];
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents, stages: STAGES, template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  const dry = (args) => JSON.parse(runner(sb, [...args, '--dry-run', '--json']).stdout.trim());
+  const block = (d, head) => d.terminal.find((b) => b.startsWith(head))?.split('\n');
+  const d = dry(['--pick', 'opus:medium,sol:max,flash:high']);
+  assert.equal(d.terminalTotal, 3);
+  const claude = block(d, '# opus medium (Claude Code CLI)');
+  assert.match(claude[1], /^d=\S+\/opus-medium__z$/);
+  assert.equal(claude[2], 'mkdir -p "$d/work"');
+  assert.match(claude[3], /^\(cd "\$d\/work" && \S+\/claude -p --output-format stream-json --verbose --model claude-opus-5-5 --effort medium --settings '\{"ultracode":false\}' --dangerously-skip-permissions < \.\.\/prompt\.md\)$/);
+  assert.match(block(d, '# sol max (Codex CLI)')[3], /\/codex exec --json -m gpt-6\.1-sol -c model_reasoning_effort=max --yolo - < \.\.\/prompt\.md\)$/);
+  assert.match(block(d, '# flash high (Antigravity CLI)')[3], /\/agy -p "\$\(cat \.\.\/prompt\.md\)" --output-format stream-json --model gemini-3\.8-flash --effort high --dangerously-skip-permissions\)$/);
+  // A later stage starts in a copy of the folder of the run it continues from.
+  const s = dry(['--stage', 'plan=opus:max', '--stage', 'build=sol:max']), plan = s.ids.find((id) => id.includes('.plan'));
+  const build = block(s, '# sol max · 2 build (Codex CLI)');
+  assert.ok(build[2].startsWith(`cp -r `) && build[2].includes(`${plan}/work "$d/work"`), build[2]);
+  assert.match(runner(sb, ['--pick', 'opus:medium', '--dry-run']).stdout, /--- in a terminal \(every run not done yet\) ---\n# opus medium/);
+});
+
 test('retrying a failed run from before a dimension was added replaces it', (t) => {
   const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:fail=boom' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
   t.after(() => cleanup(sb));

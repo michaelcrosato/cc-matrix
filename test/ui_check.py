@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(ROOT, 'test', 'fake-cli')
 SIZES = [('phone', 375, 667, True), ('tablet', 768, 1024, True), ('small laptop', 1024, 768, False), ('laptop', 1366, 768, False), ('ultrawide', 2560, 1080, False)]
-TABS = ['setup', 'run', 'results', 'insights', 'audit']
+TABS = ['setup', 'advanced', 'run', 'results', 'insights', 'audit']
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--engines', default='chromium,webkit,firefox')

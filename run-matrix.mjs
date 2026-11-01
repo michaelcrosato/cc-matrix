@@ -325,7 +325,7 @@ function stageRuns() {
   const have = new Map();
   for (const { r, dir } of finished().values()) if (r.chain?.length && r.status === 'ok') {
     const k = `${briefKey(r)}|${chainKey(r.chain.slice(0, -1))}|${r.chain.at(-1).stage}`;
-    (have.get(k) ?? have.set(k, []).get(k)).push({ key: runKey(r), chain: r.chain, dir, info: infoOf(r) });
+    (have.get(k) ?? have.set(k, []).get(k)).push({ key: runKey(r), chain: r.chain, dir, id: dir, info: infoOf(r) });
   }
   for (const combo of product()) {
     if (!filters.every(([k, set]) => !dimNames.includes(k) || set.has(combo[k].id))) continue;
@@ -338,7 +338,7 @@ function stageRuns() {
         for (const { agent, pe } of picksAt[k]) {
           const chain = [...p.chain, { stage: st.id, agent: agent.id, effort: pe.label }];
           const node = { id: stageRunName(`${agent.id}-${pe.label}`, st.id, combo, p.chain), key: `${chainKey(chain)}__${bk}`, chain, agent,
-            effort: pe.base, ultracode: pe.ultracode, combo, stage: st, parentKey: p.key, parentInfo: p.info,
+            effort: pe.base, ultracode: pe.ultracode, combo, stage: st, parentKey: p.key, parentInfo: p.info, parentDir: p.id ?? null,
             info: { agent: agent.id, model: agent.model, effort: pe.label, stage: st.id },
             fields: { agent: agent.id, provider: agent.provider, effort: pe.label, ultracode: pe.ultracode, ...dims, stage: st.id, chain } };
           out.push(node); next.push(node);
@@ -356,30 +356,6 @@ if (stageMode) {
   queue = stageRuns().slice(0, args.limit);
 }
 
-if (args.dryRun) {
-  const byAgent = {}, resuming = queue.filter((r) => canResume(r));
-  for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
-  let sample = '', error = null;
-  try {
-    const r0 = queue[0];
-    if (r0?.stage) { // a later stage's parent may not exist yet: its text names the model picked for it
-      const brief = buildPrompt(r0), g = goalMessage(r0), t = stageTexts(r0).text;
-      sample = `Message sent:\n${g ?? t}\n\n${g ? `--- STAGE.md ---\n${t}\n` : ''}--- TASK.md ---\n${brief}`;
-    } else if (r0) { sample = buildPrompt(r0); const g = goalMessage(r0); if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; }
-  } catch (e) { error = e.message; }
-  const byStage = {};
-  for (const r of queue) if (r.stage) byStage[r.stage.id] = (byStage[r.stage.id] ?? 0) + 1;
-  if (args.json) {
-    console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length,
-      ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf) }));
-  } else {
-    console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
-    for (const r of queue) console.log('  ' + r.id + (resuming.includes(r) ? '  (resumes)' : ''));
-    if (error) console.log(`\nPrompt error: ${error}`);
-    else if (queue[0]) console.log(`\n--- sample prompt (${queue[0].id}) ---\n${sample}`);
-  }
-  process.exit(0);
-}
 
 // -------------------------------------------------------------- providers
 // Flags added to every run of a CLI when matrix.config.json has no extraArgs entry for it.
@@ -438,6 +414,52 @@ const providers = {
     return { bin: binOf('muse'), argv, promptInArgs: true };
   },
 };
+
+// A run as you'd type it yourself, from this folder: a fresh work folder (for a later stage, a copy of the one it
+// continues from), then its CLI with what it's sent. Every run is one terminal session; a batch only queues them.
+// prompt.md beside work/ is the prompt (for a stage, its text), TASK.md in work/ the prompt filled for that run.
+const sh = (x) => /^[\w@%+=:,./-]+$/.test(String(x)) ? String(x) : `'${String(x).replace(/'/g, `'\\''`)}'`;
+function terminalOf(run, resumes = false) {
+  const rel = (id) => path.relative(process.cwd(), path.join(outDir, id)) || '.', dir = rel(run.id);
+  const st = run.stage, where = st ? ` · ${STAGES.indexOf(st) + 1} ${st.id}` : '';
+  const head = `# ${run.agent.id} ${parseEffort(run.effort ?? 'default').label}${run.ultracode ? '-uc' : ''}${where} (${CLIS[run.agent.provider] ?? run.agent.provider})`;
+  if (resumes) { const p = prevRun(run); return [`${head}: carries on with its session where it stopped`, `d=${sh(rel(p.dir))}`, `(cd "$d/work" && ${sh(binOf('claude'))} -p … --resume ${sh(p.r.sessionId)} …)`]; }
+  let text;
+  try { text = st ? stageTexts(run).text : buildPrompt(run); } catch (e) { return [head, `# can't start: ${e.message}`]; }
+  const { bin, argv, promptInArgs } = providers[run.agent.provider](run.agent, run.effort, text, run, '\0prompt.md');
+  const args = argv.map((a) => a === '\0prompt.md' ? '../prompt.md' : a === text ? '"$(cat ../prompt.md)"' : sh(a));
+  const make = st && run.parentDir ? `cp -r ${sh(rel(run.parentDir) + '/work')} "$d/work"   # a copy of the folder it continues from (without node_modules, .git)`
+    : 'mkdir -p "$d/work"';
+  return [head, `d=${sh(dir)}`, make, `(cd "$d/work" && ${[sh(bin), ...args].join(' ')}${promptInArgs ? '' : ' < ../prompt.md'})`];
+}
+
+if (args.dryRun) {
+  const byAgent = {}, resuming = queue.filter((r) => canResume(r));
+  for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
+  let sample = '', error = null;
+  try {
+    const r0 = queue[0];
+    if (r0?.stage) { // a later stage's parent may not exist yet: its text names the model picked for it
+      const brief = buildPrompt(r0), g = goalMessage(r0), t = stageTexts(r0).text;
+      sample = `Message sent:\n${g ?? t}\n\n${g ? `--- STAGE.md ---\n${t}\n` : ''}--- TASK.md ---\n${brief}`;
+    } else if (r0) { sample = buildPrompt(r0); const g = goalMessage(r0); if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; }
+  } catch (e) { error = e.message; }
+  const byStage = {};
+  for (const r of queue) if (r.stage) byStage[r.stage.id] = (byStage[r.stage.id] ?? 0) + 1;
+  // The batch as terminal sessions (the first 100; Run → Preview shows them): the runs not done yet, in queue order.
+  const todo = queue.filter((r) => !isDone(r)), terminal = todo.slice(0, 100).map((r) => terminalOf(r, resuming.includes(r)).join('\n'));
+  if (args.json) {
+    console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length,
+      ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf), terminal, terminalTotal: todo.length }));
+  } else {
+    console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
+    for (const r of queue) console.log('  ' + r.id + (resuming.includes(r) ? '  (resumes)' : ''));
+    if (error) console.log(`\nPrompt error: ${error}`);
+    else if (queue[0]) console.log(`\n--- sample prompt (${queue[0].id}) ---\n${sample}`);
+    if (terminal.length) console.log(`\n--- in a terminal (${terminal.length === todo.length ? 'every run not done yet' : `the first ${terminal.length} of ${todo.length}`}) ---\n${terminal.join('\n\n')}`);
+  }
+  process.exit(0);
+}
 
 // Claude Code and Grok share this usage shape; modelUsage includes subagents and helper models.
 // The per-model split (what /usage shows) is kept in result.json as `models`.

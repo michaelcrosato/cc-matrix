@@ -6,6 +6,8 @@ Perspective: {{perspective}}
 
 Game Title: {{gameTitle}}
 
+Research: {{research}}
+
 Package: {{package}}
 
 Tech Stack: {{techStack}}
@@ -24,8 +26,6 @@ Working Environment and deliverable:
 Performance: {{performance}}
 
 Testing: {{testing}}
-
-Research: {{research}}
 
 ## Goal
 
