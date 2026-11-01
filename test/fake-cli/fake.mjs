@@ -13,6 +13,9 @@
 //   FAKE:todo             leave a TODO in the game
 //   FAKE:limit            claude: work a while (a dev file, tokens), then stop on the 5-hour usage limit
 //   FAKE:limit=start      claude: stop on the usage limit at the first request, having done nothing
+//   FAKE:plan             write PLAN.md instead of a game (a planning stage)
+// A run in stages gets its stage's text as the message (or in STAGE.md, with /goal) and the brief in TASK.md;
+// both are read. Given a game already (a later stage), the fake adds to it, so the game it leaves is its own.
 // FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
 // With CODEX_HOME or GROK_HOME set, codex and grok also write session logs there the way the real ones
 // do (a Codex subagent thread; Grok /goal helper sessions), for the runner to find. With CLAUDE_CONFIG_DIR
@@ -57,7 +60,9 @@ export async function run(cli) {
     : after(argv, '--prompt-file') ? fs.readFileSync(after(argv, '--prompt-file'), 'utf8')
     : cli === 'grok' ? after(argv, '-p') : argv[argv.length - 1];
   const goal = /^\/goal /.test(msg ?? '');
-  const prompt = goal ? fs.readFileSync('TASK.md', 'utf8') : msg ?? '';
+  const read = (f) => fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
+  const prompt = goal ? (/STAGE\.md/.test(msg) ? `${read('STAGE.md')}\n${read('TASK.md')}` : read('TASK.md'))
+    : `${msg ?? ''}${/TASK\.md/.test(msg ?? '') ? `\n${read('TASK.md')}` : ''}`;
   if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal }) + '\n');
 
   const fail = prompt.match(/FAKE:fail=([^\n]*)/)?.[1];
@@ -74,10 +79,13 @@ export async function run(cli) {
     reply = 'You\'ve hit your 5-hour limit · resets 10:10am (America/Vancouver)';
     if (!limit[1]) { fs.mkdirSync('src', { recursive: true }); fs.writeFileSync(path.join('src', 'partial.js'), 'console.log("half a game");\n'); }
   } else if (/smoke\.txt/.test(prompt)) { fs.writeFileSync('smoke.txt', 'ok\n'); reply = 'SMOKE-OK'; }
+  else if (!fail && /FAKE:plan/.test(prompt)) fs.writeFileSync('PLAN.md', `# Plan by ${model}\n\n1. Engine\n2. Levels\n3. Polish\n`);
   else if (!fail && !/FAKE:nogame/.test(prompt)) {
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(path.join('src', 'main.js'), 'console.log("game");\n');
-    const body = `<!doctype html><title>Fake</title><script>${'let x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}</script>`;
+    const given = fs.readdirSync('.').filter((f) => /\.html$/.test(f)).length; // a later stage adds content to the game it was given
+    const body = `<!doctype html><title>Fake</title><script>${'let x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}`
+      + `${given ? `// content added by ${cli} ${model}\n` : ''}</script>`;
     fs.writeFileSync(`Fake-Game-${model}.html`, body);
   }
   if (/FAKE:noreply/.test(prompt)) reply = '';

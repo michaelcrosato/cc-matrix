@@ -187,11 +187,17 @@ function startSmoke(key, goal) {
   });
 }
 
-// Turn the dashboard's selection into runner flags.
+// Turn the dashboard's selection into runner flags. sel.stages ({ stage: ['agent:effort', …] }) runs in stages
+// (see stageRuns in run-matrix.mjs) instead of sel.pick.
+const PICK = /^[\w.-]+:[\w.+-]+$/;
 function selectionArgs(sel = {}) {
   const a = ['--config', CONFIG, '--out', OUT];
-  if (sel.pick?.length) a.push('--pick', sel.pick.join(','));
-  else a.push('--pick', '__none__'); // nothing ticked = nothing runs
+  const stages = sel.stages && typeof sel.stages === 'object' ? Object.entries(sel.stages)
+    .map(([st, picks]) => [st, (Array.isArray(picks) ? picks : []).filter((p) => typeof p === 'string' && PICK.test(p))])
+    .filter(([st, picks]) => /^\w+$/.test(st) && picks.length) : [];
+  if (stages.length) for (const [st, picks] of stages) a.push('--stage', `${st}=${picks.join(',')}`);
+  else if (!sel.stages && sel.pick?.length) a.push('--pick', sel.pick.join(','));
+  else a.push('--pick', '__none__'); // nothing ticked (or picked for a stage) = nothing runs
   for (const [dim, ids] of Object.entries(sel.only ?? {})) a.push('--only', `${dim}=${ids.join(',')}`);
   if (sel.repeat > 1) a.push('--repeat', String(sel.repeat));
   if (sel.rerunFailed) a.push('--rerun-failed');
