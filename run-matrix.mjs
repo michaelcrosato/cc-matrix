@@ -25,7 +25,7 @@
 //                                     starting over (canResume); with --rerun-failed the others start over
 //        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
 //                                     logs (after parser or price changes); games already holding their record get the new figures
-//        --stamp                      write each finished run's record into its game file (stampGame); new runs get it as they end
+//        --stamp                      write each finished run's record into its game file (stampGame, run-record.mjs); new runs get it as they end
 //        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
 //        --stage <stage>=agent:effort,...   run in stages instead (repeatable; see stageRuns): each stage in the config's
 //                                     "stages" continues from the finished runs of the stage before
@@ -38,6 +38,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, stampHtml, unstamped, upgrade } from './run-record.mjs';
 
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
@@ -954,14 +955,22 @@ function prepare(run, dir, prompt) {
 }
 
 // A stage run's folder: its parent's work folder copied (without node_modules and .git: they can be big, and are
-// made again), TASK.md (the prompt, filled for this run, so its file name and Source Information name this model),
+// made again; nor its exit interview, so the one this run leaves is its own; and its games as their agent left
+// them, without the record stampGame put in, which is about the run before), TASK.md (the prompt, filled for this
+// run, so its file name and Source Information name this model),
 // prompt.md beside work/ (the stage's text, what it's sent) and, with a /goal, that text as STAGE.md and the
 // command as goal.md. Returns the parent's root .html files (name -> hash), so measureOutput can tell the game
 // this run made from the ones it was given.
-const NOT_COPIED = new Set(['node_modules', '.git']);
+const NOT_COPIED = new Set(['node_modules', '.git', EXIT_FILE]);
 function prepareStage(run, dir, brief, parent) {
   const work = path.join(dir, 'work');
-  if (parent) fs.cpSync(path.join(outDir, parent.dir, 'work'), work, { recursive: true, filter: (src) => !NOT_COPIED.has(path.basename(src)) });
+  if (parent) {
+    fs.cpSync(path.join(outDir, parent.dir, 'work'), work, { recursive: true, filter: (src) => !NOT_COPIED.has(path.basename(src)) });
+    for (const f of fs.readdirSync(work)) if (/\.html?$/i.test(f)) try {
+      const file = path.join(work, f), t = fs.readFileSync(file, 'utf8');
+      if (STAMP_RE.test(t)) fs.writeFileSync(file, unstamped(t));
+    } catch {}
+  }
   fs.mkdirSync(work, { recursive: true });
   fs.writeFileSync(path.join(work, 'TASK.md'), brief);
   const { text } = stageTexts(run), goal = goalMessage(run);
@@ -980,6 +989,17 @@ function stageFields(run, work, parent, given) {
   return { parentId: parent?.dir ?? null, parentStartedAt: parent?.r.startedAt ?? null, ...(run.stage.game === false ? { expectsGame: false } : {}),
     ...(given?.size ? { givenHtml: Object.fromEntries(given) } : {}), ...(planChars != null ? { planChars } : {}) };
 }
+// exitInterview: whether a run left the exit interview its prompt asks for (exit-interview.json beside the game, one
+// JSON object; see run-record.mjs): ok, invalid or missing. Left out when its prompt (TASK.md for a stage run) doesn't
+// ask for one, and for a plan, which makes no game.
+function exitInterview(home, stage, expectsGame) {
+  const read = (f) => { try { return fs.readFileSync(path.join(home, f), 'utf8'); } catch { return null; } };
+  if (expectsGame === false || !(read(stage ? 'work/TASK.md' : 'prompt.md') ?? '').includes(EXIT_FILE)) return {};
+  const text = read(path.join('work', EXIT_FILE));
+  return { exitInterview: text == null ? 'missing' : parseInterview(text).error ? 'invalid' : 'ok' };
+}
+// The time zone of this computer's clock, saved with each run: its folder name and {{stamp}} are in local time.
+const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const lastLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').pop().trim().slice(0, 500); } catch { return ''; } };
 
@@ -1079,10 +1099,11 @@ async function runOne(run) {
   const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
   const measured = measureOutput(work, given), end = Date.now();
   const id = status === 'ok' ? withTitle(run.id, measured, run) : run.id, home = path.join(outDir, id);
+  const staged = stageFields(run, path.join(home, 'work'), parent, given);
   const result = { id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
     variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
-    wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...stageFields(run, path.join(home, 'work'), parent, given),
-    startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString() };
+    wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...staged, ...exitInterview(home, !!run.stage, staged.expectsGame),
+    startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(), timeZone: TIME_ZONE };
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
   finished().set(run.key, { r: result, dir: id }); // so the runs continuing from it can start
   stampGame(home, result, run.combo);
@@ -1168,7 +1189,8 @@ async function resumeOne(run, prev) {
   const result = { id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
     variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode,
     wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measured, ...kept, ...(planChars != null ? { planChars } : {}),
-    startedAt: r.startedAt, finishedAt: part.finishedAt, resumes: n, parts: all };
+    ...exitInterview(home, !!r.stage, r.expectsGame),
+    startedAt: r.startedAt, finishedAt: part.finishedAt, ...(r.timeZone ? { timeZone: r.timeZone } : {}), resumes: n, parts: all };
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
   stampGame(home, result, run.combo);
   finished().set(run.key, { r: result, dir: id });
@@ -1220,8 +1242,8 @@ function readMetrics(provider, text, agent, ctx) {
 }
 
 // --reparse: refresh token and cost fields of finished runs from their saved agent.out and the CLIs'
-// session logs (and the TODO count from the saved game), leaving status, timing, other measurements and
-// scores alone. A run whose session log was read before but is gone now keeps its figures.
+// session logs (and the TODO count from the saved game, and exitInterview from its folder), leaving status,
+// timing, other measurements and scores alone. A run whose session log was read before but is gone now keeps its figures.
 function reparseAll() {
   const metricKeys = ['costUsd', 'costSource', 'apiCostUsd', 'unpricedModels', 'inputTokens', 'cachedTokens', 'cacheWriteTokens', 'uncachedInputTokens',
     'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents', 'helpers', 'apiCalls', 'toolCalls', 'tools', 'toolErrors',
@@ -1243,6 +1265,8 @@ function reparseAll() {
     for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k]; else delete r[k];
     if (r.status !== 'ok' && m.error) r.error = m.error; // e.g. Claude Code's usage limit, which was "exit code 1" before
     try { if (r.entry) r.todos = markers(unstamped(fs.readFileSync(path.join(outDir, r.entry), 'utf8'))); } catch {}
+    const ei = exitInterview(path.join(outDir, d), !!r.stage, r.expectsGame).exitInterview;
+    if (ei) r.exitInterview = ei; else delete r.exitInterview;
     fs.writeFileSync(resFile, JSON.stringify(r, null, 2)); n++;
     if (isStamped(r)) stampGame(path.join(outDir, d), r); // the record in the game gets the new figures too
   }
@@ -1296,38 +1320,50 @@ function measureOutput(work, given = null) {
     entry: file ? path.relative(outDir, file).split(path.sep).join('/') : null };
 }
 
-// A second pass once a run has ended: its record goes into the game file itself, so a game passed around (or
-// put on ai-hub) says what made it and what it took. Most of it can't be in the prompt: time, tokens and cost
-// are only known at the end. It's a <script type="application/json" id="cc-matrix-run"> block just before
-// </body> (inert: the browser doesn't run it), read with JSON.parse(document.getElementById('cc-matrix-run')
-// .textContent). Stamping again replaces it (--reparse refreshes stamped games, --stamp stamps finished ones),
-// and kb, loc, todos and gameSha256 are measured without it. Left out: the session id, the plan's usage and
-// tier (the account's, not the game's) and local file paths.
-const STAMP_RE = /\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/;
-const unstamped = (t) => t.replace(STAMP_RE, '');
+// A second pass once a run has ended: its record goes into the game file itself, so a game passed around (or put on
+// ai-hub) says what made it, what it took and what the agent said about it, and the run can be rebuilt from the game
+// alone. Most of it can't be in the prompt: time, tokens and cost are only known at the end. The format, and the
+// tools that read it back, are in run-record.mjs: an inert <script type="application/json" id="cc-matrix-run">
+// block just before </body>, with the AI Hub's catalogue fields, result.json, the prompt and the exit interview.
+// Stamping again replaces it (--reparse refreshes stamped games, --stamp stamps finished ones), and kb, loc, todos
+// and gameSha256 are measured without it.
 const isStamped = (r) => { try { return r.delivered && STAMP_RE.test(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch { return false; } };
-const NOT_STAMPED = ['sessionId', 'plan', 'entry', 'sessionLog', 'variantHashes', 'parts', 'givenHtml'];
 function stampGame(dir, r, combo) {
   if (!r.delivered || !r.entry) return;
   const file = path.join(outDir, r.entry);
   const read = (f) => { try { return fs.readFileSync(path.join(dir, f), 'utf8'); } catch { return null; } };
-  let page; try { page = unstamped(fs.readFileSync(file, 'utf8')); } catch { return; }
+  let html; try { html = fs.readFileSync(file, 'utf8'); } catch { return; }
+  // What only the run knew (its template, each variant's text as sent) is kept from the record already in the game
+  // (schema 1 too) when it's stamped again without the run at hand (--stamp, --reparse).
+  const was = upgrade(readRecord(html))?.prompt ?? {};
   let history = []; try { history = JSON.parse(fs.readFileSync(path.join(outDir, 'prompt-history.json'), 'utf8')); } catch {}
-  const run = Object.fromEntries(Object.entries(r).filter(([k]) => !NOT_STAMPED.includes(k)));
-  // Each variant's text as it was sent: from the run itself, else (--stamp on an older run) the config's
-  // variant of that id, which may have been edited since; prompt.md is exact either way.
-  const variants = Object.fromEntries(dimNames.filter((d) => r[d] != null).map((d) => {
-    const v = combo?.[d] ?? cfg.dimensions[d].find((x) => x.id === r[d]);
-    let text = null; try { text = v ? variantText(v).trim() : null; } catch {}
-    return [d, { id: r[d], text }];
-  }));
-  const record = { schema: 1, tool: 'cc-matrix', stampedAt: new Date().toISOString(), lab: labOf({ model: r.model, provider: r.provider }),
-    cli: CLIS[r.provider] ?? r.provider, ...run, variants, promptNumber: history.find((e) => e.hash === r.promptVersion)?.v ?? null,
-    prompt: read('prompt.md'), goal: read('goal.md')?.trim() || null, reply: read('reply.md') };
-  // In a <script>, only "</script" (or "<!--") could end it early: escaping every < rules both out.
-  const block = `\n<script type="application/json" id="cc-matrix-run">${JSON.stringify(record).replace(/</g, '\\u003c')}</script>\n`;
-  const at = [page.toLowerCase().lastIndexOf('</body>'), page.toLowerCase().lastIndexOf('</html>')].find((i) => i >= 0) ?? page.length;
-  fs.writeFileSync(file, page.slice(0, at) + block + page.slice(at));
+  const version = history.find((e) => e.hash === r.promptVersion);
+  // Each section's variant as it was sent: the run's own, else the one in the record already there, else the config's
+  // of that id. Each only if its text hashes as the run's did (variantHashes), so an edit made since never gets in:
+  // null when it can't be told (prompt.text is exact either way).
+  const sections = { ...was.sections };
+  for (const d of dimNames) {
+    if (r[d] == null) continue;
+    const hash = r.variantHashes?.[d] ?? null, conf = cfg.dimensions[d].find((x) => x.id === r[d]);
+    const tries = [() => combo?.[d] && variantText(combo[d]).trim(), () => was.sections?.[d]?.id === r[d] ? was.sections[d].text : null,
+      () => hash && conf ? variantText(conf).trim() : null];
+    let text = null;
+    for (const t of tries) { let x = null; try { x = t(); } catch {} if (typeof x === 'string' && (!hash || textHash(x) === hash)) { text = x; break; } }
+    sections[d] = { id: r[d], text, hash };
+  }
+  // The prompt as filled for this run: prompt.md, or for a stage run TASK.md (its prompt.md is the stage's text).
+  const promptMd = read('prompt.md'), text = (r.stage ? read('work/TASK.md') : promptMd) ?? was.text ?? null;
+  const prompt = { version: r.promptVersion ?? null, number: version?.v ?? was.number ?? null,
+    savedAt: version?.at ?? was.savedAt ?? null, firstRanAt: version?.ranAt ?? was.firstRanAt ?? null,
+    template: textHash(template ?? '') === r.promptVersion ? template : version?.text ?? was.template ?? null,
+    text, ...(r.stage ? { stageText: promptMd ?? was.stageText ?? null } : {}), goal: read('goal.md')?.trim() || null, sections };
+  // The exit interview, its feedback answers paired with the questions they answer.
+  const questions = Object.fromEntries(Object.entries(sections).map(([d, s]) => [d, questionsOf(s.text)]).filter(([, q]) => q.length));
+  const exit = read(path.join('work', EXIT_FILE));
+  const interview = { file: exit == null ? null : EXIT_FILE, ...(exit == null ? {} : parseInterview(exit, questions)), reply: read('reply.md') };
+  const page = unstamped(html);
+  fs.writeFileSync(file, stampHtml(page, makeRecord({ result: r, lab: labOf({ model: r.model, provider: r.provider }),
+    cli: CLIS[r.provider] ?? r.provider, page, prompt, interview })));
 }
 
 // Take runs round-robin across CLIs so parallel slots go to different services (each keeps
@@ -1592,7 +1628,7 @@ function writeReport() {
   const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', 'stage', 'path', 'parentId', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource', 'apiCostUsd',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
     'apiCalls', 'toolCalls', 'toolErrors', 'compactions',
-    'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt'];
+    'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'exitInterview', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt', 'timeZone'];
   const cell = (v) => v == null ? '' : typeof v === 'number' ? +v.toFixed(4)
     : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
   fs.writeFileSync(path.join(outDir, 'results.csv'),

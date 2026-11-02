@@ -269,13 +269,19 @@ test('each finished game gets its record: inert, complete, private bits left out
   assert.equal(blocks.length, 1);
   assert.ok(!blocks[0].slice(0, -9).includes('</script'), 'a "</script" in the data would end the block early');
   const rec = JSON.parse(blocks[0].replace(/^<script[^>]*>|<\/script>$/g, ''));
-  assert.equal(rec.tool, 'cc-matrix');
-  assert.equal(rec.model, 'm'); assert.equal(rec.effort, 'low'); assert.equal(rec.lab, 'Anthropic'); assert.equal(rec.cli, 'Claude Code CLI');
-  assert.equal(rec.outputTokens, r.outputTokens); assert.equal(rec.costUsd, r.costUsd); assert.equal(rec.wallMinutes, r.wallMinutes);
-  assert.deepEqual(rec.variants.testing, { id: 'a', text: 'ends early? </script><b>no' });
-  assert.equal(rec.prompt, fs.readFileSync(path.join(sb.out, 'opus-low__a', 'prompt.md'), 'utf8'));
-  assert.ok(rec.reply.length > 0);
-  for (const k of ['sessionId', 'plan', 'entry', 'parts']) assert.ok(!(k in rec), k);
+  assert.equal(rec.schema, 2); assert.equal(rec.tool, 'cc-matrix'); assert.equal(rec.id, 'opus-low__a');
+  assert.equal(rec.lab, 'Anthropic'); assert.equal(rec.cli, 'Claude Code CLI');
+  // result is result.json as written, without the session id and the plan's usage (the account's).
+  const { sessionId, plan, ...rest } = r;
+  assert.ok(sessionId && plan);
+  assert.deepEqual(rec.result, rest);
+  assert.deepEqual(rec.prompt.sections.testing, { id: 'a', text: 'ends early? </script><b>no', hash: r.variantHashes.testing });
+  assert.equal(rec.prompt.text, fs.readFileSync(path.join(sb.out, 'opus-low__a', 'prompt.md'), 'utf8'));
+  assert.equal(rec.prompt.template, 'Make a small game.\n\nTesting: {{testing}}\n');
+  assert.equal(rec.prompt.number, 1); assert.equal(rec.prompt.version, r.promptVersion); assert.equal(rec.prompt.goal, null);
+  assert.equal(rec.interview.reply, fs.readFileSync(path.join(sb.out, 'opus-low__a', 'reply.md'), 'utf8'));
+  assert.equal(rec.interview.file, null);
+  assert.equal(rec.aiHub.model, 'M'); assert.equal(rec.aiHub.harness, 'Claude Code'); assert.equal(rec.aiHub.sourceDate, r.startedAt);
   // Measured on the game as the agent left it: the record doesn't count.
   const game = page.replace(/\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/, '');
   assert.equal(r.gameSha256, crypto.createHash('sha256').update(game).digest('hex'));

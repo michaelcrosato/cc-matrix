@@ -335,6 +335,7 @@ function results() {
     const dir = path.join(OUT, d.name), r = readJSON(path.join(dir, 'result.json'), null);
     if (!r?.id) continue;
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
+    r.hasInterview = fs.existsSync(path.join(dir, 'work', 'exit-interview.json'));
     if (resumable(dir, r)) r.resumable = true;
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;

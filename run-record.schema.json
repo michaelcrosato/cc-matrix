@@ -1,0 +1,618 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "cc-matrix run record, schema 2",
+  "description": "The record cc-matrix writes into each game it makes, as <script type=\"application/json\" id=\"cc-matrix-run\"> just before </body>. Written and read by run-record.mjs. A new field can appear within schema 2; a renamed or removed one makes schema 3.",
+  "type": "object",
+  "required": [
+    "schema",
+    "tool",
+    "stampedAt",
+    "id",
+    "aiHub",
+    "result",
+    "prompt",
+    "interview"
+  ],
+  "properties": {
+    "schema": {
+      "const": 2
+    },
+    "tool": {
+      "const": "cc-matrix"
+    },
+    "stampedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When this record was written (UTC)."
+    },
+    "id": {
+      "type": "string",
+      "description": "The run's id: its folder in runs/."
+    },
+    "lab": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "examples": [
+        "Anthropic",
+        "OpenAI",
+        "Google",
+        "xAI",
+        "Meta"
+      ]
+    },
+    "cli": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "examples": [
+        "Claude Code CLI",
+        "Codex CLI",
+        "Grok CLI",
+        "Antigravity CLI",
+        "Muse Code CLI"
+      ]
+    },
+    "upgradedFrom": {
+      "const": 1,
+      "description": "Only on a schema 1 record read in schema 2's shape (run-record.mjs upgrade()); never written."
+    },
+    "aiHub": {
+      "$ref": "#/$defs/aiHub"
+    },
+    "result": {
+      "$ref": "#/$defs/result"
+    },
+    "prompt": {
+      "$ref": "#/$defs/prompt"
+    },
+    "interview": {
+      "$ref": "#/$defs/interview"
+    }
+  },
+  "$defs": {
+    "aiHub": {
+      "description": "AI Hub catalogue fields, named and written the way ai-hub's catalogue has them (its data/overrides.json and games.json), so an import can take them as they are. Lowest first: what ai-hub reads from the game's <head> (title as Name — Tagline, description, theme-color, hub:* meta), the agent's answers under aiHub in its exit interview, then the runner's (model, effort, harness, sourceDate). A field with no value is left out.",
+      "type": "object",
+      "required": [
+        "type",
+        "model",
+        "effort",
+        "harness",
+        "sourceDate",
+        "provenance"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The game's title."
+        },
+        "tagline": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "Game",
+            "Tech demo",
+            "Tool"
+          ],
+          "description": "Always one of the three: Game unless the agent says otherwise. A genre written as the type goes to genre (if there is none)."
+        },
+        "genre": {
+          "type": "string",
+          "examples": [
+            "Action",
+            "Adventure",
+            "Fighting",
+            "Flight",
+            "Horror",
+            "Kids & Learning",
+            "Life Sim",
+            "Platformer",
+            "Puzzle",
+            "Racing",
+            "RPG",
+            "Shooter",
+            "Simulation",
+            "Sports",
+            "Stealth",
+            "Strategy",
+            "Tech Demo",
+            "Graphics"
+          ],
+          "description": "One of the catalogue's genres when it matches one whatever its case; else as the agent wrote it."
+        },
+        "source": {
+          "type": "string",
+          "description": "The work the game is based on."
+        },
+        "series": {
+          "type": "string",
+          "description": "Its franchise."
+        },
+        "players": {
+          "type": "string",
+          "examples": [
+            "1",
+            "1–2",
+            "1–4"
+          ],
+          "description": "A range is written with an en dash."
+        },
+        "controls": {
+          "type": "string",
+          "description": "One line."
+        },
+        "tags": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Lowercase, no repeats."
+        },
+        "themeColor": {
+          "type": "string",
+          "pattern": "^#[0-9a-f]{3,8}$"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Claude Opus 5.5",
+            "GPT-6.1 Sol",
+            "Gemini 4 Argon"
+          ],
+          "description": "The model the run used, by the name the wall gives it."
+        },
+        "effort": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "medium",
+            "xhigh",
+            "max",
+            "high-ultracode"
+          ]
+        },
+        "harness": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "examples": [
+            "Claude Code",
+            "Codex",
+            "Grok",
+            "Antigravity",
+            "Muse Code"
+          ],
+          "description": "The agent's CLI."
+        },
+        "sourceDate": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "When the run started (UTC): the date ai-hub sorts by."
+        },
+        "provenance": {
+          "type": "object",
+          "description": "What ai-hub's import registry keeps for a game.",
+          "required": [
+            "sourceKind",
+            "artifactId",
+            "sourceDate"
+          ],
+          "properties": {
+            "sourceKind": {
+              "const": "cc-matrix-run"
+            },
+            "artifactId": {
+              "type": "string",
+              "description": "The run's id."
+            },
+            "sourceDate": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "format": "date-time"
+            }
+          }
+        }
+      },
+      "additionalProperties": {
+        "description": "Any other hub:* field from the game's <head> (session, sessionPlayers, sessionMode, sessionMinutes, sessionGoal, sessionHowto, webgpu …) or the agent's answers."
+      }
+    },
+    "result": {
+      "description": "The run's result.json as the runner wrote it, minus sessionId and plan. Every dimension's variant is a field of its own (source, goal …). The README's Notes describe each field.",
+      "type": "object",
+      "required": [
+        "id",
+        "agent",
+        "provider",
+        "model",
+        "effort",
+        "status",
+        "startedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "agent": {
+          "type": "string"
+        },
+        "provider": {
+          "enum": [
+            "claude",
+            "codex",
+            "grok",
+            "agy",
+            "muse"
+          ]
+        },
+        "model": {
+          "type": "string"
+        },
+        "effort": {
+          "type": "string"
+        },
+        "ultracode": {
+          "type": "boolean"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "chain": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "stage": {
+                "type": "string"
+              },
+              "agent": {
+                "type": "string"
+              },
+              "effort": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "parentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cliVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "promptVersion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "variantHashes": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "failed"
+          ]
+        },
+        "exitCode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "wallMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "apiMinutes": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "costUsd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "What the CLI reported (Claude Code, Grok)."
+        },
+        "apiCostUsd": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "description": "The run's tokens at the labs' public API list prices."
+        },
+        "inputTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "uncachedInputTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cachedTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cacheWriteTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "outputTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reasoningTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "totalTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "models": {
+          "type": "object",
+          "description": "Tokens and cost per model."
+        },
+        "delivered": {
+          "type": "boolean"
+        },
+        "entry": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The game's path from the runs folder: <id>/work/<file>.html."
+        },
+        "kb": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "loc": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "todos": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "gameSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The game as the agent left it, without this record."
+        },
+        "exitInterview": {
+          "enum": [
+            "ok",
+            "invalid",
+            "missing"
+          ]
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "finishedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "timeZone": {
+          "type": "string",
+          "description": "The computer's time zone: the folder name and {{stamp}} are local time."
+        }
+      }
+    },
+    "prompt": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A hash of the template (result.promptVersion)."
+        },
+        "number": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Its number in prompt-history.json (v1, v2 …)."
+        },
+        "savedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "When that version's template was last saved."
+        },
+        "firstRanAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "format": "date-time",
+          "description": "When a batch first ran that version."
+        },
+        "template": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The template, with each section's {{placeholder}}."
+        },
+        "text": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The prompt as filled for this run (TASK.md for a /goal or stage run)."
+        },
+        "stageText": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "A stage run's own text, what it was sent."
+        },
+        "goal": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The /goal message sent."
+        },
+        "sections": {
+          "type": "object",
+          "description": "Each dimension's variant, in the prompt's order.",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "text": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "As sent; null when that can't be told any more."
+              },
+              "hash": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "interview": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "enum": [
+            "exit-interview.json",
+            null
+          ],
+          "description": "Where the answers came from; null when the run left none."
+        },
+        "answers": {
+          "type": "object",
+          "description": "exit-interview.json as the agent wrote it, except that a list of answers under a dimension's name (testingFeedback, engineFeedback, promptFeedback) is paired with that dimension's questions.",
+          "properties": {
+            "sourceInformation": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "testingFeedback": {
+              "$ref": "#/$defs/answers"
+            },
+            "engineFeedback": {
+              "$ref": "#/$defs/answers"
+            },
+            "promptFeedback": {
+              "$ref": "#/$defs/answers"
+            },
+            "aiHub": {
+              "type": "object",
+              "description": "The agent's catalogue answers as written; the top-level aiHub has them the catalogue's way."
+            }
+          }
+        },
+        "error": {
+          "type": "string",
+          "description": "Why the file couldn't be read as one JSON object."
+        },
+        "text": {
+          "type": "string",
+          "description": "The file as written, when it couldn't be."
+        },
+        "reply": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The agent's final reply (reply.md)."
+        }
+      }
+    },
+    "answers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "question": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "answer": {}
+        }
+      }
+    }
+  }
+}
