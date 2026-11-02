@@ -17,7 +17,9 @@ const CLIS = ['claude', 'codex', 'grok', 'agy', 'muse'];
 export function sandbox({ agents, dimensions, template = 'Make a small game.\n\nTesting: {{testing}}\n', bins = {}, ...extra }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-test-'));
   fs.writeFileSync(path.join(dir, 'prompt.md'), template);
-  const cfg = { templateFile: 'prompt.md', agents, dimensions, bins: { ...Object.fromEntries(CLIS.map((p) => [p, path.join(FAKE, p)])), ...bins }, ...extra };
+  // startGap 0: a batch's runs start together, not 3 s apart, so tests take no longer than their runs (a test can
+  // pass startGap: undefined for the default).
+  const cfg = { templateFile: 'prompt.md', agents, dimensions, bins: { ...Object.fromEntries(CLIS.map((p) => [p, path.join(FAKE, p)])), ...bins }, startGap: 0, ...extra };
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(cfg, null, 2));
   const sb = { dir, config: path.join(dir, 'config.json'), out: path.join(dir, 'runs'), log: path.join(dir, 'fake.log') };
   // The fake codex and grok write their session logs here, and the fake claude its transcripts (and the runner

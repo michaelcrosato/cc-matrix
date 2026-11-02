@@ -388,26 +388,43 @@ test('folder names from folderName: the source and start time, then the game\'s 
     template: 'SOURCE: {{source}}\n{{package}}\n', folderName: { fields: ['source'], date: true, title: true } });
   t.after(() => cleanup(sb));
   const dry = JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim());
-  assert.ok(dry.ids.every((id) => /^opus-low__(zelda|bad)__\d{8}-\d{4}$/.test(id)), dry.ids.join(' ')); // no code: what's left out has one variant
+  assert.ok(dry.ids.every((id) => /^opus-low__(zelda|bad)__\d{8}-\d{6}$/.test(id)), dry.ids.join(' ')); // no code: what's left out has one variant
   const r = runner(sb, []);
   assert.equal(r.status, 0, r.all);
   const ok = allResults(sb).find((x) => x.status === 'ok'), failed = allResults(sb).find((x) => x.status !== 'ok');
   // Named when it started (the same stamp the prompt gave the game), then the title once the game was there.
-  const [, stamp] = ok.id.match(/^opus-low__zelda__(\d{8}-\d{4})__MothOfTheWild$/) ?? [];
+  const [, stamp] = ok.id.match(/^opus-low__zelda__(\d{8}-\d{6})__MothOfTheWild$/) ?? [];
   assert.ok(stamp, ok.id);
   assert.equal(ok.entry, `${ok.id}/work/MothOfTheWild-Zelda-BOTW-claude-opus-5-5-low-${stamp}.html`);
   assert.ok(fs.existsSync(path.join(sb.out, ok.entry)));
   assert.match(r.all, new RegExp(`✔ opus-low__zelda__${stamp}  .* → ${ok.id}`));
-  assert.match(failed.id, /^opus-low__bad__\d{8}-\d{4}$/); // no game, no title
+  assert.match(failed.id, /^opus-low__bad__\d{8}-\d{6}$/); // no game, no title
   // Matched by their fields: both count as done (the failed one too, without Retry failed).
   assert.equal(JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()).alreadyDone, 2);
-  // A left-out field with two variants adds the code, so runs started the same minute don't share a folder.
+  // A left-out field with two variants adds the code, so runs started the same second (startGap 0, as here) don't share a folder.
   const cfg = JSON.parse(fs.readFileSync(sb.config, 'utf8'));
   cfg.dimensions.package.push({ id: 'q', text: 'File: G-{{model}}' });
   fs.writeFileSync(sb.config, JSON.stringify(cfg));
   const ids = JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()).ids;
   assert.equal(new Set(ids).size, 4);
-  assert.ok(ids.every((id) => /__\d{8}-\d{4}__x[0-9a-f]{6}$/.test(id)), ids.join(' '));
+  assert.ok(ids.every((id) => /__\d{8}-\d{6}__x[0-9a-f]{6}$/.test(id)), ids.join(' '));
+});
+
+test('the runs of a batch start 3 s apart unless the config says otherwise, so each gets its own start time', (t) => {
+  const sb = sandbox({ agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low', 'high'] }],
+    dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, template: 'SOURCE: {{source}}\nStarted {{stamp}}, {{date}}\n',
+    folderName: { fields: ['source'], date: true }, startGap: undefined });
+  t.after(() => cleanup(sb));
+  const r = runner(sb, ['-j', '2']);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /\(concurrency 2, starting 3 s apart\)/);
+  const [a, b] = allResults(sb).sort((x, y) => x.startedAt.localeCompare(y.startedAt));
+  assert.ok(Date.parse(b.startedAt) - Date.parse(a.startedAt) >= 2900, `${a.startedAt} → ${b.startedAt}`); // not both at once, though there was room
+  const stamps = [a, b].map((x) => x.id.match(/^opus-(?:low|high)__z__(\d{8}-\d{6})$/)?.[1]);
+  assert.ok(stamps[0] && stamps[1] && stamps[0] !== stamps[1], stamps.join(' '));
+  // {{stamp}} and {{date}} are the moment that names the folder, to the second.
+  const [, y, mo, d, hh, mm, ss] = stamps[0].match(/^(\d{4})(\d\d)(\d\d)-(\d\d)(\d\d)(\d\d)$/);
+  assert.match(fs.readFileSync(path.join(sb.out, a.id, 'prompt.md'), 'utf8'), new RegExp(`Started ${stamps[0]}, ${y}-${mo}-${d} ${hh}:${mm}:${ss}\\n`));
 });
 
 test('stages with the models set for them in the config (--stages); --stage replaces a stage\'s', (t) => {
@@ -423,8 +440,8 @@ test('stages with the models set for them in the config (--stages); --stage repl
   const r = runner(sb, ['--stages', '--stage', 'build=sol:max']);
   assert.equal(r.status, 0, r.all);
   const all = allResults(sb), plan = all.find((x) => x.stage === 'plan'), build = all.find((x) => x.stage === 'build'), content = all.find((x) => x.stage === 'content');
-  assert.match(plan.id, /^opus-max\.plan__z__\d{8}-\d{4}$/); // a plan makes no game: no title
-  assert.match(build.id, /^sol-max\.build__z__\d{8}-\d{4}__x[0-9a-f]{6}__Fake-Game$/);
+  assert.match(plan.id, /^opus-max\.plan__z__\d{8}-\d{6}$/); // a plan makes no game: no title
+  assert.match(build.id, /^sol-max\.build__z__\d{8}-\d{6}__x[0-9a-f]{6}__Fake-Game$/);
   assert.deepEqual([build.parentId, content.parentId, content.status], [plan.id, build.id, 'ok']);
   assert.ok(fs.existsSync(path.join(sb.out, content.id, 'work', 'Fake-Game-gpt-6.1-sol.html')), 'the content pass got the build\'s game');
 });

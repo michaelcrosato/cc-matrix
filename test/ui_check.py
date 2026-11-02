@@ -37,7 +37,8 @@ cfg = {'templateFile': 'prompt.md', 'agents': [
   'dimensions': {'source': [{'id': 'kart', 'text': 'A kart racer'}],
                  'testing': [{'id': 'light', 'text': 'Keep testing light.'}, {'id': 'thorough', 'text': 'Test thoroughly. FAKE:todo'},
                              {'id': 'broken', 'text': 'FAKE:fail=You have hit your usage limit (429)'}]},
-  'bins': {p: os.path.join(FAKE, p) for p in ['claude', 'codex', 'grok', 'agy', 'muse']}}
+  'bins': {p: os.path.join(FAKE, p) for p in ['claude', 'codex', 'grok', 'agy', 'muse']},
+  'startGap': 0}  # runs start together, not 3 s apart: the live checks expect two running at once
 json.dump(cfg, open(os.path.join(tmp, 'config.json'), 'w'), indent=2)
 open(os.path.join(tmp, 'prompt.md'), 'w').write('Make {{source}}.\n\nTesting: {{testing}}\n')
 runs, conf = os.path.join(tmp, 'runs'), os.path.join(tmp, 'config.json')
