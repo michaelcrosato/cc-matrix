@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { sandbox, cleanup, runner, result, dashboard, ROOT } from './helpers.mjs';
-import { displayModel, hubFields, parseInterview, readRecord, stampHtml } from '../run-record.mjs';
+import { displayModel, hubFields, parseInterview, readRecord, renameInRecord, stampHtml, unstamped } from '../run-record.mjs';
 
 const RECORD = path.join(ROOT, 'run-record.mjs');
 const runIds = (sb, out = sb.out) => fs.readdirSync(out).filter((d) => fs.existsSync(path.join(out, d, 'result.json')));
@@ -144,6 +144,52 @@ test('stamping again keeps the texts the run was sent, paths are written from ~,
   assert.equal(o.record.prompt.text, 'the old prompt'); assert.equal(o.record.prompt.number, 3);
   assert.deepEqual(o.record.prompt.sections.testing, { id: 'a', text: 'old text', hash: null });
   assert.equal(o.record.interview.reply, 'old reply'); assert.equal(o.record.aiHub.model, 'Claude Opus 5.5');
+});
+
+test('--rename-variant files the runs that used an earlier text under a name of their own, in result.json and the game', async (t) => {
+  const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'first text' }] }, agents: [opus(['low'])], folderName: { fields: ['testing'], date: true } });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  const [id] = runIds(sb), file = path.join(sb.out, result(sb, id).entry), before = fs.readFileSync(file, 'utf8'), hash = result(sb, id).variantHashes.testing;
+  // The text edited by hand under the same short name: the run counts as done for the new text.
+  const cfg = JSON.parse(read(sb.dir, 'config.json')), edit = (text) => { cfg.dimensions.testing[0].text = text; fs.writeFileSync(sb.config, JSON.stringify(cfg)); };
+  const done = () => JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()).alreadyDone;
+  edit('second text');
+  assert.equal(done(), 1);
+  // With --dry-run it only says which runs would move.
+  const said = runner(sb, ['--rename-variant', 'testing:a=a-old', '--dry-run']);
+  assert.equal(said.status, 0, said.all);
+  assert.match(said.stdout, new RegExp(`testing "a" → "a-old": 1 run\\(s\\) \\(text ${hash}\\) would move\\n  ${id}\\n`));
+  assert.equal(result(sb, id).testing, 'a');
+  // Moved: the name in result.json and the game's record; the text sent, its hash and the game stay as they were.
+  assert.equal(runner(sb, ['--rename-variant', 'testing:a=a-old']).status, 0);
+  const r = result(sb, id), rec = recordOf(sb, id), after = fs.readFileSync(file, 'utf8');
+  assert.equal(r.testing, 'a-old'); assert.equal(r.variantHashes.testing, hash);
+  assert.equal(rec.result.testing, 'a-old');
+  assert.deepEqual(rec.prompt.sections.testing, { id: 'a-old', text: 'first text', hash });
+  assert.deepEqual(renameInRecord(readRecord(before), 'testing', 'a', 'a-old'), rec);
+  assert.equal(unstamped(after), unstamped(before));
+  assert.match(read(sb.out, 'results.csv'), /,a-old,/);
+  assert.equal(done(), 0); // the new text runs now
+  // Nothing left to move. A name runs used for other text, or a spec it can't read, is refused and nothing changes.
+  assert.match(runner(sb, ['--rename-variant', 'testing:a=a-old']).stdout, /: 0 run\(s\)\n/);
+  await new Promise((ok) => setTimeout(ok, 1000)); // a folder named in another second
+  assert.match(runner(sb, []).all, /✔ opus-low__a__/);
+  edit('third text');
+  const clash = runner(sb, ['--rename-variant', 'testing:a=a-old']);
+  assert.equal(clash.status, 1); assert.match(clash.all, /1 run\(s\) used testing "a-old" for other text/);
+  assert.deepEqual(runIds(sb).map((x) => result(sb, x).testing).sort(), ['a', 'a-old']);
+  assert.match(runner(sb, ['--rename-variant', 'testing:a']).all, /write it dimension:old=new/);
+  assert.match(runner(sb, ['--rename-variant', 'audio:a=b']).all, /no dimension "audio"/);
+  // Folders named without the date: a moved run keeps the folder a new run of the old name would get, and that's said.
+  const plain = sandbox({ dimensions: { testing: [{ id: 'a', text: 'first text' }] }, agents: [opus(['low'])] });
+  t.after(() => cleanup(plain));
+  assert.equal(runner(plain, []).status, 0);
+  fs.writeFileSync(plain.config, JSON.stringify({ ...JSON.parse(read(plain.dir, 'config.json')), dimensions: { testing: [{ id: 'a', text: 'second text' }] } }));
+  assert.match(runner(plain, ['--rename-variant', 'testing:a=a-old', '--dry-run']).stdout, /opus-low__a {2}⚠ a new run of "a" would get this folder/);
+  // A schema 1 record (stamped before 2026-11-02) keeps the name in its own places.
+  assert.deepEqual(renameInRecord({ schema: 1, testing: 'a', variants: { testing: { id: 'a', text: 't' } } }, 'testing', 'a', 'b'),
+    { schema: 1, testing: 'b', variants: { testing: { id: 'b', text: 't' } } });
 });
 
 test('the dashboard\'s run history comes back from the games alone (run-record.mjs rebuild)', async (t) => {

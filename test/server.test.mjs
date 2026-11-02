@@ -215,6 +215,26 @@ test('prompt history: saving edits numbers nothing, a batch does (and the page h
   assert.deepEqual([old.id, old.audio, old.predates], ['opus-low__a', 'free', ['audio']]);
 });
 
+test('variants runs used: their text from the config while it matches, else read back out of the prompt they were sent', async (t) => {
+  const s = sandbox({ template: 'SOURCE: {{source}}\n\nPremise: a successor to {{source}}, {{premise}}\n\nTesting: {{testing}}\n',
+    dimensions: { source: [{ id: 'kart', text: 'A kart racer' }], premise: [{ id: 'succ', text: 'remade as {{source}} would be today' }],
+      testing: [{ id: 'a', text: 'Test it.\n\nTwice.' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  assert.equal(runner(s, []).status, 0);
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const ran = { source: [{ id: 'kart', text: 'A kart racer', runs: 1 }], premise: [{ id: 'succ', text: 'remade as {{source}} would be today', runs: 1 }],
+    testing: [{ id: 'a', text: 'Test it.\n\nTwice.', runs: 1 }] };
+  assert.deepEqual((await dd.api('/api/variants')).json, ran);
+  // every text edited since and the source swapped: what ran is read back, the {{source}} in premise's text put back
+  const cfg = (await dd.api('/api/config')).json.config;
+  cfg.dimensions.source = [{ id: 'golf', text: 'A golf game' }];
+  cfg.dimensions.premise[0].text = 'changed'; cfg.dimensions.testing[0].text = 'changed';
+  assert.equal((await dd.api('/api/config', 'PUT', cfg)).status, 200);
+  await new Promise((r) => setTimeout(r, 1000)); // past the signature cache
+  assert.deepEqual((await dd.api('/api/variants')).json, ran);
+});
+
 test('a running batch takes changes: limits, pause and ending a run, checked first and answered with its state', async (t) => {
   const sb2 = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: `FAKE:sleep=1500 ${id}` })) },
     agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });

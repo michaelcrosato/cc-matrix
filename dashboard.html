@@ -57,6 +57,7 @@ section.tab { display: none; } section.tab.on { display: block; }
 input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 6px 8px; min-width: 0; max-width: 100%; }
 select { text-overflow: ellipsis; }
 textarea { width: 100%; resize: vertical; }
+textarea.fit { field-sizing: content; } /* opens as tall as its text and grows as you type; rows is the fallback */
 input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 button:focus-visible, a:focus-visible, summary:focus-visible, .chip:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
 .invalid { border-color: var(--bad) !important; background: color-mix(in srgb, var(--bad) 8%, var(--bg)); }
@@ -73,6 +74,8 @@ thead.srhead th { padding: 0; border: 0; height: 0; line-height: 0; }
 thead.srhead { display: table-header-group; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 button.icon:hover { background: var(--chip); color: var(--ink); }
+button.icon.pin { font-size: 12px; } button.icon.pin.on { color: var(--accent); font-weight: 600; }
+.pinrow { display: flex; gap: 8px; align-items: baseline; padding: 4px 0; border-bottom: 1px solid var(--line); } .pinrow button { flex: none; min-width: 5.5em; white-space: nowrap; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
@@ -190,7 +193,7 @@ table.cmp td:first-child { padding-right: 24px; }
 .banner { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 14px; margin-bottom: 16px; border-radius: 10px;
   background: color-mix(in srgb, var(--warn) 12%, var(--panel)); border: 1px solid color-mix(in srgb, var(--warn) 40%, var(--line)); }
 .banner.bad { background: color-mix(in srgb, var(--bad) 10%, var(--panel)); border-color: color-mix(in srgb, var(--bad) 40%, var(--line)); }
-.filters { display: contents; }
+.filters { display: contents; } .filters select { max-width: 13em; } .filters select.on { max-width: 26em; } /* options carry text; a set filter shows it whole */
 .filtertoggle { display: none; }
 select.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); background: var(--soft); }
 .only-phone, .cardsort { display: none; }
@@ -517,6 +520,41 @@ const DEFAULT_STAGES = [
     text: 'The game in this folder was built from TASK.md and PLAN.md; the steps so far: {{chain}}. Its framework is done. Your job is content and polish on top of it: more of what TASK.md asks for (levels, enemies, items, quests, music, effects, story) and fixes for anything broken. Keep the game\'s title, engine and architecture, and extend them rather than starting over. Save the result as a new bundled single .html in this folder\'s root, named as TASK.md says but with the game\'s current title, and in your final reply list what you added and give the sections TASK.md asks for.',
     goal: 'a new bundled single .html with the added content exists in this folder\'s root, nothing that worked before is broken, and your final reply lists what you added and contains the Source Information, Engine Feedback and Prompt Feedback sections.' },
 ];
+// The pins a config starts with (see pinsOf), per field name. Most fields get "use the source", "your choice" and,
+// where the engine has a say, "use the engine"; a text already run here is word for word the same, so picking it keeps
+// that variant's name and its runs count.
+const DEFAULT_PINS = {
+  source: [{ id: 'game', text: 'Pick a famous video game' }, { id: 'book', text: 'Pick a famous book' }, { id: 'movie', text: 'pick a famous movie' },
+    { id: 'tvshow', text: 'pick a famous tv show' }, { id: 'src-free', text: 'Your choice: any famous game, book, movie or TV show' }],
+  genre: [{ id: 'genre-src', text: 'Use the source\'s genre.' }, { id: 'genre', text: 'pick what would make the most interesting game' }],
+  perspective: [{ id: 'pov-src', text: 'Use the source\'s perspective.' },
+    { id: 'pov-engine', text: 'use one of the games engine native perspectives, allow the player to switch perspectives, but pick a main one' },
+    { id: 'pov-free', text: 'The camera perspective is your choice.' }],
+  gameTitle: [{ id: 'ttl-free', text: 'The title is your choice.' }],
+  research: [{ id: 'res-src', text: 'Research the source before you start: its mechanics, levels, enemies, look and sound.' },
+    { id: 'res-free', text: 'Whether and how much to research is your choice.' }, { id: 'res-none', text: 'Don\'t research; work from what you already know.' }],
+  techStack: [{ id: 'tech-free', text: 'The tech stack is your choice.' }],
+  artDirection: [{ id: 'art-src', text: 'Match the source\'s art style.' }, { id: 'engine', text: 'use the engine native style' },
+    { id: 'art-free', text: 'The art direction is your choice.' }],
+  animation: [{ id: 'ani-src', text: 'Animate the way the source does: its style, timing and feel.' }, { id: 'engine', text: 'use the engine native system' },
+    { id: 'ani-free', text: 'Animation technique and implementation is your choice' }],
+  audio: [{ id: 'aud-src', text: 'Match the source\'s music and sound style.' }, { id: 'aud-free', text: 'Music, sound effects and voice work are your choice.' }],
+  online: [{ id: 'online-src', text: 'Use the source\'s online features, or none if it had none.' }, { id: 'online-free', text: 'Online features are your choice.' },
+    { id: 'online-none', text: 'No online features.' }],
+  performance: [{ id: 'perf-free', text: 'Performance and level of detail are your choice.' },
+    { id: 'perf-60', text: 'Hold 60 fps on a mid-range laptop; scale detail to fit.' }],
+  testing: [{ id: 'test-free', text: 'How much to test is your choice.' },
+    { id: 'test-full', text: 'Test thoroughly: automated tests for every system and a full playthrough before you finish.' },
+    { id: 'test-none', text: 'Don\'t write or run tests.' }],
+  premise: [{ id: 'prem-remake', text: 'Build a faithful remake of {{source}}.' },
+    { id: 'prem-free', text: 'Build an original game inspired by {{source}}; how close to stay to it is your choice.' }],
+  attractMode: [{ id: 'attr-none', text: 'No attract mode.' }],
+  multiplayer: [{ id: 'mp-src', text: 'Use the source\'s multiplayer modes, or none if it had none.' }, { id: 'mp-free', text: 'Multiplayer is your choice.' },
+    { id: 'mp-none', text: 'Single player only.' }],
+  tone: [{ id: 'tone-free', text: 'The writing style and tone are your choice.' }],
+  uiux: [{ id: 'ui-src', text: 'Use the source\'s menus, HUD and controls as a guide, modernized where it helps.' }, { id: 'ui-free', text: 'UI and UX are your choice.' }],
+  goal: [{ id: 'off', text: '' }],
+};
 const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join('>');
 // The efforts a stage can pick for a model: all it takes (not only the ones ticked for the matrix), with Ultracode on Claude Code.
 const stageEfforts = (a) => effortOptions(a).filter((e) => !e.startsWith('default'));
@@ -556,6 +594,8 @@ let clis = {}, cliCheckedAt = null, cliError = null, smokes = {}, smokeGoal = st
 let rev = {}, onDisk = false, audit = null, offline = false;
 // prompts: every version of the prompt, oldest first: { v, hash, at, text } (runs/prompt-history.json).
 let prompts = [];
+// variantLib: every variant finished runs used, per dimension: { id, text, runs }, text null when it can't be told (/api/variants).
+let variantLib = {};
 // View state that isn't worth a URL: open panels, per browser.
 let ui = store.get('matrix.ui', { saveOpen: null, filtersOpen: false, auditFilter: { sev: '', area: '', status: '', unread: false } });
 const saveUi = () => store.set('matrix.ui', ui);
@@ -797,6 +837,7 @@ function validate() {
     vs.forEach((v, i) => {
       if (!/^[\w.-]+$/.test(v.id || '')) errors.push(`${d} variant ${i + 1}: short name must be letters, numbers, - _ or .`);
       else if (vids.has(v.id)) errors.push(`${d}: short name "${v.id}" is used twice`);
+      else { const n = takenBy(d, v); if (n) errors.push(`${d}: ${takenNote(v, n)}`); }
       vids.add(v.id);
     });
   }
@@ -843,7 +884,7 @@ function validate() {
   // A variant edited after it ran: those runs still count as done, so the new text wouldn't run.
   for (const [d, vs] of Object.entries(cfg.dimensions)) for (const v of vs) {
     const n = results.filter((r) => r[d] === v.id && r.changed?.includes(d)).length;
-    if (n) warnings.push(`${d} "${v.id}": ${plural(n, 'finished run')} used different text. They count as done, so the new text won't run for them: give the variant a new short name to run it and keep the old runs apart`);
+    if (n) warnings.push(`${d} "${v.id}": ${plural(n, 'finished run')} used its earlier text. They count as done for its text now, so that won't run for them. To give them a name of their own: node run-matrix.mjs --rename-variant ${d}:${v.id}=new-name`);
   }
   return { errors, warnings, used };
 }
@@ -859,7 +900,7 @@ async function save() {
     meta.promptVersion = r.version; meta.savedAt = r.savedAt;
     if (r.rev) Object.assign(rev, { config: r.rev.config, template: r.rev.template }); // our own save isn't a change on disk
   } catch (e) { alert(`Couldn't save: ${e.message}`); return false; }
-  savedCfg = c; savedTmpl = t; onDisk = false;
+  savedCfg = c; savedTmpl = t; onDisk = false; edits = new WeakMap(); // saved: the notes on renamed variants have been read
   await loadResults(); // which runs used a variant's old text depends on the saved config
   render();
   return true;
@@ -873,6 +914,121 @@ function changed(rerender) {
   if (rerender) render(); else updateSavebar();
 }
 const moveIn = (arr, i, d) => { const j = i + d; if (j < 0 || j >= arr.length) return; [arr[i], arr[j]] = [arr[j], arr[i]]; };
+
+// Finished runs are matched by short name, so a name stands for one text: a variant's text edited after it ran gets a
+// new name (nameFor), and a name runs used for other text is taken (takenBy). prevVariants: the variants runs used.
+const prevVariants = (d) => variantLib[d] ?? [];
+let savedParse = { src: null, cfg: {} };
+const savedConfig = () => savedParse.src === savedCfg ? savedParse.cfg : (savedParse = { src: savedCfg, cfg: JSON.parse(savedCfg || '{}') }).cfg;
+// How many finished runs used v's short name, if none of them used its text (else 0). A variant as saved is left
+// be: the "used different text" warning covers one edited before names were kept apart.
+function takenBy(d, v) {
+  if (v.text == null) return 0; // its text is in a file
+  const t = v.text.trim(), same = prevVariants(d).filter((p) => p.id === v.id);
+  if (!same.length || same.some((p) => p.text === t)) return 0;
+  if (savedConfig().dimensions?.[d]?.some((x) => x.id === v.id && (x.text ?? '').trim() === t)) return 0;
+  return same.reduce((n, p) => n + p.runs, 0);
+}
+const takenNote = (v, n) => `${plural(n, 'finished run')} used "${v.id}" for other text, so this text needs its own short name`;
+// Whether a short name is spoken for in dimension d: another of its variants has it, or finished runs used it.
+const nameUsed = (d, id, self) => cfg.dimensions[d].some((x) => x !== self && x.id === id) || prevVariants(d).some((p) => p.id === id);
+const flat = (s) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const kebabOf = (t) => t.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('-').slice(0, 40);
+let edits = new WeakMap(); // variant -> { id, text } before it was first edited here (since the last save)
+// The short name for v's text as it now is: the one it had while the text is as it was, a previous variant's when
+// the text is one that ran before (so those runs count), the same while no run has used it; else a new one, made from
+// the text when the old name was made from the old text (Alien Soldier → alien-soldier), otherwise name-v2, -v3 …
+// {{source}} names the work, so its names always come from its text, a new variant's (v5) too.
+function nameFor(d, v) {
+  const was = edits.get(v), t = (v.text ?? '').trim(), source = d === 'source';
+  if (t === was.text) return was.id;
+  const before = prevVariants(d).find((p) => p.text === t && !cfg.dimensions[d].some((x) => x !== v && x.id === p.id));
+  if (before) return before.id;
+  if (!prevVariants(d).some((p) => p.id === was.id) && !(source && !was.text && /^v\d+$/.test(was.id))) return was.id;
+  const fromText = source || (flat(was.id) && flat(was.id) === flat(was.text)) ? (/[A-Z]/.test(was.id) && !was.id.includes('-') ? slugOf : kebabOf)(t) : '';
+  if (fromText) { let id = fromText; for (let n = 2; nameUsed(d, id, v); n++) id = `${fromText}-${n}`; return id; }
+  const m = was.id.match(/^(.*)-v(\d+)$/), stem = m ? m[1] : was.id;
+  let n = m ? +m[2] + 1 : 2;
+  while (nameUsed(d, `${stem}-v${n}`, v)) n++;
+  return `${stem}-v${n}`;
+}
+// "+ Add variant": v1, v2 … not yet used.
+const newVariantId = (d) => { let n = cfg.dimensions[d].length + 1; while (nameUsed(d, 'v' + n)) n++; return 'v' + n; };
+// Under a variant whose name nameFor changed: why.
+function renameNote(d, v) {
+  const was = edits.get(v);
+  if (!was || v.id === was.id) return null;
+  const runs = (id, same) => prevVariants(d).filter((p) => p.id === id && (p.text === (v.text ?? '').trim()) === same).reduce((n, p) => n + p.runs, 0);
+  const n = runs(v.id, true);
+  if (n) return `Now "${v.id}": ${plural(n, 'finished run')} used this text, so ${n === 1 ? 'it counts' : 'they count'} for it.`;
+  const m = runs(was.id, false);
+  return m ? `New short name: ${plural(m, 'finished run')} of "${was.id}" used its old text, so the new text runs on its own. Put the old text back to keep "${was.id}".` : null;
+}
+const lineOf = (t, n) => { const s = t.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s || '(empty)'; };
+// A variant as "+ Add…" and the Results and Insights filters all show it: short name · text · runs (no text when it
+// says no more than the name).
+const variantLabel = (id, text, runs) => [id, text?.trim() && flat(text) !== flat(id) ? lineOf(text, 40) : null, runs ? plural(runs, 'run') : null].filter(Boolean).join(' · ');
+// Pinned variants per field, the ones you use often: listed first in "+ Add…", and pinned or unpinned on a variant's
+// row or in "Pin or unpin…". Saved in the config as `pinned` ({ dim: [{ id, text }] }); one without it starts from
+// DEFAULT_PINS, written in at the first pin or unpin.
+const pinsOf = (d) => (cfg.pinned ?? DEFAULT_PINS)[d] ?? [];
+const isPinned = (d, text) => pinsOf(d).some((p) => p.text === (text ?? '').trim());
+function setPin(d, v, on) {
+  cfg.pinned ??= structuredClone(DEFAULT_PINS);
+  const t = (v.text ?? '').trim(), list = (cfg.pinned[d] ?? []).filter((p) => p.text !== t);
+  if (on) list.push({ id: v.id, text: t });
+  if (list.length) cfg.pinned[d] = list; else delete cfg.pinned[d];
+  changed(true); refreshModal();
+}
+const pinButton = (d, v) => { const on = isPinned(d, v.text);
+  return h('button', { class: 'icon pin' + (on ? ' on' : ''), 'aria-pressed': String(on), 'aria-label': `${on ? 'Unpin' : 'Pin'} ${d} variant ${v.id}`,
+    title: on ? 'Pinned: listed first in + Add…. Click to unpin.' : 'Pin it: list it first in + Add…, for variants you use often', onclick: () => setPin(d, v, !on) }, on ? 'pinned' : 'pin'); };
+// The name a pinned variant gets when added: the one its text ran under (its own if that's one of them, else the most
+// run), so those runs count; else its own, made free (-2 …).
+function pinName(d, p) {
+  const ran = prevVariants(d).filter((x) => x.text === p.text && !cfg.dimensions[d].some((v) => v.id === x.id)).sort((a, b) => b.runs - a.runs);
+  if (ran.some((x) => x.id === p.id)) return p.id;
+  if (ran.length) return ran[0].id;
+  let id = p.id; for (let n = 2; nameUsed(d, id); n++) id = `${p.id}-${n}`;
+  return id;
+}
+const pinLabel = (d, id, text, runs) => text ? variantLabel(id, text, runs) : `${id} · ${d === GOAL_DIM ? 'no goal' : 'empty'}`;
+// "+ Add…" on each dimension card: its pinned variants, then the ones finished runs used that it doesn't have now, as
+// Results' filters list them; each text once. Picking one adds it with its name and text. Last, "Pin or unpin…".
+function addSelect(d, vs) {
+  const texts = new Set(vs.map((v) => (v.text ?? '').trim()));
+  const pins = pinsOf(d).filter((p) => !texts.has(p.text)).map((p) => {
+    const id = pinName(d, p), runs = prevVariants(d).filter((x) => x.id === id && x.text === p.text).reduce((n, x) => n + x.runs, 0);
+    return { id, text: p.text, runs }; });
+  const shown = new Set([...texts, ...pins.map((p) => p.text)]);
+  const prev = prevVariants(d).filter((p) => p.text != null && !shown.has(p.text) && !vs.some((v) => v.id === p.id))
+    .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+  if (!pins.length && !prev.length) return null;
+  const all = [...pins, ...prev];
+  return h('select', { 'aria-label': `Add a pinned ${d} variant or one that ran before`, style: 'max-width:100%; width:auto',
+      title: 'Your pinned variants for this field, then the ones finished runs used that aren\'t here now (as Results\' filters list them). Picking one adds it with its short name and text; one that ran keeps its name, so its runs count.',
+      onchange: (e) => { if (e.target.value === 'pins') { e.target.value = ''; return pinsModal(d); }
+        const p = all[+e.target.value]; if (p) { vs.push({ id: p.id, text: p.text }); changed(true); } } },
+    h('option', { value: '' }, pins.length ? `+ Add pinned or previous…` : `+ Add previous… (${prev.length})`),
+    pins.length ? h('optgroup', { label: `Pinned (${pins.length})` }, pins.map((p, i) => h('option', { value: i, title: p.text || null }, pinLabel(d, p.id, p.text, p.runs)))) : null,
+    prev.length ? h('optgroup', { label: `Ran before (${prev.length})` }, prev.map((p, i) => h('option', { value: pins.length + i, title: p.text }, variantLabel(p.id, p.text, p.runs)))) : null,
+    h('option', { value: 'pins' }, 'Pin or unpin…'));
+}
+// "Pin or unpin…": every variant the field has pinned, has now or ran before, each text once, with its pin; pinned
+// ones first, in the order they were when it opened (so a row doesn't jump when you click it).
+function pinsModal(d) {
+  const rows = new Map(), add = (id, text, runs = 0) => { const t = (text ?? '').trim(), r = rows.get(t); if (r) r.runs += runs; else rows.set(t, { id, text: t, runs }); };
+  for (const p of pinsOf(d)) add(p.id, p.text);
+  for (const v of cfg.dimensions[d] ?? []) if (v.text != null) add(v.id, v.text);
+  for (const p of prevVariants(d)) if (p.text != null) add(p.id, p.text, p.runs);
+  const list = [...rows.values()].sort((a, b) => isPinned(d, b.text) - isPinned(d, a.text));
+  const view = () => h('div', {},
+    h('p', { class: 'hint', style: 'margin-top:0' }, `Pinned variants come first in {{${d}}}'s "+ Add…": pin the ones you use often. Pins are saved with Setup (Save or Ctrl+S).`),
+    list.map((r) => h('div', { class: 'pinrow', key: r.text }, pinButton(d, r),
+      h('span', {}, h('b', {}, r.id), r.text ? ` · ${lineOf(r.text, 140)}` : ` · ${d === GOAL_DIM ? 'no goal' : 'empty'}`, r.runs ? h('span', { class: 'muted' }, ` · ${plural(r.runs, 'run')}`) : null))),
+    h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn primary', onclick: () => modal.close() }, 'Done')));
+  openModal(`Pins · {{${d}}}`, view(), view);
+}
 
 // The prompt is built in the order of its fields. A field's section is its {{placeholder}}'s line with the heading
 // and blank lines above it (back to the previous field's line); moving a field moves its section with it. Null
@@ -995,9 +1151,9 @@ function stagesCard() {
             onclick: () => { x.models = x.models.filter((y) => y !== k); if (!x.models.length) delete x.models; changed(true); } }, '✕'))),
         pickSelect(x.models ?? [], (k) => { (x.models ??= []).push(k); changed(true); }, `Add a model to ${x.id}`),
         (x.models ?? []).length ? null : h('span', { class: 'hint', style: 'margin:0' }, 'none yet')),
-      h('textarea', { rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
+      h('textarea', { class: 'fit', rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
         placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt above filled for the run, is in their folder.', oninput: (e) => { x.text = e.target.value; changed(); } }),
-      h('textarea', { rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
+      h('textarea', { class: 'fit', rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
         placeholder: 'Optional: done when … (sent as /goal on Claude Code, Grok, agy and Muse, with the text above in STAGE.md; Codex gets the text alone)',
         oninput: (e) => { if (e.target.value) x.goal = e.target.value; else delete x.goal; changed(); } }))),
     h('div', { class: 'row', style: 'margin-top:10px' },
@@ -1098,11 +1254,13 @@ function renderSetup() {
     cfg.dimensions = next;
     if (cfg.omitFromName) cfg.omitFromName = cfg.omitFromName.map((x) => x === oldName ? newName : x);
     if (cfg.folderName?.fields) cfg.folderName.fields = cfg.folderName.fields.map((x) => x === oldName ? newName : x);
+    if (pinsOf(oldName).length) { cfg.pinned ??= structuredClone(DEFAULT_PINS); cfg.pinned[newName] = pinsOf(oldName); delete cfg.pinned[oldName]; }
     if (sel.offOnly[oldName]) { sel.offOnly[newName] = sel.offOnly[oldName]; delete sel.offOnly[oldName]; saveSel(); }
   };
   const dimCards = dimNames.map((d, di) => {
     const vs = cfg.dimensions[d];
-    // Finished runs from before this dimension existed: which variant they count as, so they aren't redone.
+    // Finished runs from before this dimension existed: which variant they count as, so they aren't redone. Asked only
+    // when there's a choice: with one variant, they count as it.
     const older = results.filter((r) => r[d] == null || r.predates?.includes(d)).length, ov = olderVariant(d);
     const setOlder = (id) => { for (const v of vs) { if (v.id === id) v.olderRuns = true; else delete v.olderRuns; } changed(true); };
     return h('div', { class: 'card', key: 'dim:' + d,
@@ -1139,22 +1297,30 @@ function renderSetup() {
           if (cfg.omitFromName) { cfg.omitFromName = cfg.omitFromName.filter((x) => x !== d); if (!cfg.omitFromName.length) delete cfg.omitFromName; }
           if (cfg.folderName?.fields) cfg.folderName.fields = cfg.folderName.fields.filter((x) => x !== d); changed(true); } } }, '✕')),
       d === GOAL_DIM ? h('p', { class: 'hint', style: 'margin:-4px 0 10px' }, 'Leave a variant empty for no goal. With text, the prompt is saved as TASK.md in the run folder and the agent gets "/goal Read TASK.md … Done when: <your text>", so it keeps working across turns until the condition is checked as met. Add "or stop after N turns" to cap it. Claude Code, Grok, agy and Muse all run /goal headless (each with its own goal loop: Grok plans, builds and verifies with extra agents, so it takes longer). * Codex has no headless /goal, so its runs of a goal variant get the same prompt without /goal.') : null,
-      older && vs.length ? h('div', { class: 'row hint', style: 'margin:-4px 0 10px' },
+      older && vs.length > 1 ? h('div', { class: 'row hint', style: 'margin:-4px 0 10px' },
         h('label', { for: 'older-' + d }, `${plural(older, 'finished run')} ${older === 1 ? 'is' : 'are'} from before {{${d}}} existed. They count as`),
         h('select', { id: 'older-' + d, onchange: (e) => setOlder(e.target.value) }, vs.map((v) => h('option', { value: v.id, selected: v.id === ov }, v.id))),
         h('span', {}, 'so they aren\'t redone.')) : null,
-      vs.map((v, i) => h('div', { class: 'variant' },
-        h('input', { value: v.id, placeholder: 'short name', title: 'Short name used in folder names and filters', 'aria-label': `${d} variant short name`,
-          oninput: (e) => { v.id = e.target.value.trim(); changed(); } }),
-        h('textarea', { rows: Math.min(8, Math.max(1, Math.ceil((v.text || '').length / 110))), value: v.text ?? '', placeholder: d === GOAL_DIM ? 'Empty = no goal' : 'Text inserted into the prompt', 'aria-label': `${d} variant text`,
-          oninput: (e) => { v.text = e.target.value; changed(); } }),
+      vs.map((v, i) => { const taken = takenBy(d, v), note = renameNote(d, v);
+        return h('div', { class: 'variant' },
+        h('input', { value: v.id, placeholder: 'short name', class: taken ? 'invalid' : null, title: taken ? takenNote(v, taken) : 'Short name used in folder names and filters', 'aria-label': `${d} variant short name`,
+          oninput: (e) => { v.id = e.target.value.trim(); edits.delete(v); // named by hand: no longer renamed for its text
+            const n = takenBy(d, v); e.target.classList.toggle('invalid', !!n); e.target.title = n ? takenNote(v, n) : 'Short name used in folder names and filters';
+            changed(!!note); } }),
+        h('textarea', { class: 'fit', rows: Math.min(8, Math.max(1, Math.ceil((v.text || '').length / 110))), value: v.text ?? '', placeholder: d === GOAL_DIM ? 'Empty = no goal' : 'Text inserted into the prompt', 'aria-label': `${d} variant text`,
+          oninput: (e) => { if (!edits.has(v)) edits.set(v, { id: v.id, text: (v.text ?? '').trim() });
+            v.text = e.target.value;
+            const id = nameFor(d, v), moved = id !== v.id; v.id = id; changed(moved); } }),
         h('div', { style: 'white-space:nowrap' },
+          pinButton(d, v),
           h('button', { class: 'icon', title: 'Move up', 'aria-label': 'Move variant up', disabled: i === 0, onclick: () => { moveIn(vs, i, -1); changed(true); } }, '↑'),
           h('button', { class: 'icon', title: 'Move down', 'aria-label': 'Move variant down', disabled: i === vs.length - 1, onclick: () => { moveIn(vs, i, 1); changed(true); } }, '↓'),
-          h('button', { class: 'icon', title: 'Remove', 'aria-label': 'Remove variant', onclick: () => { vs.splice(i, 1); changed(true); } }, '✕')))),
+          h('button', { class: 'icon', title: 'Remove', 'aria-label': 'Remove variant', onclick: () => { vs.splice(i, 1); changed(true); } }, '✕')),
+        note ? h('p', { class: 'hint', style: 'grid-column:1/-1; margin:-4px 0 0' }, note) : null); }),
       h('div', { class: 'row' },
-        h('button', { class: 'btn', onclick: () => { vs.push({ id: 'v' + (vs.length + 1), text: '' }); changed(true); } }, '+ Add variant'),
-        h('button', { class: 'btn', title: 'Paste a list, one variant per line', onclick: () => bulkAdd(d, vs, changed) }, 'Bulk add…')));
+        h('button', { class: 'btn', onclick: () => { vs.push({ id: newVariantId(d), text: '' }); changed(true); } }, '+ Add variant'),
+        h('button', { class: 'btn', title: 'Paste a list, one variant per line', onclick: () => bulkAdd(d, vs, changed) }, 'Bulk add…'),
+        addSelect(d, vs)));
   });
   cfg.bins ??= {}; cfg.extraArgs ??= {};
   morph($('#tab-setup'),
@@ -1854,14 +2020,19 @@ function sortVals(f, vals) {
   const rk = (v) => { const x = rank(v); return x < 0 ? 1e9 : x; };
   return [...vals].sort((a, b) => rk(a) - rk(b) || String(a).localeCompare(String(b), undefined, { numeric: true }));
 }
-// One dropdown per field, for a view's filters (state.filters[field] = value).
+// One dropdown per field, for a view's filters (state.filters[field] = value). A dimension's variants read as in
+// Setup's "+ Add…": short name · text · runs, the whole text on hover.
+const variantTextOf = (f, id) => { const t = cfg.dimensions[f]?.find((x) => x.id === id)?.text ?? prevVariants(f).find((p) => p.id === id && p.text != null)?.text;
+  return t == null ? null : t.length > 400 ? t.slice(0, 399) + '…' : t; };
 // A filter whose value no run has any more (its runs were deleted) still shows, so it can't hide everything unseen.
 function filterSelects(state, rows, rerender) {
   return runFields().map((f) => {
-    const vals = sortVals(f, [...new Set(rows.map((r) => String(r[f] ?? '')))]), cur = state.filters[f];
+    const vals = sortVals(f, [...new Set(rows.map((r) => String(r[f] ?? '')))]), cur = state.filters[f], dim = !!cfg.dimensions[f];
+    const runs = {}; if (dim) for (const r of rows) runs[String(r[f] ?? '')] = (runs[String(r[f] ?? '')] ?? 0) + 1;
+    const label = (v) => `${fieldLabel(f)}: ${dim ? variantLabel(valLabel(f, v), variantTextOf(f, v), runs[v] ?? 0) : valLabel(f, v)}`;
     return h('select', { title: fieldLabel(f), key: f, 'aria-label': `Filter by ${fieldLabel(f)}`, class: cur ? 'on' : null, onchange: (e) => { state.filters[f] = e.target.value; rerender(); } },
       h('option', { value: '' }, `${fieldLabel(f)}: all`),
-      vals.map((v) => h('option', { value: v, selected: cur === v }, `${fieldLabel(f)}: ${valLabel(f, v)}`)),
+      vals.map((v) => h('option', { value: v, selected: cur === v, title: variantTextOf(f, v) }, label(v))),
       cur && !vals.includes(cur) ? h('option', { value: cur, selected: true }, `${fieldLabel(f)}: ${valLabel(f, cur)} (no runs)`) : null);
   });
 }
@@ -2132,7 +2303,7 @@ function checksCard(rows) {
   const edited = rows.filter((r) => r.changed?.length), editedNames = [...new Set(edited.flatMap((r) => r.changed.map((d) => `${d} "${r[d]}"`)))];
   add(!versions.size && !edited.length ? 'na' : versions.size > 1 || edited.length ? 'warn' : 'ok', 'Runs used the same prompt', !versions.size && !edited.length ? 'The prompt version is recorded for new runs.'
     : [versions.size > 1 ? `They used ${versions.size} versions of the prompt (${sortVals('promptVersion', [...versions]).map((v) => promptLabel(v).split(' · ')[0]).join(', ')}). Filter by prompt above to compare like with like; Setup → Prompt history shows what changed.` : versions.size ? `One version${unrec ? ` (${plural(unrec, 'older run')} not recorded)` : ''}.` : '',
-      edited.length ? `${plural(edited.length, 'run')} used text that has since been edited (${editedNames.join(', ')}), so they're grouped with runs of the new text. Give an edited variant a new short name to keep them apart.` : ''].filter(Boolean).join(' '));
+      edited.length ? `${plural(edited.length, 'run')} used text that has since been edited (${editedNames.join(', ')}), so they're grouped with runs of the new text. node run-matrix.mjs --rename-variant field:name=new-name gives them a name of their own.` : ''].filter(Boolean).join(' '));
   const cliVers = [...groupBy(rows.filter((r) => r.cliVersion), (r) => r.provider)].map(([p, rs]) => [p, sortVals('cli', [...new Set(rs.map((r) => r.cli))])]);
   const moved = cliVers.filter(([, vs]) => vs.length > 1);
   add(!cliVers.length ? 'na' : moved.length ? 'warn' : 'ok', 'Each CLI stayed on one version', !cliVers.length ? 'The CLI version is recorded for new runs.'
@@ -2530,8 +2701,10 @@ let modalRefresh = null;
 // markers (1. - *) are dropped, as are blank lines, # comments and texts the dimension already has.
 const slugOf = (t) => t.normalize('NFKD').replace(/[̀-ͯ]/g, '').split(/[^A-Za-z0-9]+/).filter(Boolean)
   .map((w) => w[0].toUpperCase() + w.slice(1)).join('').slice(0, 40);
-function parseBulk(text, vs) {
+function parseBulk(text, vs, prev = []) {
   const ids = new Set(vs.map((v) => v.id)), texts = new Set(vs.map((v) => (v.text ?? '').trim().toLowerCase()));
+  // A name finished runs used for other text is taken; a text that ran before gets its name back, so its runs count.
+  const taken = (id, t) => ids.has(id) || (prev.some((p) => p.id === id) && !prev.some((p) => p.id === id && p.text === t));
   const add = [], skipped = [];
   for (let line of text.split(/\r?\n/)) {
     line = line.trim().replace(/^(\d+[.)]|[-*•])\s+/, '');
@@ -2539,8 +2712,9 @@ function parseBulk(text, vs) {
     const m = line.match(/^([\w.-]+)\s*(?:\||\t)\s*(.+)$/);
     const t = (m ? m[2] : line).trim();
     if (texts.has(t.toLowerCase())) { skipped.push(t); continue; }
-    let id = m ? m[1] : slugOf(t) || `v${vs.length + add.length + 1}`, base = id;
-    for (let n = 2; ids.has(id); n++) id = `${base}-${n}`;
+    const before = !m && prev.find((p) => p.text === t && !ids.has(p.id));
+    let id = before ? before.id : m ? m[1] : slugOf(t) || `v${vs.length + add.length + 1}`, base = id;
+    for (let n = 2; taken(id, t); n++) id = `${base}-${n}`;
     ids.add(id); texts.add(t.toLowerCase());
     add.push({ id, text: t });
   }
@@ -2549,9 +2723,9 @@ function parseBulk(text, vs) {
 function bulkAdd(d, vs, changed) {
   let text = '';
   const view = () => {
-    const { add, skipped } = parseBulk(text, vs);
+    const { add, skipped } = parseBulk(text, vs, prevVariants(d));
     return h('div', {},
-      h('p', { class: 'hint', style: 'margin-top:0' }, `One variant per line; each becomes the text for {{${d}}}, with a short name made from it. Write "short | text" to choose the short name. Numbering and bullets are dropped, and so are lines {{${d}}} already has.`),
+      h('p', { class: 'hint', style: 'margin-top:0' }, `One variant per line; each becomes the text for {{${d}}}, with a short name made from it (a text that ran before gets its name back, so its runs count). Write "short | text" to choose the short name. Numbering and bullets are dropped, and so are lines {{${d}}} already has.`),
       h('textarea', { id: 'bulk-text', rows: 14, style: 'width:100%', value: text, placeholder: 'Rocket League\nMario Kart 64\nmk8 | Mario Kart 8 Deluxe', 'aria-label': `Variants for ${d}, one per line`,
         oninput: (e) => { text = e.target.value; refreshModal(); } }),
       h('p', { class: 'muted' }, `${plural(add.length, 'new variant')}${skipped.length ? ` · ${skipped.length} already there, skipped` : ''}`,
@@ -2796,7 +2970,7 @@ async function loadSetup() {
   onDisk = false; cache = {};
 }
 async function loadResults() {
-  const rows = await api('/api/results');
+  const [rows, lib] = await Promise.all([api('/api/results'), api('/api/variants').catch(() => variantLib)]);
   for (const r of rows) {
     r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
     if (r.cliVersion) r.cli = `${SHORT[r.provider] ?? r.provider} ${r.cliVersion}`; // versions only compare within a CLI
@@ -2807,7 +2981,7 @@ async function loadResults() {
       r.path = r.chain.map((c) => `${c.agent} ${c.effort}`).join(' → ');
     }
   }
-  results = rows; cache = {}; updateBadge();
+  results = rows; variantLib = lib; cache = {}; updateBadge();
 }
 async function loadAudit() { try { audit = await api('/api/audit'); } catch { audit = null; } updateBadge(); }
 

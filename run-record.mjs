@@ -182,6 +182,15 @@ export function upgrade(rec) {
     interview: { file: null, reply }, upgradedFrom: 1 };
 }
 
+// A record (as written, either schema) with dimension d's variant renamed from one short name to another, where each
+// schema keeps it (run-matrix.mjs --rename-variant).
+export function renameInRecord(rec, d, from, to) {
+  const res = rec.schema === 1 ? rec : rec.result, section = rec.schema === 1 ? rec.variants?.[d] : rec.prompt?.sections?.[d];
+  if (res?.[d] === from) res[d] = to;
+  if (section?.id === from) section.id = to;
+  return rec;
+}
+
 // ------------------------------------------------------------ reading games
 const HTML = /\.html?$/i, SKIP = new Set(['node_modules', '.git']);
 // The .html files under these paths (files or folders, searched all the way down).

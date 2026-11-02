@@ -26,6 +26,8 @@
 //        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
 //                                     logs (after parser or price changes); games already holding their record get the new figures
 //        --stamp                      write each finished run's record into its game file (stampGame, run-record.mjs); new runs get it as they end
+//        --rename-variant dim:old[@hash]=new   file the runs that used an earlier text of a variant under a short name of
+//                                     their own (repeatable; with --dry-run, only says which; see renameVariants)
 //        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
 //        --stage <stage>=agent:effort,...   run in stages instead (repeatable; see stageRuns): each stage in the config's
 //                                     "stages" continues from the finished runs of the stage before
@@ -38,12 +40,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, stampHtml, unstamped, upgrade } from './run-record.mjs';
+import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, unstamped, upgrade } from './run-record.mjs';
 
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false };
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rename: [], rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -65,6 +67,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--report') args.report = true;
   else if (a === '--reparse') args.reparse = true;
   else if (a === '--stamp') args.stamp = true;
+  else if (a === '--rename-variant') args.rename.push(next());
   else if (a === '--rerun-failed') args.rerunFailed = true;
   else if (a === '--resume-failed') args.resumeFailed = true;
   else if (a === '--control') args.control = true;
@@ -449,6 +452,7 @@ function terminalOf(run, resumes = false) {
   return [head, `d=${sh(dir)}`, make, `(cd "$d/work" && ${[sh(bin), ...args].join(' ')}${promptInArgs ? '' : ' < ../prompt.md'})`];
 }
 
+if (args.rename.length) { try { renameVariants(args.rename); } catch (e) { console.error(e.message); process.exit(1); } process.exit(0); }
 if (args.dryRun) {
   const byAgent = {}, resuming = queue.filter((r) => canResume(r));
   for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
@@ -1282,6 +1286,44 @@ function stampAll() {
     stampGame(path.join(outDir, d), r); n++;
   }
   console.log(`Stamped ${n} game(s).`);
+}
+
+// --rename-variant dim:old[@hash]=new. Finished runs are matched by short name, so runs that used an earlier text of a
+// variant (edited before the dashboard renamed a variant on edit) count as done for its text now. This gives them a
+// name of their own: the runs whose text hashes as @hash, else those whose text isn't the config's (one text at a
+// time). The name changes in result.json and in the record in the game; what they were sent stays as it was, and so
+// does the folder: named without the date, it's the one a new run of the old name would get, so that run won't start.
+function renameVariants(specs) {
+  const all = (fs.existsSync(outDir) ? fs.readdirSync(outDir) : []).map((dir) => ({ dir, r: readResult(dir) })).filter((x) => x.r?.id);
+  const hashOf = (d, id) => { const v = cfg.dimensions[d]?.find((x) => x.id === id); return v ? textHash(variantText(v).trim()) : null; };
+  const moves = specs.map((s) => {
+    const m = s.match(/^(\w+):([\w.-]+)(?:@([0-9a-f]{8}))?=([\w.-]+)$/);
+    if (!m) throw new Error(`--rename-variant ${s}: write it dimension:old=new, or dimension:old@hash=new`);
+    const [, d, from, hash, to] = m, now = hashOf(d, from);
+    if (!cfg.dimensions[d]) throw new Error(`--rename-variant ${s}: the config has no dimension "${d}"`);
+    if (!hash && !now) throw new Error(`--rename-variant ${s}: ${d} "${from}" isn't in the config, so say which text: dimension:old@hash=new`);
+    const pick = all.filter(({ r }) => r[d] === from && r.variantHashes?.[d] && (hash ? r.variantHashes[d] === hash : r.variantHashes[d] !== now));
+    const texts = [...new Set(pick.map(({ r }) => r.variantHashes[d]))];
+    if (texts.length > 1) throw new Error(`--rename-variant ${s}: those runs used ${texts.length} texts (${texts.join(', ')}); move one at a time with dimension:old@hash=new`);
+    const h = texts[0], clash = all.filter(({ r }) => r[d] === to && r.variantHashes?.[d] !== h).length;
+    if (pick.length && hashOf(d, to) && hashOf(d, to) !== h) throw new Error(`--rename-variant ${s}: the config's ${d} "${to}" has other text`);
+    if (pick.length && clash) throw new Error(`--rename-variant ${s}: ${clash} run(s) used ${d} "${to}" for other text`);
+    return { d, from, to, h, pick };
+  });
+  for (const { d, from, to, h, pick } of moves) {
+    console.log(`${d} "${from}" → "${to}": ${pick.length} run(s)${h ? ` (text ${h})` : ''}${args.dryRun ? ' would move' : ''}`);
+    for (const { dir } of pick) console.log(`  ${dir}${!FN?.date && runs.some((x) => x.id === dir) ? `  ⚠ a new run of "${from}" would get this folder, so it won't start while this run is in it` : ''}`);
+  }
+  if (args.dryRun) return;
+  for (const { d, from, to, pick } of moves) for (const { dir, r } of pick) {
+    r[d] = to;
+    fs.writeFileSync(path.join(outDir, dir, 'result.json'), JSON.stringify(r, null, 2));
+    const file = r.entry && path.join(outDir, r.entry);
+    let html = null; try { html = fs.readFileSync(file, 'utf8'); } catch {}
+    const rec = html && readRecord(html);
+    if (rec) fs.writeFileSync(file, stampHtml(html, renameInRecord(rec, d, from, to)));
+  }
+  if (moves.some((x) => x.pick.length)) writeReport();
 }
 
 // TODO / FIXME left in the game file (the prompt asks for none). Only these two: "not implemented"

@@ -303,6 +303,76 @@ function changedVariants(dir, r, dims, tmpl) {
   return out;
 }
 
+// A run's dimensions' texts as sent: its prompt (TASK.md for a run in stages) matched against the template it was
+// filled from, each {{placeholder}} read back out (blank lines collapse when it's built, so any whitespace matches
+// any); the goal's from goal.md. {} when the template isn't known any more.
+const sectionsCache = new Map(); // file -> { mtime, version, value }
+const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function sentSections(dir, r, templates) {
+  const file = path.join(dir, r.stage ? 'work/TASK.md' : 'prompt.md'), tmpl = templates.get(r.promptVersion);
+  let mtime = null; try { mtime = fs.statSync(file).mtimeMs; } catch {}
+  const c = sectionsCache.get(file);
+  if (c && c.mtime === mtime && c.version === r.promptVersion) return c.value;
+  const out = {}, text = sentText(file);
+  if (tmpl != null && text != null) {
+    const names = [], src = tmpl.split(/\{\{(\w+)\}\}/).map((part, i) => i % 2 ? (names.push(part), '([\\s\\S]*?)') : part.split(/\s+/).map(esc).join('\\s*')).join('');
+    const m = new RegExp(`^\\s*${src}\\s*$`).exec(text);
+    if (m) names.forEach((n, i) => { out[n] ??= m[i + 1].trim(); });
+  }
+  const goal = r.stage ? null : sentText(path.join(dir, 'goal.md')), at = goal?.indexOf('Done when: ') ?? -1;
+  if (at >= 0) out.goal = goal.slice(at + 11).trim();
+  sectionsCache.set(file, { mtime, version: r.promptVersion, value: out });
+  return out;
+}
+// The text a run used for dimension d, as read back from what it was sent, if it hashes as the run's did. A text that
+// names other fields ("a successor to {{source}}") was sent filled in, so those are put back to check it.
+function sentVariant(sent, d, hash) {
+  const t = sent[d];
+  if (t == null || hash == null || textHash(t) === hash) return t ?? null;
+  const others = Object.entries(sent).filter(([o, x]) => o !== d && x.length > 2 && t.includes(x));
+  for (const set of [others, ...others.map((o) => [o])]) {
+    const back = set.reduce((s, [o, x]) => s.replaceAll(x, `{{${o}}}`), t);
+    if (textHash(back) === hash) return back;
+  }
+  return null;
+}
+
+// Every variant finished runs used, per dimension, so Setup can bring one back and keep a short name to one text
+// (runs are matched by short name, so a name runs used for other text is taken): { dim: [{ id, text, runs }] }, text
+// null when it can't be told. A run's text is its variant's in the config while that still matches (changedVariants),
+// else it's read back out of the prompt it was sent.
+let libCache = null;
+function variantLibrary() {
+  const rv = revs(), key = [rv.results, rv.config, rv.template, rv.history].join('|');
+  if (libCache?.key === key) return libCache.value;
+  const dims = readJSON(CONFIG, {}).dimensions ?? {};
+  let tmpl = ''; try { tmpl = fs.readFileSync(templatePath(), 'utf8'); } catch {}
+  const templates = new Map(readJSON(HISTORY, []).map((e) => [e.hash, e.text]));
+  templates.set(textHash(tmpl), tmpl);
+  const found = Object.fromEntries(Object.keys(dims).map((d) => [d, new Map()])), known = new Map();
+  for (const e of fs.readdirSync(OUT, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(OUT, e.name), r = readJSON(path.join(dir, 'result.json'), null);
+    if (!r?.id) continue;
+    const changed = changedVariants(dir, r, dims, tmpl);
+    for (const [d, vs] of Object.entries(dims)) {
+      const id = r[d], hash = r.variantHashes?.[d] ?? null, k = `${d}\n${id}\n${hash}`;
+      if (id == null) continue; // from before the dimension existed
+      let text = hash != null ? known.get(k) : undefined;
+      if (text === undefined) {
+        const v = vs.find((x) => x.id === id);
+        text = v && !changed.includes(d) ? variantText(v).trim() : sentVariant(sentSections(dir, r, templates), d, hash);
+        if (hash != null) known.set(k, text);
+      }
+      const f = found[d], fk = `${id}\n${text}`;
+      if (f.has(fk)) f.get(fk).runs++; else f.set(fk, { id, text, runs: 1 });
+    }
+  }
+  const value = Object.fromEntries(Object.entries(found).map(([d, f]) => [d, [...f.values()]]));
+  libCache = { key, value };
+  return value;
+}
+
 // A review (score, notes, "looked at") belongs to one attempt at a run: it's saved with the run's
 // startedAt, so a re-run (Retry failed, or after ✕) starts unreviewed instead of inheriting it.
 // Reviews saved before that have no startedAt and still apply.
@@ -478,6 +548,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/results' && m === 'GET') return send(res, 200, results());
+    if (p === '/api/variants' && m === 'GET') return send(res, 200, variantLibrary());
     if (p === '/api/score' && m === 'PUT') {
       const { id, score, notes, seen, startedAt } = await body(req);
       if (!runDir(id)) return send(res, 400, { error: 'No such run.' });

@@ -128,6 +128,32 @@ try:
         check('bulk add: 103 games pasted at once, names made from the text, duplicates skipped, typing keeps focus',
               focused == 'bulk-text' and len(src) == 104 and src[1:4] == ['SuperMarioKart', 'FZeroX', 'mk8'] and src[-1] == 'Game99', f'{focused} {len(src)} {src[:5]}')
         c = json.load(open(conf)); c['dimensions']['source'] = c['dimensions']['source'][:1]; json.dump(c, open(conf, 'w'), indent=2); page.wait_for_timeout(2500)
+        # Setup: runs are matched by short name, so editing the text of a variant that ran renames it ({{source}}'s from
+        # the text) and the old text brings the old name back; a new source is named from its text; a name that ran is taken
+        page.goto(base + '/#setup'); page.wait_for_selector('text=Bulk add…')
+        card = page.locator('.card', has=page.locator('.tag', has_text='{{source}}'))
+        name = card.get_by_label('source variant short name')
+        card.get_by_label('source variant text').first.click(); page.keyboard.press('End'); page.keyboard.type(' 2')
+        renamed = name.first.input_value()
+        for _ in range(2): page.keyboard.press('Backspace')
+        check('editing a variant that ran renames it, from its text for {{source}}; the old text brings the old name back',
+              renamed == 'a-kart-racer-2' and name.first.input_value() == 'kart', f'{renamed} {name.first.input_value()}')
+        card.get_by_role('button', name='+ Add variant').click(); page.wait_for_timeout(200)
+        card.get_by_label('source variant text').last.fill('A golf game'); page.wait_for_timeout(200)
+        new = name.last.input_value()
+        card.get_by_label('Remove variant').first.click(); page.wait_for_timeout(200) # kart goes; its name is still the runs'
+        name.first.fill('kart'); page.wait_for_timeout(200)
+        taken = 'invalid' in (name.first.get_attribute('class') or '') and 'used "kart" for other text' in page.locator('.savebar').inner_text()
+        check('a new {{source}} is named from its text; a short name finished runs used for other text is taken', new == 'a-golf-game' and taken, f'{new} {taken}')
+        tcard = page.locator('.card', has=page.locator('.tag', has_text='{{testing}}'))
+        tcard.locator('select[aria-label^="Add a pinned"]').select_option(label='test-full · Test thoroughly: automated tests for ev…'); page.wait_for_timeout(200)
+        added = tcard.get_by_label('testing variant short name').last.input_value()
+        check('"+ Add…" adds a pinned variant with its name and text', added == 'test-full' and 'automated tests' in tcard.get_by_label('testing variant text').last.input_value(), added)
+        tcard.get_by_label('Pin testing variant light').click(); page.wait_for_timeout(200)
+        tcard.get_by_label('Unpin testing variant test-full').click(); page.wait_for_timeout(200)
+        pins = page.evaluate("pinsOf('testing').map((p) => p.id)")
+        check('pin and unpin on a variant\'s row change the field\'s pins', 'light' in pins and 'test-full' not in pins, str(pins))
+        page.get_by_role('button', name='Discard').click(); page.wait_for_timeout(300)
         page.goto(base + '/#run'); page.wait_for_selector('#tab-run.on > *')
         # a batch from the Run tab: the log follows its end, the pill shows progress
         many = [{'id': f'm{i}', 'text': f'FAKE:sleep=150 m{i}'} for i in range(30)]
