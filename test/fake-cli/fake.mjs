@@ -15,6 +15,10 @@
 //   FAKE:limit=start      claude: stop on the usage limit at the first request, having done nothing
 //   FAKE:plan             write PLAN.md instead of a game (a planning stage)
 //   FAKE:game=<name>      name the game file <name>.html (default Fake-Game-<model>.html)
+//   FAKE:noexit           leave no exit-interview.json (written beside the game whenever the prompt names that file)
+//   FAKE:badexit          leave an exit-interview.json that isn't valid JSON
+//   FAKE:hubmeta          put AI Hub session <meta> tags (hub:session, hub:session-players, hub:players) in the game's head
+//   FAKE:saypath          end the reply with the work folder's full path
 // A run in stages gets its stage's text as the message (or in STAGE.md, with /goal) and the brief in TASK.md;
 // both are read. Given a game already (a later stage), the fake adds to it, so the game it leaves is its own.
 // FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
@@ -45,6 +49,19 @@ const MODELS = {
   grok: '  * grok-4.7 (default)\n  - grok-4.6\n',
   agy: 'gemini-4-argon-low\tGemini 4 Argon (Low)\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\ngemini-4-argon-high\tGemini 4 Argon (High)\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\n',
 };
+
+// An exit interview the way an agent writes one: answers in the shape the prompt gives, some of them not quite the
+// catalogue's way (a lowercase type and genre, "1-2" players, tags as one string with a repeat, a model it guessed).
+const EXIT = (cli, model) => ({
+  sourceInformation: { date: '2026-11-02 10:00', source: 'Fake Source', genre: 'shooter', perspective: 'top-down', tech: 'canvas 2D',
+    artDirection: 'flat', animation: 'tweens', audio: 'none', online: 'none', testing: 'a smoke test', research: 'none',
+    environment: `${cli} (fake)`, model, usage: 'unknown' },
+  testingFeedback: ['3 issues', '1 critical', 'the smoke test', 'none'],
+  engineFeedback: ['small', 'no', 'the loop', 'nothing', 'nothing', 'nothing'],
+  promptFeedback: ['clear', 'nothing', 'the game', 'a real play-test'],
+  aiHub: { name: 'Fake Game', tagline: 'A stand-in for tests', description: 'Fake Game is a test double.', type: 'game', genre: 'shooter',
+    source: 'Fake Source', series: '', players: '1-2', controls: ['WASD to move', 'Space to fire'], tags: 'Arcade, 2D, arcade', model: 'a guess' },
+});
 
 export async function run(cli) {
   const argv = process.argv.slice(2);
@@ -85,10 +102,15 @@ export async function run(cli) {
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(path.join('src', 'main.js'), 'console.log("game");\n');
     const given = fs.readdirSync('.').filter((f) => /\.html$/.test(f)).length; // a later stage adds content to the game it was given
-    const body = `<!doctype html><title>Fake</title><script>${'let x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}`
+    const head = /FAKE:hubmeta/.test(prompt) ? '<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:players" content="1-4">' : '';
+    const body = `<!doctype html><title>Fake</title>${head}<script>${'let x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}`
       + `${given ? `// content added by ${cli} ${model}\n` : ''}</script>`;
     fs.writeFileSync(`${prompt.match(/FAKE:game=(\S+)/)?.[1] ?? `Fake-Game-${model}`}.html`, body);
+    // The exit interview, when the prompt asks for one: exit-interview.json beside the game (see EXIT above).
+    if (/exit-interview\.json/.test(prompt) && !/FAKE:noexit/.test(prompt))
+      fs.writeFileSync('exit-interview.json', /FAKE:badexit/.test(prompt) ? '{"sourceInformation": {"date": "' : JSON.stringify(EXIT(cli, model), null, 2));
   }
+  if (/FAKE:saypath/.test(prompt)) reply += `\n\nThe game is in ${process.cwd()}`;
   if (/FAKE:noreply/.test(prompt)) reply = '';
   const tok = { input: 1200, cacheRead: 9000, cacheWrite: 800, output: 640, reasoning: 120 };
 

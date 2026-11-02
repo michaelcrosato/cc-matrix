@@ -1953,6 +1953,8 @@ const runFlags = () => cached('flags', () => {
     const items = [];
     if (!r.delivered && r.expectsGame !== false) items.push({ sev: 100, bad: true, tag: 'no game', text: 'Finished OK but left no game file (.html) in the work folder root' });
     if (!r.hasReply) items.push({ sev: 60, tag: 'no reply', text: r.rounds > 1 ? `No final reply: the last of its ${r.rounds} /goal rounds ended without text` : 'No final reply: its last message was empty' });
+    if (r.exitInterview === 'missing') items.push({ sev: 55, tag: 'no exit interview', text: 'Its prompt asks for exit-interview.json beside the game, and it left none' });
+    if (r.exitInterview === 'invalid') items.push({ sev: 50, tag: 'bad exit interview', text: 'Its exit-interview.json isn\'t one JSON object, so its answers aren\'t in the game\'s record as fields' });
     if (r.todos > 0) items.push({ sev: 40 + Math.min(r.todos, 20), tag: `${r.todos} TODO`, text: `${r.todos} TODO/FIXME left in the game file` });
     const bundle = fits.kb?.usual(r) && r.kb >= 2 * fits.kb.usual(r);
     for (const k of FLAG_METRICS) {
@@ -2113,6 +2115,9 @@ function checksCard(rows) {
   const count = (fn) => ok.filter(fn).length, noGame = count((r) => !r.delivered && r.expectsGame !== false), noReply = count((r) => !r.hasReply);
   add(noGame ? 'warn' : 'ok', 'Finished runs leave a game file', noGame ? `${noGame} of ${ok.length} didn't (listed under Needs a look).` : `All ${ok.length} did.`);
   add(noReply ? 'warn' : 'ok', 'Finished runs end with a reply', noReply ? `${noReply} of ${ok.length} ended without one (listed under Needs a look).` : `All ${ok.length} did.`);
+  const asked = ok.filter((r) => r.exitInterview), noExit = asked.filter((r) => r.exitInterview !== 'ok').length;
+  add(!asked.length ? 'na' : noExit ? 'warn' : 'ok', 'Finished runs leave the exit interview their prompt asks for',
+    !asked.length ? 'None of these runs\' prompts asks for one (exit-interview.json).' : noExit ? `${noExit} of ${asked.length} left none or one that isn't valid JSON (listed under Needs a look).` : `All ${asked.length} did.`);
   const counted = ok.filter((r) => r.todos != null), todo = counted.filter((r) => r.todos > 0).length;
   add(!counted.length ? 'na' : todo ? 'warn' : 'ok', 'No TODO or FIXME left in games',
     !counted.length ? 'Counted for new runs (or after node run-matrix.mjs --reparse).' : todo ? `${todo} of ${counted.length} games still have some.` : `None in ${plural(counted.length, 'game')}.`);
@@ -2148,7 +2153,7 @@ function lookCard(rows) {
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Needs a look'),
       all.length > open.length ? h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!iv.showSeen,
         onchange: (e) => { iv.showSeen = e.target.checked; saveIv(); renderInsights(); } }), `Show reviewed (${all.length - open.length})`) : null),
-    h('p', { class: 'sub' }, 'Finished runs that look off: no game or reply, TODOs left, a time, cost or output at least 2× off what\'s usual for its setup, or a game under half the usual size. A score, a note or "looked at" clears one.'),
+    h('p', { class: 'sub' }, 'Finished runs that look off: no game, reply or exit interview, TODOs left, a time, cost or output at least 2× off what\'s usual for its setup, or a game under half the usual size. A score, a note or "looked at" clears one.'),
     shown.length ? h('div', { class: 'scroll' }, h('table', { class: 'look' }, srHead('Play', 'Run', 'Why', 'Files and actions'), h('tbody', {}, shown.slice(0, limit).map((f) => lookRow(f.r,
       f.items.map((i) => h('div', {}, h('span', { class: 'tag ' + (i.bad ? 'bad' : 'warn') }, i.tag), ' ', i.text)))))))
       : h('p', { class: 'muted' }, all.length ? 'All reviewed ✔' : 'Nothing stands out ✔'),
@@ -2571,6 +2576,8 @@ const refreshModal = () => { if (modal.open && modalRefresh) morph($('#mbody'), 
 // A resumed run (Resume failed) has each later session's output in agent.<n>.out and .err; its error is the last one's.
 const fileButtons = (r) => [
   h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
+  r.hasInterview ? h('button', { class: 'icon', title: 'Exit interview (exit-interview.json): the agent\'s answers, as they go into the game\'s record',
+    onclick: () => showFile(r.id, 'work/exit-interview.json', 'Exit interview') }, 'interview') : null,
   h('button', { class: 'icon', title: 'Prompt sent', onclick: () => showFile(r.id, 'prompt.md', 'Prompt') }, 'prompt'),
   r.goal && r.goal !== 'off' ? h('button', { class: 'icon', title: 'The /goal message sent', onclick: () => showFile(r.id, 'goal.md', 'Goal') }, 'goal') : null,
   h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, r.parts?.length > 1 ? `agent.${r.parts.length}.err` : 'agent.err', 'Errors', r.error) }, 'log'),
@@ -2676,6 +2683,7 @@ function runDetails(r) {
         line('Dev files', r.files),
         line('TODO / FIXME', r.todos),
         line('Reply', r.hasReply ? (r.replyChars ? `${fmtNum(r.replyChars)} characters` : 'yes') : 'none'),
+        r.exitInterview ? line('Exit interview', { ok: 'yes', invalid: 'not valid JSON', missing: 'none' }[r.exitInterview] ?? r.exitInterview, 'exit-interview.json, in the game\'s record') : null,
         line('Plan usage', r.plan ? planText(r.plan) : null, r.plan ? planNote(r.plan) : ''),
         line('First token', r.firstTokenMs != null ? fmtSecs(r.firstTokenMs / 1000) : null),
         line('CLI version', r.cli),
