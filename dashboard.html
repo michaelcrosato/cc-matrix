@@ -494,8 +494,8 @@ const RUN_VARS = {
   effort: 'the effort level, with -ultracode when Ultracode is on (medium, high-ultracode)',
   lab: 'the lab that made the model (Anthropic, OpenAI, Google, xAI, Meta)',
   environment: 'the CLI and operating system (Claude Code CLI (headless); Linux; browser unknown)',
-  stamp: 'when the run started, to the minute, as YYYYMMDD-HHMM in this computer\'s time zone (20261029-0753 = Oct 29, 2026, 7:53 am); the same everywhere in one run, so it ties the game\'s file name to its run',
-  date: 'the same moment as {{stamp}}, written YYYY-MM-DD HH:MM (2026-10-29 07:53)',
+  stamp: 'when the run started, to the second, as YYYYMMDD-HHMMSS in this computer\'s time zone (20261029-075312 = Oct 29, 2026, 7:53:12 am); the same everywhere in one run, so it ties the game\'s file name to its run',
+  date: 'the same moment as {{stamp}}, written YYYY-MM-DD HH:MM:SS (2026-10-29 07:53:12)',
 };
 // Runs in stages (Setup · Advanced, Run → Advanced; stageRuns in run-matrix.mjs). Besides the dimensions and RUN_VARS,
 // a stage's text and goal can use the step its run continues from.
@@ -1073,8 +1073,8 @@ function folderNameCard() {
   // Rebuilt in one key order, so ticking back undoes the change.
   const set = (k, on) => { const f = { ...adopt(), [k]: on };
     cfg.folderName = { fields: f.fields ?? [], ...(f.date ? { date: true } : {}), ...(f.title ? { title: true } : {}) }; changed(true); };
-  const now = new Date(), two = (n) => String(n).padStart(2, '0');
-  const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}`;
+  const now = new Date(), two = (n) => String(n).padStart(2, '0'), gap = Math.max(0, +(cfg.startGap ?? 3) || 0);
+  const stamp = `${now.getFullYear()}${two(now.getMonth() + 1)}${two(now.getDate())}-${two(now.getHours())}${two(now.getMinutes())}${two(now.getSeconds())}`;
   const left = dims.filter((d) => !inFolderName(d)), coded = fn ? left.some((d) => cfg.dimensions[d].length > 1) : left.length > 0;
   const example = [a ? `${a.id}-${effortsOf(a)[0]}` : 'model-effort', ...dims.filter(inFolderName).map((d) => cfg.dimensions[d][0]?.id),
     fn?.date ? stamp : null, coded ? 'x1a2b3c' : null, fn?.title ? 'GameTitle' : null].filter(Boolean).join('__');
@@ -1082,10 +1082,11 @@ function folderNameCard() {
     h('h2', {}, 'Run folder names'),
     h('p', { class: 'sub' }, 'Each run gets a folder in runs/, named by its model and effort, then the variant of each dimension ticked "in folder name" below, then:'),
     h('div', { class: 'chips' },
-      chip('date and time it started', !!fn?.date, (on) => set('date', on), 'Its start, the same YYYYMMDD-HHMM as {{stamp}} in the game\'s file name'),
+      chip('date and time it started', !!fn?.date, (on) => set('date', on), 'Its start, the same YYYYMMDD-HHMMSS as {{stamp}} in the game\'s file name'),
       chip('game title, once made', !!fn?.title, (on) => set('title', on), 'The agent picks the title while it works, so the folder gets it added when the run has finished OK with its game')),
     h('p', { class: 'hint', style: 'margin:10px 0 0' }, 'Like ', h('span', { class: 'mono', style: 'overflow-wrap:anywhere' }, example), '. '
       + 'Finished runs are recognised by what they were made with (their result.json), not by folder name, so changing this only names new runs. '
+      + (fn?.date && gap ? `The runs of a batch start at least ${gap} seconds apart (startGap in the config), so no two get the same time. ` : '')
       + 'Dimensions left out become a short code (x and 6 characters) when two runs could otherwise share a folder: always with no date, else when one of them has more than one variant.'));
 }
 

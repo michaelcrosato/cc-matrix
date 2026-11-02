@@ -124,12 +124,14 @@ const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`
 // scheme: every dimension's variant except those in omitFromName. Runs are matched by the fields in their result.json
 // (runKey), never by folder name, so changing this only names runs made from then on. Variants left out become a
 // short code (x + 6 hex) where runs could otherwise share a folder: always in the older scheme; with folderName when a
-// left-out dimension has more than one variant (runs of one batch can start the same minute), and for a stage run
-// after the first, which also encodes the steps before it (the same builder on two plans gets two folders).
+// left-out dimension has more than one variant, and for a stage run after the first, which also encodes the steps
+// before it (the same builder on two plans gets two folders). The runs of one batch start at least startGap apart
+// (see pool), so their start times differ anyway; the code covers a startGap of 0 and two batches at once.
 const FN = cfg.folderName ?? null, omitted = new Set(cfg.omitFromName ?? []);
 const inName = (d) => FN ? (FN.fields ?? []).includes(d) : !omitted.has(d);
-const stampOf = (d) => `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}-`
-  + `${String(d.getHours()).padStart(2, '0')}${String(d.getMinutes()).padStart(2, '0')}`;
+const pad = (n) => String(n).padStart(2, '0');
+// A run's start, to the second: YYYYMMDD-HHMMSS in this computer's time zone (its folder name and {{stamp}}).
+const stampOf = (d) => `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
 function runName(head, combo, rep, when, before = []) {
   const left = dimNames.filter((d) => !inName(d));
   const seed = [...left.map((d) => `${d}=${combo[d].id}`), ...(before.length ? [`from=${chainKey(before)}`] : [])];
@@ -177,14 +179,13 @@ const CLIS = { claude: 'Claude Code CLI', codex: 'Codex CLI', grok: 'Grok CLI', 
 const MODEL_LABS = [[/^claude/i, 'Anthropic'], [/^(gpt|o\d)/i, 'OpenAI'], [/^gemini/i, 'Google'], [/^grok/i, 'xAI'], [/^muse/i, 'Meta']];
 const labOf = (agent) => MODEL_LABS.find(([re]) => re.test(agent.model ?? ''))?.[1] ?? LABS[agent.provider] ?? 'unknown';
 const OS = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platform] ?? process.platform;
-const pad = (n) => String(n).padStart(2, '0');
 
 // Placeholders the runner fills per run (in addition to the dimensions).
 function runVars(run, d = new Date()) {
   return { model: run.agent.model, effort: `${run.effort ?? 'default'}${run.ultracode ? '-ultracode' : ''}`, lab: labOf(run.agent),
     environment: `${CLIS[run.agent.provider] ?? run.agent.provider} (headless); ${OS}; browser unknown`,
-    stamp: `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`,
-    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}` };
+    stamp: stampOf(d),
+    date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` };
 }
 
 // With a goal, the full prompt goes to TASK.md and the message sent is the
@@ -1103,14 +1104,15 @@ function withTitle(id, measured, run) {
   return nid;
 }
 // The game's title from its file name, GameTitle-SOURCE-model-effort-stamp.html as the prompt asks for: what's left
-// once the stamp, the model and effort, and the source are taken off its end. Letters, digits, . _ - only.
+// once the stamp, the model and effort, and the source are taken off its end. Letters, digits, . _ - only. The stamp
+// is to the second (YYYYMMDD-HHMMSS), or to the minute in a game made before that and resumed since.
 function titleOf(file, run) {
   const norm = (x) => String(x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
   let tokens = file.replace(/\.html?$/i, '').split(/[-\s]+/).filter(Boolean);
   const dropEnd = (target) => { const t = norm(target); if (!t) return false;
     for (let k = 1; k <= tokens.length; k++) if (norm(tokens.slice(-k).join('')) === t) { tokens = tokens.slice(0, -k); return true; }
     return false; };
-  if (/^\d{8}$/.test(tokens.at(-2) ?? '') && /^\d{4}$/.test(tokens.at(-1) ?? '')) tokens = tokens.slice(0, -2);
+  if (/^\d{8}$/.test(tokens.at(-2) ?? '') && /^\d{4}(\d{2})?$/.test(tokens.at(-1) ?? '')) tokens = tokens.slice(0, -2);
   const v = runVars(run, run.when);
   if (!dropEnd(`${v.model}${v.effort}`)) dropEnd(v.model);
   const src = run.combo.source;
@@ -1355,6 +1357,9 @@ function skip(run) {
 // going finish, since what they've spent so far would be thrown away otherwise.
 // A run in a later stage starts once the run it continues from has finished OK (in this batch or before). One
 // whose parent failed, was left out or was stopped can't run in this batch: it's left out too (and runs next time).
+// Runs start at least startGap seconds apart (the config's, default 3; 0 = together), so no two runs of a batch get
+// the same start time, which names their folders and games (stampOf).
+const START_GAP_MS = Math.max(0, +(cfg.startGap ?? 3) || 0) * 1000;
 const parentOk = (r) => !r.parentKey || finished().get(r.parentKey)?.r.status === 'ok';
 const coming = (key) => pending.some((r) => r.key === key) || [...live.values()].some((c) => c.run.key === key);
 function leaveOutOrphans() {
@@ -1372,6 +1377,7 @@ function leaveOutOrphans() {
 async function pool() {
   pending = interleave(queue);
   const busy = {}, jobs = new Set();
+  let lastStart = -Infinity, gapTimer = null;
   for (;;) {
     while (!stopping) {
       if (!overBudget && spent >= args.budget) {
@@ -1382,9 +1388,12 @@ async function pool() {
       leaveOutOrphans();
       const i = pending.findIndex((r) => (busy[r.agent.provider] ?? 0) < args.perCli && parentOk(r));
       if (i < 0) break; // every CLI left is at its limit, or what's left waits for its parent
+      if (isDone(pending[i])) { skip(pending.splice(i, 1)[0]); continue; }
+      // Too soon after the last start: check again once the gap is up (a timer can fire a little early, so it's re-checked).
+      const wait = lastStart + START_GAP_MS - Date.now();
+      if (wait > 0) { gapTimer ??= setTimeout(() => { gapTimer = null; wake(); }, wait); break; }
       const [run] = pending.splice(i, 1), p = run.agent.provider;
-      if (isDone(run)) { skip(run); continue; }
-      busy[p] = (busy[p] ?? 0) + 1;
+      lastStart = Date.now(); busy[p] = (busy[p] ?? 0) + 1;
       const job = runOne(run).catch((e) => { done++; console.log(`✘ ${run.id}  ${e.message}`); })
         .finally(() => { busy[p]--; jobs.delete(job); wake(); });
       jobs.add(job);
@@ -1392,7 +1401,7 @@ async function pool() {
     sayState();
     // Done once nothing runs and nothing more will start: the queue is empty, the batch was stopped
     // or the budget is spent. A paused batch waits to be resumed (or stopped).
-    if (!jobs.size && (stopping || overBudget || !pending.length)) return;
+    if (!jobs.size && (stopping || overBudget || !pending.length)) { clearTimeout(gapTimer); return; }
     await new Promise((r) => { wakeUp = r; });
   }
 }
@@ -1516,7 +1525,8 @@ for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provi
 }
 // The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
 const already = queue.filter(isDone).length;
-console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''})`);
+console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}`
+  + `${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''})`);
 if (stageMode) { const n = {}; for (const r of queue) n[r.stage.id] = (n[r.stage.id] ?? 0) + 1;
   console.log(`In stages: ${STAGES.filter((s) => n[s.id]).map((s) => `${s.id} ${n[s.id]}`).join(', ')}. A run starts once the one it continues from has finished OK.`); }
 const resuming = queue.filter((r) => canResume(r)).length;
