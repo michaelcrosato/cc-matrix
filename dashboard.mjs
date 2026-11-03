@@ -156,7 +156,7 @@ const UPDATABLE = ['claude', 'codex', 'agy', 'grok'];
 let updating = null;
 async function updateCli(p) {
   if (!UPDATABLE.includes(p)) throw new Error(`No update command for ${p}`);
-  if (runner) throw new Error('Wait for the batch to finish before updating a CLI.');
+  if (running()) throw new Error('Wait for the batch to finish before updating a CLI.');
   if (Object.values(smokes).some((s) => s.running)) throw new Error('Wait for the tests to finish before updating a CLI.');
   if (updating) throw new Error(`${updating} is already updating.`);
   updating = p;
@@ -188,10 +188,10 @@ function startSmoke(key, goal) {
 }
 
 // Turn the dashboard's selection into runner flags. sel.stages ({ stage: ['agent:effort', …] }) runs in stages
-// (see stageRuns in run-matrix.mjs) instead of sel.pick.
+// (see stageRuns in run-matrix.mjs) instead of sel.pick. A batch runs from its own copy of the config (see snapshot).
 const PICK = /^[\w.-]+:[\w.+-]+$/;
-function selectionArgs(sel = {}) {
-  const a = ['--config', CONFIG, '--out', OUT];
+function selectionArgs(sel = {}, config = CONFIG) {
+  const a = ['--config', config, '--out', OUT];
   const stages = sel.stages && typeof sel.stages === 'object' ? Object.entries(sel.stages)
     .map(([st, picks]) => [st, (Array.isArray(picks) ? picks : []).filter((p) => typeof p === 'string' && PICK.test(p))])
     .filter(([st, picks]) => /^\w+$/.test(st) && picks.length) : [];
@@ -206,30 +206,130 @@ function selectionArgs(sel = {}) {
 }
 
 // ------------------------------------------------------------- run state
-let runner = null;
-// active: run id -> start time. state: what the runner last said about itself (its settings as they
-// are now, spend, paused, runs left per CLI); see control() in run-matrix.mjs.
-const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, active: new Map(), finished: 0, planned: null, settings: null, state: null };
-const stateWaiters = []; // /api/adjust calls waiting for the runner to answer
-function logLine(line) {
+// The batches running now: Start begins one, Queue adds more while it runs. Each is its own runner
+// (run-matrix.mjs --broker) working from a copy of the config and prompt as they were when it was started or
+// queued (see snapshot), so editing Setup for the next batch never changes one that's going. They share Parallel
+// runs, Max per CLI, the budget, the start gap and Pause, which this server keeps for all of them: a run starts
+// only when schedule() grants it. Batches go in the order they were queued, and a later one only gets the slots
+// the ones before it can't use: their running runs, and every run they still have to start (a build waiting
+// hours for its plan, say), keep theirs. So a batch queued later never holds up an earlier one, and one with
+// nothing to wait for ramps up at once in whatever slots are left.
+const STOP = path.join(OUT, '.stop');
+const batches = [], waiting = []; // this session's batches in order; queued ones not started yet (see startWaiting)
+const live = () => batches.filter((b) => b.child);
+const running = () => live().length > 0 || waiting.length > 0;
+// The session: its log, when it started and ended, what Start sent, and the limits all its batches share.
+const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, settings: null, limits: null, overBudget: false, stopping: false, gapMs: 0 };
+let snaps = null; // a temp folder for the batches' copies of the config, made when first needed
+const total = (o) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
+const usd = (v) => `$${(v ?? 0).toFixed(2)}`;
+const none = (v, unit = '') => v === Infinity || !v ? 'none' : `${unit}${v}`;
+const activeRuns = () => new Map(batches.flatMap((b) => [...b.active]));
+const spentNow = () => batches.reduce((n, b) => n + (b.state?.spent ?? 0), 0);
+const note = (line) => { run.log.push(line); if (run.log.length > 3000) run.log.splice(0, run.log.length - 3000); };
+const tellBatch = (b, msg) => { if (b.child) b.child.stdin.write(JSON.stringify(msg) + '\n'); };
+// What the page shows for the running batches together: the shared limits, spend and the runs left per CLI.
+function sessionState() {
+  const l = run.limits ?? {}, left = {};
+  for (const b of live()) for (const [p, n] of Object.entries(b.state?.left ?? {})) left[p] = (left[p] ?? 0) + n;
+  return { concurrency: l.concurrency ?? null, perCli: l.perCli === Infinity ? null : l.perCli ?? null, budget: l.budget === Infinity ? null : l.budget ?? null,
+    timeout: l.timeout || null, rerunFailed: !!l.rerunFailed, resumeFailed: !!l.resumeFailed, paused: !!l.paused, overBudget: run.overBudget, spent: spentNow(), left };
+}
+const shortPicks = (ps) => { const l = (ps ?? []).map((p) => String(p).replace(':', ' · ')); return l.length > 4 ? `${l.slice(0, 3).join(', ')} +${l.length - 3} more` : l.join(', '); };
+const describe = (sel) => sel.stages && typeof sel.stages === 'object'
+  ? `in stages: ${Object.entries(sel.stages).filter(([, ps]) => ps?.length).map(([st, ps]) => `${st} ${shortPicks(ps)}`).join(' → ') || 'nothing picked'}`
+  : `1-shot: ${shortPicks(sel.pick) || 'nothing picked'}`;
+const batchList = () => [
+  ...batches.map((b) => ({ n: b.n, what: describe(b.sel), stages: !!b.sel.stages, startedAt: b.startedAt, finishedAt: b.finishedAt, running: !!b.child,
+    ended: b.ended, active: b.active.size, finished: b.finished, planned: b.planned, left: total(b.state?.left) })),
+  ...waiting.map((w) => ({ n: w.n, what: describe(w.sel), stages: !!w.sel.stages, queuedAt: w.queuedAt, waiting: true }))];
+
+// A line from batch b's runner: "@…" lines are for this server (its state, and the runs it offers, takes and
+// finishes; see brokered in run-matrix.mjs), the rest go to the log.
+function logLine(b, line) {
   if (!line) return;
-  if (line.startsWith('@state ')) {
-    try { run.state = JSON.parse(line.slice(7)); } catch { return; }
-    // Runs this batch will do, now that limits, Retry failed or a skipped CLI can change it mid-batch.
-    run.planned = run.finished + run.active.size + Object.values(run.state.left ?? {}).reduce((a, b) => a + b, 0);
-    stateWaiters.splice(0).forEach((w) => w(run.state));
-    return;
-  }
-  run.log.push(line);
-  if (run.log.length > 3000) run.log.splice(0, run.log.length - 3000);
+  if (line[0] === '@') return brokerLine(b, line);
+  note(line);
   // ▶ started · ✔ ✘ finished · ■ stopped (discarded) · ↺ ended to start over later
   const m = line.match(/^(▶|✔|✘|■|↺) (\S+)/);
-  if (m) { if (m[1] === '▶') run.active.set(m[2], new Date().toISOString()); else { run.active.delete(m[2]); if (m[1] === '✔' || m[1] === '✘') run.finished++; } }
-  else { const p = line.match(/^(\d+) runs(?: \((\d+) already done\))? → /); if (p) run.planned = p[1] - (p[2] ?? 0); } // runs this batch will do
+  if (m) { if (m[1] === '▶') b.active.set(m[2], new Date().toISOString()); else { b.active.delete(m[2]); if (m[1] === '✔' || m[1] === '✘') { b.finished++; refreshReport(); } } }
+  else { const p = line.match(/^(\d+) runs(?: \((\d+) already done\))? → /); if (p) b.planned = p[1] - (p[2] ?? 0); } // runs this batch will do
+}
+function brokerLine(b, line) {
+  const at = line.indexOf(' '), tag = line.slice(1, at < 0 ? undefined : at);
+  let v; try { v = JSON.parse(line.slice(at + 1)); } catch { return; } // a line cut short
+  if (tag === 'state') {
+    b.state = v;
+    // Runs this batch will do, now that Retry failed, a skipped CLI or a run ended can change it mid-batch.
+    b.planned = b.finished + b.active.size + total(v.left);
+    b.waiters.splice(0).forEach((w) => w());
+  } else if (tag === 'ready') b.ready = v;
+  else if (tag === 'keys') { b.keys = new Set(v.keys); b.state ??= { left: v.left, spent: 0 }; startWaiting(); }
+  else if (tag === 'took') { const p = b.granted.get(v); b.granted.delete(v); if (p) b.taken.set(v, p); }
+  else if (tag === 'unused') b.granted.delete(v);
+  else if (tag === 'freed') b.taken.delete(v);
+  else if (tag === 'done' || tag === 'gone') {
+    const key = tag === 'done' ? v.key : v;
+    b.keys?.delete(key);
+    // A batch beside it may be waiting on this run (a build on its plan): it carries on, or leaves that out.
+    for (const o of live()) if (o !== b) tellBatch(o, tag === 'done' ? { finished: [v] } : { gone: [key] });
+  }
+  schedule();
 }
 
-// A change to the running batch from the page, checked before it goes to the runner. Empty (or 0)
-// perCli, budget or timeout = none; requeue and drop name runs that are running.
+// Grants runs while there's room, one per start gap (the config's startGap, default 3 s, so no two runs anywhere
+// start in the same second: that names their folders and games). Batches go in order: one's runs that can start
+// now come before the next one's, and what an earlier batch still has to start keeps its slots (see run state).
+let grantTimer = null, lastGrant = -Infinity;
+function schedule() {
+  clearTimeout(grantTimer); grantTimer = null;
+  const L = run.limits;
+  if (!L || !live().length) return;
+  const inUse = batches.reduce((n, b) => n + b.taken.size + b.granted.size, 0);
+  if (!run.overBudget && spentNow() >= L.budget) {
+    run.overBudget = true;
+    note(`■ Budget of $${L.budget} reached (spent ${usd(spentNow())}): no new runs start; ${activeRuns().size} still running will finish.`);
+  }
+  // Once nothing runs any more the batches end (till then a raised budget can still start more).
+  if (run.overBudget && !inUse) for (const b of live()) if (!b.ended) { b.ended = true; tellBatch(b, { end: true }); }
+  if (run.stopping || L.paused || run.overBudget) return;
+  for (;;) {
+    const wait = lastGrant + run.gapMs - Date.now();
+    if (wait > 0) { grantTimer = setTimeout(schedule, wait); return; }
+    const g = nextGrant();
+    if (!g) return;
+    const [b, key, p] = g;
+    b.granted.set(key, p); lastGrant = Date.now();
+    tellBatch(b, { grant: [key] });
+  }
+}
+// The next run to start: the first one offered, batch by batch, that fits under Parallel runs and its CLI's Max per
+// CLI once the slots held for earlier batches are counted. A batch holds one for each run it still has to start
+// (waiting for its plan or not), up to what its CLIs can run at once; the ones it's running count as in use.
+function nextGrant() {
+  const L = run.limits, use = {}, heldCli = {};
+  let used = 0, held = 0;
+  for (const b of batches) for (const m of [b.taken, b.granted]) for (const p of m.values()) { use[p] = (use[p] ?? 0) + 1; used++; }
+  for (const b of live()) {
+    if (b.ended) continue;
+    for (const [key, p] of b.ready) {
+      if (used + held >= L.concurrency) return null;
+      if (b.granted.has(key) || b.taken.has(key) || (use[p] ?? 0) + (heldCli[p] ?? 0) >= L.perCli) continue;
+      return [b, key, p];
+    }
+    const mine = {}, asked = {};
+    for (const p of b.taken.values()) mine[p] = (mine[p] ?? 0) + 1;
+    for (const p of b.granted.values()) { mine[p] = (mine[p] ?? 0) + 1; asked[p] = (asked[p] ?? 0) + 1; }
+    for (const [p, n] of Object.entries(b.state?.left ?? {})) {
+      const k = Math.max(0, Math.min(n - (asked[p] ?? 0), L.perCli - (mine[p] ?? 0)));
+      heldCli[p] = (heldCli[p] ?? 0) + k; held += k;
+    }
+  }
+  return null;
+}
+
+// A change to the running batches from the page, checked first. Empty (or 0) perCli, budget or timeout = none;
+// requeue and drop name runs that are running; endBatch leaves the rest of one batch out (it runs next time).
 function adjustment(b) {
   b = b && typeof b === 'object' ? b : {};
   const s = b.set && typeof b.set === 'object' ? b.set : {}, set = {};
@@ -244,34 +344,130 @@ function adjustment(b) {
   if ('budget' in s) set.budget = num('budget', 0) || null;
   if ('timeout' in s) set.timeout = num('timeout', 0) || null;
   for (const k of ['rerunFailed', 'resumeFailed', 'paused']) if (k in s) set[k] = !!s[k];
-  const ids = (x) => (Array.isArray(x) ? x : []).filter((id) => typeof id === 'string' && run.active.has(id));
+  const act = activeRuns(), ids = (x) => (Array.isArray(x) ? x : []).filter((id) => typeof id === 'string' && act.has(id));
   return { set, timeoutRunning: !!b.timeoutRunning, requeue: ids(b.requeue), drop: ids(b.drop),
-    skipCli: (Array.isArray(b.skipCli) ? b.skipCli : []).filter((p) => typeof p === 'string' && /^\w+$/.test(p)) };
+    skipCli: (Array.isArray(b.skipCli) ? b.skipCli : []).filter((p) => typeof p === 'string' && /^\w+$/.test(p)),
+    endBatch: Number.isInteger(b.endBatch) ? b.endBatch : null };
 }
-// Hands the change to the runner (a line on its stdin) and answers with its state once it has applied it.
-function adjustRun(msg) {
-  return new Promise((resolve) => {
-    const t = setTimeout(() => resolve(run.state), 5000);
-    stateWaiters.push((st) => { clearTimeout(t); resolve(st); });
-    runner.stdin.write(JSON.stringify(msg) + '\n');
-  });
+// Parallel runs, Max per CLI, the budget and Pause are this server's (see schedule); the time limit, Retry and Resume
+// failed, runs to end, CLIs to skip and a batch to end go to the runners. Answers once each has applied its part.
+async function adjustRun(msg) {
+  const L = run.limits, s = msg.set, was = { ...L }, going = activeRuns().size;
+  if ('concurrency' in s) {
+    L.concurrency = s.concurrency;
+    note(`⚙ Parallel runs: ${was.concurrency} → ${L.concurrency}${going > L.concurrency ? ` (${going} still running; no new one starts until fewer than ${L.concurrency} are)` : ''}`);
+  }
+  if ('perCli' in s) { L.perCli = s.perCli ?? Infinity; note(`⚙ Max per CLI: ${none(was.perCli)} → ${none(L.perCli)}`); }
+  if ('budget' in s) {
+    L.budget = s.budget ?? Infinity;
+    const again = run.overBudget && spentNow() < L.budget;
+    if (again) run.overBudget = false;
+    note(`⚙ Budget: ${none(was.budget, '$')} → ${none(L.budget, '$')} (spent ${usd(spentNow())})${again ? ': new runs start again' : ''}`);
+  }
+  if ('paused' in s && s.paused !== !!L.paused) {
+    L.paused = s.paused;
+    note(L.paused ? `⚙ Paused: no new runs start${going ? ` (${going} still running)` : ''}` : '⚙ Resumed: new runs start again');
+  }
+  const set = {};
+  for (const k of ['timeout', 'rerunFailed', 'resumeFailed']) if (k in s) { set[k] = s[k]; L[k] = k === 'timeout' ? s[k] || 0 : s[k]; }
+  const answers = [];
+  for (const b of live()) {
+    const end = msg.endBatch === b.n && !b.ended;
+    const m = { set, timeoutRunning: msg.timeoutRunning, requeue: msg.requeue.filter((id) => b.active.has(id)),
+      drop: msg.drop.filter((id) => b.active.has(id)), skipCli: msg.skipCli, ...(end ? { end: true } : {}) };
+    if (end) { b.ended = true; note(`■ Batch ${b.n}: the runs it hasn't started are left out (they run next time)`); }
+    if (!Object.keys(set).length && !m.requeue.length && !m.drop.length && !m.skipCli.length && !end) continue;
+    answers.push(new Promise((resolve) => { const t = setTimeout(resolve, 5000); b.waiters.push(() => { clearTimeout(t); resolve(); }); tellBatch(b, m); }));
+  }
+  const w = waiting.findIndex((x) => x.n === msg.endBatch); // one not started yet just goes
+  if (w >= 0) { const [x] = waiting.splice(w, 1); fs.rmSync(x.dir, { recursive: true, force: true }); note(`■ Batch ${x.n} taken out of the queue`); }
+  await Promise.all(answers);
+  schedule();
+  return sessionState();
 }
 
-function startRun(s) {
-  const a = [RUNNER, ...selectionArgs(s), '-j', String(Math.max(1, +s.concurrency || 1)), '--control'];
-  if (+s.perCli > 0) a.push('--per-cli', String(+s.perCli));
-  if (+s.budget > 0) a.push('--budget', String(+s.budget));
-  if (+s.timeout > 0) a.push('--timeout', String(+s.timeout));
-  Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null,
-    active: new Map(), finished: 0, planned: null, settings: s, state: null });
-  runner = spawn(process.execPath, a, { cwd: HERE });
-  runner.stdin.on('error', () => {}); // the runner may have just exited
-  let buf = '';
-  const onData = (d) => { buf += d; const lines = buf.split(/\r?\n/); buf = lines.pop(); lines.forEach(logLine); };
-  runner.stdout.on('data', onData); runner.stderr.on('data', onData);
-  runner.on('close', (code) => { logLine(buf); buf = ''; run.exitCode = code; run.finishedAt = new Date().toISOString();
-    run.active.clear(); runner = null; stateWaiters.splice(0).forEach((w) => w(run.state)); });
+// A batch's own copy of the config and prompt as they are now: a queued batch starts later, and Setup may change
+// meanwhile. A variant whose text is in a file is copied in as text, and the prompt keeps its file's time (the
+// prompt history says when a version was saved).
+function snapshot(n) {
+  snaps ??= fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-batches-'));
+  const c = readJSON(CONFIG, null);
+  if (!c || typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, 'The config can\'t be read.');
+  const dir = fs.mkdtempSync(path.join(snaps, `batch${n}-`));
+  if (c.templateFile) {
+    const from = templatePath(), to = path.join(dir, path.basename(from)), st = fs.statSync(from);
+    fs.copyFileSync(from, to); fs.utimesSync(to, st.atime, st.mtime);
+    c.templateFile = path.basename(from);
+  }
+  for (const vs of Object.values(c.dimensions ?? {})) for (const v of Array.isArray(vs) ? vs : []) if (v?.text == null && v?.file) { v.text = variantText(v); delete v.file; }
+  fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(c, null, 2));
+  return dir;
 }
+
+function startSession(s) {
+  fs.rmSync(STOP, { force: true });
+  batches.length = 0; waiting.length = 0; lastGrant = -Infinity;
+  const c = readJSON(CONFIG, {});
+  Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, settings: s, overBudget: false, stopping: false,
+    gapMs: Math.max(0, +(c.startGap ?? 3) || 0) * 1000,
+    limits: { concurrency: Math.max(1, Math.floor(+s.concurrency) || 1), perCli: +s.perCli >= 1 ? Math.floor(+s.perCli) : Infinity,
+      budget: +s.budget > 0 ? +s.budget : Infinity, timeout: +s.timeout > 0 ? +s.timeout : 0, paused: false,
+      rerunFailed: !!s.rerunFailed, resumeFailed: !!s.resumeFailed } });
+  return addBatch(s);
+}
+// Queues a batch: its copy of the config is made now. Retry and Resume failed are the running batches' (they're
+// options of the whole queue on the page), the rest of its options too.
+function addBatch(s) {
+  const n = batches.length + waiting.length + 1, L = run.limits;
+  const sel = { ...s, rerunFailed: L.rerunFailed, resumeFailed: L.resumeFailed };
+  waiting.push({ n, sel, dir: snapshot(n), queuedAt: new Date().toISOString() });
+  if (n > 1) note(`+ Batch ${n} queued (${describe(sel)}): it starts its runs in the slots the batches before it can't use.`);
+  startWaiting();
+  return n;
+}
+// Starts the queued batches, each once every running one has said which runs it has (so the new one leaves those
+// out, and waits for the ones it continues from).
+function startWaiting() {
+  while (waiting.length && !run.stopping && live().every((b) => b.keys)) {
+    const w = waiting.shift(), skip = [...new Set(live().flatMap((b) => [...b.keys]))];
+    const a = [RUNNER, ...selectionArgs(w.sel, path.join(w.dir, 'config.json')), '--broker'];
+    if (run.limits.timeout > 0) a.push('--timeout', String(run.limits.timeout));
+    if (skip.length) { const f = path.join(w.dir, 'skip-keys.json'); fs.writeFileSync(f, JSON.stringify(skip)); a.push('--skip-keys', f); }
+    const b = Object.assign(w, { child: spawn(process.execPath, a, { cwd: HERE }), startedAt: new Date().toISOString(), finishedAt: null, exitCode: null,
+      active: new Map(), finished: 0, planned: null, state: null, ready: [], granted: new Map(), taken: new Map(), keys: null, ended: false, waiters: [] });
+    batches.push(b);
+    b.child.stdin.on('error', () => {}); // the runner may have just exited
+    let buf = '';
+    const onData = (d) => { buf += d; const lines = buf.split(/\r?\n/); buf = lines.pop(); lines.forEach((l) => logLine(b, l)); };
+    b.child.stdout.on('data', onData); b.child.stderr.on('data', onData);
+    b.child.on('close', (code) => { logLine(b, buf); buf = ''; batchEnded(b, code); });
+  }
+}
+function batchEnded(b, code) {
+  Object.assign(b, { child: null, exitCode: code, finishedAt: new Date().toISOString(), ready: [] });
+  b.active.clear(); b.granted.clear(); b.taken.clear(); b.waiters.splice(0).forEach((w) => w());
+  // What it had left won't run now: a batch waiting on one of them leaves that out.
+  const gone = [...(b.keys ?? [])]; b.keys = new Set();
+  if (gone.length) for (const o of live()) tellBatch(o, { gone });
+  startWaiting();
+  if (!running()) return endSession();
+  schedule();
+}
+function endSession() {
+  Object.assign(run, { finishedAt: new Date().toISOString(), stopping: false, exitCode: batches.find((b) => b.exitCode)?.exitCode ?? batches.at(-1)?.exitCode ?? null });
+  fs.rmSync(STOP, { force: true }); refreshReport();
+  for (const b of batches) fs.rmSync(b.dir, { recursive: true, force: true });
+}
+// Stop: every batch ends its running agents (their work is thrown away), and the queued ones don't start.
+function stopAll(why) {
+  if (!running()) return;
+  run.stopping = true;
+  for (const w of waiting.splice(0)) fs.rmSync(w.dir, { recursive: true, force: true });
+  fs.writeFileSync(STOP, why);
+  for (const b of live()) tellBatch(b, { stop: true });
+  if (!live().length) endSession();
+}
+process.on('exit', () => { if (snaps) fs.rmSync(snaps, { recursive: true, force: true }); });
 
 // ------------------------------------------------------------------ results
 // Whether a run used different text for one of its variants than the config has now (the variant was
@@ -488,8 +684,8 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(req, res, p.slice(6));
     if (p === '/api/audit' && m === 'GET') return send(res, 200, readJSON(AUDIT, null));
 
-    // canResume: this server takes Resume failed (a page newer than its server hides it).
-    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true), canResume: true });
+    // canResume, canQueue: this server takes Resume failed and queued batches (a page newer than its server hides them).
+    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true), canResume: true, canQueue: true });
     if (p === '/api/config' && m === 'PUT') {
       const c = await body(req);
       if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });
@@ -514,26 +710,29 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, JSON.parse(r.stdout.trim().split('\n').pop()));
     }
 
+    // Start begins a batch; with add, one is queued beside the batches running now (see run state).
     if (p === '/api/run' && m === 'POST') {
-      if (runner) return send(res, 409, { error: 'A batch is already running.' });
+      const s = await body(req);
       if (updating) return send(res, 409, { error: `${updating} is updating; start when it's done.` });
-      startRun(await body(req));
-      return send(res, 200, { ok: true });
+      if (running() && !s?.add) return send(res, 409, { error: 'A batch is already running.' });
+      if (run.stopping) return send(res, 409, { error: 'The running batches are stopping; start when they have.' });
+      return send(res, 200, { ok: true, batch: running() ? addBatch(s) : startSession(s) });
     }
     if (p === '/api/adjust' && m === 'POST') {
       const msg = adjustment(await body(req));
-      if (!runner) return send(res, 409, { error: 'No batch is running.' });
+      if (!running()) return send(res, 409, { error: 'No batch is running.' });
       return send(res, 200, { ok: true, state: await adjustRun(msg) });
     }
     if (p === '/api/stop' && m === 'POST') {
-      if (runner) fs.writeFileSync(path.join(OUT, '.stop'), new Date().toISOString());
+      stopAll(new Date().toISOString());
       return send(res, 200, { ok: true });
     }
     if (p === '/api/status' && m === 'GET') {
-      const since = +(url.searchParams.get('since') ?? 0), known = url.searchParams.get('smokes');
-      return send(res, 200, { running: !!runner, stopping: fs.existsSync(path.join(OUT, '.stop')),
-        startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...run.active.keys()],
-        activeSince: Object.fromEntries(run.active), finished: run.finished, planned: run.planned, settings: run.settings, state: run.state, logTotal: run.log.length,
+      const since = +(url.searchParams.get('since') ?? 0), known = url.searchParams.get('smokes'), act = activeRuns();
+      return send(res, 200, { running: running(), stopping: run.stopping || fs.existsSync(STOP),
+        startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...act.keys()], activeSince: Object.fromEntries(act),
+        finished: batches.reduce((n, b) => n + b.finished, 0), planned: run.startedAt ? batches.reduce((n, b) => n + (b.planned ?? 0), 0) : null,
+        settings: run.settings, state: run.limits ? sessionState() : null, batches: batchList(), logTotal: run.log.length,
         log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), updating, rev: revs(),
         ...(known === String(smokesRev) ? {} : { smokes }) }); // the tests only when they changed
     }
@@ -561,7 +760,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (p === '/api/delete-run' && m === 'POST') {
       const { id } = await body(req), dir = runDir(id);
-      if (!dir || run.active.has(id)) return send(res, 400, { error: 'Cannot delete that run.' });
+      if (!dir || activeRuns().has(id)) return send(res, 400, { error: 'Cannot delete that run.' });
       fs.rmSync(dir, { recursive: true, force: true });
       const all = readJSON(SCORES, {}); // its review was of the game just deleted
       if (all[id]) { delete all[id]; fs.writeFileSync(SCORES, JSON.stringify(all, null, 2)); }
@@ -593,13 +792,15 @@ server.listen(opts.port, '127.0.0.1', () => {
 // work away, so with agents running Ctrl-C asks to be pressed again (the runner leaves Ctrl-C to us).
 let ctrlCAt = 0;
 const quit = (sig) => {
-  if (!runner) process.exit(0);
-  if (sig === 'SIGINT' && run.active.size && Date.now() - ctrlCAt > 5000) {
+  if (!running()) process.exit(0);
+  const going = activeRuns().size;
+  if (sig === 'SIGINT' && going && Date.now() - ctrlCAt > 5000) {
     ctrlCAt = Date.now();
-    console.log(`\nA batch is running with ${run.active.size} agent(s) going: quitting ends them and throws away what they've done so far.\n`
+    console.log(`\nA batch is running with ${going} agent(s) going: quitting ends them and throws away what they've done so far.\n`
       + 'Press Ctrl-C again within 5 seconds to quit anyway, or Pause the batch in the dashboard to let them finish first.');
     return;
   }
-  fs.writeFileSync(path.join(OUT, '.stop'), 'quit'); runner.on('close', () => process.exit(0)); setTimeout(() => process.exit(0), 15000);
+  stopAll('quit');
+  setInterval(() => { if (!live().length) process.exit(0); }, 100); setTimeout(() => process.exit(0), 15000);
 };
 process.on('SIGINT', () => quit('SIGINT')); process.on('SIGTERM', () => quit('SIGTERM'));

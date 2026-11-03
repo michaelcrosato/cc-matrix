@@ -6,7 +6,6 @@
       "provider": "claude",
       "model": "claude-opus-5-5",
       "efforts": [
-        "xhigh",
         "medium"
       ]
     },
@@ -17,26 +16,33 @@
       "efforts": [
         "medium"
       ]
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "provider": "claude",
+      "model": "claude-haiku-5-5",
+      "efforts": [
+        "medium"
+      ]
     }
   ],
   "dimensions": {
     "source": [
       {
-        "id": "source",
-        "text": "source"
+        "id": "the-wire-tv",
+        "text": "The Wire (2002-2008) - Keep it as gritty and real as the show"
       }
     ],
     "genre": [
       {
-        "id": "genre",
-        "text": "pick what would make the most interesting game",
-        "olderRuns": true
+        "id": "genre-v2",
+        "text": "pick the genre(s) that best matches the source and would ultimately make the best game"
       }
     ],
     "perspective": [
       {
-        "id": "pov-engine",
-        "text": "use one of the games engine native perspectives, allow the player to switch perspectives, but pick a main one",
+        "id": "pov-engine-v3",
+        "text": "pick the perspective(s) that best matches the genre/source and would ultimately make the best game",
         "olderRuns": true
       }
     ],
@@ -63,20 +69,20 @@
     ],
     "techStack": [
       {
-        "id": "tech-v4",
-        "text": " Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Web Audio, Gamepad API; The rest of the tech stack is yours to choose."
+        "id": "my-3d2dge0851-v2",
+        "text": "https://github.com/michaelcrosato/my-3d2dge/tree/main/dist/handoff, feel free to modify and expand upon it as needed, the rest of the tech stack choices are yours"
       }
     ],
     "artDirection": [
       {
-        "id": "engine",
-        "text": "use the engine native style"
+        "id": "art-engine",
+        "text": "use the engine native style, feel free to modify and expand upon it as needed"
       }
     ],
     "animation": [
       {
-        "id": "engine",
-        "text": "use the engine native system"
+        "id": "ani-engine",
+        "text": "use the engine native system, feel free to modify and expand upon it as needed"
       }
     ],
     "audio": [
@@ -109,8 +115,8 @@
     ],
     "testing": [
       {
-        "id": "efficient",
-        "text": "Keep testing efficient and lightweight. "
+        "id": "test-eff-v2",
+        "text": "Keep testing token efficient and lightweight. "
       }
     ],
     "premise": [
@@ -150,8 +156,8 @@
     ],
     "uiux": [
       {
-        "id": "ui-10ft",
-        "text": "10-Foot Controller-First Philosophy\nDesign all interfaces and interactions for a \"10-foot experience\" with a PS5-compatible controller as the primary input. Keyboard and mouse are secondary inputs that map to the controller's interaction model, not a separate desktop paradigm. Apply modern UX principles. Use your judgment to balance deep systemic information with clean, uncluttered presentation.\n\nCommon Issue (~10%): Gamepad horizontal/vertical input is intermittently inverted. As a quick fix, add toggles in Settings to invert horizontal and vertical axes.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: no touch controls; show \"Controller or keyboard required\" and the settings button. Allow the attract mode run.",
+        "id": "ui-10ft-v2",
+        "text": "10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nCommon Issue (~10%): Gamepad horizontal/vertical input is intermittently inverted. As a quick fix, add toggles in Settings to invert horizontal and vertical axes.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: no touch controls; show \"Controller or keyboard required\" and the settings button. Allow the attract mode run.",
         "olderRuns": true
       }
     ],
@@ -203,25 +209,20 @@
       "models": [
         "claude-opus-5-5:max"
       ],
-      "game": false,
       "text": "Read TASK.md in this folder: it describes a game to build. Don't build it yet: plan it. Write PLAN.md in this folder for the developers who will build it from TASK.md and your plan; they may be other AI models, working without you. Start PLAN.md with the game's title, picked as TASK.md says. Cover the architecture and modules, every system and mechanic TASK.md asks for, the content (levels, enemies, items, story beats), the order to build in with milestones, the riskiest parts and how to de-risk them, and how to test each part. Be specific enough that a capable developer can build the whole demo from TASK.md and PLAN.md alone. Then reply with a short summary of the plan.",
-      "goal": "PLAN.md exists in this folder and covers the title, architecture, every system, the content, the build order and testing for everything TASK.md asks for."
+      "goal": "PLAN.md exists in this folder and covers the title, architecture, every system, the content, the build order and testing for everything TASK.md asks for.",
+      "game": false
     },
     {
       "id": "build",
       "models": [
-        "claude-opus-5-5:xhigh"
+        "claude-opus-5-5:xhigh",
+        "claude-opus-5-5:medium",
+        "claude-sonnet-5-5:medium",
+        "claude-haiku-5-5:medium"
       ],
       "text": "Read TASK.md (what to build) and PLAN.md (how to build it, written by {{parentModel}} at {{parentEffort}} effort) in this folder. Build the game TASK.md describes, following the plan and using the title it gives; where they disagree, TASK.md wins. Deliver everything TASK.md asks for, including its file name, and the sections it asks for in your final reply.",
       "goal": "the bundled single .html file exists in this folder's root, every feature in TASK.md is implemented with no TODOs, placeholders or stubs, exit-interview.json in this folder's root parses as JSON and answers every field, and your final reply contains the Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections."
-    },
-    {
-      "id": "content",
-      "models": [
-        "claude-sonnet-5-5:medium"
-      ],
-      "text": "The game in this folder was built from TASK.md and PLAN.md; the steps so far: {{chain}}. Its framework is done. Your job is content and polish on top of it: more of what TASK.md asks for (levels, enemies, items, quests, music, effects, story) and fixes for anything broken. Keep the game's title, engine and architecture, and extend them rather than starting over. Save the result as a new bundled single .html in this folder's root, named as TASK.md says but with the game's current title, and in your final reply list what you added and give the sections TASK.md asks for.",
-      "goal": "a new bundled single .html with the added content exists in this folder's root, nothing that worked before is broken, exit-interview.json in this folder's root parses as JSON and answers every field, and your final reply lists what you added and contains the Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections."
     }
   ],
   "extraArgs": {
@@ -249,9 +250,7 @@
     "muse": "muse"
   },
   "folderName": {
-    "fields": [
-      "source"
-    ],
+    "fields": [],
     "date": true,
     "title": true
   }

@@ -899,3 +899,26 @@ test('Ctrl-C with agents running asks to be pressed again; under the dashboard i
   assert.equal(await c.exit, 0);
   assert.match(c.out, /■ opus-low__long stopped \(discarded\)/);
 });
+
+test('--broker: a run starts only when the dashboard grants it, says what it did, and the rest can be left out', async (t) => {
+  const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  t.after(() => cleanup(s));
+  const child = spawn(process.execPath, [RUNNER, '--config', s.config, '--out', s.out, '--broker'], { env: s.env });
+  const lines = []; let buf = '';
+  child.stdout.on('data', (d) => { buf += d; const l = buf.split('\n'); buf = l.pop(); lines.push(...l); });
+  const say = (m) => child.stdin.write(JSON.stringify(m) + '\n');
+  const line = (re) => waitFor(() => lines.find((l) => re.test(l)));
+  assert.deepEqual(JSON.parse((await line(/^@keys /)).slice(6)), { keys: ['opus-low__a', 'opus-low__b'], left: { claude: 2 } });
+  assert.deepEqual(JSON.parse((await line(/^@ready \[\[/)).slice(7)), [['opus-low__a', 'claude'], ['opus-low__b', 'claude']]);
+  await new Promise((r) => setTimeout(r, 300));
+  assert.ok(!lines.some((l) => l.startsWith('▶')), 'a run started without a grant');
+  say({ grant: ['opus-low__a', 'nope'] });
+  await line(/^@freed "opus-low__a"$/);
+  assert.ok(lines.includes('@took "opus-low__a"') && lines.includes('@unused "nope"'), lines.join('\n'));
+  assert.ok(lines.includes('@done {"key":"opus-low__a","dir":"opus-low__a"}'), lines.join('\n'));
+  say({ end: true });
+  assert.equal(await new Promise((r) => child.on('close', r)), 0);
+  assert.ok(lines.includes('@gone "opus-low__b"') && lines.some((l) => l.startsWith('■ 1 queued run(s) left out')), lines.join('\n'));
+  assert.equal(result(s, 'opus-low__a').status, 'ok');
+  assert.ok(!fs.existsSync(path.join(s.out, 'opus-low__b')));
+});

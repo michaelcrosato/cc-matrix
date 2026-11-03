@@ -241,6 +241,10 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
 
 /* ---- Tablets and below ---- */
 @media (max-width: 900px) {
+  /* The tabs get a row of their own, scrolling sideways when they don't fit */
+  header { padding-bottom: 0; }
+  nav { order: 5; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; margin: 4px calc(-1 * var(--gutter)) 0; padding: 0 var(--gutter) 6px; }
+  nav::-webkit-scrollbar { display: none; }
   /* Runs table: one card per run */
   table.runs thead { display: none; }
   table.runs, table.runs tbody { display: block; }
@@ -273,7 +277,7 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
   table.runs td.scorecell, table.runs td.notescell { order: 8; } table.runs td.b4 { order: 9; }
   table.runs td.act { order: 10; }
   .cardsort { display: inline-flex; }
-  /* Setup and Run: CLIs and models as cards */
+  /* CLIs and Run: CLIs and models as cards */
   table.stack, table.stack tbody { display: block; }
   table.stack thead { display: none; }
   table.stack tr { display: block; padding: 10px 0; border-bottom: 1px solid var(--line); }
@@ -296,8 +300,6 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
   header h1 { font-size: 15px; }
   .pill { font-size: 12px; padding: 3px 9px; }
   .pill .full { display: none; } .pill .short { display: inline; }
-  nav { order: 5; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; margin: 4px calc(-1 * var(--gutter)) 0; padding: 0 var(--gutter) 6px; }
-  nav::-webkit-scrollbar { display: none; }
   nav { gap: 2px; }
   nav button { flex: 1 0 auto; padding: 8px 6px; font-size: 13.5px; }
   nav .badge { margin-left: 4px; min-width: 16px; padding: 0 4px; font-size: 11px; line-height: 16px; }
@@ -356,7 +358,8 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
 <header>
   <h1>Matrix Dashboard</h1>
   <nav>
-    <button data-tab="setup" title="The 1-shot prompt: CLIs, models, its sections and the prompt">Setup · Basic</button>
+    <button data-tab="clis" title="What this machine has installed, the models to run and each CLI's command and flags">CLIs</button>
+    <button data-tab="setup" title="The prompt: its sections and their variants, the prompt itself and run folder names">Setup · Basic</button>
     <button data-tab="advanced" title="Multistage runs: the stages that hand the work from one model or lab to the next">Setup · Advanced</button>
     <button data-tab="run">Run</button>
     <button data-tab="results">Results</button>
@@ -367,6 +370,7 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
   <button class="icon" id="theme" title="Toggle light/dark" aria-label="Toggle light or dark theme">◐</button>
 </header>
 <main>
+  <section class="tab" id="tab-clis"></section>
   <section class="tab" id="tab-setup"></section>
   <section class="tab" id="tab-advanced"></section>
   <section class="tab" id="tab-run"></section>
@@ -493,7 +497,7 @@ const effortsOf = (a) => (a.efforts?.length ? a.efforts : ['default']).map(effNa
 const RESERVED = ['model', 'effort', 'lab', 'environment', 'stamp', 'date'];
 // What the runner fills these with (runVars in run-matrix.mjs), for the Setup hint and the chips' tooltips.
 const RUN_VARS = {
-  model: 'the model ID, as in the Models card (claude-opus-5-5)',
+  model: 'the model ID, as in CLIs → Models (claude-opus-5-5)',
   effort: 'the effort level, with -ultracode when Ultracode is on (medium, high-ultracode)',
   lab: 'the lab that made the model (Anthropic, OpenAI, Google, xAI, Meta)',
   environment: 'the CLI and operating system (Claude Code CLI (headless); Linux; browser unknown)',
@@ -560,7 +564,7 @@ const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`
 const stageEfforts = (a) => effortOptions(a).filter((e) => !e.startsWith('default'));
 const pickLabel = (k) => { const [a, e] = k.split(':'); return `${a} · ${effortLabel(e)}`; };
 const validPick = (k) => { const [a, e] = k.split(':'), ag = cfg.agents.find((x) => x.id === a); return !!ag && stageEfforts(ag).includes(e); };
-// "+ add model…": every model in Setup · Basic → Models, at every effort it takes.
+// "+ add model…": every model in CLIs → Models, at every effort it takes.
 const pickSelect = (have, add, label) => h('select', { 'aria-label': label, style: 'max-width:240px', onchange: (e) => { const k = e.target.value; if (k && !have.includes(k)) add(k); } },
   h('option', { value: '' }, '+ add model…'),
   cfg.agents.map((a) => h('optgroup', { label: `${a.id} (${PROVIDERS[a.provider] ?? a.provider})` },
@@ -613,7 +617,7 @@ const cached = (k, fn) => k in cache ? cache[k] : (cache[k] = fn());
 const dirty = () => JSON.stringify(cfg) !== savedCfg || tmpl !== savedTmpl;
 
 // tabs
-const TABS = ['setup', 'advanced', 'run', 'results', 'insights', 'audit'];
+const TABS = ['clis', 'setup', 'advanced', 'run', 'results', 'insights', 'audit'];
 let tab = location.hash.slice(1) || store.get('matrix.tab', 'run');
 const tabOk = (t) => TABS.includes(t) && (t !== 'audit' || !!audit);
 function showTab(t) {
@@ -630,7 +634,8 @@ function showTab(t) {
 // Redraws the open tab from the current state. Cheap, and safe at any time (see patch).
 function render() {
   if (!cfg) return;
-  if (tab === 'setup') renderSetup();
+  if (tab === 'clis') renderClis();
+  else if (tab === 'setup') renderSetup();
   else if (tab === 'advanced') renderAdvanced();
   else if (tab === 'run') renderRun();
   else if (tab === 'results') renderResults();
@@ -810,7 +815,7 @@ function showSmoke(s) {
     s.error ? h('p', { class: 'errs' }, s.error) : null,
     s.checks ? h('div', { style: 'margin-bottom:12px; display:grid; gap:2px' },
       check(c.exit, 'CLI ran and finished without an error', s.exitCode != null ? `exit code ${s.exitCode}` : null),
-      check(c.file, 'Agent used its tools (it created smoke.txt)', c.file ? null : 'check the permission flags in Advanced'),
+      check(c.file, 'Agent used its tools (it created smoke.txt)', c.file ? null : 'check its extra flags in CLI commands and flags'),
       check(c.reply, s.goal ? 'Final reply read' : 'Final reply read (asked for SMOKE-OK)'),
       check(c.tokens, 'Token usage read', `${fmtTok(s.inputTokens)} in · ${fmtTok(s.outputTokens)} out`),
       h('div', { class: 'muted' }, `Cost: ${s.costUsd != null ? fmtUsd(s.costUsd) : s.apiCostUsd != null ? `~${fmtUsd(s.apiCostUsd)} at API list prices (this CLI doesn't report cost)` : 'this CLI doesn\'t report cost'} · took ${fmtSecs(s.seconds)} · ${new Date(s.at).toLocaleString()}`)) : null,
@@ -1102,7 +1107,7 @@ function modelsCard() {
   const pick = all.find((c) => c.key === addPick?.key && c.provider === addPick?.provider && !!c.custom === !!addPick?.custom) ?? all[0];
   return h('div', { class: 'card', id: 'modelcard', key: 'models' },
     h('h2', {}, 'Models'),
-    h('p', { class: 'sub' }, 'Each model and its effort levels to sweep. On the Run tab you tick which ones to run. Test runs one tiny task through the CLI (about a minute; Grok with /goal takes a few) to check the install, login, model ID, flags and that results are read correctly.'),
+    h('p', { class: 'sub' }, 'Each model and its effort levels to sweep in 1-shot runs. On the Run tab you tick which ones to run. The stages in Setup · Advanced pick from these models too, at any effort they take. Test runs one tiny task through the CLI (about a minute; Grok with /goal takes a few) to check the install, login, model ID, flags and that results are read correctly.'),
     h('div', { class: 'scroll' }, h('table', { class: 'stack models' },
       h('thead', {}, h('tr', {}, ['Model', 'Effort levels', 'Time limit (min)', 'Works?'].map((t) => h('th', {}, t)), h('th', {}, h('span', { class: 'sr-only' }, 'Order and remove')))),
       h('tbody', {}, agentRows))),
@@ -1115,6 +1120,26 @@ function modelsCard() {
         h('input', { type: 'checkbox', checked: smokeGoal, onchange: (e) => { smokeGoal = e.target.checked; store.set('matrix.smokeGoal', smokeGoal); } }), 'Test with /goal'),
       h('button', { class: 'btn', disabled: !cfg.agents.length, onclick: () => testModels(cfg.agents) }, 'Test all')),
     h('p', { class: 'hint' }, 'Pick Custom at the bottom of the model list to type any model ID for that CLI. Each effort dropdown lists only the levels that model takes (as its CLI reports them). Add several to sweep them; "default" leaves it to the CLI. On Claude Code each level also has a "+ Ultracode" version. Time limit is optional, per run.'));
+}
+
+// CLIs → CLI commands and flags: each CLI's executable and the extra flags added to every run of it.
+function cliCmdsCard() {
+  return h('div', { class: 'card', key: 'clicmds' },
+    h('h2', {}, 'CLI commands and flags'),
+    h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
+    h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', { key: p },
+      h('strong', {}, n),
+      h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Command'),
+        h('input', { class: 'mono grow', value: cfg.bins[p] ?? p, 'aria-label': `${n} command`, oninput: (e) => { cfg.bins[p] = e.target.value.trim(); changed(); } })),
+      h('div', { class: 'muted', style: 'margin-bottom:4px' }, 'Extra flags (one per line)'),
+      h('textarea', { class: 'mono', rows: 3, value: (cfg.extraArgs[p] ?? DEFAULT_EXTRA[p] ?? []).join('\n'), 'aria-label': `${n} extra flags`,
+        oninput: (e) => { cfg.extraArgs[p] = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); changed(); } })))));
+}
+
+// CLIs: what this machine can run. The models here are the ones the Run tab sweeps and the stages pick from.
+function renderClis() {
+  cfg.bins ??= {}; cfg.extraArgs ??= {};
+  morph($('#tab-clis'), onDiskBanner(), clisCard(), modelsCard(), cliCmdsCard(), savebar());
 }
 
 // Setup · Advanced → Stages: the steps of runs in stages (Run → Advanced; stageRuns in run-matrix.mjs). Each has a name, a
@@ -1131,7 +1156,8 @@ function stagesCard() {
   };
   return h('div', { class: 'card', key: 'stages' },
     h('h2', {}, 'Stages'),
-    h('p', { class: 'sub' }, 'In order: each continues from the one before it. A stage\'s models each run it on every session of the stage before (models come from Setup · Basic → Models, at any effort they take). '
+    h('p', { class: 'sub' }, 'In order: each continues from the one before it. A stage\'s models each run it on every session of the stage before (models come from ',
+      h('button', { class: 'linkish', onclick: () => showTab('clis') }, 'CLIs → Models'), ', at any effort they take). A stage with no models stops the chain there. '
       + 'Untick "makes a game" for a stage that only plans, so its sessions aren\'t flagged for leaving no game.'),
     list.map((x, i) => h('div', { class: 'stagebox', key: 'stage:' + i },
       h('div', { class: 'dim-head' },
@@ -1146,7 +1172,7 @@ function stagesCard() {
       h('div', { class: 'row', style: 'gap:6px; margin:8px 0 2px' },
         h('span', { class: 'muted', style: 'min-width:56px' }, 'Models'),
         (x.models ?? []).map((k) => h('span', { class: 'tag' + (validPick(k) ? ' on' : ' bad'), key: k, style: 'font-size:13px; padding:3px 4px 3px 10px',
-            title: validPick(k) ? null : 'Not in Setup · Basic → Models (or not at this effort): left out' }, pickLabel(k),
+            title: validPick(k) ? null : 'Not in CLIs → Models (or not at this effort): left out' }, pickLabel(k),
           h('button', { class: 'icon', title: `Take ${pickLabel(k)} out of ${x.id}`, 'aria-label': `Remove ${pickLabel(k)} from ${x.id}`, style: 'min-height:20px; padding:0 4px',
             onclick: () => { x.models = x.models.filter((y) => y !== k); if (!x.models.length) delete x.models; changed(true); } }, '✕'))),
         pickSelect(x.models ?? [], (k) => { (x.models ??= []).push(k); changed(true); }, `Add a model to ${x.id}`),
@@ -1214,6 +1240,8 @@ function renderAdvanced() {
         h('li', {}, 'Every session finds TASK.md in its folder: the prompt from Setup · Basic, filled for its own model, so its file name and Source Information name that model.'),
         h('li', {}, 'A stage after the first starts in a copy of the folder of the session before it (without node_modules and .git): a build sees PLAN.md, a content pass sees the game.'),
         h('li', {}, 'Each stage has its models: every one of them runs the stage on every session of the stage before, so the stages branch. Run → Advanced ticks which of them to queue.'),
+        h('li', {}, 'To see what the planner changes, give plan two or more models: each builder builds every plan. To see what the builder changes, give build two or more: they all build the same plan. '
+          + 'To stop after the build, leave content without models. Results filters and groups by stage and by the run each one continues from.'),
         h('li', {}, 'Run → Preview shows the queue as the terminal commands it stands for.'))),
     pipelineCard(),
     stagesCard(),
@@ -1322,11 +1350,8 @@ function renderSetup() {
         h('button', { class: 'btn', title: 'Paste a list, one variant per line', onclick: () => bulkAdd(d, vs, changed) }, 'Bulk add…'),
         addSelect(d, vs)));
   });
-  cfg.bins ??= {}; cfg.extraArgs ??= {};
   morph($('#tab-setup'),
     onDiskBanner(),
-    clisCard(),
-    modelsCard(),
     folderNameCard(),
     h('div', { class: 'card', key: 'dims', style: 'margin-bottom:8px' },
       h('h2', {}, 'Dimensions'),
@@ -1349,22 +1374,11 @@ function renderSetup() {
         oninput: (e) => { tmpl = e.target.value; updateChips(); updateHistory(); changed(); } }),
       h('div', { class: 'chips', id: 'tchips', style: 'margin-top:10px' }, chipButtons()),
       h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Click a chip to insert it at the cursor. Filled automatically for every run, here and in variants\' text:'),
-      h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, RESERVED.map((n) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${RUN_VARS[n]}`)))),
-    historyCard(),
-    // Each CLI's command and extra flags
-    h('div', { class: 'card', key: 'clicmds' },
-      h('h2', {}, 'CLI commands and flags'),
-      h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
-      h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', { key: p },
-        h('strong', {}, n),
-        h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Command'),
-          h('input', { class: 'mono grow', value: cfg.bins[p] ?? p, 'aria-label': `${n} command`, oninput: (e) => { cfg.bins[p] = e.target.value.trim(); changed(); } })),
-        h('div', { class: 'muted', style: 'margin-bottom:4px' }, 'Extra flags (one per line)'),
-        h('textarea', { class: 'mono', rows: 3, value: (cfg.extraArgs[p] ?? DEFAULT_EXTRA[p] ?? []).join('\n'), 'aria-label': `${n} extra flags`,
-          oninput: (e) => { cfg.extraArgs[p] = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); changed(); } })))),
+      h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, RESERVED.map((n) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${RUN_VARS[n]}`))),
       h('div', { class: 'row', style: 'margin-top:12px' }, h('span', { class: 'muted' }, 'Prompt file'),
         h('input', { class: 'mono', value: cfg.templateFile || 'prompt-template.md', 'aria-label': 'Prompt file', onchange: (e) => { cfg.templateFile = e.target.value.trim(); changed(); } }),
         h('span', { class: 'hint', style: 'margin:0' }, 'Change to keep several prompts side by side; the current text is saved to the new file.'))),
+    historyCard(),
     savebar());
 }
 
@@ -1575,7 +1589,7 @@ function renderRun() {
   if (!cfg) return;
   const staged = inStages(), s = staged ? stageSelection() : selection();
   const rerender = () => { saveSel(); renderRun(); };
-  const running = !!status.running;
+  const running = !!status.running, many = running && (status.batches?.length ?? 0) > 1;
   // While a batch runs, Options shows and changes its settings as they are now (see adjust).
   const now = running ? status.state : null;
 
@@ -1597,12 +1611,14 @@ function renderRun() {
         : h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per model+effort'), h('span', {}, `up to ${s.combos * s.repeat} runs`)),
       h('div', { class: 'launch' },
         h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
+        running && meta.canQueue ? h('button', { class: 'btn primary', onclick: queue, disabled: !(s.count - s.done) || status.stopping || !!status.updating,
+          title: 'Run these too, beside the batch going now: they start in the slots it can\'t use, so it\'s never held up' }, '+ Queue') : null,
         running && status.state ? h('button', { class: 'btn', onclick: togglePause, disabled: status.stopping,
           title: status.state.paused ? 'Let new runs start again' : 'Hold the queue: no new runs start until you resume' }, status.state.paused ? '▶ Resume' : '⏸ Pause') : null,
         running
           ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
           : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))),
-    dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, 'Setup has unsaved changes; they will be saved when you start.') : null,
+    dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, `CLIs or Setup has unsaved changes; they will be saved when you ${running && meta.canQueue ? 'queue' : 'start'}.`) : null,
     s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with an earlier version of the prompt or of a variant's text. They still count as done, so they're skipped (Setup lists the prompt's versions; Results → Compare by prompt shows what a change did). To redo one with the current text, delete it in Results (✕); to run a variant's new text beside its old runs, give the variant a new short name.`) : null);
 
   // Models & efforts
@@ -1612,7 +1628,7 @@ function renderRun() {
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Models & effort'),
         h('button', { class: 'icon', onclick: () => { sel.offPick = []; rerender(); } }, 'all'),
         h('button', { class: 'icon', onclick: () => { sel.offPick = [...allKeys]; rerender(); } }, 'none')),
-      cfg.agents.length ? null : h('p', { class: 'muted' }, 'No models yet. Add some in Setup.'),
+      cfg.agents.length ? null : h('p', { class: 'muted' }, 'No models yet. Add some in ', h('button', { class: 'linkish', onclick: () => showTab('clis') }, 'CLIs'), '.'),
       h('div', { class: 'scroll' }, h('table', { class: 'stack runmodels' }, srHead('Model', 'Efforts to run', 'Tick all or none'), h('tbody', {}, cfg.agents.map((a) => {
         const effs = effortsOf(a);
         const keys = effs.map((e) => `${a.id}:${e}`);
@@ -1629,15 +1645,15 @@ function renderRun() {
             h('button', { class: 'icon', title: `Untick every effort of ${a.id}`, onclick: () => { keys.forEach((k) => setOff(sel.offPick, k, true)); rerender(); } }, 'none')] : null));
       }))))),
     h('div', { class: 'card', key: 'options' },
-      h('h2', {}, now ? 'Options · this batch' : 'Options'),
-      now ? h('p', { class: 'sub' }, `A run that has started keeps its model, effort, prompt and time limit and runs to the end. These apply to the ${plural(queuedCount(), 'run')} not started yet; `
+      h('h2', {}, now ? (many ? 'Options · the running batches' : 'Options · this batch') : 'Options'),
+      now ? h('p', { class: 'sub' }, `${many ? `Shared by the ${status.batches.length} batches in the queue. ` : ''}A run that has started keeps its model, effort, prompt and time limit and runs to the end. These apply to the ${plural(queuedCount(), 'run')} not started yet; `
         + 'each change asks first, and nothing running is ended unless you choose that. They stay for the next batch too.') : null,
       h('table', { class: 'opts' }, h('tbody', {},
         optRow('Parallel runs', 'concurrency', 'How many agents run at once. Runs take turns across CLIs, so parallel slots go to different services.'),
         optRow('Max per CLI', 'perCli', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit.'),
         staged ? null : optRow('Repeat each', 'repeat', now ? 'Run each combination this many times. Fixed once a batch starts.' : 'Run each combination this many times (to see variance)'),
         optRow('Budget ($)', 'budget', 'Stop starting new runs once this much is spent. Spend is counted as each run finishes (that\'s when the CLI reports it), so a run already going can take it past the budget, and a run ended early isn\'t counted. Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'
-          + (now ? ` Spent so far in this batch: ${fmtUsd(now.spent)}.` : '')),
+          + (now ? ` Spent so far in ${many ? 'these batches' : 'this batch'}: ${fmtUsd(now.spent)}.` : '')),
         optRow('Time limit (min)', 'timeout', 'Per run, unless the model has its own. Empty = no limit.'
           + (now ? ' Runs going now keep theirs unless you choose otherwise when you change it.' : '')),
         h('tr', {}, h('td', {}, 'Retry failed', reach('rerunFailed')), h('td', {}, h('label', { class: 'row' }, h('input', { type: 'checkbox', checked: now ? !!now.rerunFailed : !!sel.opts.rerunFailed,
@@ -1716,6 +1732,7 @@ function liveCard() {
   const ctl = st.running && st.state && !st.stopping;
   return h('div', { class: 'card', id: 'live', key: 'live' }, h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
     st.running ? holding() : null,
+    (st.batches?.length ?? 0) > 1 ? queueList(st, ctl) : null,
     hb ? liveHealth(hb) : null,
     hb?.active.length ? h('div', { class: 'chips', style: 'margin-bottom:10px' }, hb.active.map((a) =>
       h('span', { class: 'tag' + (a.slow ? ' warn' : ''), key: a.id, style: 'white-space:normal; overflow-wrap:anywhere', title: a.usual ? `Running for ${fmtMin(a.mins)}; this setup usually takes ~${fmtMin(a.usual)}` : 'Running for' },
@@ -1727,6 +1744,16 @@ function liveCard() {
       onscroll: (e) => { const p = e.currentTarget; logFollow = p.scrollTop + p.clientHeight >= p.scrollHeight - 8; } }, logText));
 }
 function resetLog() { logSince = 0; logText = ''; const pre = $('#logpre'); if (pre) pre.textContent = ''; }
+// The batches queued together, in the order they get slots: what each runs and how far it is.
+function queueList(st, ctl) {
+  return h('div', { key: 'queue', style: 'margin-bottom:10px' }, st.batches.map((b) => h('div', { class: 'row', key: 'b' + b.n, style: 'gap:2px 10px; padding:4px 0; border-top:1px solid var(--line)' },
+    h('strong', { style: 'white-space:nowrap' }, `Batch ${b.n}`),
+    h('span', { class: 'muted grow', style: 'overflow-wrap:anywhere; min-width:0' }, b.what),
+    h('span', {}, b.waiting ? 'waiting to start' : b.running && b.planned == null ? 'starting…' : b.running ? [`${b.finished} of ${b.planned} done`,
+      b.active ? ` · ${b.active} running` : '', b.left ? ` · ${b.left} to start` : '', b.ended ? ' · rest left out' : ''].join('') : `done · ${b.finished} finished`),
+    ctl && (b.waiting || (b.running && !b.ended && b.left)) ? h('button', { class: 'icon', title: 'Leave out the runs it hasn\'t started (its running ones finish); they run next time',
+      'aria-label': `Take batch ${b.n} out of the queue`, onclick: () => endBatch(b) }, 'take out') : null)));
+}
 
 // Progress, per-CLI tallies and warnings for the current (or last) batch, from the runs it has finished.
 function batchHealth() {
@@ -1797,14 +1824,18 @@ async function preview() {
   } catch (e) { alert(e.message); }
 }
 
+// The models a batch picks that haven't passed a test or finished a run yet, said before it starts.
+function unprovenNote(s, staged) {
+  const picked = new Set((staged ? Object.values(s.stages).flat() : s.pick).map((k) => k.split(':')[0]));
+  const unproven = cfg.agents.filter((a) => picked.has(a.id) && !hasWorked(a)).map((a) => a.id);
+  return unproven.length ? `\n\nNot proven to work yet (no passing test or finished run): ${unproven.join(', ')}. Test checks one in about a minute.` : '';
+}
 async function start() {
   if (dirty() && !(await save())) return;
   const staged = inStages(), s = staged ? stageSelection() : selection();
   const n = s.count - s.done;
   const budget = +sel.opts.budget > 0 ? ` with a $${sel.opts.budget} budget` : ' with no budget limit';
-  const picked = new Set((staged ? Object.values(s.stages).flat() : s.pick).map((k) => k.split(':')[0]));
-  const unproven = cfg.agents.filter((a) => picked.has(a.id) && !hasWorked(a)).map((a) => a.id);
-  const note = unproven.length ? `\n\nNot proven to work yet (no passing test or finished run): ${unproven.join(', ')}. Test checks one in about a minute.` : '';
+  const note = unprovenNote(s, staged);
   const resumes = s.resume ? ` (${s.resume} of them resume their session where it stopped)` : '';
   const order = staged ? `\n\nIn stages: ${Object.entries(s.stages).map(([st, p]) => `${st} (${p.length} model${p.length === 1 ? '' : 's'})`).join(' → ')}. `
     + 'A run starts once the run it continues from has finished OK; if that one fails, the runs after it are left for the next batch.' : '';
@@ -1818,16 +1849,35 @@ async function start() {
     await poll();
   } catch (e) { alert(e.message); }
 }
+// Queue: one more batch beside the ones running, from Setup and the ticks as they are now (saved first), so they can
+// change for the next one straight away. It starts its runs in the slots the batches before it can't use (see run
+// state in dashboard.mjs): theirs keep every slot they still need, so it never holds them up.
+async function queue() {
+  if (dirty() && !(await save())) return;
+  const staged = inStages(), s = staged ? stageSelection() : selection(), n = s.count - s.done;
+  const order = staged ? ` in stages (${Object.entries(s.stages).map(([st, p]) => `${st}: ${plural(p.length, 'model')}`).join(' → ')})` : '';
+  if (!confirm(`Queue ${plural(n, 'run')}${order} beside the batch running now?\n\n`
+    + 'They run from Setup and the prompt as they are now, so you can change them for the next batch straight away. '
+    + 'They start in the slots the batches before them can\'t use: those keep every slot they still need (a build waiting for its plan too), so they\'re never held up. '
+    + 'Runs one of them has already are left out, and a build on a plan being made there waits for it.\n\n'
+    + `Parallel runs, Max per CLI, Budget, Time limit and Pause are shared by all the batches.\n\nAgents run with permission prompts off.${unprovenNote(s, staged)}`)) return;
+  try { await api('/api/run', 'POST', { ...batchOf(s), add: true }); await poll(); } catch (e) { alert(e.message); }
+}
+async function endBatch(b) {
+  if (!confirm(`Take batch ${b.n} out of the queue?\n\n${b.waiting ? 'None of its runs has started.'
+    : `The runs it hasn't started are left out (they run next time)${b.active ? `; ${b.active === 1 ? 'the one' : `the ${b.active}`} going now finish${b.active === 1 ? 'es' : ''}` : ''}.`}`)) return;
+  await tellBatch({ endBatch: b.n });
+}
 async function stop() {
-  const n = status.active?.length ?? 0;
+  const n = status.active?.length ?? 0, what = (status.batches?.length ?? 0) > 1 ? 'every batch in the queue' : 'the batch';
   if (n && status.state) {
-    const how = await choose('Stop the batch', [`${n === 1 ? '1 run is' : `${n} runs are`} going now. Finished runs are kept either way.`],
+    const how = await choose(`Stop ${what}`, [`${n === 1 ? '1 run is' : `${n} runs are`} going now. Finished runs are kept either way.`],
       [{ value: 'pause', primary: true, label: `Pause instead: let ${n === 1 ? 'it' : 'them'} finish`, hint: 'No new runs start and nothing is lost. Stop once they\'re done.' },
        { value: 'stop', danger: true, label: `Stop now and end the ${n === 1 ? 'run' : `${n} runs`} going`, hint: `${lostWork(n)} ${n === 1 ? 'It runs' : 'They run'} from the beginning in the next batch.` }]);
     if (how === 'pause') return tellBatch({ set: { paused: true } });
     if (how !== 'stop') return;
-  } else if (!confirm(n ? `Stop the batch now?\n\n${n === 1 ? 'The run' : `The ${n} runs`} going ${n === 1 ? 'is' : 'are'} ended. ${lostWork(n)} Finished runs are kept.`
-    : 'Stop the batch? Nothing is running; the runs not started yet are left for the next batch.')) return;
+  } else if (!confirm(n ? `Stop ${what} now?\n\n${n === 1 ? 'The run' : `The ${n} runs`} going ${n === 1 ? 'is' : 'are'} ended. ${lostWork(n)} Finished runs are kept.`
+    : `Stop ${what}? Nothing is running; the runs not started yet are left for the next batch.`)) return;
   try { await api('/api/stop', 'POST', {}); } catch (e) { alert(e.message); }
   await poll();
 }
@@ -1916,7 +1966,7 @@ async function adjust(key, input) {
   }
   if (key === 'budget') {
     const spent = st.spent ?? 0, going = active.length;
-    lines.push(`Spent so far in this batch: ${fmtUsd(spent)}. Spend is counted as each run finishes (that's when Claude Code and Grok report it; `
+    lines.push(`Spent so far in ${(status.batches?.length ?? 0) > 1 ? 'these batches' : 'this batch'}: ${fmtUsd(spent)}. Spend is counted as each run finishes (that's when Claude Code and Grok report it; `
       + `the other CLIs don't), so the budget never stops a run that's going, and one can take it past the budget. Runs ended early aren't counted.`,
       v == null ? 'With no budget, new runs keep starting until the batch is done.'
         : v <= spent ? `That's spent already, so no new runs start${going ? `; ${going === 1 ? 'the run going now finishes' : `the ${going} runs going now finish`}` : ' and the batch ends'}.`
@@ -2961,7 +3011,7 @@ function renderAudit() {
 // ------------------------------------------------------------------- data
 async function loadSetup() {
   const c = await api('/api/config');
-  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume };
+  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume, canQueue: !!c.canQueue };
   cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
@@ -3005,8 +3055,10 @@ async function pollOnce() {
   catch { if (!offline) { offline = true; setPill(); } return; }
   const back = offline; offline = false;
   if (st.logTotal < logSince) { resetLog(); return pollOnce(); } // a new batch (or a restarted server) started a new log
-  // The batch's settings as they are now show in Options, so a change to them (from any tab) redraws.
-  const stateChanged = JSON.stringify(st.state ?? null) !== JSON.stringify(status.state ?? null);
+  // The batch's settings as they are now show in Options, so a change to them (from any tab) redraws, and so does a
+  // batch queued beside it (Options and Stop then speak for all of them).
+  const stateChanged = JSON.stringify(st.state ?? null) !== JSON.stringify(status.state ?? null)
+    || (st.batches?.length ?? 0) !== (status.batches?.length ?? 0);
   status = st;
   let changed = back || stateChanged || wasRunning !== !!st.running;
   if (st.smokes) { smokes = st.smokes; changed = true; }
