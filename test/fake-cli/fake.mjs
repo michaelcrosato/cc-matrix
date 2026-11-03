@@ -7,7 +7,9 @@
 //   FAKE:fail=<message>   exit 1 with this error, in the CLI's own error format
 //   FAKE:sleep=<ms>       take this long (default FAKE_SLEEP_MS, else 150)
 //   FAKE:hang             codex: write its session logs, then work until stopped and exit 0 like the real one,
-//                         never printing the turn's usage
+//                         never printing the turn's usage. claude (not when resumed): get going (a response and a
+//                         dev file, the response in its transcript as it's made, like the real one), then work until
+//                         stopped, never printing the result; FAKE:hang=state also saves the session's totals as it stops
 //   FAKE:nogame           finish OK without writing a game file
 //   FAKE:noreply          finish OK with an empty final reply
 //   FAKE:todo             leave a TODO in the game
@@ -87,6 +89,7 @@ export async function run(cli) {
   // claude --resume <id>: the same session, so the usage limit it stopped on has passed.
   const resume = cli === 'claude' ? after(argv, '--resume') : undefined;
   const limit = cli === 'claude' && !resume ? prompt.match(/FAKE:limit(=start)?/) : null;
+  const hang = cli === 'claude' && !resume ? prompt.match(/FAKE:hang(=state)?/) : null;
   const transcript = cli === 'claude' && process.env.CLAUDE_CONFIG_DIR
     ? path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'), `${resume ?? 'fake-session'}.jsonl`) : null;
   if (resume && !(transcript && fs.existsSync(transcript))) { process.stderr.write(`No conversation found with session ID: ${resume}\n`); process.exit(1); }
@@ -98,7 +101,7 @@ export async function run(cli) {
     if (!limit[1]) { fs.mkdirSync('src', { recursive: true }); fs.writeFileSync(path.join('src', 'partial.js'), 'console.log("half a game");\n'); }
   } else if (/smoke\.txt/.test(prompt)) { fs.writeFileSync('smoke.txt', 'ok\n'); reply = 'SMOKE-OK'; }
   else if (!fail && /FAKE:plan/.test(prompt)) fs.writeFileSync('PLAN.md', `# Plan by ${model}\n\n1. Engine\n2. Levels\n3. Polish\n`);
-  else if (!fail && !/FAKE:nogame/.test(prompt)) {
+  else if (!fail && !hang && !/FAKE:nogame/.test(prompt)) { // a hang makes its dev file below, as it gets going
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(path.join('src', 'main.js'), 'console.log("game");\n');
     const given = fs.readdirSync('.').filter((f) => /\.html$/.test(f)).length; // a later stage adds content to the game it was given
@@ -119,6 +122,24 @@ export async function run(cli) {
     const sessionId = cli === 'grok' ? crypto.randomUUID() : resume ?? 'fake-session';
     // What the session had used before this part (the cost-state its transcript saved), which the totals include.
     const since = resume ? JSON.parse(fs.readFileSync(transcript, 'utf8').trim().split('\n').filter((l) => l.includes('"cost-state"')).pop() ?? 'null') : null;
+    if (hang) { // cut off mid-way: one response (and its tool call), then working until stopped
+      const usage = { input_tokens: 100, cache_creation_input_tokens: 600, cache_read_input_tokens: 5000, output_tokens: 400 };
+      const msg = { id: 'msg_h1', model, content: [{ type: 'tool_use', id: 'h1', name: 'Write', input: {} }], usage };
+      line({ type: 'system', subtype: 'init', model, session_id: sessionId });
+      line({ type: 'assistant', message: { ...msg, usage: { ...usage, output_tokens: 5 } } }); // the stream's usage is from the response's start
+      fs.mkdirSync('src', { recursive: true }); fs.writeFileSync(path.join('src', 'partial.js'), 'console.log("half a game");\n');
+      if (transcript) {
+        fs.mkdirSync(path.dirname(transcript), { recursive: true });
+        const at = new Date().toISOString();
+        fs.appendFileSync(transcript, jsonl([{ type: 'user', timestamp: at, message: { content: 'turn' } }, { type: 'assistant', timestamp: at, message: msg }]));
+      }
+      process.on('SIGTERM', () => {
+        if (hang[1] && transcript) claudeTranscript(transcript, { totalCostUSD: 0.03, totalAPIDuration: 700,
+          modelUsage: { [model]: { inputTokens: 100, outputTokens: 400, cacheReadInputTokens: 5000, cacheCreationInputTokens: 600, costUSD: 0.03 } } });
+        process.exit(143);
+      });
+      return setInterval(() => {}, 60000);
+    }
     if (limit?.[1]) { // stopped at the first request: nothing used
       line({ type: 'system', subtype: 'init', model, session_id: sessionId });
       line({ type: 'rate_limit_event', rate_limit_info: { status: 'rejected', rateLimitType: 'five_hour', utilization: 1, resetsAt: 1793293800 } });
@@ -216,7 +237,7 @@ const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
 // totals so far, which --resume restores).
 function claudeTranscript(file, totals) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, jsonl([{ type: 'user', message: { content: 'turn' } }, { type: 'cost-state', ...totals }]));
+  fs.appendFileSync(file, jsonl([{ type: 'user', timestamp: new Date().toISOString(), message: { content: 'turn' } }, { type: 'cost-state', ...totals }]));
 }
 
 // Codex: the main thread's rollout (2 requests, plan limits at the start and end) and one subagent's, which

@@ -1485,6 +1485,11 @@ function savebar() {
 }
 
 // -------------------------------------------------------------------- RUN
+// Runs cut off mid-way (the dashboard quit or restarted, the computer went down; the server lists them as status.cut):
+// never done, and the next batch that has one carries on with its session where it was (on: a Claude Code session
+// that had got going) or starts it over.
+const cutKeys = () => cached('cutKeys', () => { const cut = status.cut ?? [];
+  return { all: new Set(cut.map(runKey)), on: new Set(cut.filter((c) => c.carriesOn).map(runKey)) }; });
 // Mirrors run-matrix.mjs: a finished run counts for the id it would get now. One from before a dimension
 // was added counts as that dimension's olderRuns variant (else its first); a dimension removed since is left out.
 const olderVariant = (d) => (cfg.dimensions[d].find((v) => v.olderRuns) ?? cfg.dimensions[d][0])?.id;
@@ -1513,10 +1518,11 @@ function selection() {
   const count = pick.length * combos * repeat;
   let done = 0, doneOld = 0, resume = 0; // doneOld: of those, made with an older prompt or a variant's old text
   if (count <= 50000) {
-    // Resume failed: failed runs that got partway carry on with their session (the server says which can).
-    const resumable = (r) => r.status !== 'ok' && r.resumable && resumeOn();
-    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || !(sel.opts.rerunFailed || resumable(r))).map((r) => [runKey(r), r]));
-    const resumes = new Set(results.filter(resumable).map(runKey));
+    // Resume failed: failed runs that got partway carry on with their session (the server says which can), and so do
+    // runs cut off mid-way whose session had got going, whatever the options (cutKeys).
+    const resumable = (r) => r.status !== 'ok' && r.resumable && resumeOn(), cut = cutKeys();
+    const doneRuns = new Map(results.filter((r) => r.status === 'ok' || (!cut.all.has(runKey(r)) && !(sel.opts.rerunFailed || resumable(r)))).map((r) => [runKey(r), r]));
+    const resumes = new Set([...results.filter(resumable).map(runKey), ...cut.on]);
     const walk = (i, acc, base) => {
       if (i === lists.length) {
         for (let r = 1; r <= repeat; r++) {
@@ -1550,9 +1556,9 @@ function stageSelection() {
       const k = `${briefKeyOf(r)}|${chainKey(r.chain.slice(0, -1))}|${r.chain.at(-1).stage}`;
       (have.get(k) ?? have.set(k, []).get(k)).push(r.chain);
     }
-    const resumable = (r) => r.status !== 'ok' && r.resumable && resumeOn();
-    const doneRuns = new Set(results.filter((r) => r.chain && (r.status === 'ok' || !(sel.opts.rerunFailed || resumable(r)))).map(runKey));
-    const resumes = new Set(results.filter((r) => r.chain && resumable(r)).map(runKey));
+    const resumable = (r) => r.status !== 'ok' && r.resumable && resumeOn(), cut = cutKeys();
+    const doneRuns = new Set(results.filter((r) => r.chain && (r.status === 'ok' || (!cut.all.has(runKey(r)) && !(sel.opts.rerunFailed || resumable(r))))).map(runKey));
+    const resumes = new Set([...results.filter((r) => r.chain && resumable(r)).map(runKey), ...cut.on]);
     const walk = (i, acc) => {
       if (i < lists.length) { for (const v of lists[i]) walk(i + 1, [...acc, v]); return; }
       const bk = acc.join('__');
@@ -1689,8 +1695,9 @@ function renderRun() {
       d === GOAL_DIM && vs.some((v) => (v.text || '').trim()) ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, '* Not on Codex: it has no headless /goal, so it gets the same prompt without /goal.') : null);
   }));
 
-  // While a batch runs, Live comes right after the summary, so it's on screen without scrolling.
-  morph($('#tab-run'), summary, running ? liveCard() : null, models, dims, running ? null : liveCard());
+  // While a batch runs, Live comes right after the summary, so it's on screen without scrolling. A batch cut off before
+  // (the dashboard quit or restarted) is offered first, to pick up.
+  morph($('#tab-run'), restartedBanner(), !running && status.saved ? savedCard() : null, summary, running ? liveCard() : null, models, dims, running ? null : liveCard());
   const pre = $('#logpre'); if (pre && logFollow) pre.scrollTop = pre.scrollHeight;
 }
 
@@ -1730,7 +1737,14 @@ function liveCard() {
     : st.finishedAt ? `Last batch ended ${new Date(st.finishedAt).toLocaleString()} (${st.finished} finished)` : 'No batch started since the dashboard opened.';
   // A running batch takes changes (see adjust): each run can be ended, to start over later or to leave out.
   const ctl = st.running && st.state && !st.stopping;
-  return h('div', { class: 'card', id: 'live', key: 'live' }, h('h2', {}, 'Live'), h('p', { class: 'sub' }, head),
+  const now = restartingNow || st.restarting === 'now';
+  return h('div', { class: 'card', id: 'live', key: 'live' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Live'),
+      meta.canRestart ? h('button', { class: 'btn', onclick: restartDashboard, disabled: now || !!st.updating || (st.stopping && !st.restarting),
+        title: 'Start the dashboard again with its code as it is now; a batch going picks up where it left off' }, now ? 'Restarting…' : '⟳ Restart dashboard') : null),
+    h('p', { class: 'sub' }, head),
+    now ? h('p', { class: 'warns', style: 'margin:0 0 10px' }, '⟳ Restarting the dashboard: this page reloads itself when it\'s back, in a few seconds'
+      + (st.running ? '. The batch then picks up where it left off.' : '.')) : null,
     st.running ? holding() : null,
     (st.batches?.length ?? 0) > 1 ? queueList(st, ctl) : null,
     hb ? liveHealth(hb) : null,
@@ -1839,7 +1853,9 @@ async function start() {
   const resumes = s.resume ? ` (${s.resume} of them resume their session where it stopped)` : '';
   const order = staged ? `\n\nIn stages: ${Object.entries(s.stages).map(([st, p]) => `${st} (${p.length} model${p.length === 1 ? '' : 's'})`).join(' → ')}. `
     + 'A run starts once the run it continues from has finished OK; if that one fails, the runs after it are left for the next batch.' : '';
-  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}${resumes}, ${sel.opts.concurrency || 1} at a time${budget}?${order}\n\nAgents run with permission prompts off.${note}\n\n`
+  const forgets = status.saved ? '\n\nThe batch cut off before (Pick up where you left off, above) is forgotten: Resume it instead to run it as it was started. '
+    + 'Its cut-off runs still carry on whenever a batch has them.' : '';
+  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}${resumes}, ${sel.opts.concurrency || 1} at a time${budget}?${order}${forgets}\n\nAgents run with permission prompts off.${note}\n\n`
     + `Once a run starts, its model, effort, prompt and time limit are fixed and it runs to the end. While the batch runs you can still change `
     + `Parallel runs, Max per CLI, Budget, Time limit and Retry failed, and pause it: changes apply to the runs not started yet. `
     + `Nothing that's running is ended unless you confirm it.`)) return;
@@ -1990,7 +2006,9 @@ async function togglePause() {
   if (active.length) {
     const k = active.length;
     const how = await choose('Pause the batch', [`No new runs start until you resume. ${k === 1 ? '1 run is' : `${k} runs are`} going now.`,
-      'A running agent can\'t be frozen and picked up later where it left off, so pausing lets it finish unless you choose to end it.'],
+      'A running agent can\'t be frozen and picked up later where it left off, so pausing lets it finish unless you choose to end it.',
+      meta.canRestart ? 'Pausing to restart the dashboard (to load its latest code)? Use ⟳ Restart dashboard instead: it can wait for the runs going to finish, '
+        + 'and the batch carries on by itself once it\'s back.' : null],
       [{ value: 'finish', primary: true, label: 'Let the running ones finish', hint: 'Nothing is lost; the batch waits for you once they\'re done.' },
        { value: 'requeue', danger: true, label: `End ${k === 1 ? 'it' : `all ${k}`} now and start ${k === 1 ? 'it' : 'them'} over when you resume`, hint: lostWork(k) }]);
     if (!how) return;
@@ -2013,11 +2031,94 @@ function holding() {
   const s = status.state; if (!s) return null;
   const n = status.active?.length ?? 0, left = Object.values(s.left ?? {}).reduce((a, b) => a + b, 0);
   const going = n === 1 ? 'the run going now' : `the ${n} runs going now`;
+  if (status.restarting === 'idle' && !restartingNow) return h('div', { class: 'row warns', style: 'margin:0 0 10px' },
+    h('span', { class: 'grow' }, `⟳ Restarting once ${going} finish${n === 1 ? 'es' : ''}: no new runs start until then, and the batch carries on after the restart.`),
+    h('button', { class: 'btn', onclick: () => askRestart({}) }, 'Restart now'),
+    h('button', { class: 'btn', onclick: () => askRestart({ cancel: true }) }, 'Call it off'));
   const why = s.paused ? `⏸ Paused: no new runs start until you resume${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
     : s.overBudget ? `Budget spent (${fmtUsd(s.spent)} of ${fmtUsd(s.budget)}): no new runs start${n ? `; ${going} finish${n === 1 ? 'es' : ''}. Raise the budget in Options to carry on` : ''}.`
     : n > s.concurrency && left ? `${n} running, more than the ${s.concurrency} now allowed: no new run starts until fewer are running.`
     : null;
   return why ? h('p', { class: 'warns', style: 'margin:0 0 10px' }, why) : null;
+}
+
+// --------------------------------------------- restarting, and picking up
+// Restart: the dashboard starts again with its code as it is now (dashboard.mjs, run-matrix.mjs and this page, which
+// reloads itself). A batch going picks up where it left off by itself once it's back. Its running agents are cut off
+// by it: a Claude Code session that has got going carries on where it was (only the request it was waiting on is
+// asked again), any other run starts over. So with runs going it offers to wait for them to finish first.
+async function restartDashboard() {
+  const going = activeNewest(), lose = going.filter((a) => a.agent && a.agent.provider !== 'claude'), k = going.length;
+  const lines = [`The dashboard starts again with its code as it is now (dashboard.mjs, run-matrix.mjs and this page). It's back in a few seconds and this page reloads itself.`];
+  let options = [{ value: 'now', primary: true, label: 'Restart now' }];
+  if (status.running) lines.push(`The batch picks up where it left off once it's back, with the settings it has now${status.state?.paused ? ' (still paused)' : ''}: runs not started yet wait for it.`);
+  if (k) {
+    lines.push(`${k === 1 ? '1 run is' : `${k} runs are`} going now. Restarting now cuts ${k === 1 ? 'it' : 'them'} off: `
+      + (lose.length < k ? `${k - lose.length === 1 ? 'a Claude Code run carries' : `the ${k - lose.length} Claude Code runs carry`} on with ${k - lose.length === 1 ? 'its session' : 'their sessions'} where ${k - lose.length === 1 ? 'it was' : 'they were'} `
+        + '(one that hadn\'t had its first answer yet starts over)' : '')
+      + (lose.length ? `${lose.length < k ? '; ' : ''}${lose.map((a) => a.id).join(', ')} can't carry on a session, so ${lose.length === 1 ? 'it starts' : 'they start'} over and what ${lose.length === 1 ? 'it has' : 'they have'} done so far is lost` : '') + '.');
+    const wait = { value: 'idle', label: `Restart once ${k === 1 ? 'it has' : 'they have'} finished`, hint: 'No new runs start meanwhile, so nothing is cut off. The batch carries on after the restart.' };
+    const now = { value: 'now', danger: lose.length > 0, label: 'Restart now', hint: lose.length ? `${plural(lose.length, 'run')} start${lose.length === 1 ? 's' : ''} over.` : 'Nothing is lost but the answers they\'re waiting on.' };
+    options = lose.length ? [{ ...wait, primary: true }, now] : [{ ...now, primary: true }, wait];
+  }
+  const how = await choose('Restart the dashboard', lines, options);
+  if (how) await askRestart(how === 'idle' ? { idle: true } : {});
+}
+async function askRestart(msg) {
+  try {
+    const r = await api('/api/restart', 'POST', msg);
+    if (!msg.cancel && !r.later) { restartingNow = true; setPill(); render(); }
+  } catch (e) { alert(`Couldn't restart: ${e.message}`); }
+  poll();
+}
+
+// Shown when this page couldn't reload itself after the dashboard was started again (it had unsaved edits, or a dialog open).
+const restartedBanner = () => newServer ? h('div', { class: 'banner', key: 'restarted' },
+  h('span', { class: 'grow' }, 'The dashboard was started again. Reload this page to get its version that came with it.'),
+  h('button', { class: 'btn', onclick: () => { if (!dirty() || confirm('Reload the page? Your unsaved edits here are discarded.')) location.reload(); } }, 'Reload'),
+  dirty() ? h('span', { class: 'muted' }, 'Save your edits first to keep them.') : null) : null;
+
+// The batch the dashboard before this one was running when it quit, restarted or stopped (status.saved): what's left of
+// it, and Resume to pick it up where it left off. Cut-off runs (status.cut) carry on with their session, or start over.
+function savedCard() {
+  const s = status.saved, p = s.plan, cut = status.cut ?? [], on = cut.filter((c) => c.carriesOn), L = s.limits ?? {};
+  const when = s.why === 'quit' ? 'when the dashboard was closed' : s.why === 'restart' ? 'by a restart of the dashboard'
+    : 'when the dashboard stopped (it was ended, or the computer went down)';
+  const finished = s.batches.reduce((n, b) => n + b.finished, 0), left = s.batches.filter((b) => !b.done);
+  const ran = (c) => c.partStartedAt && c.cutAt ? ` · ran ${fmtMin((Date.parse(c.cutAt) - Date.parse(c.partStartedAt)) / 60000)}` : '';
+  const settings = [`${L.concurrency ?? 1} at a time`, L.perCli ? `at most ${L.perCli} per CLI` : null, L.budget ? `budget ${fmtUsd(L.budget)} (spent ${fmtUsd(s.spent)})` : `spent ${fmtUsd(s.spent)}`,
+    L.timeout ? `${L.timeout} min limit` : null, L.rerunFailed ? 'Retry failed' : null, L.resumeFailed ? 'Resume failed' : null, L.paused ? 'paused' : null].filter(Boolean).join(' · ');
+  return h('div', { class: 'card', key: 'saved' },
+    h('h2', {}, 'Pick up where you left off'),
+    h('p', { class: 'sub' }, `The batch started ${new Date(s.startedAt).toLocaleString()} was cut off ${when}, at ${new Date(s.savedAt).toLocaleTimeString()}.`),
+    h('div', { class: 'stats' },
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Finished'), h('span', { class: 'big' }, finished.toLocaleString())),
+      h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Still to run'), h('span', { class: 'big' }, p ? p.left.toLocaleString() : '…')),
+      h('div', { class: 'stat', title: 'Claude Code sessions that had got going: they carry on where they were cut off, work and all' },
+        h('span', { class: 'label' }, 'Of those, carry on'), h('span', {}, plural(on.length, 'session'))),
+      cut.length > on.length ? h('div', { class: 'stat', title: 'Cut off before their session got going, or on a CLI that can\'t carry one on' },
+        h('span', { class: 'label' }, 'Start over'), h('span', {}, plural(cut.length - on.length, 'run'))) : null,
+      h('div', { class: 'launch' },
+        h('button', { class: 'btn', onclick: forgetSaved, title: 'Don\'t pick this batch up. Its cut-off runs still carry on (or start over) whenever a batch has them.' }, 'Forget it'),
+        h('button', { class: 'btn primary', onclick: resumeSaved, disabled: !!status.updating }, '▶ Resume the batch'))),
+    cut.length ? h('div', { class: 'chips', style: 'margin-top:12px' }, cut.map((c) => h('span', { class: 'tag', key: c.dir, style: 'white-space:normal; overflow-wrap:anywhere',
+      title: c.carriesOn ? 'Carries on with its Claude Code session where it was cut off' : `Starts over: ${c.provider === 'claude' ? 'its session hadn\'t got going' : `${PROVIDERS[c.provider] ?? c.provider} can't carry on a session`}` },
+      `${c.carriesOn ? '⟳' : '↺'} ${c.dir}${ran(c)}`))) : null,
+    s.batches.length > 1 ? h('div', { style: 'margin-top:10px' }, s.batches.map((b) => h('div', { class: 'row', key: 'b' + b.n, style: 'gap:2px 10px; padding:4px 0; border-top:1px solid var(--line)' },
+      h('strong', { style: 'white-space:nowrap' }, `Batch ${b.n}`), h('span', { class: 'muted grow', style: 'overflow-wrap:anywhere; min-width:0' }, b.what),
+      h('span', {}, `${b.finished} finished${b.done ? ' · done' : ''}`)))) : null,
+    h('p', { class: 'hint' }, `Resume runs ${left.length > 1 ? `its ${left.length} batches` : 'it'} as ${left.length > 1 ? 'they were' : 'it was'} started (${settings}), from the copy of Setup and the prompt made then: `
+      + 'finished runs are skipped, cut-off ones carry on or start over, and the rest run.'));
+}
+async function resumeSaved() {
+  try { await api('/api/session', 'POST', { resume: true }); resetLog(); } catch (e) { alert(e.message); }
+  poll();
+}
+async function forgetSaved() {
+  const n = (status.cut ?? []).filter((c) => c.carriesOn).length;
+  if (!confirm(`Forget the batch that was cut off?${n ? `\n\nIts ${plural(n, 'cut-off run')} still carr${n === 1 ? 'ies' : 'y'} on with ${n === 1 ? 'its session' : 'their sessions'} whenever a batch has ${n === 1 ? 'it' : 'them'}.` : ''}`)) return;
+  try { await api('/api/session', 'POST', { forget: true }); } catch (e) { alert(e.message); }
+  poll();
 }
 
 // ---------------------------------------------------------------- RESULTS
@@ -2809,8 +2910,9 @@ const fileButtons = (r) => [
   ...(r.parts ?? []).slice(1).map((p, i) => h('button', { class: 'icon', title: `Raw CLI output of resumed session ${i + 2} (agent.${i + 2}.out)`,
     onclick: () => showFile(r.id, `agent.${i + 2}.out`, `Output ${i + 2}`) }, `out ${i + 2}`))];
 // ⟳ on a run that carried on with its session (Resume failed); "resumable" on a failed one that could.
-const resumeTag = (r) => r.resumes ? h('span', { class: 'tag', style: 'margin-left:4px', title: `Resumed ${r.resumes === 1 ? 'once' : `${r.resumes} times`}: `
-    + `${r.resumes + 1} sessions, whose time, tokens and cost are added up` }, `⟳${r.resumes > 1 ? ` ${r.resumes}` : ''}`)
+const resumeTag = (r) => r.resumes ? h('span', { class: 'tag', style: 'margin-left:4px', title: `Resumed ${r.resumes === 1 ? 'once' : `${r.resumes} times`}`
+    + `${r.parts?.some((p) => p.cutOff) ? ' (it was cut off by a quit or restart of the dashboard)' : ''}: ${r.resumes + 1} sessions, whose time, tokens and cost are added up` },
+    `⟳${r.resumes > 1 ? ` ${r.resumes}` : ''}`)
   : r.resumable && r.status !== 'ok' ? h('span', { class: 'tag', style: 'margin-left:4px',
     title: 'Failed partway with its session still on disk: Resume failed (Run tab → Options) carries on with it instead of starting over' }, 'resumable') : null;
 
@@ -2886,10 +2988,11 @@ function runDetails(r) {
     h('div', { class: 'grid2' },
       h('table', {}, h('tbody', {},
         line('Time', fmtMin(r.wallMinutes), usual('wallMinutes')),
-        r.parts?.length > 1 ? line('Sessions', r.parts.length, `resumed: ${r.parts.map((p, i) => `${i + 1}. ${fmtMin(p.wallMinutes)}${p.exitCode === 0 ? '' : ' (failed)'}`)
-          .join(' · ')}. Time, tokens and cost are all of them together.`) : null,
+        r.parts?.length > 1 ? line('Sessions', r.parts.length, `resumed: ${r.parts.map((p, i) => `${i + 1}. ${fmtMin(p.wallMinutes)}${p.exitCode === 0 ? '' : p.cutOff ? ' (cut off)' : ' (failed)'}`)
+          .join(' · ')}. Time, tokens and cost are all of them together${r.parts.some((p) => p.cutOff) ? '; a session cut off never reported its totals, so its tokens are from its transcript' : ''}.`) : null,
         line('API time', r.apiMinutes != null ? fmtMin(r.apiMinutes) : null, r.apiMinutes && r.wallMinutes ? `${pct(r.apiMinutes / r.wallMinutes)} of the time` : ''),
-        line('Cost', r.costUsd != null ? fmtUsd(r.costUsd) : null, r.costUsd != null ? usual('costUsd') : 'this CLI doesn\'t report cost'),
+        line('Cost', r.costUsd != null ? fmtUsd(r.costUsd) : null, r.costUsd != null ? [usual('costUsd'), r.costSource === 'estimated'
+          ? 'part estimated: a session cut off before it reported, its tokens at list price' : ''].filter(Boolean).join(' · ') : 'this CLI doesn\'t report cost'),
         line('API list price', r.apiCostUsd != null ? fmtUsd(r.apiCostUsd) : null, [r.provider === 'claude' && r.costUsd != null ? 'Claude Code\'s own cost is at list price'
           : r.apiCostUsd != null ? 'its tokens at the lab\'s public API price' : '', r.unpricedModels ? `no price for ${r.unpricedModels.join(', ')}` : ''].filter(Boolean).join(' · ')),
         line('Output tokens', tok('outputTokens'), [r.reasoningTokens != null ? `${fmtTok(r.reasoningTokens)} reasoning` : '', usual('outputTokens')].filter(Boolean).join(' · ')),
@@ -3011,7 +3114,7 @@ function renderAudit() {
 // ------------------------------------------------------------------- data
 async function loadSetup() {
   const c = await api('/api/config');
-  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume, canQueue: !!c.canQueue };
+  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume, canQueue: !!c.canQueue, canRestart: !!c.canRestart, boot: c.boot ?? null };
   cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
@@ -3040,6 +3143,8 @@ async function loadAudit() { try { audit = await api('/api/audit'); } catch { au
 // came from: this page, another tab, `node run-matrix.mjs` in a terminal, or a hand edit. One poll at
 // a time, so a slow answer can't add the same log lines twice.
 let pollChain = Promise.resolve(), pollTimer = null, wasRunning = false, logFollow = true;
+// restartingNow: Restart was asked for here and the server isn't back yet; newServer: it's back, but this page couldn't reload.
+let restartingNow = false, newServer = false;
 function poll() {
   clearTimeout(pollTimer);
   const p = pollChain = pollChain.then(pollOnce, pollOnce).catch((e) => console.error(e)).finally(() => {
@@ -3054,13 +3159,22 @@ async function pollOnce() {
   try { st = await api(`/api/status?since=${logSince}&smokes=${rev.smokes ?? ''}`, 'GET', undefined, 15000); }
   catch { if (!offline) { offline = true; setPill(); } return; }
   const back = offline; offline = false;
+  // The server was started again (Restart, or by hand): this page reloads to be the version that came with it, unless
+  // that would lose something (unsaved edits, an open dialog); then it says so (see restartedBanner).
+  if (st.boot && meta.boot && st.boot !== meta.boot && !newServer) {
+    if (!dirty() && !modal.open) return location.reload();
+    newServer = true; restartingNow = false; render();
+  }
   if (st.logTotal < logSince) { resetLog(); return pollOnce(); } // a new batch (or a restarted server) started a new log
   // The batch's settings as they are now show in Options, so a change to them (from any tab) redraws, and so does a
   // batch queued beside it (Options and Stop then speak for all of them).
   const stateChanged = JSON.stringify(st.state ?? null) !== JSON.stringify(status.state ?? null)
     || (st.batches?.length ?? 0) !== (status.batches?.length ?? 0);
+  // A batch to pick up, the runs cut off, or a restart under way: the Run tab shows them, and the cut-off runs count.
+  const keptChanged = JSON.stringify([st.saved ?? null, st.cut ?? [], st.restarting ?? null]) !== JSON.stringify([status.saved ?? null, status.cut ?? [], status.restarting ?? null]);
+  if (keptChanged) delete cache.cutKeys;
   status = st;
-  let changed = back || stateChanged || wasRunning !== !!st.running;
+  let changed = back || stateChanged || keptChanged || wasRunning !== !!st.running;
   if (st.smokes) { smokes = st.smokes; changed = true; }
   if (st.rev?.smokes != null) rev.smokes = st.rev.smokes;
   if (st.log.length) {
@@ -3092,7 +3206,8 @@ async function pollOnce() {
 function setPill() {
   const pill = $('#pill'), st = status, hb = cfg ? batchHealth() : null, warn = st.running ? hb?.alerts.length ?? 0 : 0;
   let full, short, cls = '';
-  if (offline) { full = short = 'Dashboard server not reachable'; cls = ' off'; }
+  if (offline && (restartingNow || st.restarting === 'now')) { full = short = 'Restarting…'; cls = ' off'; }
+  else if (offline) { full = short = 'Dashboard server not reachable'; cls = ' off'; }
   else if (st.running) {
     full = st.stopping ? 'Stopping…' : `Running · ${st.active.length} active · ${st.finished}${hb?.total ? ` of ${hb.total}` : ''} done${warn ? ` · ⚠ ${warn}` : ''}`;
     short = st.stopping ? 'Stopping…' : `● ${st.finished}${hb?.total ? `/${hb.total}` : ''} done${warn ? ` ⚠${warn}` : ''}`; cls = ' live';

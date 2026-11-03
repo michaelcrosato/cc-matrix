@@ -922,3 +922,118 @@ test('--broker: a run starts only when the dashboard grants it, says what it did
   assert.equal(result(s, 'opus-low__a').status, 'ok');
   assert.ok(!fs.existsSync(path.join(s.out, 'opus-low__b')));
 });
+
+// ------------------------------------------- cut off mid-way (unfinished.json)
+// A quit or Restart of the dashboard ({ stop, keep }), the runner ended or killed outright: a Claude Code session that
+// got going carries on where it was the next time a batch has the run; other runs start over.
+const RESUME_MESSAGE = 'Your session stopped before the task was finished. Continue where you left off and complete it.';
+const cutAgents = [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }, { id: 'sol', provider: 'codex', model: 'gpt-6.1-sol', efforts: ['max'] }];
+const gotGoing = (sb, id) => waitFor(() => { try { return fs.readFileSync(path.join(sb.out, id, 'agent.out'), 'utf8').includes('msg_h1'); } catch { return false; } });
+const figures = (x) => [x.costUsd, x.outputTokens, x.inputTokens, x.cacheWriteTokens, x.apiCalls, x.toolCalls].map((v) => +(+v).toFixed(6));
+
+test('cut off by a quit or restart: a Claude Code session that got going carries on next time, work and all; the others start over', async (t) => {
+  const sb = sandbox({ agents: cutAgents, dimensions: { testing: [{ id: 'h', text: 'FAKE:hang' }, { id: 'late', text: 'FAKE:sleep=20000' }] } });
+  t.after(() => cleanup(sb));
+  const id = 'opus-low__h', dir = path.join(sb.out, id);
+  const c = controlled(sb, ['-j', '4']);
+  await waitFor(() => c.count('▶ ') === 4);
+  await gotGoing(sb, id);
+  c.send({ stop: true, keep: true });
+  assert.equal(await c.exit, 0, c.out);
+  assert.match(c.out, /■ opus-low__h cut off: it carries on with its session when its batch runs again/);
+  assert.match(c.out, /■ opus-low__late stopped \(discarded: its session hadn't got going, so it starts over next time\)/);
+  assert.match(c.out, /■ sol-max__h stopped \(discarded: Codex CLI can't carry on a session, so it starts over next time\)/);
+  assert.deepEqual(fs.readdirSync(sb.out).filter((d) => fs.statSync(path.join(sb.out, d)).isDirectory()), [id]);
+  assert.ok(fs.existsSync(path.join(dir, 'unfinished.json')) && !fs.existsSync(path.join(dir, 'result.json')));
+  const u = JSON.parse(fs.readFileSync(path.join(dir, 'unfinished.json'), 'utf8'));
+  assert.deepEqual([u.base.id, u.base.model, u.part.n, u.runner, u.agent, u.part.endedAt > u.part.startedAt], [id, 'claude-opus-5-5', 0, null, null, true]);
+
+  // Not a result (the report and the dashboard never count it), and never done: the dry run says it carries on.
+  assert.equal(runner(sb, ['--report']).status, 0);
+  assert.doesNotMatch(fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8'), /opus-low__h/);
+  const dry = JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim());
+  assert.deepEqual([dry.count, dry.alreadyDone, dry.carriesOn, dry.startsOver, dry.resumes], [4, 0, 1, 0, 0]);
+  assert.match(dry.terminal.join('\n'), /opus low \(Claude Code CLI\): carries on with its session where it was cut off[\s\S]*--resume fake-session/);
+
+  const r = runner(sb, ['--pick', 'opus:low', '--only', 'testing=h']);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /Of those, 1 was cut off mid-way and carries on with its session where it stopped/);
+  assert.match(r.all, /▶ opus-low__h {2}\(carrying on with its session where it was cut off, part 2\)/);
+  assert.deepEqual(calls(sb).filter((x) => x.cwd === path.join(dir, 'work')).pop().argv.slice(0, 4), ['-p', RESUME_MESSAGE, '--resume', 'fake-session']);
+  const x = result(sb, id);
+  assert.deepEqual([x.status, x.resumes, x.parts.length, x.parts[0].cutOff, x.parts[0].exitCode, x.parts[1].exitCode], ['ok', 1, 2, true, null, 0]);
+  assert.deepEqual([x.startedAt, x.parts[0].finishedAt], [u.part.startedAt, u.part.endedAt]);
+  assert.ok(fs.existsSync(path.join(dir, 'work', 'src', 'partial.js')) && x.delivered, 'the work from before it was cut off is gone');
+  assert.ok(!fs.existsSync(path.join(dir, 'unfinished.json')));
+  // The cut-off part never printed its totals: its tokens are its response's in the transcript (the stream only has
+  // the response's start), priced at list price. The part after it adds its own.
+  const expected = [0.0549, 400 + 660, 5700 + 11015, 600 + 805, 1 + 2, 1 + 2]; // $0.0124 + $0.0425
+  assert.deepEqual(figures(x), expected);
+  assert.deepEqual([x.costSource, x.tools], ['estimated', { Write: 1, Read: 1, Edit: 1 }]);
+  assert.equal(+x.models['claude-opus-5-5'].costUsd.toFixed(6), 0.0524);
+  // --reparse measures the cut-off part the same way again.
+  fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({ ...x, costUsd: 1, outputTokens: 1 }));
+  assert.match(runner(sb, ['--reparse']).stdout, /Reparsed 1 run/);
+  assert.deepEqual(figures(result(sb, id)), expected);
+});
+
+test('a session that saved its totals as it was cut off counts those; a run going in another runner is left out', async (t) => {
+  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang=state' }] } });
+  t.after(() => cleanup(sb));
+  const c = controlled(sb, []);
+  await gotGoing(sb, 'opus-low__h');
+  const other = runner(sb, []);
+  assert.match(other.all, /· 1 run\(s\) left out: still running in another process/);
+  assert.doesNotMatch(other.all, /▶/);
+  c.send({ stop: true, keep: true });
+  assert.equal(await c.exit, 0, c.out);
+  assert.equal(runner(sb, []).status, 0);
+  const x = result(sb, 'opus-low__h');
+  // 0.03 as it was cut off (Claude Code's own figure), then 0.0425: the resumed session's totals less what it had before.
+  assert.deepEqual(figures(x).slice(0, 2), [0.0725, 1060]);
+  assert.equal(x.costSource, 'reported');
+});
+
+test('cut off by a crash: an agent still going after its runner was killed is ended first, then its session carries on', async (t) => {
+  if (process.platform !== 'linux') return t.skip('orphans are found by their working folder on Linux');
+  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang' }] } });
+  t.after(() => cleanup(sb));
+  const id = 'opus-low__h', dir = path.join(sb.out, id);
+  const c = controlled(sb, []);
+  await gotGoing(sb, id);
+  const { agent } = JSON.parse(fs.readFileSync(path.join(dir, 'unfinished.json'), 'utf8'));
+  const alive = (pid) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  c.child.kill('SIGKILL');
+  await c.exit;
+  assert.ok(alive(agent), 'the agent went with its runner');
+  // A dry run (the dashboard's preview) leaves it be.
+  assert.equal(JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()).carriesOn, 1);
+  assert.ok(alive(agent));
+  const r = runner(sb, []);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, new RegExp(`· ${id}: ending its agent, still going since its runner was killed \\(pid ${agent}\\)`));
+  assert.match(r.all, /carrying on with its session where it was cut off, part 2/);
+  assert.ok(!alive(agent));
+  const x = result(sb, id);
+  assert.deepEqual([x.status, x.resumes, x.parts[0].cutOff, x.outputTokens], ['ok', 1, true, 1060]);
+});
+
+test('a cut-off run ended mid-way as it carries on stays cut off, and carries on again next time', async (t) => {
+  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang FAKE:sleep=1500' }] } });
+  t.after(() => cleanup(sb));
+  const id = 'opus-low__h', dir = path.join(sb.out, id);
+  const c = controlled(sb, []);
+  await gotGoing(sb, id);
+  c.send({ stop: true, keep: true });
+  assert.equal(await c.exit, 0, c.out);
+  const d = controlled(sb, []);
+  await waitFor(() => d.out.includes(`▶ ${id}  (carrying on`));
+  d.send({ drop: [id] });
+  assert.equal(await d.exit, 0, d.out);
+  assert.match(d.out, /■ opus-low__h stopped \(this part discarded; it can be resumed again\)/);
+  assert.ok(!fs.existsSync(path.join(dir, 'agent.2.out')) && !fs.existsSync(path.join(dir, 'result.json')));
+  assert.equal(JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()).carriesOn, 1);
+  assert.equal(runner(sb, []).status, 0);
+  const x = result(sb, id);
+  assert.deepEqual([x.status, x.resumes, x.parts.map((p) => !!p.cutOff), x.outputTokens], ['ok', 1, [true, false], 1060]);
+});

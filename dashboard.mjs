@@ -14,6 +14,26 @@ import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
+// Restart (on the page) starts the dashboard again, so it runs its code as it is now. For that, `node dashboard.mjs`
+// keeps the dashboard itself in a child process and starts it again whenever it exits with RESTART_CODE; any other
+// exit ends this one too. Ctrl-C and SIGTERM are passed on to it: in a process group of its own it doesn't get the
+// terminal's Ctrl-C itself (on Windows every process in the console gets Ctrl-C, so only SIGTERM is passed on there).
+// The terminal closing (SIGHUP) quits it the way SIGTERM does.
+const RESTART_CODE = 75;
+if (!process.env.MATRIX_DASHBOARD_CHILD) {
+  const win = process.platform === 'win32';
+  let child = null;
+  const start = (again) => {
+    child = spawn(process.execPath, [fileURLToPath(import.meta.url), ...process.argv.slice(2)], { stdio: 'inherit', detached: !win,
+      env: { ...process.env, MATRIX_DASHBOARD_CHILD: '1', ...(again ? { MATRIX_DASHBOARD_RESTARTED: '1' } : {}) } });
+    child.on('exit', (code, sig) => code === RESTART_CODE ? start(true) : process.exit(code ?? (sig ? 1 : 0)));
+  };
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) process.on(sig, () => { if (!win || sig !== 'SIGINT') child?.kill(sig === 'SIGHUP' ? 'SIGTERM' : sig); });
+  start(false);
+  await new Promise(() => {}); // the rest of this file is the child's
+}
+for (const s of [process.stdout, process.stderr]) s.on('error', () => {}); // the terminal closed: what's printed goes nowhere
+
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const opts = { port: 4173, config: 'matrix.config.json', out: 'runs', open: false, allowHosts: [] };
 for (let i = 2; i < process.argv.length; i++) {
@@ -30,6 +50,8 @@ const RUNNER = path.join(HERE, 'run-matrix.mjs');
 const PAGE = path.join(HERE, 'dashboard.html');
 const AUDIT = path.join(HERE, 'audit.json');
 fs.mkdirSync(OUT, { recursive: true });
+// This start of the dashboard: the page reloads itself when it changes (Restart), to get the page as it is now too.
+const BOOT = crypto.randomUUID();
 
 // ---------------------------------------------------------------- helpers
 const readJSON = (f, fallback) => { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return fallback; } };
@@ -218,14 +240,15 @@ const STOP = path.join(OUT, '.stop');
 const batches = [], waiting = []; // this session's batches in order; queued ones not started yet (see startWaiting)
 const live = () => batches.filter((b) => b.child);
 const running = () => live().length > 0 || waiting.length > 0;
-// The session: its log, when it started and ended, what Start sent, and the limits all its batches share.
-const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, settings: null, limits: null, overBudget: false, stopping: false, gapMs: 0 };
-let snaps = null; // a temp folder for the batches' copies of the config, made when first needed
+// The session: its log, when it started and ended, what Start sent, and the limits all its batches share. spentBefore:
+// what it spent before the dashboard was restarted (see resumeSession); suspended: why it's being kept (see suspend).
+const run = { log: [], startedAt: null, finishedAt: null, exitCode: null, settings: null, limits: null, overBudget: false, stopping: false, gapMs: 0,
+  spentBefore: 0, suspended: null };
 const total = (o) => Object.values(o ?? {}).reduce((a, b) => a + b, 0);
 const usd = (v) => `$${(v ?? 0).toFixed(2)}`;
 const none = (v, unit = '') => v === Infinity || !v ? 'none' : `${unit}${v}`;
 const activeRuns = () => new Map(batches.flatMap((b) => [...b.active]));
-const spentNow = () => batches.reduce((n, b) => n + (b.state?.spent ?? 0), 0);
+const spentNow = () => run.spentBefore + batches.reduce((n, b) => n + (b.state?.spent ?? 0), 0);
 const note = (line) => { run.log.push(line); if (run.log.length > 3000) run.log.splice(0, run.log.length - 3000); };
 const tellBatch = (b, msg) => { if (b.child) b.child.stdin.write(JSON.stringify(msg) + '\n'); };
 // What the page shows for the running batches together: the shared limits, spend and the runs left per CLI.
@@ -252,8 +275,11 @@ function logLine(b, line) {
   note(line);
   // ▶ started · ✔ ✘ finished · ■ stopped (discarded) · ↺ ended to start over later
   const m = line.match(/^(▶|✔|✘|■|↺) (\S+)/);
-  if (m) { if (m[1] === '▶') b.active.set(m[2], new Date().toISOString()); else { b.active.delete(m[2]); if (m[1] === '✔' || m[1] === '✘') { b.finished++; refreshReport(); } } }
-  else { const p = line.match(/^(\d+) runs(?: \((\d+) already done\))? → /); if (p) b.planned = p[1] - (p[2] ?? 0); } // runs this batch will do
+  if (m) {
+    if (m[1] === '▶') b.active.set(m[2], new Date().toISOString());
+    else { b.active.delete(m[2]); if (m[1] === '✔' || m[1] === '✘') { b.finished++; refreshReport(); saveSession(); } }
+    restartIfIdle();
+  } else { const p = line.match(/^(\d+) runs(?: \((\d+) already done\))? → /); if (p) b.planned = b.finished + (+p[1]) - (+p[2] || 0); } // runs this batch will do
 }
 function brokerLine(b, line) {
   const at = line.indexOf(' '), tag = line.slice(1, at < 0 ? undefined : at);
@@ -292,7 +318,7 @@ function schedule() {
   }
   // Once nothing runs any more the batches end (till then a raised budget can still start more).
   if (run.overBudget && !inUse) for (const b of live()) if (!b.ended) { b.ended = true; tellBatch(b, { end: true }); }
-  if (run.stopping || L.paused || run.overBudget) return;
+  if (run.stopping || L.paused || run.overBudget || restartPending) return;
   for (;;) {
     const wait = lastGrant + run.gapMs - Date.now();
     if (wait > 0) { grantTimer = setTimeout(schedule, wait); return; }
@@ -382,18 +408,19 @@ async function adjustRun(msg) {
   const w = waiting.findIndex((x) => x.n === msg.endBatch); // one not started yet just goes
   if (w >= 0) { const [x] = waiting.splice(w, 1); fs.rmSync(x.dir, { recursive: true, force: true }); note(`■ Batch ${x.n} taken out of the queue`); }
   await Promise.all(answers);
-  schedule();
+  schedule(); saveSession();
   return sessionState();
 }
 
 // A batch's own copy of the config and prompt as they are now: a queued batch starts later, and Setup may change
 // meanwhile. A variant whose text is in a file is copied in as text, and the prompt keeps its file's time (the
 // prompt history says when a version was saved).
+// It's kept in runs/.batches/ until its session ends, so a session picked up after a restart runs as it was started.
 function snapshot(n) {
-  snaps ??= fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-batches-'));
   const c = readJSON(CONFIG, null);
   if (!c || typeof c !== 'object' || Array.isArray(c)) throw new HttpError(400, 'The config can\'t be read.');
-  const dir = fs.mkdtempSync(path.join(snaps, `batch${n}-`));
+  fs.mkdirSync(SNAPS, { recursive: true });
+  const dir = fs.mkdtempSync(path.join(SNAPS, `batch${n}-`));
   if (c.templateFile) {
     const from = templatePath(), to = path.join(dir, path.basename(from)), st = fs.statSync(from);
     fs.copyFileSync(from, to); fs.utimesSync(to, st.atime, st.mtime);
@@ -406,10 +433,11 @@ function snapshot(n) {
 
 function startSession(s) {
   fs.rmSync(STOP, { force: true });
+  forgetSaved(); // a session left from before: its cut-off runs still carry on whenever they run
   batches.length = 0; waiting.length = 0; lastGrant = -Infinity;
   const c = readJSON(CONFIG, {});
   Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, settings: s, overBudget: false, stopping: false,
-    gapMs: Math.max(0, +(c.startGap ?? 3) || 0) * 1000,
+    gapMs: Math.max(0, +(c.startGap ?? 3) || 0) * 1000, spentBefore: 0, suspended: null,
     limits: { concurrency: Math.max(1, Math.floor(+s.concurrency) || 1), perCli: +s.perCli >= 1 ? Math.floor(+s.perCli) : Infinity,
       budget: +s.budget > 0 ? +s.budget : Infinity, timeout: +s.timeout > 0 ? +s.timeout : 0, paused: false,
       rerunFailed: !!s.rerunFailed, resumeFailed: !!s.resumeFailed } });
@@ -422,7 +450,7 @@ function addBatch(s) {
   const sel = { ...s, rerunFailed: L.rerunFailed, resumeFailed: L.resumeFailed };
   waiting.push({ n, sel, dir: snapshot(n), queuedAt: new Date().toISOString() });
   if (n > 1) note(`+ Batch ${n} queued (${describe(sel)}): it starts its runs in the slots the batches before it can't use.`);
-  startWaiting();
+  startWaiting(); saveSession();
   return n;
 }
 // Starts the queued batches, each once every running one has said which runs it has (so the new one leaves those
@@ -433,9 +461,10 @@ function startWaiting() {
     const a = [RUNNER, ...selectionArgs(w.sel, path.join(w.dir, 'config.json')), '--broker'];
     if (run.limits.timeout > 0) a.push('--timeout', String(run.limits.timeout));
     if (skip.length) { const f = path.join(w.dir, 'skip-keys.json'); fs.writeFileSync(f, JSON.stringify(skip)); a.push('--skip-keys', f); }
-    const b = Object.assign(w, { child: spawn(process.execPath, a, { cwd: HERE }), startedAt: new Date().toISOString(), finishedAt: null, exitCode: null,
-      active: new Map(), finished: 0, planned: null, state: null, ready: [], granted: new Map(), taken: new Map(), keys: null, ended: false, waiters: [] });
-    batches.push(b);
+    // A batch picked up after a restart (see resumeSession) keeps when it first started and what it had finished.
+    const b = Object.assign(w, { child: spawn(process.execPath, a, { cwd: HERE }), startedAt: w.startedAt ?? new Date().toISOString(), finishedAt: null, exitCode: null,
+      active: new Map(), finished: w.finished ?? 0, planned: null, state: null, ready: [], granted: new Map(), taken: new Map(), keys: null, ended: false, cut: false, waiters: [] });
+    batches.push(b); saveSession();
     b.child.stdin.on('error', () => {}); // the runner may have just exited
     let buf = '';
     const onData = (d) => { buf += d; const lines = buf.split(/\r?\n/); buf = lines.pop(); lines.forEach((l) => logLine(b, l)); };
@@ -450,13 +479,17 @@ function batchEnded(b, code) {
   const gone = [...(b.keys ?? [])]; b.keys = new Set();
   if (gone.length) for (const o of live()) tellBatch(o, { gone });
   startWaiting();
+  if (run.suspended) return; // kept as it is now (see suspend)
+  saveSession();
   if (!running()) return endSession();
   schedule();
 }
 function endSession() {
   Object.assign(run, { finishedAt: new Date().toISOString(), stopping: false, exitCode: batches.find((b) => b.exitCode)?.exitCode ?? batches.at(-1)?.exitCode ?? null });
   fs.rmSync(STOP, { force: true }); refreshReport();
-  for (const b of batches) fs.rmSync(b.dir, { recursive: true, force: true });
+  for (const b of batches) if (b.dir) fs.rmSync(b.dir, { recursive: true, force: true });
+  clearTimeout(saveTimer); fs.rmSync(SESSION, { force: true });
+  restartIfIdle();
 }
 // Stop: every batch ends its running agents (their work is thrown away), and the queued ones don't start.
 function stopAll(why) {
@@ -467,7 +500,149 @@ function stopAll(why) {
   for (const b of live()) tellBatch(b, { stop: true });
   if (!live().length) endSession();
 }
-process.on('exit', () => { if (snaps) fs.rmSync(snaps, { recursive: true, force: true }); });
+
+// --------------------------------------------------------- the session kept
+// runs/.session.json: the batches going and queued, what each was started with, and the limits and log they share,
+// saved as they change. Quit (Ctrl-C) and Restart end the runners but keep it (see suspend), and a crash simply never
+// ends it. The dashboard started next picks it up where it left off (resumeSession): at once after Restart, else
+// when Resume is chosen on the page (it's offered as `saved`). A running agent ended that way is cut off: a Claude
+// Code session that got going carries on where it stopped when its batch runs again; other runs start over (see
+// UNFINISHED in run-matrix.mjs). Each batch runs from its copy of the config in runs/.batches/ (see snapshot).
+const SESSION = path.join(OUT, '.session.json'), SNAPS = path.join(OUT, '.batches');
+let saveTimer = null;
+function saveSession(now = false) {
+  clearTimeout(saveTimer); saveTimer = null;
+  if (!now) { saveTimer = setTimeout(() => saveSession(true), 300); return; }
+  if (!run.limits || !(running() || run.suspended)) return;
+  const L = run.limits, fin = (v) => v === Infinity ? null : v;
+  const s = { savedAt: new Date().toISOString(), why: run.suspended, startedAt: run.startedAt, settings: run.settings, gapMs: run.gapMs,
+    limits: { ...L, perCli: fin(L.perCli), budget: fin(L.budget) }, spent: spentNow(),
+    // done: ended (finished, or taken out of the queue) before the dashboard was; the others are picked up.
+    batches: [...batches.map((b) => ({ n: b.n, sel: b.sel, dir: b.dir && path.basename(b.dir), queuedAt: b.queuedAt, startedAt: b.startedAt, finished: b.finished,
+      done: b.ended || (!b.child && !b.cut) })), ...waiting.map((w) => ({ n: w.n, sel: w.sel, dir: path.basename(w.dir), queuedAt: w.queuedAt,
+      startedAt: w.startedAt ?? null, finished: w.finished ?? 0, done: false }))],
+    log: run.log.slice(-500) };
+  fs.writeFileSync(SESSION + '.tmp', JSON.stringify(s, null, 2)); fs.renameSync(SESSION + '.tmp', SESSION);
+}
+
+// Quit and Restart: every runner ends with its running agents cut off, the queued batches stay queued, and the session
+// is kept for the dashboard started next. Resolves once the runners are gone (or after a minute).
+function suspend(why) {
+  if (!running()) return Promise.resolve();
+  const going = activeRuns().size;
+  run.suspended = why; run.stopping = true; clearTimeout(grantTimer);
+  note(`⏸ ${why === 'restart' ? 'Restarting the dashboard' : 'The dashboard is closing'}${going ? `: the ${plural(going, 'run')} going ${going === 1 ? 'is' : 'are'} cut off` : ''}. `
+    + 'The batch picks up where it left off when the dashboard is back.');
+  for (const b of live()) { b.cut = true; tellBatch(b, { stop: true, keep: true }); }
+  return new Promise((resolve) => {
+    const until = Date.now() + 60000, t = setInterval(() => {
+      if (live().length && Date.now() < until) return;
+      clearInterval(t); saveSession(true); resolve();
+    }, 100);
+  });
+}
+
+// Restart: the session is kept (suspend), and the dashboard exits for the one that started it to start it again
+// with its code as it is now (see RESTART_CODE). With idle, no new runs start meanwhile and it waits for the ones
+// going to finish first, so none is cut off (restartPending; Restart again or cancel it on the page).
+let restartPending = null, restarting = false;
+async function restart() {
+  if (restarting) return;
+  restarting = true; restartPending = null;
+  await suspend('restart');
+  process.exit(RESTART_CODE);
+}
+function restartIfIdle() { if (restartPending && !activeRuns().size) restart(); }
+
+// A session kept by the dashboard before this one (it quit, crashed or restarted): offered on the page, or picked up
+// at once after a Restart. Read once this one has its port (a second dashboard on the same runs folder never gets that
+// far), when snapshots in runs/.batches/ that no session needs any more are cleared.
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+let saved = null;
+function loadSaved() {
+  saved = readJSON(SESSION, null);
+  if (!saved?.batches?.some((b) => !b.done)) { saved = null; fs.rmSync(SESSION, { force: true }); }
+  try { for (const d of fs.readdirSync(SNAPS)) if (!saved?.batches.some((b) => b.dir === d)) fs.rmSync(path.join(SNAPS, d), { recursive: true, force: true }); } catch {}
+}
+function forgetSaved() {
+  if (!saved) return;
+  for (const b of saved.batches) if (b.dir) fs.rmSync(path.join(SNAPS, b.dir), { recursive: true, force: true });
+  saved = null; savedPlanCache = null; fs.rmSync(SESSION, { force: true });
+}
+// Picks up the session kept: its log, limits and spend, the batches that had ended as they were, and the rest queued
+// again from their own copies of the config. Their runners skip what's done, carry on what was cut off and start the rest.
+function resumeSession() {
+  const s = saved, L = s.limits ?? {};
+  saved = null; savedPlanCache = null;
+  fs.rmSync(STOP, { force: true });
+  batches.length = 0; waiting.length = 0; lastGrant = -Infinity;
+  Object.assign(run, { log: [...(s.log ?? [])], startedAt: s.startedAt, finishedAt: null, exitCode: null, settings: s.settings, overBudget: false, stopping: false,
+    suspended: null, gapMs: s.gapMs ?? 3000, spentBefore: s.spent ?? 0,
+    limits: { concurrency: Math.max(1, Math.floor(+L.concurrency) || 1), perCli: L.perCli ?? Infinity, budget: L.budget ?? Infinity, timeout: L.timeout || 0,
+      paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed } });
+  const cut = cutOffRuns(), on = cut.filter((c) => c.carriesOn).length;
+  note(`⟳ ${s.why === 'restart' ? 'The dashboard restarted' : 'Resumed'} at ${new Date().toLocaleTimeString()}: carrying on with the batch started ${new Date(s.startedAt).toLocaleString()}`
+    + (cut.length ? ` (${on ? `${plural(on, 'cut-off run')} carr${on === 1 ? 'ies' : 'y'} on with ${on === 1 ? 'its session' : 'their sessions'}` : ''}${on && cut.length > on ? ', ' : ''}`
+      + `${cut.length > on ? `${cut.length - on} start${cut.length - on === 1 ? 's' : ''} over` : ''})` : '')
+    + `${L.paused ? '. It was paused: Resume on the page lets new runs start' : ''}.`);
+  for (const b of s.batches) {
+    const dir = b.dir ? path.join(SNAPS, b.dir) : null;
+    if (b.done) { batches.push({ n: b.n, sel: b.sel, dir, queuedAt: b.queuedAt, startedAt: b.startedAt, finishedAt: s.savedAt, child: null, exitCode: 0,
+      active: new Map(), finished: b.finished ?? 0, planned: b.finished ?? 0, state: null, ready: [], granted: new Map(), taken: new Map(), keys: new Set(), ended: true, waiters: [] }); continue; }
+    let from = dir;
+    if (!dir || !fs.existsSync(path.join(dir, 'config.json'))) { from = snapshot(b.n); note(`⚠ Batch ${b.n}'s copy of the config was gone: it carries on with Setup as it is now.`); }
+    waiting.push({ n: b.n, sel: b.sel, dir: from, queuedAt: b.queuedAt, startedAt: b.startedAt, finished: b.finished ?? 0 });
+  }
+  startWaiting(); saveSession();
+}
+
+// The kept session as the page shows it: when and why it ended, its batches and what's left of them. What's left comes
+// from each batch's dry run (in the background, again whenever the runs on disk change): runs still to do, and of
+// them the cut-off ones that carry on with their session and those that start over.
+let savedPlanCache = null;
+function savedInfo() {
+  if (!saved) return null;
+  const key = revs().results;
+  if (savedPlanCache?.key !== key) {
+    const mine = savedPlanCache = { key, plan: savedPlanCache?.plan ?? null }, L = saved.limits ?? {};
+    Promise.all(saved.batches.filter((b) => !b.done).map((b) => new Promise((resolve) => {
+      const file = path.join(SNAPS, b.dir ?? '', 'config.json'), a = [RUNNER, ...selectionArgs(b.sel, fs.existsSync(file) ? file : CONFIG), '--dry-run', '--json'];
+      if (L.timeout > 0) a.push('--timeout', String(L.timeout));
+      const child = spawn(process.execPath, a, { cwd: HERE });
+      let out = ''; child.stdout.on('data', (d) => { out += d; });
+      child.on('close', () => { try { resolve(JSON.parse(out.trim().split('\n').pop())); } catch { resolve(null); } });
+    }))).then((rs) => { mine.plan = rs.reduce((t, r) => r ? { left: t.left + r.count - r.alreadyDone, carriesOn: t.carriesOn + (r.carriesOn ?? 0),
+      startsOver: t.startsOver + (r.startsOver ?? 0), resumes: t.resumes + (r.resumes ?? 0) } : t, { left: 0, carriesOn: 0, startsOver: 0, resumes: 0 }); });
+  }
+  const L = saved.limits ?? {};
+  return { why: saved.why, savedAt: saved.savedAt, startedAt: saved.startedAt, spent: saved.spent ?? 0, plan: savedPlanCache.plan,
+    limits: { concurrency: L.concurrency, perCli: L.perCli, budget: L.budget, timeout: L.timeout || null, paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed },
+    batches: saved.batches.map((b) => ({ n: b.n, what: describe(b.sel), stages: !!b.sel?.stages, finished: b.finished ?? 0, done: !!b.done })) };
+}
+
+// Runs cut off mid-way that no runner has now (unfinished.json, see UNFINISHED in run-matrix.mjs), for the page: which
+// carry on with their session the next time a batch has them (a Claude Code session that got going) and which start
+// over. Read again whenever the runs on disk change.
+let cutCache = null;
+const pidAlive = (pid) => { if (!pid) return false; try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } };
+function cutOffRuns() {
+  const key = revs().results;
+  if (cutCache?.key === key) return cutCache.value;
+  const value = [];
+  for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
+    if (!d.isDirectory() || d.name.startsWith('.')) continue;
+    const dir = path.join(OUT, d.name), u = readJSON(path.join(dir, 'unfinished.json'), null);
+    if (!u?.base?.id || pidAlive(u.runner)) continue;
+    let head = ''; try { const fd = fs.openSync(path.join(dir, u.part?.n ? `agent.${u.part.n + 1}.out` : 'agent.out'), 'r'), b = Buffer.alloc(20000);
+      head = b.toString('utf8', 0, fs.readSync(fd, b, 0, b.length, 0)); fs.closeSync(fd); } catch {}
+    const sid = head.match(/"session_id":"([\w-]+)"/)?.[1] ?? u.base.sessionId, file = sid && u.base.provider === 'claude' ? claudeTranscript(sid, path.join(dir, 'work')) : null;
+    let going = u.base.outputTokens > 0; if (!going && file) try { going = fs.readFileSync(file, 'utf8').includes('"type":"assistant"'); } catch {}
+    const { variantHashes, givenHtml, parts, models, tools, plan, ...fields } = u.base;
+    value.push({ ...fields, dir: d.name, carriesOn: !!file && going, cutAt: u.part?.endedAt ?? null, partStartedAt: u.part?.startedAt ?? null, resumes: parts?.length ?? 0 });
+  }
+  cutCache = { key, value };
+  return value;
+}
 
 // ------------------------------------------------------------------ results
 // Whether a run used different text for one of its variants than the config has now (the variant was
@@ -626,7 +801,7 @@ function revs(fresh) {
   const h = crypto.createHash('sha1');
   try {
     for (const d of fs.readdirSync(OUT, { withFileTypes: true })) if (d.isDirectory())
-      h.update(`${d.name}|${stamp(path.join(OUT, d.name, 'result.json'))}|${stamp(path.join(OUT, d.name, 'reply.md'))}\n`);
+      h.update(`${d.name}|${stamp(path.join(OUT, d.name, 'result.json'))}|${stamp(path.join(OUT, d.name, 'reply.md'))}|${stamp(path.join(OUT, d.name, 'unfinished.json'))}\n`);
   } catch {}
   h.update(stamp(SCORES));
   const value = { results: h.digest('hex').slice(0, 12), config: stamp(CONFIG), template: stamp(templatePath()), history: stamp(HISTORY), smokes: smokesRev };
@@ -684,8 +859,10 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(req, res, p.slice(6));
     if (p === '/api/audit' && m === 'GET') return send(res, 200, readJSON(AUDIT, null));
 
-    // canResume, canQueue: this server takes Resume failed and queued batches (a page newer than its server hides them).
-    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true), canResume: true, canQueue: true });
+    // canResume, canQueue, canRestart: this server takes Resume failed, queued batches and Restart (a page newer than its
+    // server hides them). boot: this start of the server.
+    if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true),
+      canResume: true, canQueue: true, canRestart: true, boot: BOOT });
     if (p === '/api/config' && m === 'PUT') {
       const c = await body(req);
       if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });
@@ -727,13 +904,40 @@ const server = http.createServer(async (req, res) => {
       stopAll(new Date().toISOString());
       return send(res, 200, { ok: true });
     }
+    // Restart: now, or with idle once the runs going have finished (cancel takes that back). The answer comes first.
+    if (p === '/api/restart' && m === 'POST') {
+      const s = await body(req);
+      if (updating) return send(res, 409, { error: `${updating} is updating; restart when it's done.` });
+      if (s?.cancel) {
+        if (restartPending) { restartPending = null; note('⟳ Restart called off: new runs start again'); schedule(); }
+        return send(res, 200, { ok: true });
+      }
+      const going = activeRuns().size, later = !!s?.idle && going > 0;
+      if (later && !restartPending) { restartPending = { at: new Date().toISOString() }; note(`⟳ Restarting once the ${plural(going, 'run')} going finish${going === 1 ? 'es' : ''}: no new runs start until then`); }
+      send(res, 200, { ok: true, later });
+      if (!later) setTimeout(restart, 100);
+      return;
+    }
+    // The session the dashboard before this one kept (see suspend): pick it up, or forget it.
+    if (p === '/api/session' && m === 'POST') {
+      const s = await body(req);
+      if (!saved) return send(res, 409, { error: 'There\'s no batch to pick up.' });
+      if (s?.forget) { forgetSaved(); return send(res, 200, { ok: true }); }
+      if (running()) return send(res, 409, { error: 'A batch is running; pick the other one up once it\'s done.' });
+      if (updating) return send(res, 409, { error: `${updating} is updating; resume when it's done.` });
+      resumeSession();
+      return send(res, 200, { ok: true });
+    }
     if (p === '/api/status' && m === 'GET') {
       const since = +(url.searchParams.get('since') ?? 0), known = url.searchParams.get('smokes'), act = activeRuns();
-      return send(res, 200, { running: running(), stopping: run.stopping || fs.existsSync(STOP),
+      // saved: a session the dashboard before this one kept, to pick up (see suspend); cut: runs cut off mid-way;
+      // restarting: Restart under way, now or once the runs going finish (idle).
+      return send(res, 200, { running: running(), stopping: run.stopping || fs.existsSync(STOP), boot: BOOT,
         startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...act.keys()], activeSince: Object.fromEntries(act),
         finished: batches.reduce((n, b) => n + b.finished, 0), planned: run.startedAt ? batches.reduce((n, b) => n + (b.planned ?? 0), 0) : null,
         settings: run.settings, state: run.limits ? sessionState() : null, batches: batchList(), logTotal: run.log.length,
         log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), updating, rev: revs(),
+        restarting: restarting ? 'now' : restartPending ? 'idle' : null, saved: running() ? null : savedInfo(), cut: cutOffRuns(),
         ...(known === String(smokesRev) ? {} : { smokes }) }); // the tests only when they changed
     }
 
@@ -778,29 +982,37 @@ server.on('error', (e) => {
 });
 server.listen(opts.port, '127.0.0.1', () => {
   checkClis(); // warm the cache so the Setup tab has it on first load
-  const link = `http://localhost:${opts.port}`;
-  console.log(`Matrix dashboard: ${link}\nConfig: ${CONFIG}\nRuns:   ${OUT}\nCtrl-C to quit (a running batch keeps its finished results).`);
+  const link = `http://localhost:${opts.port}`, again = !!process.env.MATRIX_DASHBOARD_RESTARTED;
+  console.log(`${again ? '\n⟳ Restarted. ' : ''}Matrix dashboard: ${link}\nConfig: ${CONFIG}\nRuns:   ${OUT}\nCtrl-C to quit (a running batch keeps its finished results).`);
   if (opts.allowHosts.length) console.log(`Also answering as ${opts.allowHosts.join(', ')}: anyone who can reach that address can start agents.`);
-  if (opts.open) {
+  // After Restart the session it kept carries on at once; one kept otherwise waits for Resume on the page.
+  loadSaved();
+  if (saved && again && saved.why === 'restart') resumeSession();
+  else if (saved) console.log(`A batch from ${new Date(saved.startedAt).toLocaleString()} was cut off ${saved.why === 'quit' ? 'when the dashboard quit' : 'when the dashboard stopped'}: Resume it on the Run tab.`);
+  if (opts.open && !again) {
     const cmd = process.platform === 'win32' ? ['cmd', ['/c', 'start', '', link]]
       : process.platform === 'darwin' ? ['open', [link]] : ['xdg-open', [link]];
     spawn(cmd[0], cmd[1], { stdio: 'ignore', detached: true }).on('error', () => {}).unref();
   }
 });
 
-// Quitting the dashboard stops a running batch cleanly too. That ends its running agents and throws their
-// work away, so with agents running Ctrl-C asks to be pressed again (the runner leaves Ctrl-C to us).
-let ctrlCAt = 0;
-const quit = (sig) => {
+// Quitting the dashboard ends a running batch too, but keeps it to pick up (see suspend): its running agents are cut
+// off, and only a Claude Code session that got going carries on from where it was. So with agents running Ctrl-C asks
+// to be pressed again (the runner leaves Ctrl-C to us).
+let ctrlCAt = 0, quitting = false;
+const quit = async (sig) => {
+  if (quitting) return;
   if (!running()) process.exit(0);
   const going = activeRuns().size;
   if (sig === 'SIGINT' && going && Date.now() - ctrlCAt > 5000) {
     ctrlCAt = Date.now();
-    console.log(`\nA batch is running with ${going} agent(s) going: quitting ends them and throws away what they've done so far.\n`
-      + 'Press Ctrl-C again within 5 seconds to quit anyway, or Pause the batch in the dashboard to let them finish first.');
+    console.log(`\nA batch is running with ${going} agent(s) going. Quitting ends them: a Claude Code run that has got going carries on with its session\n`
+      + 'when you resume the batch (the Run tab offers that when the dashboard starts again); runs of other CLIs start over.\n'
+      + 'Press Ctrl-C again within 5 seconds to quit, or use Restart on the Run tab to come straight back with the batch going.');
     return;
   }
-  stopAll('quit');
-  setInterval(() => { if (!live().length) process.exit(0); }, 100); setTimeout(() => process.exit(0), 15000);
+  quitting = true;
+  await suspend('quit');
+  process.exit(0);
 };
 process.on('SIGINT', () => quit('SIGINT')); process.on('SIGTERM', () => quit('SIGTERM'));
