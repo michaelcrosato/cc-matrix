@@ -166,7 +166,8 @@ try:
         pos = page.evaluate("(() => { const p = document.querySelector('#logpre'); return [p.scrollTop, p.scrollHeight - p.clientHeight]; })()")
         check('the batch log follows its end', pos[1] > 0 and pos[0] >= pos[1] - 8, str(pos))
         # a running batch takes changes: Options act on it, Pause holds the queue, a run can be restarted
-        c = json.load(open(conf)); c['dimensions']['testing'] += [{'id': f's{i}', 'text': f'FAKE:sleep=4000 s{i}'} for i in range(4)]; json.dump(c, open(conf, 'w'), indent=2)
+        # long enough to still be running at the ↻ below, many steps later
+        c = json.load(open(conf)); c['dimensions']['testing'] += [{'id': f's{i}', 'text': f'FAKE:sleep=12000 s{i}'} for i in range(4)]; json.dump(c, open(conf, 'w'), indent=2)
         api_state = lambda: json.load(urllib.request.urlopen(base + '/api/status'))
         page.goto(base + '/#run'); page.wait_for_timeout(1500)
         page.get_by_role('button', name='▶ Start').click()
@@ -213,6 +214,12 @@ try:
         page.set_viewport_size({'width': 1280, 'height': 900}); page.wait_for_timeout(300)
         if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-run-queue.png'), full_page=True)
         if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-run-live.png'), full_page=True)
+        boot = api_state()['boot']
+        page.get_by_role('button', name='⟳ Restart dashboard').click()
+        page.wait_for_selector('#modal[open] >> text=The batch picks up where it left off')
+        page.get_by_role('button', name='Cancel').click(); page.wait_for_timeout(500)
+        st = api_state()
+        check('Restart says what happens to the batch and the runs going, and Cancel leaves them be', st['boot'] == boot and st['running'] and not st['restarting'])
         page.get_by_role('button', name='■ Stop').click()
         page.wait_for_selector('#modal[open] .choices button.danger')
         check('Stop offers Pause first; ending runs is the red choice', page.locator('#modal .choices button.primary').inner_text().startswith('Pause instead'))

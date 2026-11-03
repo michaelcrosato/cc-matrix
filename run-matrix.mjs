@@ -6,9 +6,13 @@
 // Usually driven by the dashboard (node dashboard.mjs), but works on its own.
 //
 // costUsd is only ever what the CLI itself reports: Claude Code (at API list prices) and Grok (at its own,
-// lower rate). Every run also gets apiCostUsd, its tokens at the labs' public API list prices (PRICES), to
-// compare runs across CLIs. Codex and Grok print less than they use (subagents, /goal helpers): their
-// session logs fill that in (sessionLogs).
+// lower rate). The one exception is a Claude Code session cut off before it could report (see cutPart): that
+// part's tokens at the same list prices, costSource estimated. Every run also gets apiCostUsd, its tokens at the
+// labs' public API list prices (PRICES), to compare runs across CLIs. Codex and Grok print less than they use
+// (subagents, /goal helpers): their session logs fill that in (sessionLogs).
+//
+// A run cut off mid-way (the dashboard quit or restarted, the computer went down) carries on with its Claude Code
+// session the next time a batch has it; other CLIs' start over (see UNFINISHED).
 //
 //   node run-matrix.mjs --dry-run
 //   node run-matrix.mjs -j 3 --pick opus:xhigh,opus:max --only testing=none,open
@@ -314,7 +318,99 @@ function claudeTranscript(sessionId, cwd) {
   try { for (const d of fs.readdirSync(root)) if (fs.existsSync(path.join(root, d, file))) return path.join(root, d, file); } catch {}
   return null;
 }
-const isDone = (run) => { const p = prevRun(run); return !!p && (p.r.status === 'ok' || !(args.rerunFailed || canResume(run, p))); };
+
+// A run's folder holds unfinished.json from when its agent starts until its result is in: the run's record so far
+// (`base`: what it was made with and, for a run carrying on, its earlier parts' figures), the part going now (`part`)
+// and the pids of the runner and the agent. A run cut off mid-way (the dashboard quit or restarted, the runner was
+// ended, the computer went down) leaves it behind, and the next batch that has the run carries on with its session
+// where it stopped (carryOn), whether or not Resume failed is on. One that can't (another CLI, or a session that hadn't
+// got going) starts over. Not a result: the dashboard's results, the report and the stats never count it.
+const UNFINISHED = 'unfinished.json';
+const readUnfinished = (dir) => { try { return JSON.parse(fs.readFileSync(path.join(dir, UNFINISHED), 'utf8')); } catch { return null; } };
+const writeUnfinished = (dir, u) => fs.writeFileSync(path.join(dir, UNFINISHED), JSON.stringify(u, null, 2));
+// Whether a process is still going: a pid that's gone, or now this runner's, isn't (on Linux the runner's also has to
+// still be a runner, in case its pid was given to something else since).
+function alive(pid, runner = false) {
+  if (!pid || pid === process.pid) return false;
+  try { process.kill(pid, 0); } catch (e) { if (e.code !== 'EPERM') return false; }
+  if (runner && process.platform === 'linux') try { return fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('run-matrix'); } catch { return false; }
+  return true;
+}
+// An agent still going after its runner is gone (the runner was killed outright): nobody reads what it does any more.
+// On Linux it's known by its working folder, the run's work/, so it can be ended before its session carries on.
+function orphanOf(u, dir) {
+  if (!alive(u.agent) || process.platform !== 'linux') return null;
+  try { return fs.readlinkSync(`/proc/${u.agent}/cwd`) === path.join(outDir, dir, 'work') ? u.agent : null; } catch { return null; }
+}
+// The runs cut off before this batch (key -> { u, dir, orphan }), and those still going in another runner (busy), read once.
+let cutCache = null;
+function cutRuns() {
+  if (!cutCache) {
+    cutCache = { cut: new Map(), busy: new Set() };
+    for (const dir of fs.existsSync(outDir) ? fs.readdirSync(outDir) : []) {
+      const u = readUnfinished(path.join(outDir, dir));
+      if (!u?.base?.id) continue;
+      const orphan = alive(u.runner, true) ? null : orphanOf(u, dir);
+      if (alive(u.runner, true) || (alive(u.agent) && !orphan)) cutCache.busy.add(runKey(u.base));
+      else cutCache.cut.set(runKey(u.base), { u, dir, orphan });
+    }
+  }
+  return cutCache;
+}
+// Ends an orphaned agent (and what it started), and waits up to 10 s for it to be gone.
+async function endOrphan(pid) {
+  try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch {} }
+  for (let i = 0; i < 100 && alive(pid); i++) await new Promise((r) => setTimeout(r, 100));
+}
+const cutOf = (run) => cutRuns().cut.get(run.key) ?? null;
+// Where a cut-off run's session had got to: its id (from the part's output so far), its transcript, the responses
+// the part got (see transcriptResponses; up to `to`, when the part after it started, once there is one), when the part
+// ended (as it was cut off; after a crash, the last write to its output or transcript) and the minutes it has run in
+// all, every part counted.
+function cutSession({ u, dir }, to = Infinity) {
+  const home = path.join(outDir, dir), part = u.part, mtime = (f) => { try { return fs.statSync(f).mtimeMs; } catch { return 0; } };
+  let sessionId = u.base.sessionId ?? null, end = null, responses = new Map(), out = null;
+  if (part) {
+    out = path.join(home, partFile(part.n, 'out'));
+    let head = ''; try { head = fs.readFileSync(out, 'utf8').slice(0, 20000); } catch {}
+    sessionId = head.match(/"session_id":"([\w-]+)"/)?.[1] ?? sessionId;
+  }
+  const file = sessionId ? claudeTranscript(sessionId, path.join(home, 'work')) : null;
+  if (part) {
+    const start = Date.parse(part.startedAt);
+    end = Date.parse(part.endedAt ?? '') || Math.max(start, mtime(out), file ? mtime(file) : 0);
+    if (file) responses = transcriptResponses(file, start, to);
+  }
+  return { sessionId, file, responses, end, minutes: (u.base.wallMinutes ?? 0) + (part ? (end - Date.parse(part.startedAt)) / 60000 : 0) };
+}
+// A Claude Code transcript's responses from `from` until `to` (ms), by message id: model and usage. It writes each
+// response as it's made, with the request's final usage, so it has what a session cut off before its result line used.
+function transcriptResponses(file, from, to) {
+  const out = new Map();
+  try {
+    for (const l of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (!l.includes('"type":"assistant"')) continue;
+      let e; try { e = JSON.parse(l); } catch { continue; }
+      const m = e.message, at = Date.parse(e.timestamp ?? '');
+      if (e.type !== 'assistant' || !m?.id || !m.usage || m.model === '<synthetic>' || !(at >= from && at < to)) continue;
+      out.set(m.id, { model: m.model, usage: m.usage });
+    }
+  } catch {}
+  return out;
+}
+// A cut-off run carries on with its session when its CLI can (Claude Code), with the same model, once its session had
+// got going (it made output before, or got a response in the part cut off) and, with a time limit, while there's time left.
+function canCarryOn(run, cut) {
+  if (!cut || !RESUMABLE.has(run.agent.provider) || cut.u.base.model !== run.agent.model) return false;
+  const s = cutSession(cut), limit = +(run.agent.timeout || args.timeout || 0);
+  return !!s.file && (cut.u.base.outputTokens > 0 || s.responses.size > 0) && !(limit && s.minutes >= limit);
+}
+const isDone = (run) => {
+  const p = prevRun(run);
+  if (p?.r.status === 'ok') return true;
+  if (cutOf(run)) return false; // it carries on, or starts over
+  return !!p && !(args.rerunFailed || canResume(run, p));
+};
 
 // ------------------------------------------------------------------ stages
 // Runs in stages (--stage plan=claude-opus-5-5:max --stage build=claude-opus-5-5:xhigh,gpt-6.1-sol:max …), the
@@ -388,6 +484,11 @@ if (elsewhere.size) {
   const n = queue.length; queue = queue.filter((r) => !elsewhere.has(r.key));
   if (queue.length < n) console.log(`· ${n - queue.length} run(s) left out: a batch queued before this one has them`);
 }
+// Runs whose agent is still going in another runner (a terminal, say): left out too, so none runs twice.
+if (cutRuns().busy.size) {
+  const n = queue.length; queue = queue.filter((r) => !cutRuns().busy.has(r.key) || isDone(r));
+  if (queue.length < n) console.log(`· ${n - queue.length} run(s) left out: still running in another process`);
+}
 
 
 // -------------------------------------------------------------- providers
@@ -456,7 +557,10 @@ function terminalOf(run, resumes = false) {
   const rel = (id) => path.relative(process.cwd(), path.join(outDir, id)) || '.', dir = rel(run.id);
   const st = run.stage, where = st ? ` · ${STAGES.indexOf(st) + 1} ${st.id}` : '';
   const head = `# ${run.agent.id} ${parseEffort(run.effort ?? 'default').label}${run.ultracode ? '-uc' : ''}${where} (${CLIS[run.agent.provider] ?? run.agent.provider})`;
-  if (resumes) { const p = prevRun(run); return [`${head}: carries on with its session where it stopped`, `d=${sh(rel(p.dir))}`, `(cd "$d/work" && ${sh(binOf('claude'))} -p … --resume ${sh(p.r.sessionId)} …)`]; }
+  if (resumes) {
+    const cut = cutOf(run), p = cut ? { dir: cut.dir, r: { sessionId: cutSession(cut).sessionId } } : prevRun(run);
+    return [`${head}: carries on with its session where it ${cut ? 'was cut off' : 'stopped'}`, `d=${sh(rel(p.dir))}`, `(cd "$d/work" && ${sh(binOf('claude'))} -p … --resume ${sh(p.r.sessionId)} …)`];
+  }
   let text;
   try { text = st ? stageTexts(run).text : buildPrompt(run); } catch (e) { return [head, `# can't start: ${e.message}`]; }
   const { bin, argv, promptInArgs } = providers[run.agent.provider](run.agent, run.effort, text, run, '\0prompt.md');
@@ -468,7 +572,9 @@ function terminalOf(run, resumes = false) {
 
 if (args.rename.length) { try { renameVariants(args.rename); } catch (e) { console.error(e.message); process.exit(1); } process.exit(0); }
 if (args.dryRun) {
-  const byAgent = {}, resuming = queue.filter((r) => canResume(r));
+  // resumes: failed runs that carry on (Resume failed); carriesOn: cut-off runs that do; startsOver: cut-off runs that can't.
+  const byAgent = {}, cut = queue.filter((r) => cutOf(r) && !isDone(r)), carrying = cut.filter((r) => canCarryOn(r, cutOf(r)));
+  const resuming = [...carrying, ...queue.filter((r) => !cutOf(r) && canResume(r))];
   for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
   let sample = '', error = null;
   try {
@@ -483,11 +589,12 @@ if (args.dryRun) {
   // The batch as terminal sessions (the first 100; Run → Preview shows them): the runs not done yet, in queue order.
   const todo = queue.filter((r) => !isDone(r)), terminal = todo.slice(0, 100).map((r) => terminalOf(r, resuming.includes(r)).join('\n'));
   if (args.json) {
-    console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length,
+    console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length - carrying.length,
+      carriesOn: carrying.length, startsOver: cut.length - carrying.length,
       ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf), terminal, terminalTotal: todo.length }));
   } else {
     console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
-    for (const r of queue) console.log('  ' + r.id + (resuming.includes(r) ? '  (resumes)' : ''));
+    for (const r of queue) console.log('  ' + r.id + (carrying.includes(r) ? '  (carries on: cut off)' : cut.includes(r) ? '  (cut off: starts over)' : resuming.includes(r) ? '  (resumes)' : ''));
     if (error) console.log(`\nPrompt error: ${error}`);
     else if (queue[0]) console.log(`\n--- sample prompt (${queue[0].id}) ---\n${sample}`);
     if (terminal.length) console.log(`\n--- in a terminal (${terminal.length === todo.length ? 'every run not done yet' : `the first ${terminal.length} of ${todo.length}`}) ---\n${terminal.join('\n\n')}`);
@@ -910,7 +1017,7 @@ function apiPrice(m, provider, when) {
 // The agents running now, by run id: the process, when it started and its time-limit timer, so a
 // time limit changed mid-batch can reach them and one can be ended on request.
 const live = new Map();
-let spent = 0, stopping = false, overBudget = false, paused = false, done = 0, skipped = 0;
+let spent = 0, stopping = false, keeping = false, overBudget = false, paused = false, done = 0, skipped = 0;
 // The batch loop (pool) sleeps until a run ends or a setting changes; wake() lets it check again.
 let wakeUp = null;
 function wake() { const w = wakeUp; wakeUp = null; w?.(); }
@@ -922,10 +1029,12 @@ function killTree(child) {
   else { try { process.kill(-child.pid, 'SIGTERM'); } catch { child.kill('SIGTERM'); } }
 }
 
-function stopAll(reason) {
+// Stop throws the running agents' runs away (they start over next time). With keep (the dashboard quitting or
+// restarting, or this runner being ended) they're cut off instead: see cutOff.
+function stopAll(reason, keep = false) {
   if (stopping) return;
-  stopping = true;
-  console.log(`■ Stopping (${reason}): ending ${live.size} running agent(s)…`);
+  stopping = true; keeping = keep;
+  console.log(`■ Stopping (${reason}): ending ${live.size} running agent(s)${keep && live.size ? '; a Claude Code run that got going carries on with its session next time' : ''}…`);
   for (const c of live.values()) killTree(c.child);
   wake(); // a paused batch with nothing running has nothing else to wake it
 }
@@ -958,7 +1067,7 @@ process.on('SIGINT', () => {
   ctrlCAt = Date.now();
   console.log(`\n${live.size} agent(s) running: press Ctrl-C again within 5 s to end them (what they've done so far is thrown away).`);
 });
-process.on('SIGTERM', () => stopAll('terminated'));
+process.on('SIGTERM', () => stopAll('terminated', true));
 // The dashboard asks us to stop by creating runs/.stop (works on every OS). A smoke
 // test runs beside batches, so it ignores that.
 const stopPoll = args.smoke ? null : setInterval(() => { if (fs.existsSync(stopFile)) stopAll('stop requested'); }, 1500);
@@ -1023,7 +1132,8 @@ const lastLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim().s
 
 // Start the agent in dir/work, wait for it to exit (or hit `limit` minutes) and parse its output. A resumed
 // run's later parts write their own output files (partFile) and say what the session had used before (since).
-async function spawnAgent(run, dir, prompt, limit, part = 0, since = null) {
+// base: the run's record so far, written with this part to unfinished.json as the agent starts (see UNFINISHED).
+async function spawnAgent(run, dir, prompt, limit, part = 0, since = null, base = null) {
   const { bin, argv, promptInArgs } = providers[run.agent.provider](run.agent, run.effort, prompt, run, path.join(dir, 'prompt.md'));
   const outPath = path.join(dir, partFile(part, 'out')), errPath = path.join(dir, partFile(part, 'err'));
   const out = fs.createWriteStream(outPath), err = fs.createWriteStream(errPath);
@@ -1036,6 +1146,8 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null) {
     const child = spawn(bin, a, { cwd: path.join(dir, 'work'), shell: isWin, detached: !isWin, env: process.env });
     const c = { run, child, start, err, timer: null };
     live.set(run.id, c);
+    if (base) writeUnfinished(dir, { base, part: { n: part, startedAt: new Date(start).toISOString(), cliVersion: cliVersions[run.agent.provider],
+      ...(since ? { since } : {}) }, runner: process.pid, agent: child.pid });
     child.stdout.pipe(out); child.stderr.pipe(err);
     child.stdin.on('error', () => {});
     child.stdin.end(promptInArgs ? '' : prompt);
@@ -1058,6 +1170,17 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null) {
 
 // Runs not done yet (pool skips the others first).
 async function runOne(run) {
+  // Cut off in an earlier batch: it carries on with its session, or starts over when it can't.
+  const cut = cutOf(run);
+  if (cut) {
+    cutRuns().cut.delete(run.key);
+    if (cut.orphan) { console.log(`· ${cut.dir}: ending its agent, still going since its runner was killed (pid ${cut.orphan})`); await endOrphan(cut.orphan); }
+    if (canCarryOn(run, cut)) return resumeOne(run, { r: cutRecord(cut), dir: cut.dir }, true);
+    fs.rmSync(path.join(outDir, cut.dir), { recursive: true, force: true });
+    if (finished().get(run.key)?.dir === cut.dir) finished().delete(run.key); // it was carrying on from a failed run there
+    console.log(`· ${cut.dir} was cut off before and starts over: ${RESUMABLE.has(run.agent.provider)
+      ? 'its session hadn\'t got going, or its time limit is used up' : `${CLIS[run.agent.provider] ?? run.agent.provider} can't carry on a session`}`);
+  }
   const prev = prevRun(run);
   if (canResume(run, prev)) return resumeOne(run, prev);
   // The start time names the folder (with folderName.date) and fills the prompt's {{stamp}}: the two match.
@@ -1065,7 +1188,7 @@ async function runOne(run) {
   if (FN?.date) run.id = nameOf(run, run.when);
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   // Never clear a folder that holds another combination's run (see runName); left as it is, this one doesn't start.
-  const there = readResult(run.id);
+  const there = readResult(run.id) ?? readUnfinished(dir)?.base;
   if (there?.id && runKey(there) !== run.key) { done++; tell('gone', run); console.log(`✘ ${run.id}  not started: its folder holds a different run`); return; }
   fs.rmSync(dir, { recursive: true, force: true });
   // A failed run being retried that was made before a dimension was added: the new attempt replaces it.
@@ -1100,21 +1223,26 @@ async function runOne(run) {
     if (setup) spawnSync(setup, { cwd: work, shell: true, stdio: 'ignore' });
   }
 
+  // goalSkipped: a goal (a goal variant, or a stage's goal) on a CLI without headless /goal, so it got the plain text.
+  const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
+  // What the run is made with, kept in unfinished.json while it runs, so a cut-off run carries on as itself.
+  const base = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
+    variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), ...stageFields(run, work, parent, given), timeZone: TIME_ZONE };
   console.log(`▶ ${run.id}${parent ? `  (${run.stage.id}, from ${parent.dir})` : ''}`);
-  const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, limitOf(run));
+  const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, limitOf(run), 0, null, base);
 
-  if (stopping || run.abort) { // interrupted: throw it away so it runs fresh (later in this batch if requeued)
+  if (stopping || run.abort) { // interrupted: cut off, or thrown away so it runs fresh (later in this batch if requeued)
+    if (keeping && !run.abort && cutOff(run, dir)) return;
     fs.rmSync(dir, { recursive: true, force: true });
     if (run.abort === 'requeue' && !stopping) { run.abort = null; pending.unshift(run); console.log(`↺ ${run.id} requeued (starts over)`); }
-    else { tell('gone', run); console.log(`■ ${run.id} stopped (discarded)`); }
+    else { tell('gone', run); console.log(`■ ${run.id} stopped (discarded${keeping ? `: ${RESUMABLE.has(run.agent.provider) ? 'its session hadn\'t got going'
+      : `${CLIS[run.agent.provider] ?? run.agent.provider} can't carry on a session`}, so it starts over next time` : ''})`); }
     return;
   }
 
   if (metrics.reply) fs.writeFileSync(path.join(dir, 'reply.md'), metrics.reply);
   delete metrics.reply;
   const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed';
-  // goalSkipped: a goal (a goal variant, or a stage's goal) on a CLI without headless /goal, so it got the plain text.
-  const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
   const measured = measureOutput(work, given), end = Date.now();
   const id = status === 'ok' ? withTitle(run.id, measured, run) : run.id, home = path.join(outDir, id);
   const staged = stageFields(run, path.join(home, 'work'), parent, given);
@@ -1123,6 +1251,7 @@ async function runOne(run) {
     wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...staged, ...exitInterview(home, !!run.stage, staged.expectsGame),
     startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(), timeZone: TIME_ZONE };
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
+  fs.rmSync(path.join(home, UNFINISHED), { force: true });
   finished().set(run.key, { r: result, dir: id }); // so the runs continuing from it can start
   stampGame(home, result, run.combo);
   spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
@@ -1161,32 +1290,37 @@ function titleOf(file, run) {
 }
 
 // A resumed run's output: the first part's in agent.out and agent.err, part n's in agent.<n>.out and .err.
-const partFile = (i, ext) => i ? `agent.${i + 1}.${ext}` : `agent.${ext}`;
+function partFile(i, ext) { return i ? `agent.${i + 1}.${ext}` : `agent.${ext}`; } // a declaration: the dry run uses it
 // Sent to a resumed session that had no /goal (one with a /goal gets it again, from goal.md).
 const RESUME_MESSAGE = 'Your session stopped before the task was finished. Continue where you left off and complete it.';
 
-// --resume-failed: carry on with a failed run's session (see canResume) instead of starting over. Its folder
-// stays as it is, work and all, and the new part's output goes to agent.<n>.out. The result adds up every
-// part and keeps what the run was made with (prompt, variants, CLI version) and when it first started;
-// `parts` lists each part's times and `resumes` counts them. Ended mid-way (Stop, ↻, ✕), the new part is
-// thrown away and the run stays as it was, so it can be resumed again.
-async function resumeOne(run, prev) {
+// --resume-failed: carry on with a failed run's session (see canResume) instead of starting over; with carrying, a
+// run that was cut off (see cutRecord), whatever the flags. Its folder stays as it is, work and all, and the new
+// part's output goes to agent.<n>.out. The result adds up every part and keeps what the run was made with (prompt,
+// variants, CLI version) and when it first started; `parts` lists each part's times and `resumes` counts them.
+// Ended mid-way (Stop, ↻, ✕), the new part is thrown away and the run stays as it was, so it can be resumed again;
+// cut off mid-way, the new part is kept for the next time too.
+async function resumeOne(run, prev, carrying = false) {
   run.id = prev.dir; // it carries on in its own folder, whatever a new run would be named now
   const dir = path.join(outDir, prev.dir), work = path.join(dir, 'work'), r = prev.r;
   const parts = r.parts ?? [{ startedAt: r.startedAt, finishedAt: r.finishedAt, wallMinutes: r.wallMinutes, exitCode: r.exitCode, cliVersion: r.cliVersion }];
   const n = parts.length, since = claudeCostState(claudeTranscript(r.sessionId, work));
   let message = RESUME_MESSAGE;
   try { message = fs.readFileSync(path.join(dir, 'goal.md'), 'utf8').trim() || message; } catch {}
-  // The time limit counts every part, so this one gets what's left (canResume checked there's some).
+  // The time limit counts every part, so this one gets what's left (canResume and canCarryOn checked there's some).
   const limit = limitOf(run) && limitOf(run) - (r.wallMinutes ?? 0);
 
-  console.log(`▶ ${run.id}  (resuming its session, part ${n + 1})`);
+  console.log(`▶ ${run.id}  (${carrying ? 'carrying on with its session where it was cut off' : 'resuming its session'}, part ${n + 1})`);
   run.resume = { sessionId: r.sessionId, message };
-  const { exitCode, metrics, start } = await spawnAgent(run, dir, '', limit, n, since);
+  const { exitCode, metrics, start } = await spawnAgent(run, dir, '', limit, n, since, { ...r, parts });
   run.resume = null;
 
   if (stopping || run.abort) {
+    if (keeping && !run.abort && cutOff(run, dir)) return;
     for (const ext of ['out', 'err']) fs.rmSync(path.join(dir, partFile(n, ext)), { force: true });
+    // As it was: a failed run's result.json is still there; a cut-off run stays cut off without this part.
+    if (fs.existsSync(path.join(dir, 'result.json'))) fs.rmSync(path.join(dir, UNFINISHED), { force: true });
+    else writeUnfinished(dir, { base: r });
     if (run.abort === 'requeue' && !stopping) { run.abort = null; pending.unshift(run); console.log(`↺ ${run.id} requeued (resumes again)`); }
     else { tell('gone', run); console.log(`■ ${run.id} stopped (this part discarded; it can be resumed again)`); }
     return;
@@ -1210,6 +1344,7 @@ async function resumeOne(run, prev) {
     ...exitInterview(home, !!r.stage, r.expectsGame),
     startedAt: r.startedAt, finishedAt: part.finishedAt, ...(r.timeZone ? { timeZone: r.timeZone } : {}), resumes: n, parts: all };
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
+  fs.rmSync(path.join(home, UNFINISHED), { force: true });
   stampGame(home, result, run.combo);
   finished().set(run.key, { r: result, dir: id });
   spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
@@ -1218,10 +1353,16 @@ async function resumeOne(run, prev) {
   if (!args.broker) writeReport();
 }
 
-// The cost-state Claude Code saved in a session's transcript as its last part ended (see minusSince), or null.
-function claudeCostState(file) {
+// The cost-state Claude Code saved in a session's transcript as its last part ended (see minusSince), or null. With
+// `to` (ms), the last one before the transcript's entries from then on (a later part's).
+function claudeCostState(file, to = Infinity) {
   let last = null;
-  try { for (const l of fs.readFileSync(file, 'utf8').split('\n')) if (l.includes('"type":"cost-state"')) last = l; } catch {}
+  try {
+    for (const l of fs.readFileSync(file, 'utf8').split('\n')) {
+      if (to < Infinity && Date.parse(l.match(/"timestamp":"([^"]+)"/)?.[1] ?? '') >= to) break;
+      if (l.includes('"type":"cost-state"')) last = l;
+    }
+  } catch {}
   if (!last) return null;
   const keep = ['inputTokens', 'outputTokens', 'thinkingTokens', 'cacheReadInputTokens', 'cacheCreationInputTokens', 'costUSD'];
   try {
@@ -1229,6 +1370,62 @@ function claudeCostState(file) {
     return { totalCostUSD: c.totalCostUSD ?? 0, totalAPIDuration: c.totalAPIDuration ?? 0, modelUsage: Object.fromEntries(Object.entries(c.modelUsage ?? {})
       .map(([id, u]) => [id, Object.fromEntries(keep.filter((k) => u[k] != null).map((k) => [k, u[k]]))])) };
   } catch { return null; }
+}
+
+// A running agent cut off by a quit or restart (stopAll with keep): a run that can carry on with its session keeps its
+// folder, work, output and unfinished.json (now with when the part ended) for the next batch that has it, and says so.
+// Returns false for one that can't (another CLI, or its session hadn't got going): the caller throws it away.
+function cutOff(run, dir) {
+  const u = readUnfinished(dir);
+  if (!u?.part) return false;
+  u.part.endedAt = new Date().toISOString(); u.runner = u.agent = null;
+  writeUnfinished(dir, u);
+  if (!canCarryOn(run, { u, dir: path.basename(dir) })) return false;
+  tell('gone', run); console.log(`■ ${run.id} cut off: it carries on with its session when its batch runs again`);
+  return true;
+}
+
+// A cut-off run's record so far, for resumeOne to carry on from: what it was made with (unfinished.json's base),
+// the part cut off added to any parts before (see cutPart) and its session. Status interrupted; never saved as a result.
+function cutRecord(cut) {
+  const { base, part } = cut.u;
+  if (!part) return base; // cut off, then ended mid-way when it carried on: as it was before that part
+  const s = cutSession(cut), m = cutPart(cut, Infinity, s), start = Date.parse(part.startedAt);
+  const p = { startedAt: part.startedAt, finishedAt: new Date(s.end).toISOString(), wallMinutes: (s.end - start) / 60000, exitCode: null,
+    cliVersion: part.cliVersion, cutOff: true, ...(part.since ? { since: part.since } : {}) };
+  const before = base.parts ?? (base.finishedAt ? [{ startedAt: base.startedAt, finishedAt: base.finishedAt, wallMinutes: base.wallMinutes,
+    exitCode: base.exitCode, cliVersion: base.cliVersion }] : []);
+  return { ...base, ...(before.length ? combineParts([base, m]) : m), status: 'interrupted', error: 'cut off', sessionId: s.sessionId,
+    startedAt: base.startedAt ?? part.startedAt, finishedAt: p.finishedAt, wallMinutes: (base.wallMinutes ?? 0) + p.wallMinutes, parts: [...before, p] };
+}
+// What a cut-off part did. Its output so far has its tool calls, failed ones, compactions and plan limits, but never
+// the session's totals (they come with the result line). Its tokens are its responses' in the transcript (see
+// transcriptResponses); its cost is those at list price, which is what Claude Code reports too (costSource
+// estimated), unless Claude Code saved the session's totals as it stopped (a cost-state newer than the part's since).
+// to: when the part after it started, if there is one (--reparse), where this part's entries in the transcript end.
+function cutPart(cut, to = Infinity, s = cutSession(cut, to)) {
+  const { part } = cut.u, home = path.join(outDir, cut.dir), start = Date.parse(part.startedAt);
+  let text = ''; try { text = fs.readFileSync(path.join(home, partFile(part.n, 'out')), 'utf8'); } catch {}
+  const st = readStream(text), state = s.file ? claudeCostState(s.file, to) : null;
+  let m;
+  if (state && JSON.stringify(state) !== JSON.stringify(part.since ?? null)) {
+    const j = minusSince({ modelUsage: state.modelUsage, total_cost_usd: state.totalCostUSD, duration_api_ms: state.totalAPIDuration }, part.since);
+    m = { costUsd: j.total_cost_usd, costSource: 'reported', ...usageTotals(j), apiMinutes: j.duration_api_ms ? j.duration_api_ms / 60000 : null };
+  } else {
+    const models = {};
+    for (const { model, usage: u } of s.responses.values()) {
+      const read = u.cache_read_input_tokens ?? 0, write = u.cache_creation_input_tokens ?? 0;
+      const use = modelUse((u.input_tokens ?? 0) + read + write, read, write, u.output_tokens ?? 0, null);
+      addModel(models, model, { ...use, costUsd: apiPrice({ models: { [model]: use } }, 'claude', start).apiCostUsd });
+    }
+    const sum = (k) => Object.values(models).reduce((n, x) => n + x[k], 0), priced = apiPrice({ models }, 'claude', start);
+    m = { costUsd: priced.apiCostUsd, costSource: priced.apiCostUsd != null ? 'estimated' : 'none', models,
+      inputTokens: sum('uncachedInputTokens') + sum('cacheReadTokens') + sum('cacheWriteTokens'), cachedTokens: sum('cacheReadTokens'),
+      cacheWriteTokens: sum('cacheWriteTokens'), outputTokens: sum('outputTokens'), reasoningTokens: null, ...(priced.unpricedModels ? { unpricedModels: priced.unpricedModels } : {}) };
+  }
+  Object.assign(m, { apiCalls: st.ids.size || s.responses.size, toolCalls: total(st.tools), tools: st.tools, toolErrors: st.toolErrors, compactions: st.compactions,
+    plan: claudePlan(st.limits), isError: true, error: 'cut off', sessionId: s.sessionId, replyChars: 0 });
+  return Object.assign(tokenTotals(m), apiPrice(m, 'claude', start));
 }
 
 // A resumed run's figures, its parts' added up: tokens, cost, time and counts. The reply, outcome, session
@@ -1246,7 +1443,7 @@ function combineParts(ms) {
   const unpriced = [...new Set(ms.flatMap((x) => x.unpricedModels ?? []))];
   Object.assign(m, { tools: Object.keys(tools).length ? tools : undefined, models: Object.keys(models).length ? models : undefined,
     unpricedModels: unpriced.length ? unpriced : undefined });
-  if (ms.some((x) => x.costSource === 'reported')) m.costSource = 'reported';
+  if (ms.some((x) => x.costSource === 'reported')) m.costSource = ms.some((x) => x.costSource === 'estimated') ? 'estimated' : 'reported';
   return m;
 }
 
@@ -1273,10 +1470,13 @@ function reparseAll() {
     if (!fs.existsSync(resFile) || !fs.existsSync(outFile)) continue;
     const r = JSON.parse(fs.readFileSync(resFile, 'utf8'));
     if (!PARSERS[r.provider]) continue;
-    // A resumed run: each part from its own output, with what its session had used before (see resumeOne).
+    // A resumed run: each part from its own output, with what its session had used before (see resumeOne); a part
+    // that was cut off as it was measured then (see cutPart).
     const parts = r.parts ?? [{ startedAt: r.startedAt, finishedAt: r.finishedAt }];
-    let ms; try { ms = parts.map((p, i) => readMetrics(r.provider, fs.readFileSync(path.join(outDir, d, partFile(i, 'out')), 'utf8'), { model: r.model },
-      { cwd: path.join(outDir, d, 'work'), start: Date.parse(p.startedAt), end: Date.parse(p.finishedAt), since: p.since })); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
+    let ms; try { ms = parts.map((p, i) => p.cutOff ? cutPart({ u: { base: {}, part: { n: i, startedAt: p.startedAt, endedAt: p.finishedAt, since: p.since } }, dir: d },
+        Date.parse(parts[i + 1]?.startedAt ?? '') || Infinity)
+      : readMetrics(r.provider, fs.readFileSync(path.join(outDir, d, partFile(i, 'out')), 'utf8'), { model: r.model },
+        { cwd: path.join(outDir, d, 'work'), start: Date.parse(p.startedAt), end: Date.parse(p.finishedAt), since: p.since })); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
     const m = combineParts(ms);
     if (r.sessionLog === 'read' && m.sessionLog !== 'read') { console.log(`· ${d}: session log ${m.sessionLog ?? 'not found'} now; kept its figures`); continue; }
     m.replyChars = String(ms.findLast((x) => x.reply)?.reply ?? '').trim().length;
@@ -1591,14 +1791,15 @@ function control(msg) {
     console.log(`⚙ ${CLIS[p] ?? p}: ${out.filter((r) => !isDone(r)).length} queued run(s) left out of this batch (they run next time)`);
   }
   // --broker: runs to start now; the rest of this batch left out (the budget is spent, or it was taken out of the
-  // queue); a stop; and runs another batch had that finished there (one here may continue from it) or won't run.
+  // queue); a stop (with keep, the dashboard is quitting or restarting: the running ones are cut off, see cutOff); and
+  // runs another batch had that finished there (one here may continue from it) or won't run.
   if (msg.grant) grants.push(...msg.grant);
   if (msg.end && pending.length) {
     const out = pending.splice(0);
     for (const r of out) tell('gone', r);
     console.log(`■ ${out.filter((r) => !isDone(r)).length} queued run(s) left out of this batch (they run next time)`);
   }
-  if (msg.stop) stopAll('stop requested');
+  if (msg.stop) stopAll(msg.keep ? 'the dashboard is closing' : 'stop requested', !!msg.keep);
   for (const { key, dir } of msg.finished ?? []) {
     const r = readResult(dir);
     if (r?.id && runKey(r) === key) finished().set(key, { r, dir });
@@ -1675,8 +1876,10 @@ console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} 
   : `concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''}`) + ')');
 if (stageMode) { const n = {}; for (const r of queue) n[r.stage.id] = (n[r.stage.id] ?? 0) + 1;
   console.log(`In stages: ${STAGES.filter((s) => n[s.id]).map((s) => `${s.id} ${n[s.id]}`).join(', ')}. A run starts once the one it continues from has finished OK.`); }
-const resuming = queue.filter((r) => canResume(r)).length;
+const resuming = queue.filter((r) => !cutOf(r) && canResume(r)).length, carrying = queue.filter((r) => !isDone(r) && canCarryOn(r, cutOf(r))).length;
 if (resuming) console.log(`Of those, ${resuming} failed partway and resume their session where it stopped (Resume failed).`);
+if (carrying) console.log(`Of those, ${carrying === 1 ? '1 was cut off mid-way and carries on with its session where it stopped'
+  : `${carrying} were cut off mid-way and carry on with their sessions where they stopped`}.`);
 if (queue.length > already) try { recordPromptVersion(); } catch (e) { console.log(`⚠ Prompt history not updated: ${e.message}`); }
 if (args.control) {
   let buf = '';
@@ -1685,6 +1888,12 @@ if (args.control) {
     const lines = (buf + d).split('\n'); buf = lines.pop();
     for (const l of lines) if (l.trim()) try { control(JSON.parse(l)); } catch (e) { console.log(`⚠ Setting change ignored: ${e.message}`); }
   });
+  // With --broker, the dashboard gone (it crashed or was killed) leaves nobody to grant runs or read this: its running
+  // agents are cut off, so the next batch carries them on, and the runner ends.
+  if (args.broker) {
+    for (const s of [process.stdout, process.stderr]) s.on('error', () => {}); // what it prints goes nowhere now
+    process.stdin.on('end', () => stopAll('the dashboard is gone', true));
+  }
 }
 // What this batch will do, for the dashboard: a batch queued after it leaves these out, and they hold its slots. Said
 // once the prompt's version is recorded, since the next batch starts on it (see startWaiting in dashboard.mjs).

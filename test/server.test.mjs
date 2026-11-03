@@ -364,3 +364,107 @@ test('the queue: a batch can be taken out of it, and Stop ends every batch', asy
   assert.ok(done.log.some((l) => l.startsWith('■ Batch 2:')) && done.log.some((l) => l.startsWith('■ opus-low__l1 stopped')), done.log.join('\n'));
   assert.ok(!fs.existsSync(path.join(s.out, 'opus-low__l2')) && !fs.existsSync(path.join(s.out, 'opus-low__l3')));
 });
+
+// ------------------------------------------------- Restart, Quit and picking up
+// The session is kept in runs/.session.json (see suspend in dashboard.mjs): after Restart the dashboard picks it up
+// at once; after Quit (or a crash) the page offers it. Cut-off Claude Code sessions carry on where they were.
+const quiet = async (dd, p) => { try { return (await dd.api(p)).json; } catch { return null; } }; // the server may be restarting
+const statusOf = (dd) => quiet(dd, '/api/status?since=0');
+const doneAfter = (dd, ms = 30000) => waitFor(async () => { const x = await statusOf(dd); return x && !x.running && x.finishedAt ? x : null; }, ms);
+const goingOn = (s, id) => waitFor(() => { try { return fs.readFileSync(path.join(s.out, id, 'agent.out'), 'utf8').includes('msg_h1'); } catch { return false; } });
+const opusOnly = [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }];
+
+test('Restart: the dashboard comes back with its code as it is now, and the batch picks up where it left off', async (t) => {
+  const s = sandbox({ agents: opusOnly, dimensions: { testing: [{ id: 'h', text: 'FAKE:hang' }, { id: 'late', text: 'FAKE:sleep=3000 late' }, { id: 'q', text: 'q' }] } });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const c = (await dd.api('/api/config')).json, s0 = await statusOf(dd);
+  assert.deepEqual([c.canRestart, c.boot, s0.saved, s0.cut], [true, s0.boot, null, []]);
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['h', 'late', 'q'] }, concurrency: 2, budget: 5 })).status, 200);
+  const going = await waitFor(async () => { const x = await statusOf(dd); return x?.active.length === 2 ? x : null; });
+  await goingOn(s, 'opus-low__h');
+  // late hasn't had its first answer, so it's cut off with nothing to carry on: it starts over
+  fs.writeFileSync(path.join(s.dir, 'prompt.md'), 'Make a small game.\n\nTesting: {{testing}}\n'); // Setup unchanged: the batch's copy is used anyway
+  const r = await dd.api('/api/restart', 'POST', {});
+  assert.deepEqual([r.status, r.json.later], [200, false]);
+  const back = await waitFor(async () => { const x = await statusOf(dd); return x && x.boot !== s0.boot && x.running ? x : null; }, 30000);
+  assert.match(dd.output(), /⟳ Restarted\. Matrix dashboard:/);
+  assert.equal(back.startedAt, going.startedAt);
+  assert.equal(back.state.budget, 5);
+  assert.ok(back.log.some((l) => l.startsWith('⏸ Restarting the dashboard: the 2 runs going are cut off')), back.log.join('\n'));
+  assert.ok(back.log.some((l) => /^⟳ The dashboard restarted at .+: carrying on with the batch started .+ \(1 cut-off run carries on with its session\)\.$/.test(l)), back.log.join('\n'));
+  const done = await doneAfter(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.equal(done.finished, 3);
+  assert.ok(done.log.some((l) => l.startsWith('▶ opus-low__h  (carrying on with its session where it was cut off, part 2)')), done.log.join('\n'));
+  const rows = Object.fromEntries((await dd.api('/api/results')).json.map((x) => [x.testing, x]));
+  assert.deepEqual([rows.h.status, rows.h.resumes, rows.h.parts[0].cutOff, rows.late.status, rows.late.resumes, rows.q.status], ['ok', 1, true, 'ok', undefined, 'ok']);
+  assert.ok(!fs.existsSync(path.join(s.out, '.session.json')));
+  assert.deepEqual(fs.readdirSync(path.join(s.out, '.batches')), []);
+  assert.deepEqual((await statusOf(dd)).cut, []);
+});
+
+test('Restart once the runs going finish: none starts meanwhile and none is cut off; it can be called off', async (t) => {
+  const s = sandbox({ agents: opusOnly, dimensions: { testing: [{ id: 's1', text: 'FAKE:sleep=1500 s1' }, { id: 'q', text: 'q' }] } });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const boot = (await statusOf(dd)).boot;
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['s1', 'q'] }, concurrency: 1 })).status, 200);
+  await waitFor(async () => (await statusOf(dd))?.active.length === 1);
+  assert.equal((await dd.api('/api/restart', 'POST', { idle: true })).json.later, true);
+  assert.equal((await statusOf(dd)).restarting, 'idle');
+  assert.equal((await dd.api('/api/restart', 'POST', { cancel: true })).status, 200);
+  assert.equal((await statusOf(dd)).restarting, null);
+  assert.equal((await dd.api('/api/restart', 'POST', { idle: true })).json.later, true);
+  assert.equal((await dd.api('/api/adjust', 'POST', { set: { concurrency: 2 } })).status, 200); // room for q, but the restart holds it
+  const back = await waitFor(async () => { const x = await statusOf(dd); return x && x.boot !== boot ? x : null; }, 30000);
+  assert.ok(back.log.some((l) => l.startsWith('⟳ Restarting once the 1 run going finishes')), back.log.join('\n'));
+  const done = await doneAfter(dd);
+  assert.equal(done.finished, 2, done.log.join('\n'));
+  const rows = (await dd.api('/api/results')).json;
+  assert.deepEqual(rows.map((x) => [x.testing, x.status, x.resumes ?? 0]).sort(), [['q', 'ok', 0], ['s1', 'ok', 0]]);
+  const q = rows.find((x) => x.testing === 'q'), s1 = rows.find((x) => x.testing === 's1');
+  assert.ok(q.startedAt > s1.finishedAt, 'a run started while the restart waited');
+});
+
+test('Quit keeps the batch: the dashboard started again offers it, Resume picks it up, and Forget lets one go', async (t) => {
+  const s = sandbox({ agents: opusOnly, dimensions: { testing: [{ id: 'h', text: 'FAKE:hang' }, { id: 'q', text: 'q' }, { id: 'h2', text: 'FAKE:hang h2' }] } });
+  t.after(() => cleanup(s));
+  let dd = await dashboard(s);
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['h', 'q'] }, concurrency: 1 })).status, 200);
+  await goingOn(s, 'opus-low__h');
+  await dd.stop(); // SIGTERM, as Ctrl-C twice
+  const kept = JSON.parse(fs.readFileSync(path.join(s.out, '.session.json'), 'utf8'));
+  assert.deepEqual([kept.why, kept.batches.length, kept.batches[0].done], ['quit', 1, false]);
+  assert.ok(fs.existsSync(path.join(s.out, '.batches', kept.batches[0].dir, 'config.json')));
+
+  dd = await dashboard(s);
+  t.after(() => dd.stop());
+  await waitFor(() => /was cut off when the dashboard quit: Resume it on the Run tab/.test(dd.output()));
+  const offered = await waitFor(async () => { const x = await statusOf(dd); return x?.saved?.plan ? x : null; });
+  assert.equal(offered.running, false);
+  assert.deepEqual([offered.saved.why, offered.saved.plan.left, offered.saved.plan.carriesOn, offered.saved.batches[0].what], ['quit', 2, 1, '1-shot: opus · low']);
+  assert.deepEqual(offered.cut.map((x) => [x.dir, x.carriesOn, x.agent, x.testing]), [['opus-low__h', true, 'opus', 'h']]);
+  assert.equal((await dd.api('/api/session', 'POST', { resume: true })).status, 200);
+  const done = await doneAfter(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.ok(done.log.some((l) => /^⟳ Resumed at .+ \(1 cut-off run carries on with its session\)/.test(l)), done.log.join('\n'));
+  assert.deepEqual([done.finished, done.saved], [2, null]);
+  const h = (await dd.api('/api/results')).json.find((x) => x.testing === 'h');
+  assert.deepEqual([h.status, h.resumes], ['ok', 1]);
+  assert.equal((await dd.api('/api/session', 'POST', { resume: true })).status, 409); // nothing kept any more
+
+  // Forget: the batch isn't offered any more, but its cut-off run still carries on when a batch has it.
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['h2'] } })).status, 200);
+  await goingOn(s, 'opus-low__h2');
+  await new Promise((r) => { dd.child.once('exit', r); dd.child.kill('SIGHUP'); }); // the terminal closed: quit the same way
+  dd = await dashboard(s);
+  await waitFor(async () => (await statusOf(dd))?.saved);
+  assert.equal((await dd.api('/api/session', 'POST', { forget: true })).status, 200);
+  const st = await statusOf(dd);
+  assert.deepEqual([st.saved, st.cut.map((x) => x.dir), fs.existsSync(path.join(s.out, '.session.json')), fs.readdirSync(path.join(s.out, '.batches'))],
+    [null, ['opus-low__h2'], false, []]);
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['h2'] } })).status, 200);
+  const again = await doneAfter(dd);
+  assert.ok(again.log.some((l) => l.startsWith('▶ opus-low__h2  (carrying on')), again.log.join('\n'));
+});
