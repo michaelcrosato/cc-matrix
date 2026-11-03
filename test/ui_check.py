@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(ROOT, 'test', 'fake-cli')
 SIZES = [('phone', 375, 667, True), ('tablet', 768, 1024, True), ('small laptop', 1024, 768, False), ('laptop', 1366, 768, False), ('ultrawide', 2560, 1080, False)]
-TABS = ['setup', 'advanced', 'run', 'results', 'insights', 'audit']
+TABS = ['clis', 'setup', 'advanced', 'run', 'results', 'insights', 'audit']
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--engines', default='chromium,webkit,firefox')
@@ -199,6 +199,19 @@ try:
         page.set_viewport_size({'width': 1280, 'height': 900})
         page.get_by_role('button', name='▶ Resume').click(); page.wait_for_timeout(800)
         check('Resume lets runs start again', api_state()['state']['paused'] is False)
+        # + Queue: another batch beside the running one, listed on the Live card; the runs the first has are left out of it
+        page.get_by_role('button', name='+ Queue').click()
+        page.wait_for_function("status.batches && status.batches.length === 2", timeout=10000)
+        page.wait_for_selector('#live >> text=Batch 2', timeout=5000)
+        st = api_state()
+        check('+ Queue adds a batch beside the running one, and it leaves out the runs that one has',
+              any(l.startswith('+ Batch 2 queued') for l in st['log']) and st['running'], json.dumps(st['batches']))
+        page.set_viewport_size({'width': 375, 'height': 667}); page.wait_for_timeout(400)
+        o = page.evaluate(OVERFLOW)
+        check('phone 375px run tab with two batches in the queue: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
+        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-phone-run-queue.png'), full_page=True)
+        page.set_viewport_size({'width': 1280, 'height': 900}); page.wait_for_timeout(300)
+        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-run-queue.png'), full_page=True)
         if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-run-live.png'), full_page=True)
         page.get_by_role('button', name='■ Stop').click()
         page.wait_for_selector('#modal[open] .choices button.danger')

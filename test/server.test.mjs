@@ -279,3 +279,88 @@ test('Ctrl-C on the dashboard with agents running asks to be pressed again befor
   await exited;
   assert.ok(!fs.existsSync(path.join(sb3.out, 'opus-low__long')), 'the ended run was kept');
 });
+
+// Queued batches (see run state in dashboard.mjs): a runner each, sharing the limits. A later batch gets the slots the
+// earlier ones can't use and never holds them up.
+const finishedSession = (dd, ms = 30000) => waitFor(async () => { const x = (await dd.api('/api/status?since=0')).json; return !x.running && x.finishedAt ? x : null; }, ms);
+const mostAtOnce = (rows) => {
+  const ev = rows.flatMap((r) => [[Date.parse(r.startedAt), 1], [Date.parse(r.finishedAt), -1]]).sort((x, y) => x[0] - y[0] || x[1] - y[1]);
+  let n = 0, most = 0; for (const [, d] of ev) most = Math.max(most, n += d); return most;
+};
+
+test('a queued batch starts in the slots the batches before it can\'t use, and never holds them up', async (t) => {
+  const s = sandbox({ dimensions: { testing: ['x', 'q1', 'q2', 'q3'].map((id) => ({ id, text: id === 'x' ? 'brief x' : `FAKE:sleep=2000 ${id}` })) },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }],
+    stages: [{ id: 'plan', text: 'Plan TASK.md. FAKE:plan FAKE:sleep=1500', game: false }, { id: 'build', text: 'Build it from PLAN.md. FAKE:sleep=800' }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  // 1: a plan, and the two builds waiting for it, hold 3 of the 4 slots
+  assert.equal((await dd.api('/api/run', 'POST', { stages: { plan: ['opus:max'], build: ['opus:high', 'opus:low'] }, only: { testing: ['x'] }, concurrency: 4 })).status, 200);
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['q1'] } })).status, 409); // Start, not Queue
+  // 2: three 1-shot runs with no plan to wait for: one starts at once, in the slot that's left
+  const q = await dd.api('/api/run', 'POST', { add: true, pick: ['opus:low'], only: { testing: ['q1', 'q2', 'q3'] } });
+  assert.deepEqual([q.status, q.json.batch], [200, 2]);
+  const done = await finishedSession(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.deepEqual(done.batches.map((b) => [b.n, b.finished]), [[1, 3], [2, 3]]);
+  assert.ok(done.log.some((l) => l.startsWith('+ Batch 2 queued (1-shot: opus · low)')), done.log.join('\n'));
+  const rows = (await dd.api('/api/results')).json, at = (r) => Date.parse(r.startedAt), end = (r) => Date.parse(r.finishedAt);
+  const plan = rows.find((r) => r.stage === 'plan'), builds = rows.filter((r) => r.stage === 'build'), queued = rows.filter((r) => !r.stage);
+  assert.deepEqual([rows.length, rows.every((r) => r.status === 'ok')], [6, true]);
+  assert.ok(Math.min(...queued.map(at)) < end(plan), 'the queued batch waited for the plan');
+  for (const b of builds) assert.ok(at(b) - end(plan) < 1000, `a build started ${at(b) - end(plan)} ms after its plan: held up by the queued batch`);
+  assert.ok(mostAtOnce(rows) <= 4, 'more runs at once than Parallel runs');
+});
+
+test('a queued batch runs from the config and prompt as they were when it was queued', async (t) => {
+  const s = sandbox({ dimensions: { testing: [{ id: 'long', text: 'FAKE:sleep=1500 long' }, { id: 'v', text: 'old text' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['long'] }, concurrency: 1 })).status, 200);
+  assert.equal((await dd.api('/api/run', 'POST', { add: true, pick: ['opus:low'], only: { testing: ['v'] } })).status, 200);
+  // Setup changes while it waits for the slot: the variant's text and the prompt
+  const c = JSON.parse(fs.readFileSync(s.config, 'utf8')); c.dimensions.testing[1].text = 'new text';
+  assert.equal((await dd.api('/api/config', 'PUT', c)).status, 200);
+  assert.equal((await dd.api('/api/template', 'PUT', { text: 'Changed prompt.\n\nTesting: {{testing}}\n' })).status, 200);
+  const done = await finishedSession(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  const sent = fs.readFileSync(path.join(s.out, 'opus-low__v', 'prompt.md'), 'utf8');
+  assert.match(sent, /Make a small game[\s\S]*old text/);
+  assert.doesNotMatch(sent, /new text|Changed prompt/);
+});
+
+test('no run is done twice: a queued batch leaves out the runs an earlier one has, and builds on a plan running there', async (t) => {
+  const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'brief a' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }],
+    stages: [{ id: 'plan', text: 'Plan TASK.md. FAKE:plan FAKE:sleep=1000', game: false }, { id: 'build', text: 'Build it from PLAN.md.' }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/run', 'POST', { stages: { plan: ['opus:max'], build: ['opus:high'] }, only: { testing: ['a'] }, concurrency: 4 })).status, 200);
+  // the same plan, another builder: the plan isn't made again, and the new build waits for the one being made
+  assert.equal((await dd.api('/api/run', 'POST', { add: true, stages: { plan: ['opus:max'], build: ['opus:low'] }, only: { testing: ['a'] } })).status, 200);
+  const done = await finishedSession(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  assert.ok(done.log.some((l) => l.includes('left out: a batch queued before this one has them')), done.log.join('\n'));
+  const rows = (await dd.api('/api/results')).json, plans = rows.filter((r) => r.stage === 'plan');
+  assert.equal(plans.length, 1);
+  assert.deepEqual(rows.filter((r) => r.stage === 'build').map((r) => [r.effort, r.parentId, r.status]).sort(),
+    [['high', plans[0].id, 'ok'], ['low', plans[0].id, 'ok']]);
+});
+
+test('the queue: a batch can be taken out of it, and Stop ends every batch', async (t) => {
+  const s = sandbox({ dimensions: { testing: ['l1', 'l2', 'l3'].map((id) => ({ id, text: `FAKE:sleep=20000 ${id}` })) },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['l1'] }, concurrency: 1 })).status, 200);
+  for (const v of ['l2', 'l3']) assert.equal((await dd.api('/api/run', 'POST', { add: true, pick: ['opus:low'], only: { testing: [v] } })).status, 200);
+  const st = await waitFor(async () => { const x = (await dd.api('/api/status')).json; return x.active.length === 1 && x.batches.length === 3 && x.batches.every((b) => b.planned === 1) ? x : null; });
+  assert.deepEqual(st.batches.map((b) => [b.n, b.active, b.left]), [[1, 1, 0], [2, 0, 1], [3, 0, 1]]); // one slot: the later ones wait
+  assert.equal((await dd.api('/api/adjust', 'POST', { endBatch: 2 })).status, 200);
+  await waitFor(async () => !(await dd.api('/api/status')).json.batches[1].running);
+  assert.equal((await dd.api('/api/stop', 'POST', {})).status, 200);
+  const done = await finishedSession(dd);
+  assert.deepEqual([done.finished, done.active.length, fs.existsSync(path.join(s.out, '.stop'))], [0, 0, false]);
+  assert.ok(done.log.some((l) => l.startsWith('■ Batch 2:')) && done.log.some((l) => l.startsWith('■ opus-low__l1 stopped')), done.log.join('\n'));
+  assert.ok(!fs.existsSync(path.join(s.out, 'opus-low__l2')) && !fs.existsSync(path.join(s.out, 'opus-low__l3')));
+});

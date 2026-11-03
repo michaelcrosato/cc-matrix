@@ -33,6 +33,10 @@
 //                                     "stages" continues from the finished runs of the stage before
 //        --stages                     run in stages with the models each stage has in the config ("models"); a
 //                                     --stage given too replaces that stage's
+//        --broker                     one of several batches at once (the dashboard's queue): start a run only when the
+//                                     dashboard says so, which keeps the limits for all of them (see brokered); implies --control
+//        --skip-keys <file>           leave out these runs (a JSON list of run keys): a batch running beside this one
+//                                     has them, and a run here that continues from one waits for it there
 
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
@@ -45,7 +49,8 @@ import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecor
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rename: [], rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false };
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rename: [], rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false,
+  broker: false, skipKeys: null };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -71,6 +76,8 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--rerun-failed') args.rerunFailed = true;
   else if (a === '--resume-failed') args.resumeFailed = true;
   else if (a === '--control') args.control = true;
+  else if (a === '--broker') { args.broker = true; args.control = true; }
+  else if (a === '--skip-keys') args.skipKeys = next();
   else { console.error(`Unknown flag: ${a}`); process.exit(1); }
 }
 
@@ -373,6 +380,13 @@ if (stageMode) {
   if (new Set(ids).size !== ids.length || ids.some((id) => !/^\w+$/.test(id))) { console.error(`Stage names must be unique letters, numbers or _ (${ids.join(', ')})`); process.exit(1); }
   if (args.repeat > 1) console.error('Note: Repeat isn\'t used for runs in stages.');
   queue = stageRuns().slice(0, args.limit);
+}
+// --skip-keys: runs another batch running beside this one has queued or running (the dashboard's queue), left out so
+// none runs twice. They stay "coming" (see coming): a run here that continues from one waits for it to finish there.
+const elsewhere = new Set(args.skipKeys ? JSON.parse(fs.readFileSync(args.skipKeys, 'utf8')) : []);
+if (elsewhere.size) {
+  const n = queue.length; queue = queue.filter((r) => !elsewhere.has(r.key));
+  if (queue.length < n) console.log(`· ${n - queue.length} run(s) left out: a batch queued before this one has them`);
 }
 
 
@@ -1052,7 +1066,7 @@ async function runOne(run) {
   const dir = path.join(outDir, run.id), resFile = path.join(dir, 'result.json');
   // Never clear a folder that holds another combination's run (see runName); left as it is, this one doesn't start.
   const there = readResult(run.id);
-  if (there?.id && runKey(there) !== run.key) { done++; console.log(`✘ ${run.id}  not started: its folder holds a different run`); return; }
+  if (there?.id && runKey(there) !== run.key) { done++; tell('gone', run); console.log(`✘ ${run.id}  not started: its folder holds a different run`); return; }
   fs.rmSync(dir, { recursive: true, force: true });
   // A failed run being retried that was made before a dimension was added: the new attempt replaces it.
   if (prev && prev.dir !== run.id) fs.rmSync(path.join(outDir, prev.dir), { recursive: true, force: true });
@@ -1076,7 +1090,7 @@ async function runOne(run) {
     let hashes; try { hashes = variantHashes(run.combo); } catch {} // a variant whose file can't be read is why we're here
     fs.writeFileSync(resFile, JSON.stringify({ id: run.id, ...run.fields, model: run.agent.model, promptVersion, variantHashes: hashes,
       status: 'failed', exitCode: null, error: `Not started: ${e.message}`, wallMinutes: 0, startedAt: now, finishedAt: now }, null, 2));
-    finished().set(run.key, { r: readResult(run.id), dir: run.id });
+    finished().set(run.key, { r: readResult(run.id), dir: run.id }); tell('done', run, run.id);
     done++; console.log(`✘ ${run.id}  not started: ${e.message}`);
     return;
   }
@@ -1092,7 +1106,7 @@ async function runOne(run) {
   if (stopping || run.abort) { // interrupted: throw it away so it runs fresh (later in this batch if requeued)
     fs.rmSync(dir, { recursive: true, force: true });
     if (run.abort === 'requeue' && !stopping) { run.abort = null; pending.unshift(run); console.log(`↺ ${run.id} requeued (starts over)`); }
-    else console.log(`■ ${run.id} stopped (discarded)`);
+    else { tell('gone', run); console.log(`■ ${run.id} stopped (discarded)`); }
     return;
   }
 
@@ -1111,10 +1125,10 @@ async function runOne(run) {
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
   finished().set(run.key, { r: result, dir: id }); // so the runs continuing from it can start
   stampGame(home, result, run.combo);
-  spent += metrics.costUsd ?? 0; done++;
+  spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  ${result.wallMinutes.toFixed(1)}m  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
-  writeReport();
+  if (!args.broker) writeReport(); // with --broker the dashboard writes it, from the config as it is now
 }
 
 // With folderName.title, a run that has made its game gets the game's title at the end of its folder's name: the
@@ -1174,7 +1188,7 @@ async function resumeOne(run, prev) {
   if (stopping || run.abort) {
     for (const ext of ['out', 'err']) fs.rmSync(path.join(dir, partFile(n, ext)), { force: true });
     if (run.abort === 'requeue' && !stopping) { run.abort = null; pending.unshift(run); console.log(`↺ ${run.id} requeued (resumes again)`); }
-    else console.log(`■ ${run.id} stopped (this part discarded; it can be resumed again)`);
+    else { tell('gone', run); console.log(`■ ${run.id} stopped (this part discarded; it can be resumed again)`); }
     return;
   }
 
@@ -1198,10 +1212,10 @@ async function resumeOne(run, prev) {
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
   stampGame(home, result, run.combo);
   finished().set(run.key, { r: result, dir: id });
-  spent += metrics.costUsd ?? 0; done++;
+  spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
-  writeReport();
+  if (!args.broker) writeReport();
 }
 
 // The cost-state Claude Code saved in a session's transcript as its last part ended (see minusSince), or null.
@@ -1424,7 +1438,7 @@ let pending = [];
 const skippedRuns = [];
 function skip(run) {
   const prev = prevRun(run);
-  skipped++; skippedRuns.push(run);
+  skipped++; skippedRuns.push(run); tell('done', run, prev.dir);
   console.log(`· skip ${run.id} (already ${prev.r.status}${prev.dir !== run.id ? ` as ${prev.dir}` : ''})`);
 }
 
@@ -1439,7 +1453,7 @@ function skip(run) {
 // the same start time, which names their folders and games (stampOf).
 const START_GAP_MS = Math.max(0, +(cfg.startGap ?? 3) || 0) * 1000;
 const parentOk = (r) => !r.parentKey || finished().get(r.parentKey)?.r.status === 'ok';
-const coming = (key) => pending.some((r) => r.key === key) || [...live.values()].some((c) => c.run.key === key);
+const coming = (key) => elsewhere.has(key) || pending.some((r) => r.key === key) || [...live.values()].some((c) => c.run.key === key);
 function leaveOutOrphans() {
   for (let again = true; again;) {
     again = false;
@@ -1447,7 +1461,7 @@ function leaveOutOrphans() {
       if (!r.parentKey || parentOk(r) || coming(r.parentKey)) continue;
       pending.splice(pending.indexOf(r), 1); again = true;
       if (isDone(r)) { skip(r); continue; }
-      skipped++; console.log(`· skip ${r.id} (the run it continues from didn't finish OK)`);
+      skipped++; tell('gone', r); console.log(`· skip ${r.id} (the run it continues from didn't finish OK)`);
     }
   }
 }
@@ -1458,6 +1472,7 @@ async function pool() {
   let lastStart = -Infinity, gapTimer = null;
   for (;;) {
     while (!stopping) {
+      if (args.broker) { brokered(busy, jobs); break; }
       if (!overBudget && spent >= args.budget) {
         overBudget = true;
         console.log(`■ Budget of $${args.budget} reached (spent ${fmtUsd(spent)}): no new runs start; ${live.size} still running will finish.`);
@@ -1482,6 +1497,43 @@ async function pool() {
     if (!jobs.size && (stopping || overBudget || !pending.length)) { clearTimeout(gapTimer); return; }
     await new Promise((r) => { wakeUp = r; });
   }
+}
+
+// --broker: one of several batches running at once (the dashboard's queue). The dashboard keeps Parallel runs, Max per
+// CLI, the budget, the start gap and Pause for all of them, so a run starts only when it says so. The runner offers
+// the runs that could start now ("@ready [[key, cli], …]", in its order, up to READY_MAX per CLI), starts the ones it's
+// granted ({ grant: [keys] }: "@took key", or "@unused key" for one that can't start any more) and says when a slot
+// is free again ("@freed key"). It also says which runs it will do ("@keys { keys, left }", once), when one has its
+// result ("@done { key, dir }", so a batch waiting on it, a build on another batch's plan, can carry on) and when it
+// won't run one after all ("@gone key"). Each carries JSON; the lines are the dashboard's and stay out of the log.
+const READY_MAX = 64;
+const grants = [];
+let lastReady = '';
+const tell = (what, run, dir) => { if (args.broker) console.log(`@${what} ${JSON.stringify(dir ? { key: run.key, dir } : run.key)}`); };
+function brokered(busy, jobs) {
+  leaveOutOrphans();
+  for (const key of grants.splice(0)) {
+    const run = pending.find((r) => r.key === key);
+    if (run && isDone(run)) { pending.splice(pending.indexOf(run), 1); skip(run); }
+    if (!run || !pending.includes(run) || !parentOk(run)) { console.log(`@unused ${JSON.stringify(key)}`); continue; }
+    pending.splice(pending.indexOf(run), 1);
+    const p = run.agent.provider;
+    busy[p] = (busy[p] ?? 0) + 1; console.log(`@took ${JSON.stringify(key)}`);
+    const job = runOne(run).catch((e) => { done++; console.log(`✘ ${run.id}  ${e.message}`); })
+      .finally(() => { busy[p]--; jobs.delete(job); console.log(`@freed ${JSON.stringify(key)}`); wake(); });
+    jobs.add(job);
+  }
+  const ready = [], per = {}, open = new Set(pending.map((r) => r.agent.provider)); // CLIs still short of READY_MAX
+  for (const r of [...pending]) {
+    const p = r.agent.provider;
+    if (!open.has(p)) continue;
+    if (!parentOk(r)) continue;
+    if (isDone(r)) { pending.splice(pending.indexOf(r), 1); skip(r); continue; }
+    ready.push([r.key, p]);
+    if ((per[p] = (per[p] ?? 0) + 1) >= READY_MAX && (open.delete(p), !open.size)) break;
+  }
+  const s = JSON.stringify(ready);
+  if (s !== lastReady) { lastReady = s; console.log('@ready ' + s); }
 }
 
 // --control (the dashboard): changes to the running batch arrive as JSON lines on stdin, and its state
@@ -1535,9 +1587,25 @@ function control(msg) {
     const out = pending.filter((r) => r.agent.provider === p);
     if (!out.length) continue;
     pending = pending.filter((r) => r.agent.provider !== p);
+    for (const r of out) tell('gone', r);
     console.log(`⚙ ${CLIS[p] ?? p}: ${out.filter((r) => !isDone(r)).length} queued run(s) left out of this batch (they run next time)`);
   }
-  sayState(true); // the dashboard waits for this to answer the change
+  // --broker: runs to start now; the rest of this batch left out (the budget is spent, or it was taken out of the
+  // queue); a stop; and runs another batch had that finished there (one here may continue from it) or won't run.
+  if (msg.grant) grants.push(...msg.grant);
+  if (msg.end && pending.length) {
+    const out = pending.splice(0);
+    for (const r of out) tell('gone', r);
+    console.log(`■ ${out.filter((r) => !isDone(r)).length} queued run(s) left out of this batch (they run next time)`);
+  }
+  if (msg.stop) stopAll('stop requested');
+  for (const { key, dir } of msg.finished ?? []) {
+    const r = readResult(dir);
+    if (r?.id && runKey(r) === key) finished().set(key, { r, dir });
+    elsewhere.delete(key);
+  }
+  for (const key of msg.gone ?? []) elsewhere.delete(key);
+  if (!msg.grant && !msg.finished && !msg.gone) sayState(true); // the dashboard waits for this to answer the change
   wake();
 }
 
@@ -1586,11 +1654,11 @@ if (args.stamp) { stampAll(); process.exit(0); }
 if (args.smoke) { await smoke(); process.exit(0); }
 
 fs.mkdirSync(outDir, { recursive: true });
-fs.rmSync(stopFile, { force: true });
+if (!args.broker) fs.rmSync(stopFile, { force: true }); // with --broker the dashboard clears it: other batches may be stopping
 // A CLI that isn't installed would fail every one of its runs; skip them instead (they run next time).
 for (const p of missingClis()) {
   const n = queue.filter((r) => r.agent.provider === p).length;
-  console.log(`⚠ ${CLIS[p] ?? p}: command "${binOf(p)}" not found, so its ${n} run(s) are skipped. Install it or set its command in Setup → Advanced.`);
+  console.log(`⚠ ${CLIS[p] ?? p}: command "${binOf(p)}" not found, so its ${n} run(s) are skipped. Install it or set its command in CLIs → CLI commands and flags.`);
   queue = queue.filter((r) => r.agent.provider !== p);
 }
 const noCost = [...new Set(queue.filter((r) => !['claude', 'grok'].includes(r.agent.provider)).map((r) => r.agent.id))];
@@ -1603,8 +1671,8 @@ for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provi
 }
 // The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
 const already = queue.filter(isDone).length;
-console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}`
-  + `${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''})`);
+console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (` + (args.broker ? 'sharing the limits of the batches running now'
+  : `concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''}`) + ')');
 if (stageMode) { const n = {}; for (const r of queue) n[r.stage.id] = (n[r.stage.id] ?? 0) + 1;
   console.log(`In stages: ${STAGES.filter((s) => n[s.id]).map((s) => `${s.id} ${n[s.id]}`).join(', ')}. A run starts once the one it continues from has finished OK.`); }
 const resuming = queue.filter((r) => canResume(r)).length;
@@ -1618,11 +1686,17 @@ if (args.control) {
     for (const l of lines) if (l.trim()) try { control(JSON.parse(l)); } catch (e) { console.log(`⚠ Setting change ignored: ${e.message}`); }
   });
 }
+// What this batch will do, for the dashboard: a batch queued after it leaves these out, and they hold its slots. Said
+// once the prompt's version is recorded, since the next batch starts on it (see startWaiting in dashboard.mjs).
+if (args.broker) {
+  const todo = queue.filter((r) => !isDone(r)), left = {};
+  for (const r of todo) left[r.agent.provider] = (left[r.agent.provider] ?? 0) + 1;
+  console.log('@keys ' + JSON.stringify({ keys: todo.map((r) => r.key), left }));
+}
 await pool();
 if (args.control) process.stdin.destroy(); // or it keeps the runner alive
 clearInterval(stopPoll);
-fs.rmSync(stopFile, { force: true });
-writeReport();
+if (!args.broker) { fs.rmSync(stopFile, { force: true }); writeReport(); }
 console.log(`Done. ${done} ran, ${skipped} skipped. Spent ${fmtUsd(spent)} this session.`);
 
 // ------------------------------------------------------- prompt history
