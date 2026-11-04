@@ -27,6 +27,8 @@ Performance: {{performance}}
 
 Testing: {{testing}}
 
+Effort: {{spend}}
+
 ## Goal
 
 {{premise}}

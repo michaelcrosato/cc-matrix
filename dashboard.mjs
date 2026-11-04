@@ -108,7 +108,7 @@ function runCmd(bin, args, ms = 30000) {
 }
 
 const CLI_INFO = {
-  claude: { instructions: ['.claude/CLAUDE.md'], suggested: true,
+  claude: { instructions: ['.claude/CLAUDE.md'], isolatedSkips: ['.claude/CLAUDE.md'], suggested: true,
     models: async () => ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5', 'claude-fable-5-1'].map((id) => ({ id })) },
   // JSON: { models: [{ slug, display_name, visibility, supported_reasoning_levels: [{ effort }] }] }
   codex: { instructions: ['.codex/AGENTS.md'],
@@ -119,7 +119,7 @@ const CLI_INFO = {
         efforts: (m.supported_reasoning_levels ?? []).map((l) => l.effort).sort(byEffort) }));
     } },
   // "  * grok-4.7 (default)" / "  - grok-4.6"
-  grok: { instructions: ['.grok/AGENTS.md', '.claude/CLAUDE.md'],
+  grok: { instructions: ['.grok/AGENTS.md', '.claude/CLAUDE.md'], isolatedSkips: ['.claude/CLAUDE.md'],
     models: async (bin) => {
       const r = await runCmd(bin, ['models']);
       if (r.code !== 0) throw new Error((r.err || r.out).trim().split('\n').pop() || 'grok models failed');
@@ -140,7 +140,7 @@ const CLI_INFO = {
       return [...base.values()].map((m) => ({ ...m, efforts: m.efforts.sort(byEffort) }));
     } },
   // Muse has no list command; it caches the provider's catalog here.
-  muse: { instructions: ['.claude/CLAUDE.md', '.codex/AGENTS.md'],
+  muse: { instructions: ['.claude/CLAUDE.md', '.codex/AGENTS.md'], isolatedSkips: ['.claude/CLAUDE.md', '.codex/AGENTS.md'],
     models: async () => {
       const dir = path.join(process.env.XDG_DATA_HOME || path.join(HOME, '.local/share'), 'muse/model-catalog');
       const rows = fs.readdirSync(dir).filter((f) => f.endsWith('.json')).flatMap((f) => readJSON(path.join(dir, f), {}).rows ?? []);
@@ -149,13 +149,16 @@ const CLI_INFO = {
     } },
 };
 
-async function detectCli(p, bins) {
+// isolate: runs are isolated (the config's isolate, run-matrix.mjs), so the files in isolatedSkips aren't loaded:
+// they're listed apart (skipped) instead.
+async function detectCli(p, bins, isolate = true) {
   const info = CLI_INFO[p] ?? {}, bin = bins[p] || p;
+  const files = (info.instructions ?? []).filter((f) => fs.existsSync(path.join(HOME, f))), skips = isolate ? info.isolatedSkips ?? [] : [];
   const v = await runCmd(bin, ['--version']);
   const r = { id: p, bin, installed: v.code === 0, suggested: !!info.suggested,
     version: v.code === 0 ? (v.out.trim() || v.err.trim()).split('\n')[0] : null,
     error: v.code === 0 ? null : (v.err.trim() || `"${bin} --version" failed`).split('\n').pop(),
-    instructions: (info.instructions ?? []).filter((f) => fs.existsSync(path.join(HOME, f))).map((f) => '~/' + f), models: [] };
+    instructions: files.filter((f) => !skips.includes(f)).map((f) => '~/' + f), skipped: files.filter((f) => skips.includes(f)).map((f) => '~/' + f), models: [] };
   if (r.installed && info.models) {
     try { r.models = await info.models(bin); } catch (e) { r.modelsError = e.message; }
   }
@@ -165,8 +168,8 @@ async function detectCli(p, bins) {
 let cliCheck = null;
 function checkClis(refresh) {
   if (refresh || !cliCheck) {
-    const bins = readJSON(CONFIG, {}).bins ?? {};
-    cliCheck = Promise.all(Object.keys(CLI_INFO).map((p) => detectCli(p, bins)))
+    const conf = readJSON(CONFIG, {}), bins = conf.bins ?? {};
+    cliCheck = Promise.all(Object.keys(CLI_INFO).map((p) => detectCli(p, bins, conf.isolate !== false)))
       .then((list) => ({ checkedAt: new Date().toISOString(), clis: Object.fromEntries(list.map((c) => [c.id, c])) }));
   }
   return cliCheck;

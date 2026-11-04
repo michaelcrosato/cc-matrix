@@ -83,7 +83,9 @@ export async function run(cli) {
   const read = (f) => fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
   const prompt = goal ? (/STAGE\.md/.test(msg) ? `${read('STAGE.md')}\n${read('TASK.md')}` : read('TASK.md'))
     : `${msg ?? ''}${/TASK\.md/.test(msg ?? '') ? `\n${read('TASK.md')}` : ''}`;
-  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal }) + '\n');
+  // env: what keeps a run on its own (the runner's isolate), as the CLI got it.
+  const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(DISPLAY|WAYLAND_DISPLAY|CLAUDE_CODE_DISABLE_(AUTO_MEMORY|CLAUDE_MDS)|GROK_(MEMORY|CLAUDE_\w+_ENABLED))$/.test(k)));
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal, env }) + '\n');
 
   const fail = prompt.match(/FAKE:fail=([^\n]*)/)?.[1];
   // claude --resume <id>: the same session, so the usage limit it stopped on has passed.

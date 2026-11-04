@@ -776,9 +776,10 @@ function clisCard() {
               title: `${m.model} · efforts: ${m.efforts.join(', ')}${unlisted ? ` · ${name} doesn't list this model` : ''}`,
               onclick: () => addAgent(m) }, m.label, unlisted ? h('span', { class: 'bad' }, 'not listed') : null);
           })), c?.modelsError ? h('div', { class: 'hint' }, `Couldn't list models: ${c.modelsError}`) : null),
-          h('td', { 'data-label': 'Global instructions' }, c?.instructions?.length ? c.instructions.map((f) => h('div', { class: 'mono', style: 'font-size:12px' }, f)) : h('span', { class: 'muted' }, c ? 'none' : '')));
+          h('td', { 'data-label': 'Global instructions' }, c?.instructions?.length ? c.instructions.map((f) => h('div', { class: 'mono', style: 'font-size:12px' }, f)) : h('span', { class: 'muted' }, c ? 'none' : ''),
+            (c?.skipped ?? []).map((f) => h('div', { class: 'mono muted', style: 'font-size:12px', title: 'Not loaded: runs are isolated' }, f + ' · skipped'))));
       })))),
-    h('p', { class: 'hint' }, 'Global instruction files are added to every run of that CLI, so keep them neutral or the comparison is skewed. Grok and Muse also read your Claude Code file; Muse skips it (and ~/.codex/AGENTS.md) with --no-foreign-personal-context in its extra flags below.'));
+    h('p', { class: 'hint' }, 'Global instruction files are added to every run of that CLI, so keep them neutral or the comparison is skewed. Runs are isolated unless the config says "isolate": false: Claude Code loads no CLAUDE.md, MCP servers or auto memory, Grok nothing of Claude Code\'s and no memory, Muse no other CLI\'s files, and no run can open a window. The files marked skipped aren\'t loaded; the others have no switch, so they still are.'));
 }
 
 // ------------------------------------------------------------ smoke tests

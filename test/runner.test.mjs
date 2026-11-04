@@ -105,10 +105,48 @@ test('every CLI: command line, how the prompt is sent, and what is parsed', (t) 
   assert.equal(mx.argv[mx.argv.indexOf('--reasoning-effort') + 1], 'max');
   assert.ok(mx.argv.includes('--prompt-file'));
 
+  // Isolated (the default): no window can open and nothing of this computer's own setup gets in (see the next test).
+  assert.ok(cc.argv.includes('--strict-mcp-config') && mx.argv.includes('--no-foreign-personal-context'));
+  assert.ok(calls(sb).every((c) => !('DISPLAY' in c.env)));
+  assert.equal(claude.isolated, true);
+
   const csv = fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8').trim().split('\n');
   assert.equal(csv.length, 7);
   for (const c of ['apiCostUsd', 'apiCalls', 'toolCalls', 'toolErrors', 'compactions']) assert.ok(csv[0].split(',').includes(c), c);
   assert.ok(fs.readFileSync(path.join(sb.out, 'index.html'), 'utf8').includes('Matrix runs (6)'));
+});
+
+test('runs are isolated unless the config says not: no window, and no CLAUDE.md, MCP servers or memory of this computer', (t) => {
+  const agents = [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['high'] }, { id: 'sol', provider: 'codex', model: 'gpt-6.1-sol', efforts: ['max'] },
+    { id: 'grok', provider: 'grok', model: 'grok-4.7', efforts: ['xhigh'] }, { id: 'muse', provider: 'muse', model: 'muse-wonder-1.0', efforts: ['max'] }];
+  const desktop = { DISPLAY: ':0', WAYLAND_DISPLAY: 'wayland-0' };
+  for (const isolate of [undefined, false]) {
+    const sb = sandbox({ dimensions: one, agents, ...(isolate === false ? { isolate } : {}),
+      extraArgs: { claude: ['--dangerously-skip-permissions'], muse: ['--yolo', '--no-foreign-personal-context'] } });
+    t.after(() => cleanup(sb));
+    for (const k of Object.keys(sb.env)) if (/^(DISPLAY|WAYLAND_DISPLAY|CLAUDE_CODE_DISABLE_|GROK_)/.test(k)) delete sb.env[k]; // this machine's own
+    // Run → Preview shows the command as it runs (before the batch: it lists the runs not done yet).
+    const preview = JSON.parse(runner(sb, ['--dry-run', '--json'], desktop).stdout).terminal.find((s) => s.includes('claude-opus-5-5')) ?? '';
+    assert.equal(/env -u DISPLAY -u WAYLAND_DISPLAY CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \S*claude -p/.test(preview), isolate !== false, preview);
+    assert.equal(runner(sb, ['-j', '4'], desktop).status, 0);
+    const [cc, cx, gx, mx] = ['opus-high__a', 'sol-max__a', 'grok-xhigh__a', 'muse-max__a'].map((id) => callFor(sb, id));
+    if (isolate === false) {
+      for (const c of [cc, cx, gx, mx]) assert.deepEqual(c.env, desktop);
+      assert.ok(!cc.argv.includes('--strict-mcp-config'));
+      assert.equal(result(sb, 'opus-high__a').isolated, false);
+      continue;
+    }
+    // Every CLI: no display to open a window on. Claude Code: no CLAUDE.md, auto memory or MCP servers.
+    assert.deepEqual(cc.env, { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' });
+    assert.ok(cc.argv.includes('--strict-mcp-config') && cc.argv.includes('--dangerously-skip-permissions'));
+    assert.deepEqual(cx.env, {});
+    // Grok: no memory, and nothing of Claude Code's.
+    assert.deepEqual(gx.env, { GROK_MEMORY: '0', GROK_CLAUDE_AGENTS_ENABLED: '0', GROK_CLAUDE_SKILLS_ENABLED: '0', GROK_CLAUDE_RULES_ENABLED: '0',
+      GROK_CLAUDE_MCPS_ENABLED: '0', GROK_CLAUDE_HOOKS_ENABLED: '0' });
+    // Muse: no other CLI's rules or skills; a flag already in its extra flags isn't added twice.
+    assert.equal(mx.argv.filter((a) => a === '--no-foreign-personal-context').length, 1);
+    assert.equal(result(sb, 'opus-high__a').isolated, true);
+  }
 });
 
 test('/goal: the message is the command and TASK.md holds the prompt; Codex gets the plain prompt', (t) => {
@@ -282,6 +320,7 @@ test('each finished game gets its record: inert, complete, private bits left out
   assert.equal(rec.interview.reply, fs.readFileSync(path.join(sb.out, 'opus-low__a', 'reply.md'), 'utf8'));
   assert.equal(rec.interview.file, null);
   assert.equal(rec.aiHub.model, 'M'); assert.equal(rec.aiHub.harness, 'Claude Code'); assert.equal(rec.aiHub.sourceDate, r.startedAt);
+  assert.ok(!('stages' in rec), 'only a run in stages has its steps');
   // Measured on the game as the agent left it: the record doesn't count.
   const game = page.replace(/\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/, '');
   assert.equal(r.gameSha256, crypto.createHash('sha256').update(game).digest('hex'));
@@ -463,7 +502,7 @@ test('the dry run shows each run as the terminal session it stands for', (t) => 
   const claude = block(d, '# opus medium (Claude Code CLI)');
   assert.match(claude[1], /^d=\S+\/opus-medium__z$/);
   assert.equal(claude[2], 'mkdir -p "$d/work"');
-  assert.match(claude[3], /^\(cd "\$d\/work" && \S+\/claude -p --output-format stream-json --verbose --model claude-opus-5-5 --effort medium --settings '\{"ultracode":false\}' --dangerously-skip-permissions < \.\.\/prompt\.md\)$/);
+  assert.match(claude[3], /^\(cd "\$d\/work" && env -u DISPLAY -u WAYLAND_DISPLAY CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \S+\/claude -p --output-format stream-json --verbose --model claude-opus-5-5 --effort medium --settings '\{"ultracode":false\}' --dangerously-skip-permissions --strict-mcp-config < \.\.\/prompt\.md\)$/);
   assert.match(block(d, '# sol max (Codex CLI)')[3], /\/codex exec --json -m gpt-6\.1-sol -c model_reasoning_effort=max --yolo - < \.\.\/prompt\.md\)$/);
   assert.match(block(d, '# flash high (Antigravity CLI)')[3], /\/agy -p "\$\(cat \.\.\/prompt\.md\)" --output-format stream-json --model gemini-3\.8-flash --effort high --dangerously-skip-permissions\)$/);
   // A later stage starts in a copy of the folder of the run it continues from.

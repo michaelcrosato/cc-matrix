@@ -105,6 +105,19 @@ test('a later stage leaves its own exit interview, not the one it was given; a p
   assert.equal(rec.interview.file, null);
   assert.equal(rec.prompt.stageText, read(dir, 'prompt.md')); assert.equal(rec.prompt.text, read(dir, 'work/TASK.md'));
   assert.equal(recordOf(sb, at('build').id).interview.answers.aiHub.name, 'Fake Game');
+  // A later stage's record has every step's figures, the plan's included (a plan makes no game of its own), and the
+  // totals.
+  const fig = (r) => [r.id, r.stage, r.wallMinutes, r.totalTokens, r.outputTokens, r.apiCostUsd ?? null];
+  const plan = at('plan'), build = at('build'), madeBy = recordOf(sb, build.id).stages;
+  assert.deepEqual(madeBy.steps.map((s) => [s.id, s.stage, s.wallMinutes, s.totalTokens, s.outputTokens, s.apiCostUsd]), [plan, build].map(fig));
+  assert.deepEqual([madeBy.steps[0].modelName, madeBy.steps[0].effort, madeBy.steps[0].harness, madeBy.complete], ['Claude Opus 5.5', 'max', 'Claude Code', true]);
+  assert.equal(madeBy.total.totalTokens, plan.totalTokens + build.totalTokens);
+  assert.equal(madeBy.total.wallMinutes, Math.round((plan.wallMinutes + build.wallMinutes) * 1e6) / 1e6);
+  assert.deepEqual(recordOf(sb, at('content').id).stages.steps.map((s) => s.stage), ['plan', 'build', 'content']);
+  // Stamped again after the plan's run was deleted, the build keeps the plan's figures from the record already there.
+  fs.rmSync(path.join(sb.out, plan.id), { recursive: true });
+  assert.equal(runner(sb, ['--stamp']).status, 0);
+  assert.deepEqual(recordOf(sb, build.id).stages, madeBy);
 });
 
 test('stamping again keeps the texts the run was sent, paths are written from ~, and export reads every record (schema 1 too)', (t) => {
