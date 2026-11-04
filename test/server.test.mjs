@@ -16,6 +16,27 @@ before(async () => {
 });
 after(async () => { await d?.stop(); cleanup(sb); });
 
+test('This computer: no environment file at first; Check again writes this computer\'s, dated, and shows it as the agents get it', async () => {
+  let r = await d.api('/api/machine');
+  assert.deepEqual([r.status, r.json.exists, r.json.text, r.json.checkedAt], [200, false, null, null]);
+  assert.match(r.json.file, /environments[\\/].+\.md$/);
+  r = await d.api('/api/machine', 'POST', { quick: true }); // without starting the browsers
+  assert.equal(r.status, 200);
+  assert.ok(r.json.ok, r.json.output);
+  const m = r.json.machine, file = path.join(path.dirname(sb.config), 'environments', path.basename(m.file));
+  assert.ok(fs.existsSync(file), 'the file is beside the config');
+  assert.deepEqual([m.exists, m.quick, m.ageDays, m.stale], [true, true, 0, false]);
+  assert.match(m.checkedAt, /^\d{4}-\d\d-\d\d \d\d:\d\d$/);
+  // As the agents get it: no title, no notes to whoever edits it.
+  assert.match(m.text, /^Checked .+\n\n- \*\*Computer:\*\*/);
+  assert.doesNotMatch(m.text, /<!--|^# /m);
+  // Checked long ago, it says so.
+  fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace(/^Checked \d{4}-\d\d-\d\d \d\d:\d\d/m, 'Checked 2020-01-01 09:00'));
+  r = await d.api('/api/machine');
+  assert.deepEqual([r.json.checkedAt, r.json.stale, r.json.ageDays > 14], ['2020-01-01 09:00', true, true]);
+  fs.rmSync(path.dirname(file), { recursive: true, force: true });
+});
+
 test('serves the page', async () => {
   const r = await fetch(d.base + '/');
   assert.equal(r.status, 200);

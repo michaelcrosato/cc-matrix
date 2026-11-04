@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sandbox, cleanup, runner, result, calls, callFor, RUNNER, waitFor } from './helpers.mjs';
@@ -150,7 +151,8 @@ test('runs are isolated unless the config says not: no window, and no CLAUDE.md,
 });
 
 test('/goal: the message is the command and TASK.md holds the prompt; Codex gets the plain prompt', (t) => {
-  const sb = sandbox({ template: 'Build it. {{testing}}', dimensions: { ...one, goal: [{ id: 'on', text: 'the game file exists.' }] }, agents: [
+  const sb = sandbox({ template: 'Build it. {{testing}}', dimensions: { testing: [{ id: 'a', text: 'variant A' }, { id: 'u', text: 'FAKE:goal=unmet' }],
+    goal: [{ id: 'on', text: 'the game file exists.' }] }, agents: [
     { id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] },
     { id: 'sol', provider: 'codex', model: 'gpt-6.1-sol', efforts: ['low'] }] });
   t.after(() => cleanup(sb));
@@ -165,6 +167,43 @@ test('/goal: the message is the command and TASK.md holds the prompt; Codex gets
   const x = result(sb, 'sol-low__a__on');
   assert.equal(x.goalSkipped, true);
   assert.match(callFor(sb, 'sol-low__a__on').stdin, /Build it\. variant A/);
+  // How the goal went, from the session's transcript: met at its one check; or never met, Claude Code ending the turn
+  // after 9 checks in a row blocked it, with what the last check said was missing. Codex was sent no /goal.
+  const pick = (r) => [r.goalMet, r.goalChecks, r.goalForced, r.goalReason];
+  assert.deepEqual(pick(result(sb, 'opus-low__a__on')), [true, 1, undefined, undefined]);
+  const unmet = result(sb, 'opus-low__u__on');
+  assert.deepEqual(pick(unmet), [false, 9, true, 'The game exists, but the transcript does not show every feature working.']);
+  assert.equal(unmet.status, 'ok'); // the run itself finished: the goal is a flag of its own
+  assert.deepEqual(pick(x), [undefined, undefined, undefined, undefined]);
+  // results.csv has it too; --reparse reads it again, and leaves a run whose transcript is gone as it was.
+  const csv = fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8').split('\n'), head = csv[0].split(','), row = csv.find((l) => l.startsWith('opus-low__u__on,')).split(',');
+  assert.deepEqual(['goalMet', 'goalChecks', 'goalForced'].map((k) => row[head.indexOf(k)]), ['false', '9', 'true']);
+  fs.writeFileSync(path.join(sb.out, 'opus-low__a__on', 'result.json'), JSON.stringify({ ...result(sb, 'opus-low__a__on'), goalMet: false, goalChecks: 0 }));
+  assert.equal(runner(sb, ['--reparse']).status, 0);
+  assert.deepEqual(pick(result(sb, 'opus-low__a__on')), [true, 1, undefined, undefined]);
+  fs.rmSync(path.join(sb.env.CLAUDE_CONFIG_DIR, 'projects'), { recursive: true, force: true });
+  assert.equal(runner(sb, ['--reparse']).status, 0);
+  assert.deepEqual(pick(result(sb, 'opus-low__u__on')), [false, 9, true, 'The game exists, but the transcript does not show every feature working.']);
+});
+
+test('{{machine}}: what this computer has, from environments/<computer>.md beside the config; without one, a run says how to make it', (t) => {
+  const sb = sandbox({ template: 'Make a game.\n\n## Environment\n{{machine}}\n', dimensions: one, agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  const failed = result(sb, 'opus-low__a');
+  assert.equal(failed.status, 'failed');
+  assert.match(failed.error, /uses \{\{machine\}\}, but this computer has no environments\/.+\.md: run node check-environment\.mjs/);
+  fs.mkdirSync(path.join(sb.dir, 'environments'));
+  fs.writeFileSync(path.join(sb.dir, 'environments', `${os.hostname().replace(/[^\w.-]/g, '-')}.md`), '# box: what this computer has\n\n'
+    + '<!-- checked: written by node check-environment.mjs, replaced each time it runs -->\nChecked today.\n\n- **Tools:** node\n<!-- /checked -->\n\n'
+    + '## What this computer doesn\'t have\n\n- No controller.\n');
+  const r = runner(sb, ['--rerun-failed']);
+  assert.equal(r.status, 0, r.all);
+  assert.equal(result(sb, 'opus-low__a').status, 'ok');
+  // Filled without the file's title and the notes to whoever edits it.
+  const prompt = fs.readFileSync(path.join(sb.out, 'opus-low__a', 'prompt.md'), 'utf8');
+  assert.match(prompt, /## Environment\nChecked today\.\n\n- \*\*Tools:\*\* node\n\n## What this computer doesn't have\n\n- No controller\.\n/);
+  assert.doesNotMatch(prompt, /<!--|# box/);
 });
 
 test('failures keep each CLI\'s own error message', (t) => {
@@ -344,6 +383,23 @@ const stageAgents = [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5',
   { id: 'sol', provider: 'codex', model: 'gpt-6.1-sol', efforts: ['max'] }, { id: 'sonnet', provider: 'claude', model: 'claude-sonnet-5-5', efforts: ['medium'] }];
 const allResults = (sb) => fs.readdirSync(sb.out).filter((d) => fs.existsSync(path.join(sb.out, d, 'result.json'))).map((d) => result(sb, d));
 
+test('stages: a planner\'s review of its prompt (planner-exit-interview.json) goes in its result, each answer with its question; builds aren\'t given it', (t) => {
+  const stages = [{ id: 'plan', text: 'Plan TASK.md. FAKE:plan Then save your review as planner-exit-interview.json.', game: false }, { id: 'build', text: 'Build it from PLAN.md.' }];
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }, { id: 'm', text: 'Metroid FAKE:noreview' }] }, agents: stageAgents.slice(0, 1), stages, template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  const r = runner(sb, ['--stage', 'plan=opus:max', '--stage', 'build=opus:xhigh']);
+  assert.equal(r.status, 0, r.all);
+  const all = allResults(sb), plan = (src) => all.find((x) => x.stage === 'plan' && x.source === src);
+  assert.deepEqual([plan('z').plannerInterview, plan('z').plannerAnswers], ['ok', [{ question: 'What was confusing?', answer: 'Which file wins for the file name (claude-opus-5-5).' },
+    { question: 'What would you change in this prompt?', answer: 'Nothing.' }]]);
+  assert.deepEqual([plan('m').plannerInterview, plan('m').plannerAnswers], ['missing', undefined]);
+  const builds = all.filter((x) => x.stage === 'build');
+  assert.equal(builds.length, 2);
+  for (const b of builds) assert.ok(!fs.existsSync(path.join(sb.out, b.id, 'work', 'planner-exit-interview.json')) && b.plannerInterview === undefined, b.id);
+  const csv = fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8').split('\n'), col = csv[0].split(',').indexOf('plannerInterview');
+  assert.deepEqual(csv.slice(1).filter(Boolean).map((l) => l.split(',')[col]).sort(), ['', '', 'missing', 'ok']);
+});
+
 test('stages: a plan branches into builds and each build into content passes, each starting from its parent\'s folder once it\'s done', (t) => {
   const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents: stageAgents, stages: STAGES, template: 'SOURCE: {{source}}\nFile: G-{{model}}-{{effort}}.html\n' });
   t.after(() => cleanup(sb));
@@ -420,7 +476,7 @@ test('stages: a stage\'s goal goes to /goal with its text in STAGE.md; Codex get
   const r = runner(sb, ['--stage', 'build=opus:high,sol:max']);
   assert.equal(r.status, 0, r.all);
   const [claudeRun] = allResults(sb).filter((x) => x.provider === 'claude'), [codexRun] = allResults(sb).filter((x) => x.provider === 'codex');
-  assert.equal(callFor(sb, claudeRun.id).argv[1], '/goal Read STAGE.md in the current folder and do what it says (TASK.md describes the game). Done when: the game for Zelda exists');
+  assert.equal(callFor(sb, claudeRun.id).argv[1], '/goal Read STAGE.md in the current folder and do what it says. Done when: the game for Zelda exists');
   assert.equal(fs.readFileSync(path.join(sb.out, claudeRun.id, 'work', 'STAGE.md'), 'utf8'), 'Build Zelda as TASK.md says.\n');
   assert.equal(callFor(sb, codexRun.id).stdin, 'Build Zelda as TASK.md says.\n');
   assert.deepEqual([codexRun.goalSkipped, claudeRun.goalSkipped, codexRun.delivered], [true, undefined, true]);
@@ -554,6 +610,8 @@ test('--resume-failed: a Claude run that stopped partway carries on with its ses
   assert.deepEqual(c.argv.slice(0, 4), ['-p', fs.readFileSync(path.join(dir, 'goal.md'), 'utf8').trim(), '--resume', 'fake-session']);
   const x = result(sb, id);
   assert.equal(x.status, 'ok');
+  // Its goal: never checked before the limit stopped it; met once it carried on.
+  assert.deepEqual([first.goalMet, first.goalChecks, x.goalMet, x.goalChecks], [false, 0, true, 1]);
   assert.ok(fs.existsSync(path.join(dir, 'work', 'src', 'partial.js')) && x.delivered);
   assert.match(fs.readFileSync(path.join(dir, 'agent.out'), 'utf8'), /5-hour limit/);
   assert.match(fs.readFileSync(path.join(dir, 'reply.md'), 'utf8'), /Source Information/);
@@ -1055,6 +1113,60 @@ test('cut off by a crash: an agent still going after its runner was killed is en
   assert.ok(!alive(agent));
   const x = result(sb, id);
   assert.deepEqual([x.status, x.resumes, x.parts[0].cutOff, x.outputTokens], ['ok', 1, true, 1060]);
+});
+
+test('cut off by a crash, then finished on its own: its result comes from its session, and nothing is sent to it', async (t) => {
+  if (process.platform !== 'linux') return t.skip('orphans are found by their working folder on Linux');
+  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang=alone' }] } });
+  t.after(() => cleanup(sb));
+  const id = 'opus-low__h', dir = path.join(sb.out, id);
+  const c = controlled(sb, []);
+  await gotGoing(sb, id);
+  const { agent } = JSON.parse(fs.readFileSync(path.join(dir, 'unfinished.json'), 'utf8'));
+  c.child.kill('SIGKILL');
+  await c.exit;
+  await waitFor(() => { try { process.kill(agent, 0); return false; } catch { return true; } });
+  const dry = () => JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim());
+  assert.deepEqual([dry().endedAlone, dry().carriesOn, dry().startsOver], [1, 0, 0]);
+
+  // With a /goal, it only finished if the goal was met, or Claude Code ended the turn itself after the goal check
+  // blocked it 9 times: a check that wasn't met means it was cut off before it could carry on.
+  const tr = path.join(sb.env.CLAUDE_CONFIG_DIR, 'projects', path.join(dir, 'work').replace(/[^a-zA-Z0-9]/g, '-'), 'fake-session.jsonl');
+  const kept = fs.readFileSync(tr, 'utf8'), at = new Date().toISOString();
+  fs.writeFileSync(path.join(dir, 'goal.md'), '/goal Make the game. Done when: it is made\n');
+  fs.appendFileSync(tr, JSON.stringify({ type: 'attachment', timestamp: at, attachment: { type: 'goal_status', met: false, reason: 'not yet' } }) + '\n');
+  assert.deepEqual([dry().endedAlone, dry().carriesOn], [0, 1]);
+  fs.appendFileSync(tr, JSON.stringify({ type: 'system', subtype: 'informational', timestamp: at,
+    content: 'A hook blocked the turn from ending 9 consecutive times — overriding and ending turn.' }) + '\n');
+  assert.equal(dry().endedAlone, 1);
+
+  const before = calls(sb).length, r = runner(sb, ['--fold-ended']);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.all, /✔ opus-low__h {2}finished on its own after its runner was gone: .* \(from its session\)/);
+  assert.match(r.all, /Folded 1 run/);
+  assert.equal(calls(sb).length, before, 'something was sent to its session');
+  const x = result(sb, id);
+  // Its cost is the session's totals that Claude Code saved as it ended; the tool call its own output never showed
+  // finishing is counted from the transcript.
+  assert.deepEqual([x.status, x.resumes, x.parts.length, x.parts[0].endedAlone, x.parts[0].exitCode, x.goalForced], ['ok', 0, 1, true, null, true]);
+  assert.deepEqual([x.costSource, x.costUsd, x.outputTokens, x.tools], ['reported', 0.05, 700, { Write: 1 }]);
+  assert.ok(x.delivered && !fs.existsSync(path.join(dir, 'unfinished.json')));
+  assert.match(fs.readFileSync(path.join(dir, 'reply.md'), 'utf8'), /## Source Information/);
+  // Done now: a batch that has it leaves it be.
+  const again = runner(sb, []);
+  assert.doesNotMatch(again.all, /▶/);
+
+  // The same run's transcript without the goal (and the folder as it was): a batch that has it folds it too.
+  fs.rmSync(path.join(dir, 'goal.md')); fs.writeFileSync(tr, kept);
+  fs.rmSync(path.join(dir, 'result.json'));
+  fs.writeFileSync(path.join(dir, 'unfinished.json'), JSON.stringify({ base: { id, agent: 'opus', provider: 'claude', model: 'claude-opus-5-5',
+    effort: 'low', ultracode: false, testing: 'h' }, part: { n: 0, startedAt: new Date(Date.parse(at) - 60000).toISOString() }, runner: null, agent: null }));
+  const b = runner(sb, []);
+  assert.equal(b.status, 0, b.all);
+  assert.match(b.all, /Of those, 1 was cut off and then finished on its own: its result comes from its session, and nothing is sent to it/);
+  assert.match(b.all, /✔ opus-low__h {2}finished on its own after its runner was gone/);
+  assert.equal(calls(sb).length, before);
+  assert.deepEqual([result(sb, id).status, result(sb, id).goalForced], ['ok', undefined]);
 });
 
 test('a cut-off run ended mid-way as it carries on stays cut off, and carries on again next time', async (t) => {

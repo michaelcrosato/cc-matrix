@@ -30,6 +30,8 @@
 //        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
 //                                     logs (after parser or price changes); games already holding their record get the new figures
 //        --stamp                      write each finished run's record into its game file (stampGame, run-record.mjs); new runs get it as they end
+//        --fold-ended                 cut-off runs whose session ended on its own after its runner was gone get their
+//                                     result from the session now, without a batch that has them (see foldEnded)
 //        --rename-variant dim:old[@hash]=new   file the runs that used an earlier text of a variant under a short name of
 //                                     their own (repeatable; with --dry-run, only says which; see renameVariants)
 //        --control                    take setting changes mid-batch on stdin (the dashboard; see control())
@@ -53,7 +55,7 @@ import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecor
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
-  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, rename: [], rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false,
+  budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, foldEnded: false, rename: [], rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false,
   broker: false, skipKeys: null };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
@@ -76,6 +78,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--report') args.report = true;
   else if (a === '--reparse') args.reparse = true;
   else if (a === '--stamp') args.stamp = true;
+  else if (a === '--fold-ended') args.foldEnded = true;
   else if (a === '--rename-variant') args.rename.push(next());
   else if (a === '--rerun-failed') args.rerunFailed = true;
   else if (a === '--resume-failed') args.resumeFailed = true;
@@ -195,10 +198,23 @@ const MODEL_LABS = [[/^claude/i, 'Anthropic'], [/^(gpt|o\d)/i, 'OpenAI'], [/^gem
 const labOf = (agent) => MODEL_LABS.find(([re]) => re.test(agent.model ?? ''))?.[1] ?? LABS[agent.provider] ?? 'unknown';
 const OS = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platform] ?? process.platform;
 
+// {{machine}}: what this computer has, for the agents: environments/<computer>.md beside the config, which node
+// check-environment.mjs writes (and keeps up to date between its markers) and the rest of which is written by hand.
+// Filled without its title and its notes to whoever edits it; read once. Named as check-environment.mjs names it.
+const machineFile = () => path.join(configDir, 'environments', `${os.hostname().replace(/[^\w.-]/g, '-')}.md`);
+let machineText;
+function machine() {
+  if (machineText === undefined) {
+    let t = null; try { t = fs.readFileSync(machineFile(), 'utf8'); } catch {}
+    machineText = t ? t.replace(/<!--[\s\S]*?-->\n?/g, '').replace(/^# .*\n+/, '').trim() : null;
+  }
+  return machineText || undefined;
+}
+
 // Placeholders the runner fills per run (in addition to the dimensions).
 function runVars(run, d = new Date()) {
   return { model: run.agent.model, effort: `${run.effort ?? 'default'}${run.ultracode ? '-ultracode' : ''}`, lab: labOf(run.agent),
-    environment: `${CLIS[run.agent.provider] ?? run.agent.provider} (headless); ${OS}; browser unknown`,
+    environment: `${CLIS[run.agent.provider] ?? run.agent.provider} (headless); ${OS}; browser unknown`, machine: machine(),
     stamp: stampOf(d),
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` };
 }
@@ -207,10 +223,10 @@ function runVars(run, d = new Date()) {
 // /goal command (a command must start the message, and everything after it is
 // the condition, capped at 4,000 characters).
 function goalMessage(run) {
-  if (run.stage) { // a stage's goal: its text is STAGE.md, the brief TASK.md
+  if (run.stage) { // a stage's goal: its text is STAGE.md, which says what TASK.md (the brief) and the other files are for
     const g = stageTexts(run).goal;
     if (!g || !GOAL_CLIS.has(run.agent.provider)) return null;
-    const msg = `/goal Read STAGE.md in the current folder and do what it says (TASK.md describes the game). Done when: ${g}`;
+    const msg = `/goal Read STAGE.md in the current folder and do what it says. Done when: ${g}`;
     if (msg.length > 4000) throw new Error(`Stage ${run.stage.id}'s goal is ${msg.length} characters with its preamble; /goal allows 4,000`);
     return msg;
   }
@@ -234,6 +250,8 @@ function fillText(text, run, when, what, extra = {}) {
   let p = text;
   for (let i = 0; i < 5; i++) { const next = p.replace(/\{\{(\w+)\}\}/g, (m, k) => fill[k] ?? m); if (next === p) break; p = next; }
   const left = [...new Set(p.match(/\{\{\w+\}\}/g) ?? [])];
+  if (left.includes('{{machine}}') && !machine())
+    throw new Error(`${what} uses {{machine}}, but this computer has no ${path.relative(configDir, machineFile())}: run node check-environment.mjs`);
   if (left.length) throw new Error(`Unfilled placeholders in ${what}: ${left.join(' ')}`);
   return p;
 }
@@ -404,6 +422,52 @@ function canCarryOn(run, cut) {
   if (!cut || !RESUMABLE.has(run.agent.provider) || cut.u.base.model !== run.agent.model) return false;
   const s = cutSession(cut), limit = +(run.agent.timeout || args.timeout || 0);
   return !!s.file && (cut.u.base.outputTokens > 0 || s.responses.size > 0) && !(limit && s.minutes >= limit);
+}
+// How a Claude Code session went from `from` (ms) on, from its transcript, and whether it ended by itself (`ended`):
+// its last response called no tool, Claude Code saved the session's totals after it (as the process ended) and, with
+// a /goal, the goal was met, Claude Code ended the turn itself after the goal check had blocked it 9 times, or an
+// error (a response Claude Code made up, like "Credit balance is too low") ended the goal. A session ended mid-turn
+// has a tool call last, or a goal check that wasn't met. `at`: its last entry; tools, toolErrors and compactions
+// from then on until `to` (the agent's own output may stop short of them, if nobody was reading it).
+function sessionEnd(file, from, goal, to = Infinity) {
+  let lines; try { lines = fs.readFileSync(file, 'utf8').split('\n'); } catch { return null; }
+  let on = false, last = null, at = 0, saved = false, met = false, forced = false, toolErrors = 0, compactions = 0;
+  const tools = {}, toolIds = new Set();
+  for (const l of lines) {
+    let e; try { e = JSON.parse(l); } catch { continue; }
+    const t = Date.parse(e.timestamp ?? '');
+    if (t >= to) break; // a later part's
+    if (!on && !(t >= from)) continue; // the parts before this one; a cost-state has no timestamp, so it goes by place
+    on = true;
+    if (t) at = Math.max(at, t);
+    if (e.type === 'cost-state') saved = !!last;
+    else if (e.type === 'assistant' && e.message) {
+      const m = e.message;
+      if (last?.id !== m.id) last = { id: m.id, text: [], tool: false, madeUp: m.model === '<synthetic>' };
+      for (const c of Array.isArray(m.content) ? m.content : []) {
+        if (c.type === 'text' && c.text) last.text.push(c.text);
+        if (c.type === 'tool_use') { last.tool = true; if (!toolIds.has(c.id)) { toolIds.add(c.id); tools[c.name] = (tools[c.name] ?? 0) + 1; } }
+      }
+      saved = met = forced = false; // what comes after a response is about it
+    } else if (e.type === 'user') {
+      for (const c of Array.isArray(e.message?.content) ? e.message.content : []) if (c.type === 'tool_result' && c.is_error) toolErrors++;
+    } else if (e.type === 'system') {
+      if (e.subtype === 'compact_boundary') compactions++;
+      if (/A hook blocked the turn from ending/.test(e.content ?? '')) forced = true;
+    } else if (e.attachment?.type === 'goal_status' && !e.attachment.sentinel) met = !!e.attachment.met; // a sentinel marks the goal set
+  }
+  const ended = !!last && !last.tool && saved && (!goal || met || forced || last.madeUp);
+  const text = last?.text.join('\n').trim() ?? '';
+  return { ended, at, reply: last?.madeUp ? '' : text, error: last?.madeUp ? text || 'API error' : null, forced, tools, toolErrors, compactions };
+}
+// A cut-off run whose agent went on without its runner and ended its session by itself (see sessionEnd), or null.
+function endedAlone(cut) {
+  const { base, part } = cut?.u ?? {};
+  if (!part || !RESUMABLE.has(base.provider) || alive(cut.u.agent)) return null;
+  const s = cutSession(cut);
+  if (!s.file) return null;
+  const e = sessionEnd(s.file, Date.parse(part.startedAt), fs.existsSync(path.join(outDir, cut.dir, 'goal.md')));
+  return e?.ended ? { s, e } : null;
 }
 const isDone = (run) => {
   const p = prevRun(run);
@@ -596,8 +660,10 @@ function terminalOf(run, resumes = false) {
 
 if (args.rename.length) { try { renameVariants(args.rename); } catch (e) { console.error(e.message); process.exit(1); } process.exit(0); }
 if (args.dryRun) {
-  // resumes: failed runs that carry on (Resume failed); carriesOn: cut-off runs that do; startsOver: cut-off runs that can't.
-  const byAgent = {}, cut = queue.filter((r) => cutOf(r) && !isDone(r)), carrying = cut.filter((r) => canCarryOn(r, cutOf(r)));
+  // resumes: failed runs that carry on (Resume failed); carriesOn: cut-off runs that do; startsOver: cut-off runs that can't;
+  // endedAlone: cut-off runs that finished on their own, which get their result from their session and run nothing.
+  const byAgent = {}, cut = queue.filter((r) => cutOf(r) && !isDone(r)), ended = cut.filter((r) => endedAlone(cutOf(r)));
+  const carrying = cut.filter((r) => !ended.includes(r) && canCarryOn(r, cutOf(r)));
   const resuming = [...carrying, ...queue.filter((r) => !cutOf(r) && canResume(r))];
   for (const r of queue) byAgent[r.fields.agent] = (byAgent[r.fields.agent] ?? 0) + 1;
   let sample = '', error = null;
@@ -611,14 +677,15 @@ if (args.dryRun) {
   const byStage = {};
   for (const r of queue) if (r.stage) byStage[r.stage.id] = (byStage[r.stage.id] ?? 0) + 1;
   // The batch as terminal sessions (the first 100; Run → Preview shows them): the runs not done yet, in queue order.
-  const todo = queue.filter((r) => !isDone(r)), terminal = todo.slice(0, 100).map((r) => terminalOf(r, resuming.includes(r)).join('\n'));
+  const todo = queue.filter((r) => !isDone(r) && !ended.includes(r)), terminal = todo.slice(0, 100).map((r) => terminalOf(r, resuming.includes(r)).join('\n'));
   if (args.json) {
     console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length - carrying.length,
-      carriesOn: carrying.length, startsOver: cut.length - carrying.length,
+      carriesOn: carrying.length, startsOver: cut.length - carrying.length - ended.length, endedAlone: ended.length,
       ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf), terminal, terminalTotal: todo.length }));
   } else {
     console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
-    for (const r of queue) console.log('  ' + r.id + (carrying.includes(r) ? '  (carries on: cut off)' : cut.includes(r) ? '  (cut off: starts over)' : resuming.includes(r) ? '  (resumes)' : ''));
+    for (const r of queue) console.log('  ' + r.id + (ended.includes(r) ? '  (finished on its own after it was cut off: its result comes from its session)'
+      : carrying.includes(r) ? '  (carries on: cut off)' : cut.includes(r) ? '  (cut off: starts over)' : resuming.includes(r) ? '  (resumes)' : ''));
     if (error) console.log(`\nPrompt error: ${error}`);
     else if (queue[0]) console.log(`\n--- sample prompt (${queue[0].id}) ---\n${sample}`);
     if (terminal.length) console.log(`\n--- in a terminal (${terminal.length === todo.length ? 'every run not done yet' : `the first ${terminal.length} of ${todo.length}`}) ---\n${terminal.join('\n\n')}`);
@@ -1112,7 +1179,8 @@ function prepare(run, dir, prompt) {
 // prompt.md beside work/ (the stage's text, what it's sent) and, with a /goal, that text as STAGE.md and the
 // command as goal.md. Returns the parent's root .html files (name -> hash), so measureOutput can tell the game
 // this run made from the ones it was given.
-const NOT_COPIED = new Set(['node_modules', '.git', EXIT_FILE]);
+const PLANNER_FILE = 'planner-exit-interview.json'; // a stage run's review of its prompt (see plannerInterview)
+const NOT_COPIED = new Set(['node_modules', '.git', EXIT_FILE, PLANNER_FILE]);
 function prepareStage(run, dir, brief, parent) {
   const work = path.join(dir, 'work');
   if (parent) {
@@ -1140,6 +1208,21 @@ function stageFields(run, work, parent, given) {
   return { parentId: parent?.dir ?? null, parentStartedAt: parent?.r.startedAt ?? null, ...(run.stage.game === false ? { expectsGame: false } : {}),
     ...(given?.size ? { givenHtml: Object.fromEntries(given) } : {}), ...(planChars != null ? { planChars } : {}) };
 }
+// plannerInterview: a stage run's review of the prompt it was given (TASK.md and its stage's text), when the stage's
+// text asks for one: planner-exit-interview.json in its folder, a JSON list of { question, answer }. ok, invalid or
+// missing, and when ok the answers (plannerAnswers), kept in result.json: a plan makes no game to carry a record, and
+// each question goes with its answer, so answers still read right after the questions change. A later stage isn't
+// given the file (NOT_COPIED).
+function plannerInterview(home) {
+  const read = (f) => { try { return fs.readFileSync(path.join(home, f), 'utf8'); } catch { return null; } };
+  if (!(read('prompt.md') ?? '').includes(PLANNER_FILE)) return {};
+  const text = read(path.join('work', PLANNER_FILE));
+  if (text == null) return { plannerInterview: 'missing' };
+  let j; try { j = JSON.parse(text); } catch { return { plannerInterview: 'invalid' }; }
+  const list = Array.isArray(j) ? j : Object.values(j ?? {}).find(Array.isArray); // also { "answers": [...] }
+  if (!list?.length || !list.every((x) => typeof x?.question === 'string' && typeof x?.answer === 'string')) return { plannerInterview: 'invalid' };
+  return { plannerInterview: 'ok', plannerAnswers: list.map((x) => ({ question: x.question.trim(), answer: x.answer.trim() })) };
+}
 // exitInterview: whether a run left the exit interview its prompt asks for (exit-interview.json beside the game, one
 // JSON object; see run-record.mjs): ok, invalid or missing. Left out when its prompt (TASK.md for a stage run) doesn't
 // ask for one, and for a plan, which makes no game.
@@ -1148,6 +1231,32 @@ function exitInterview(home, stage, expectsGame) {
   if (expectsGame === false || !(read(stage ? 'work/TASK.md' : 'prompt.md') ?? '').includes(EXIT_FILE)) return {};
   const text = read(path.join('work', EXIT_FILE));
   return { exitInterview: text == null ? 'missing' : parseInterview(text).error ? 'invalid' : 'ok' };
+}
+// goalOutcome: how a run's /goal went, from its Claude Code transcript (the CLI's own output doesn't say). goalMet:
+// whether its last goal check passed (false when it never got one, like a session that failed first); goalChecks: how
+// many checks it got; goalForced: Claude Code ended the turn itself after the check had blocked it 9 times in a row,
+// so the run finished without the goal; goalReason: what the last check said was missing, when it wasn't met. {} for
+// a run sent no /goal, and for one whose transcript isn't on this computer (made on another one, say), which keeps
+// what it has. A run ended by its time limit never printed its result, so its session is the one its output started.
+// GOAL_KEYS: these fields, for --reparse to replace.
+const GOAL_KEYS = ['goalMet', 'goalChecks', 'goalForced', 'goalReason'];
+function goalOutcome(home, r) {
+  if (r.provider !== 'claude' || !fs.existsSync(path.join(home, 'goal.md'))) return {};
+  let sid = r.sessionId; if (!sid) try { sid = firstLine(path.join(home, 'agent.out'))?.session_id; } catch {}
+  const file = sid && claudeTranscript(sid, path.join(home, 'work'));
+  let text; try { text = file && fs.readFileSync(file, 'utf8'); } catch {}
+  if (!text) return {};
+  let checks = 0, last = null, forced = false;
+  for (const l of text.split('\n')) {
+    if (!l.includes('"goal_status"') && !l.includes('A hook blocked the turn from ending')) continue;
+    let e; try { e = JSON.parse(l); } catch { continue; }
+    // A sentinel marks the goal being set or cleared, not a check; forced is about the checks before it.
+    if (e.attachment?.type === 'goal_status' && !e.attachment.sentinel) { checks++; last = e.attachment; forced = false; }
+    else if (e.type === 'system' && /A hook blocked the turn from ending/.test(e.content ?? '')) forced = true;
+  }
+  const met = !!last?.met;
+  return { goalMet: met, goalChecks: checks, ...(forced && !met ? { goalForced: true } : {}),
+    ...(!met && last?.reason ? { goalReason: String(last.reason).slice(0, 1500) } : {}) };
 }
 // The time zone of this computer's clock, saved with each run: its folder name and {{stamp}} are in local time.
 const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -1194,10 +1303,13 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null, base 
 
 // Runs not done yet (pool skips the others first).
 async function runOne(run) {
-  // Cut off in an earlier batch: it carries on with its session, or starts over when it can't.
+  // Cut off in an earlier batch: it carries on with its session, or starts over when it can't. One whose agent
+  // finished on its own after its runner was gone gets its result from its session instead.
   const cut = cutOf(run);
   if (cut) {
     cutRuns().cut.delete(run.key);
+    const ended = endedAlone(cut);
+    if (ended) return foldEnded(run, cut, ended);
     if (cut.orphan) { console.log(`· ${cut.dir}: ending its agent, still going since its runner was killed (pid ${cut.orphan})`); await endOrphan(cut.orphan); }
     if (canCarryOn(run, cut)) return resumeOne(run, { r: cutRecord(cut), dir: cut.dir }, true);
     fs.rmSync(path.join(outDir, cut.dir), { recursive: true, force: true });
@@ -1273,6 +1385,7 @@ async function runOne(run) {
   const result = { id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
     variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
     wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...staged, ...exitInterview(home, !!run.stage, staged.expectsGame),
+    ...(run.stage ? plannerInterview(home) : {}), ...goalOutcome(home, { provider: run.agent.provider, sessionId: metrics.sessionId }),
     startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(), timeZone: TIME_ZONE, isolated: ISOLATE };
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
   fs.rmSync(path.join(home, UNFINISHED), { force: true });
@@ -1352,29 +1465,83 @@ async function resumeOne(run, prev, carrying = false) {
 
   const end = Date.now(), part = { startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(),
     wallMinutes: (end - start) / 60000, exitCode, cliVersion: cliVersions[run.agent.provider], ...(since ? { since } : {}) };
-  // The earlier parts' figures are the old result's, so they add up even if their output is gone.
-  const m = combineParts([r, metrics]);
-  if (metrics.reply) fs.writeFileSync(path.join(dir, 'reply.md'), metrics.reply);
-  delete m.reply;
-  if (!metrics.reply) m.replyChars = r.replyChars; // reply.md is still the earlier one
-  const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed', all = [...parts, part];
-  const given = r.givenHtml ? new Map(Object.entries(r.givenHtml)) : null;
-  const kept = Object.fromEntries(['parentId', 'parentStartedAt', 'expectsGame', 'givenHtml'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
-  let planChars; try { if (r.stage) planChars = fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').length; } catch {}
-  const measured = measureOutput(work, given), id = status === 'ok' ? withTitle(prev.dir, measured, run) : prev.dir, home = path.join(outDir, id);
-  const result = { id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
-    variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode,
-    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measured, ...kept, ...(planChars != null ? { planChars } : {}),
-    ...exitInterview(home, !!r.stage, r.expectsGame),
-    startedAt: r.startedAt, finishedAt: part.finishedAt, ...(r.timeZone ? { timeZone: r.timeZone } : {}), resumes: n, parts: all };
-  fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
-  fs.rmSync(path.join(home, UNFINISHED), { force: true });
-  stampGame(home, result, run.combo);
-  finished().set(run.key, { r: result, dir: id });
+  const status = exitCode === 0 && !metrics.isError ? 'ok' : 'failed';
+  const { result, id } = saveParts(run, prev.dir, r, parts, part, metrics, status);
   spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
   if (!args.broker) writeReport();
+}
+
+// A resumed run's new part (resumeOne), or a cut-off one read from its session (foldEnded), saved as the run's result
+// after the parts before it: the figures added up, what the run was made with kept from its record so far (r) and,
+// once it's OK, its folder named after its game. Returns the result and the folder's name now.
+function saveParts(run, from, r, parts, part, metrics, status) {
+  const work = path.join(outDir, from, 'work'), all = [...parts, part];
+  // The earlier parts' figures are the old result's, so they add up even if their output is gone.
+  const m = parts.length ? combineParts([r, metrics]) : { ...metrics };
+  if (metrics.reply) fs.writeFileSync(path.join(outDir, from, 'reply.md'), metrics.reply);
+  delete m.reply;
+  if (!metrics.reply) m.replyChars = r.replyChars; // reply.md is still the earlier one
+  const given = r.givenHtml ? new Map(Object.entries(r.givenHtml)) : null;
+  const kept = Object.fromEntries(['parentId', 'parentStartedAt', 'expectsGame', 'givenHtml', 'isolated'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+  let planChars; try { if (r.stage) planChars = fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').length; } catch {}
+  const measured = measureOutput(work, given), id = status === 'ok' ? withTitle(from, measured, run) : from, home = path.join(outDir, id);
+  const result = { id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
+    variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode: part.exitCode,
+    wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measured, ...kept, ...(planChars != null ? { planChars } : {}),
+    ...exitInterview(home, !!r.stage, r.expectsGame), ...(r.stage ? plannerInterview(home) : {}),
+    ...goalOutcome(home, { provider: run.agent.provider, sessionId: m.sessionId ?? r.sessionId }),
+    startedAt: r.startedAt ?? part.startedAt, finishedAt: part.finishedAt, ...(r.timeZone ? { timeZone: r.timeZone } : {}), resumes: parts.length, parts: all };
+  fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
+  fs.rmSync(path.join(home, UNFINISHED), { force: true });
+  stampGame(home, result, run.combo);
+  finished().set(run.key, { r: result, dir: id });
+  return { result, id };
+}
+
+// A cut-off run whose session ended on its own after its runner was gone (endedAlone: the dashboard's terminal was
+// closed, say, and its agent kept working): its last part is read from the session's transcript (cutPart, with the
+// tool calls, reply and outcome from sessionEnd) and saved after the parts before it, as if it had been resumed.
+// Nothing is sent to the session, and its cost isn't this batch's. With a /goal, the goal check may never have
+// passed: Claude Code ends the turn itself after the check blocks it 9 times (see goalOutcome).
+function foldEnded(run, cut, { s, e }) {
+  const { base, part } = cut.u, start = Date.parse(part.startedAt);
+  run.id = cut.dir;
+  const parts = base.parts ?? (base.finishedAt ? [{ startedAt: base.startedAt, finishedAt: base.finishedAt, wallMinutes: base.wallMinutes,
+    exitCode: base.exitCode, cliVersion: base.cliVersion }] : []);
+  const m = endedPart(cut, e, Infinity, s);
+  const p = { startedAt: part.startedAt, finishedAt: new Date(e.at).toISOString(), wallMinutes: (e.at - start) / 60000, exitCode: null,
+    cliVersion: part.cliVersion, endedAlone: true, ...(part.since ? { since: part.since } : {}) };
+  const status = e.error ? 'failed' : 'ok', { result, id } = saveParts(run, cut.dir, base, parts, p, m, status);
+  done++; tell('done', run, id);
+  console.log(`${status === 'ok' ? '✔' : '✘'} ${cut.dir}  finished on its own after its runner was gone: ` +
+    `${parts.length ? `${p.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all` : `${p.wallMinutes.toFixed(1)}m`}  ${fmtUsd(m.costUsd)}  out:${m.outputTokens ?? '?'} tok (from its session)${id !== cut.dir ? `  → ${id}` : ''}`);
+  if (!args.broker) writeReport();
+}
+// A part that ended on its own after its runner was gone (foldEnded; --reparse measures it again), from its session:
+// what cutPart reads, with the tool calls, reply and outcome its own output may stop short of (see sessionEnd).
+function endedPart(cut, e, to = Infinity, s = cutSession(cut, to)) {
+  const m = cutPart(cut, to, s), tools = { ...m.tools };
+  for (const [k, n] of Object.entries(e.tools)) tools[k] = Math.max(tools[k] ?? 0, n);
+  return Object.assign(m, { tools, toolCalls: total(tools), toolErrors: Math.max(m.toolErrors ?? 0, e.toolErrors),
+    compactions: Math.max(m.compactions ?? 0, e.compactions), apiCalls: Math.max(m.apiCalls ?? 0, s.responses.size),
+    isError: !!e.error, error: e.error ?? undefined, reply: e.reply, replyChars: e.reply.length });
+}
+// A run as the queue would have it, made from its record (for --fold-ended, outside a batch that has it).
+function runFromRecord(r) {
+  const agent = cfg.agents.find((a) => a.id === r.agent) ?? { id: r.agent, provider: r.provider, model: r.model }, pe = parseEffort(r.effort);
+  const combo = Object.fromEntries(dimNames.map((d) => [d, cfg.dimensions[d].find((v) => v.id === r[d])]).filter(([, v]) => v));
+  const fields = Object.fromEntries(['agent', 'provider', 'effort', 'ultracode', ...dimNames, 'rep', 'stage', 'chain'].filter((k) => r[k] !== undefined).map((k) => [k, r[k]]));
+  return { key: runKey(r), id: r.id, agent, effort: pe.base, ultracode: pe.ultracode, combo, fields, when: new Date(r.startedAt ?? Date.now()) };
+}
+function foldAllEnded() {
+  let n = 0;
+  for (const cut of cutRuns().cut.values()) {
+    const ended = endedAlone(cut);
+    if (ended) { foldEnded(runFromRecord(cut.u.base), cut, ended); n++; }
+  }
+  console.log(n ? `Folded ${n} run(s) that finished on their own after they were cut off.` : 'No cut-off run has finished on its own.');
 }
 
 // The cost-state Claude Code saved in a session's transcript as its last part ended (see minusSince), or null. With
@@ -1497,8 +1664,12 @@ function reparseAll() {
     // A resumed run: each part from its own output, with what its session had used before (see resumeOne); a part
     // that was cut off as it was measured then (see cutPart).
     const parts = r.parts ?? [{ startedAt: r.startedAt, finishedAt: r.finishedAt }];
-    let ms; try { ms = parts.map((p, i) => p.cutOff ? cutPart({ u: { base: {}, part: { n: i, startedAt: p.startedAt, endedAt: p.finishedAt, since: p.since } }, dir: d },
-        Date.parse(parts[i + 1]?.startedAt ?? '') || Infinity)
+    // A part that ended on its own after its runner was gone, from its session too (see foldEnded).
+    const cutAt = (p, i) => ({ u: { base: {}, part: { n: i, startedAt: p.startedAt, endedAt: p.finishedAt, since: p.since } }, dir: d });
+    const toOf = (i) => Date.parse(parts[i + 1]?.startedAt ?? '') || Infinity;
+    const ended = (p, i) => { const cut = cutAt(p, i), s = cutSession(cut, toOf(i)), e = s.file && sessionEnd(s.file, Date.parse(p.startedAt), false, toOf(i));
+      return e ? endedPart(cut, e, toOf(i), s) : cutPart(cut, toOf(i), s); };
+    let ms; try { ms = parts.map((p, i) => p.endedAlone ? ended(p, i) : p.cutOff ? cutPart(cutAt(p, i), toOf(i))
       : readMetrics(r.provider, fs.readFileSync(path.join(outDir, d, partFile(i, 'out')), 'utf8'), { model: r.model },
         { cwd: path.join(outDir, d, 'work'), start: Date.parse(p.startedAt), end: Date.parse(p.finishedAt), since: p.since })); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
     const m = combineParts(ms);
@@ -1509,6 +1680,9 @@ function reparseAll() {
     try { if (r.entry) r.todos = markers(unstamped(fs.readFileSync(path.join(outDir, r.entry), 'utf8'))); } catch {}
     const ei = exitInterview(path.join(outDir, d), !!r.stage, r.expectsGame).exitInterview;
     if (ei) r.exitInterview = ei; else delete r.exitInterview;
+    if (r.stage) { delete r.plannerInterview; delete r.plannerAnswers; Object.assign(r, plannerInterview(path.join(outDir, d))); }
+    const g = goalOutcome(path.join(outDir, d), r); // left as it was when its transcript isn't on this computer
+    if (Object.keys(g).length) { for (const k of GOAL_KEYS) delete r[k]; Object.assign(r, g); }
     fs.writeFileSync(resFile, JSON.stringify(r, null, 2)); n++;
     if (isStamped(r)) stampGame(path.join(outDir, d), r); // the record in the game gets the new figures too
   }
@@ -1884,6 +2058,7 @@ async function smoke() {
 }
 if (args.reparse) { reparseAll(); writeReport(); process.exit(0); }
 if (args.stamp) { stampAll(); process.exit(0); }
+if (args.foldEnded) { foldAllEnded(); writeReport(); process.exit(0); }
 if (args.smoke) { await smoke(); process.exit(0); }
 
 fs.mkdirSync(outDir, { recursive: true });
@@ -1908,10 +2083,13 @@ console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} 
   : `concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''}`) + ')');
 if (stageMode) { const n = {}; for (const r of queue) n[r.stage.id] = (n[r.stage.id] ?? 0) + 1;
   console.log(`In stages: ${STAGES.filter((s) => n[s.id]).map((s) => `${s.id} ${n[s.id]}`).join(', ')}. A run starts once the one it continues from has finished OK.`); }
-const resuming = queue.filter((r) => !cutOf(r) && canResume(r)).length, carrying = queue.filter((r) => !isDone(r) && canCarryOn(r, cutOf(r))).length;
+const endedNow = queue.filter((r) => !isDone(r) && endedAlone(cutOf(r))).length;
+const resuming = queue.filter((r) => !cutOf(r) && canResume(r)).length, carrying = queue.filter((r) => !isDone(r) && !endedAlone(cutOf(r)) && canCarryOn(r, cutOf(r))).length;
 if (resuming) console.log(`Of those, ${resuming} failed partway and resume their session where it stopped (Resume failed).`);
 if (carrying) console.log(`Of those, ${carrying === 1 ? '1 was cut off mid-way and carries on with its session where it stopped'
   : `${carrying} were cut off mid-way and carry on with their sessions where they stopped`}.`);
+if (endedNow) console.log(`Of those, ${endedNow === 1 ? '1 was cut off and then finished on its own: its result comes from its session, and nothing is sent to it'
+  : `${endedNow} were cut off and then finished on their own: their results come from their sessions, and nothing is sent to them`}.`);
 if (queue.length > already) try { recordPromptVersion(); } catch (e) { console.log(`⚠ Prompt history not updated: ${e.message}`); }
 if (args.control) {
   let buf = '';
@@ -1985,7 +2163,7 @@ function writeReport() {
   const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', 'stage', 'path', 'parentId', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource', 'apiCostUsd',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
     'apiCalls', 'toolCalls', 'toolErrors', 'compactions',
-    'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'exitInterview', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt', 'timeZone'];
+    'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'exitInterview', 'plannerInterview', 'goalMet', 'goalChecks', 'goalForced', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt', 'timeZone'];
   const cell = (v) => v == null ? '' : typeof v === 'number' ? +v.toFixed(4)
     : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;
   fs.writeFileSync(path.join(outDir, 'results.csv'),
@@ -1993,7 +2171,7 @@ function writeReport() {
 
   const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const href = (p) => esc(String(p).split('/').map(encodeURIComponent).join('/')); // a # ? or % in a game's title would break the link
-  const show = ['agent', 'effort', 'stage', ...dims, 'status', 'delivered', 'wallMinutes', 'costUsd', 'apiCostUsd', 'outputTokens', 'kb', 'score'];
+  const show = ['agent', 'effort', 'stage', ...dims, 'status', 'goalMet', 'delivered', 'wallMinutes', 'costUsd', 'apiCostUsd', 'outputTokens', 'kb', 'score'];
   const html = `<!doctype html><meta charset="utf-8"><title>Matrix runs</title>
 <style>body{font:14px system-ui;margin:16px;background:#fff;color:#111}table{border-collapse:collapse;width:100%}
 th,td{padding:6px 8px;border-bottom:1px solid #ddd;text-align:left;white-space:nowrap}th{cursor:pointer;background:#f4f4f4;position:sticky;top:0}

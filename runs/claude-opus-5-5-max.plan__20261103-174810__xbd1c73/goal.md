@@ -1,0 +1,1 @@
+/goal Read STAGE.md in the current folder and do what it says (TASK.md describes the game). Done when: PLAN.md exists in this folder and covers the title, architecture, every system, the content, the build order and testing for everything TASK.md asks for.

@@ -1,0 +1,81 @@
+Europhoria Football is finished. The full test command passes on the final build: `node tools/test.mjs` reports **561 passed, 0 failed** (883 s). The earlier background run (task btklcjbyq) had passed 526 of 526, but I changed the game after it, so this new run is the one that counts.
+
+**Delivered (work root):**
+- `EurophoriaFootball-EuropeanFootball-claude-opus-5-5-xhigh-20261104-071739.html`: one self-contained 2.2 MB file that runs from `file://`.
+- `exit-interview.json`: parses and every field is answered. The in-game About screen shows the same text.
+- The dev folder of the same name holds all source, tools and tests. The root holds only those three plus TASK.md, PLAN.md and STAGE.md.
+
+**Where the file name comes from.** TASK.md lines 11 and 24 give the template `[GameTitle-SOURCE-claude-opus-5-5-xhigh-20261104-071739]`:
+- GameTitle is the picked title without its space: `EurophoriaFootball`. PLAN.md lines 5–6 record the pick: `secrets.randbelow(50)` chose title 0 of 50.
+- SOURCE is TASK.md line 1, "European football", written the same way: `EuropeanFootball`.
+
+The new `task` suite fills the template from TASK.md's own text and checks that both the file and the folder exist under those names.
+
+**Two real bugs found by the line-by-line check, now fixed:**
+- **Mocap clips never played.** The game looked for `window.Mocap`, but the mocap player is a top-level `const`, which never becomes `window.Mocap`. All 31 clips (slides, celebrations, throws, falls) were skipped and the game silently used procedural poses. They now load. Browser screenshots show the slide, get-up, keeper throw, referee gestures, backflip and knee slide playing their clips. A `content` check now guards this.
+- **Leaving the attract demo was slow.** During a slow-motion moment the demo took about 0.7 s to exit. It now leaves within 0.3 s of any input.
+
+**TASK.md, line by line** (`node tools/test.mjs task --report`, 34 of 34 pass):
+
+| TASK.md line | What it checks |
+|---|---|
+| L1 | Super strike fires from Europhoria in play; VAR reviews a penalty; 7 supers, 8 matchday events |
+| L3, L5 | Cup, Kick-About, Penalties and Training are on the menu; the match uses the 40° broadcast view |
+| L7 | The title on the page is the one PLAN.md picked at random |
+| L11 | The package file name; one self-contained file |
+| L13 | Engine v0.85.2 with its changes documented |
+| L15 | HD rigs in new kits (hoops, shirt numbers) |
+| L17 | The body tilt plus 31 mocap clips load |
+| L19 | No audio files. In the browser all 17 sound checks pass: every kind of sound reaches the output, and the sliders at 0 silence it |
+| L21 | The AI Hub's own harness passes |
+| L24 | Dev folder name; root contents; the test server binds 127.0.0.1 and is stopped by its PID |
+| L28 | One test command that prints only failures and a count |
+| L40 | Dev mode opens from the pause menu (headless and in the browser); 30 live sliders; reset to defaults works |
+| L42 | Demo starts after 10 s idle (title → attract → title); any input exits |
+| L44 | Two local players, one per side |
+| L46 | 641 commentary lines in British broadcast style |
+| L49 | 7-tile menus with a prompt footer; d-pad navigation; standard PC keys; mouse hover and click in menus, mouse aim/pass/shoot in play; prompts follow the last device (PlayStation glyphs, Xbox option) |
+| L51 | No dense screens (at most 7 rows a page) |
+| L53 | Touch-only shows the notice and Settings, blocks play, and still runs the demo |
+| L56 | No TODOs, placeholders or stubs |
+| L59 | About screen carries all four sections |
+| L75 | Exit interview shape |
+
+Nothing was committed.
+
+## Source Information
+- **Date:** 2026-11-04 07:17:39
+- **Source:** European football (over the top arcade style)
+- **Plan:** PLAN.md
+- **Genre:** Arcade sports: 5-a-side football (four outfield players and a keeper a side) with a story-driven cup run, Kick-About, Penalties and Training
+- **Perspective:** A TV broadcast camera: side-on, raised 40 degrees, scrolling with play (a custom engine View); Classic three-quarter and Aerial top-down in Settings; turned cameras for replays
+- **Tech:** my-3D2dge v0.85.2 (the handoff package, full engine, five small changes listed in engine/CHANGES-ENGINE.md); its mocap player (readable.js, mocap.js) with a 31-clip set cut from Quaternius, Mesh2Motion and CMU; the AI Hub session client 1.4.0; plain JavaScript (ES2022) in one IIFE built from 40 source fragments into a single HTML file; Node 24 and Playwright 1.63 for the tests
+- **Art Direction:** my-3D2dge's native PS1-era pixel art (ps1 resolution, expanded to any screen): HD Humanoid rigs in team kits with hoops, stripes, halves, sashes and shirt numbers; textured TileMap stadiums with tiered stands, code-drawn crowds, LED boards, floodlight pylons, nets that ripple and a skyline per city; crests, tabloid pages, a travel map and stickers painted in code
+- **Animation:** The engine's procedural Humanoid rig (gait from velocity, attack specs for passes, shots, volleys, pokes and step-overs, poses and faces), mocap clips through Mocap.drive (slide tackles, celebrations, throws, get-ups, dodges), and a new whole-body tilt for keeper dives, diving headers, bicycle kicks, launched players and theatrical dives
+- **Audio:** All in code, no audio files: the engine's chip synth for about 40 effects and 16 original songs (the Europhoria anthem and its variations, Europhoria layers that come in during play); a WebAudio crowd engine (a noise bed that follows the mood, OOOHs, roars, boos, whistles, claps) with sung team chants by an 8-voice formant choir; Animalese-style babble voices for the two commentators, the cast and the echoing stadium PA
+- **Online:** AI Hub Session Protocol v1, shared-world, 2-4 players: a host-authoritative match, snapshots 14 a second and coalesced events 5 a second, client interpolation, the game's own card (the tunnel walkout), server mode, leaving, time-up and finish; it passes the hub harness's automatic check in all four scenarios
+- **Testing:** One command, node tools/test.mjs, 19 suites printing only failures and a count: unit physics, rules, Euphoria and super strikes, AI with a balance soak and a difficulty curve (a bot-driven human side against the CPU at Easy, Normal and Hard), content, UI by pad, keyboard, mouse and touch-only, saves, attract mode, dev mode, all nine training drills, determinism, lint, a full scripted playthrough of the cup and every mode, a fake-hub loopback with latency, jitter and loss, a browser sweep that draws every scene and moment, an audio and input check in Chromium (every kind of sound measured at the master output, the volume sliders, the pause menu's Dev mode, mouse aim, click to pass and shoot), browser checks with the engine's checker at three screen sizes, the real AI Hub harness in four scenarios, and a TASK.md suite that checks every requirement line by line against the running game; screenshots only for looks (561 checks)
+- **Research:** Read the engine's handoff docs (README, API.md, parts of AI_GUIDE.md and API-INDEX.md), the SPORTS kit, the template page and test, the mocap player's header and clip catalogs, and the AI Hub README, harness and session client; no web research
+- **Environment:** Claude Code CLI (headless); Linux; browser unknown
+- **Model:** Anthropic, claude-opus-5-5, reasoning effort xhigh
+- **Usage:** Session time about 3 hours 40 minutes (07:17 to about 10:55); token count and API cost unknown (no usage meter was available to this session)
+
+## Testing Feedback
+1. **How many issues did testing catch?** About 39: 27 in the game and 12 in the tests themselves. The game's: players frozen on their set-piece spots after every restart, keepers who never saved corner-bound shots, a crash when red cards left a side with no outfield players, three crashes at load or on entering a scene (a registry used before it existed, front-end scenes losing their own methods, story data read before it was defined), two training drills that crashed looking up a hidden keeper, a draw-time crash in the attract mode's scripted Save Duel, difficulty that also weakened or strengthened the human's own teammates (so it barely changed anything), humans auto-switched onto their own goalkeeper, passes that under-led moving receivers, a team with no captain, two short commentary pools, mocap clips that never loaded (the game looked for window.Mocap, but the player is a top-level const), an attract-mode exit slowed by a slow-motion moment, Math.random in the simulation, two syntax errors in commentary text, and screen problems (the PA box over the score and the notices, set-piece prompts and the replay tag under the commentary, the logo over the menu, unknown glyphs, a washed-out snow pitch, the results over the LED boards).
+2. **How many would be considered critical issues / game breaking?** 8 were critical: the frozen players, the red-card crash, the three load and scene crashes, the two broken training drills (counted as one), and the two syntax errors that would have stopped the game from loading at all.
+3. **What was the most helpful test you ran?** The AI-versus-AI smoke run in Node and the scripted playthrough that grew out of it: seeded matches for every tactic printing goals, shots, passes, fouls and a stuck-ball counter found the frozen players, the keeper balance and the red-card crash within minutes; the playthrough then drove the whole cup, the ending, Kick-About, Penalties, a drill, About and the attract mode through the real input. Last, a suite that checks TASK.md line by line against the running game found the mocap clips had never loaded: the game had quietly fallen back to its procedural poses.
+4. **What was the least helpful test you ran?** Still screenshots of the super strike: timing a browser screenshot from outside the page to a 0.6-second slow-motion charge-up gave confusing frames, while the headless test that every super path reaches the goal answered the real question. (The opposite lesson: headless tests skip drawing, so the browser sweep that draws every moment was worth adding late; it caught the attract mode's draw-time crash.)
+
+## Engine Feedback
+1. **What did you like most about the engine?** Headless by default with exact fixed steps: the same game.advance drives unit tests, a full playthrough of the game in under two minutes and four networked copies in lockstep. And the Humanoid rig: dressed, shaded characters with kick specs, poses, faces and portraits for free.
+2. **Did you get stuck or guess wrong?** A few times: E.store prefixes its keys (a test read localStorage directly), tools/check.mjs cannot take a ?query (I added a #touchonly deep link), clips cut with a SET: prefix lose it in the set, the mocap player is a top-level const and not window.Mocap (I checked the wrong one, and the clips silently never played until late), and canvas lighting with floodlights makes a night pitch read as day until the ambient is lowered.
+3. **What was the most important thing you had to build yourself?** The football itself: a match simulation (ball physics with woodwork and nets, footballers, keepers, team AI, rules, set pieces, the referee, Euphoria) with a presentation layer that only reads its state and events, so replays, bots, tests, the attract mode and the network host all use the same code path.
+4. **What was the hardest part about using the engine?** Depth and framing in a custom 40-degree view: the goal nets, the LED board faces and the tifo had to be queued at the right anchors to sort against players, and the camera's zoom stacks the scene's start, the player's zoom and the director's own.
+5. **What did you change in the engine?** Five changes, all marked // EF: and listed in CHANGES-ENGINE.md: dialog voices that can be functions (a babble syllable per letter), named audio buses with now() and the noise buffer, football kit patterns and shirt numbers on the Humanoid, a whole-body tilt state for dives and acrobatics, and accented letters in the 5x7 font.
+6. **What would you add to the engine?** A built-in tilt or orientation channel on the Humanoid for dives, falls and acrobatics, together with kit patterns, so sports and action games do not have to patch the rig.
+
+## Prompt Feedback
+1. **What did you like most about this prompt?** It is concrete about the deliverable and the test discipline (one command, only failures, no subagents judging) and leaves the genre, look and scope to the builder; the attached plan made the size of the game explicit.
+2. **What was confusing?** The plan was written for another run (its file and folder names carry a different model, effort and date), so the names had to be re-derived from TASK.md; and the plan asks for more than TASK.md does, so how much of it is required had to be judged.
+3. **What was the hardest thing to do?** Fitting a whole sports game, a story mode, training, the attract mode, dev tools and networked play into one coherent single-file build where every feature is real and tested.
+4. **What would you change in this prompt?** Tie the plan's file names to TASK.md's run name (or mark them as placeholders), and say whether a plan's extra scope is required or optional.

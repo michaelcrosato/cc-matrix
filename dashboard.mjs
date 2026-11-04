@@ -647,6 +647,35 @@ function cutOffRuns() {
   return value;
 }
 
+// ---------------------------------------------------------- this computer
+// What this computer has, for the agents (CLIs → This computer): environments/<computer>.md beside the config, which
+// run-matrix.mjs fills into {{machine}}. The page shows it as the agents get it (without its title and its notes to
+// whoever edits it), with when it was checked; Check again runs check-environment.mjs, which rewrites the part between
+// its markers. Older than STALE_DAYS, the page says to check again.
+const MACHINE_DIR = path.join(path.dirname(CONFIG), 'environments'), STALE_DAYS = 14;
+const machineFile = () => path.join(MACHINE_DIR, `${os.hostname().replace(/[^\w.-]/g, '-')}.md`); // named as check-environment.mjs names it
+function machineInfo() {
+  const file = machineFile();
+  let text = null; try { text = fs.readFileSync(file, 'utf8'); } catch {}
+  const m = text?.match(/^Checked (\d{4}-\d\d-\d\d) (\d\d:\d\d) \(([^)]+)\)(.*)$/m); // the time is this computer's
+  const at = m ? new Date(`${m[1]}T${m[2]}:00`) : null, ageDays = at ? Math.max(0, Math.floor((Date.now() - at) / 864e5)) : null;
+  return { host: os.hostname(), file: path.relative(HERE, file), exists: text != null,
+    text: text?.replace(/<!--[\s\S]*?-->\n?/g, '').replace(/^# .*\n+/, '').trim() ?? null,
+    checkedAt: m ? `${m[1]} ${m[2]}` : null, timeZone: m?.[3] ?? null, quick: /--quick/.test(m?.[4] ?? ''), ageDays, stale: ageDays != null && ageDays >= STALE_DAYS, staleDays: STALE_DAYS };
+}
+let machineCheck = null; // one check at a time; a second Check again waits for the one going
+function checkMachine(quick) {
+  machineCheck ??= new Promise((resolve) => {
+    const child = spawn(process.execPath, [path.join(HERE, 'check-environment.mjs'), '--config', CONFIG, '--dir', MACHINE_DIR, ...(quick ? ['--quick'] : [])],
+      { cwd: HERE, stdio: ['ignore', 'pipe', 'pipe'] });
+    let output = '';
+    child.stdout.on('data', (d) => { output += d; }); child.stderr.on('data', (d) => { output += d; });
+    child.on('error', (e) => resolve({ ok: false, output: e.message }));
+    child.on('close', (code) => resolve({ ok: code === 0, output: output.trim() }));
+  }).finally(() => { machineCheck = null; });
+  return machineCheck;
+}
+
 // ------------------------------------------------------------------ results
 // Whether a run used different text for one of its variants than the config has now (the variant was
 // edited after it ran, so its label is out of date). Runs record a hash of each variant's text
@@ -779,6 +808,7 @@ function results() {
     const dir = path.join(OUT, d.name), r = readJSON(path.join(dir, 'result.json'), null);
     if (!r?.id) continue;
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
+    if (fs.existsSync(path.join(dir, 'goal.md'))) r.hasGoal = true; // sent a /goal: goalMet says how it went, once read
     r.hasInterview = fs.existsSync(path.join(dir, 'work', 'exit-interview.json'));
     if (resumable(dir, r)) r.resumable = true;
     const changed = changedVariants(dir, r, dims, tmpl);
@@ -945,6 +975,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/clis' && m === 'GET') return send(res, 200, await checkClis(url.searchParams.has('refresh')));
+    if (p === '/api/machine' && m === 'GET') return send(res, 200, machineInfo());
+    if (p === '/api/machine' && m === 'POST') { const r = await checkMachine(!!(await body(req))?.quick); return send(res, 200, { ...r, machine: machineInfo() }); }
     if (p === '/api/update-cli' && m === 'POST') return send(res, 200, await updateCli((await body(req)).provider));
     if (p === '/api/smoke' && m === 'POST') {
       const { tests = [] } = await body(req); // [{ key: 'agent:effort', goal }]

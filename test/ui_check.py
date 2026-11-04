@@ -28,22 +28,26 @@ def check(name, ok, detail=''):
     else: failures.append(f'{name}: {detail}')
     print(('  ok   ' if ok else '  FAIL ') + name + (f'  ({detail})' if detail and not ok else ''), flush=True)
 
-# --- a sandbox with realistic runs: three CLIs, two efforts, three variants, a failure, a run with no game
+# --- a sandbox with realistic runs: three CLIs, two efforts, three variants, a failure, a run with no game, a /goal
+# that's met and one that isn't (Codex has none)
 tmp = tempfile.mkdtemp(prefix='matrix-ui-')
 cfg = {'templateFile': 'prompt.md', 'agents': [
     {'id': 'opus', 'provider': 'claude', 'model': 'claude-opus-5-5', 'efforts': ['medium', 'high']},
     {'id': 'gpt-6.1-sol', 'provider': 'codex', 'model': 'gpt-6.1-sol', 'efforts': ['max']},
     {'id': 'gemini', 'provider': 'agy', 'model': 'gemini-4-argon', 'efforts': ['high']}],
   'dimensions': {'source': [{'id': 'kart', 'text': 'A kart racer'}],
-                 'testing': [{'id': 'light', 'text': 'Keep testing light.'}, {'id': 'thorough', 'text': 'Test thoroughly. FAKE:todo'},
-                             {'id': 'broken', 'text': 'FAKE:fail=You have hit your usage limit (429)'}]},
+                 'testing': [{'id': 'light', 'text': 'Keep testing light.'}, {'id': 'thorough', 'text': 'Test thoroughly. FAKE:todo FAKE:goal=unmet'},
+                             {'id': 'broken', 'text': 'FAKE:fail=You have hit your usage limit (429)'}],
+                 'goal': [{'id': 'on', 'text': 'the game file exists.'}]},
   'bins': {p: os.path.join(FAKE, p) for p in ['claude', 'codex', 'grok', 'agy', 'muse']},
   'startGap': 0}  # runs start together, not 3 s apart: the live checks expect two running at once
 json.dump(cfg, open(os.path.join(tmp, 'config.json'), 'w'), indent=2)
 open(os.path.join(tmp, 'prompt.md'), 'w').write('Make {{source}}.\n\nTesting: {{testing}}\n')
 runs, conf = os.path.join(tmp, 'runs'), os.path.join(tmp, 'config.json')
-# The fake codex and grok write their session logs under tmp, where the runner then looks for them.
-env = {**os.environ, 'FAKE_SLEEP_MS': '10', 'CODEX_HOME': os.path.join(tmp, 'codex-home'), 'GROK_HOME': os.path.join(tmp, 'grok-home')}
+# The fake codex and grok write their session logs under tmp, and the fake claude its transcripts, where the runner
+# then looks for them.
+env = {**os.environ, 'FAKE_SLEEP_MS': '10', 'CODEX_HOME': os.path.join(tmp, 'codex-home'), 'GROK_HOME': os.path.join(tmp, 'grok-home'),
+       'CLAUDE_CONFIG_DIR': os.path.join(tmp, 'claude-home')}
 subprocess.run(['node', os.path.join(ROOT, 'run-matrix.mjs'), '--config', conf, '--out', runs, '-j', '4'], check=True, capture_output=True, env=env)
 
 s = socket.socket(); s.bind(('127.0.0.1', 0)); port = s.getsockname()[1]; s.close()
@@ -94,7 +98,7 @@ try:
         box.click(); box.type('opus', delay=30); page.wait_for_timeout(600); page.keyboard.type('-high', delay=30); page.wait_for_timeout(600)
         check('search keeps focus and every keystroke across redraws', page.evaluate('document.activeElement.value') == 'opus-high')
         page.get_by_role('button', name='Clear').first.click(); page.wait_for_timeout(300)
-        rid = 'opus-medium__kart__light'
+        rid = 'opus-medium__kart__light__on'  # every run has the goal's variant
         notes = page.get_by_label(f'Notes for {rid}'); notes.click(); notes.type('half a thought', delay=20)
         n0 = page.locator('table.runs tbody tr').count()
         # meanwhile, in a terminal: a new variant added to the config by hand, and run
@@ -115,6 +119,21 @@ try:
         check('run details show list price, requests, tools, subagents and plan usage',
               all(x in txt for x in ['Model requests', 'command_execution 3', 'not in the CLI\'s own total', 'Plan usage', '5h 12%', 'week 41%', 'pro']), txt[:400])
         page.keyboard.press('Escape'); page.wait_for_timeout(200)
+        # whether each run's /goal was met, read from its session: a column, a flag on the ones that weren't, and in details
+        goals = sorted(set(g.strip() for g in page.locator('table.runs td.goalcell').all_inner_texts()))
+        check('the goal met column shows met, not met and skipped (Codex has no /goal)', {'met', 'not met', 'skipped'} <= set(goals), str(goals))
+        page.locator('table.runs tbody tr', has_text='opus').filter(has_text='thorough').filter(has_text='ok').first.get_by_role('button', name='details').click()
+        page.wait_for_selector('#modal[open] >> text=Goal met')
+        txt = page.locator('#modal').inner_text()
+        check('a run whose goal was never met says so in details, with what its last check said',
+              'Never met (9 checks; Claude Code ended the turn itself' in txt and 'does not show every feature working' in txt, txt[:600])
+        page.keyboard.press('Escape'); page.wait_for_timeout(200)
+        # CLIs → This computer: the sandbox's computer has no environment file yet, and the card says so (a page of its
+        # own, so the CLIs tab's save bar isn't left beside Setup's for the steps below)
+        cp = br.new_page(viewport={'width': 1280, 'height': 900}); cp.goto(base + '/#clis'); cp.wait_for_selector('#machinecard >> text=This computer')
+        card = cp.locator('#machinecard').inner_text(); cp.close()
+        check('CLIs → This computer says the computer has no environment file yet, and offers to write one',
+              'has no environment file yet' in card and 'Check this computer' in card, card[:300])
         # Setup: bulk add a pasted list of games to {{source}} (numbered, a chosen short name, a duplicate, a comment)
         page.goto(base + '/#setup'); page.wait_for_selector('text=Bulk add…')
         page.locator('.card', has=page.locator('.tag', has_text='{{source}}')).get_by_role('button', name='Bulk add…').click()

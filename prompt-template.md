@@ -29,6 +29,9 @@ Testing: {{testing}}
 
 Effort: {{spend}}
 
+## This computer
+{{machine}}
+
 ## Goal
 
 {{premise}}
