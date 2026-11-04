@@ -62,6 +62,9 @@
     "aiHub": {
       "$ref": "#/$defs/aiHub"
     },
+    "stages": {
+      "$ref": "#/$defs/stages"
+    },
     "result": {
       "$ref": "#/$defs/result"
     },
@@ -233,6 +236,234 @@
       },
       "additionalProperties": {
         "description": "Any other hub:* field from the game's <head> (session, sessionPlayers, sessionMode, sessionMinutes, sessionGoal, sessionHowto, webgpu …) or the agent's answers."
+      }
+    },
+    "stages": {
+      "description": "Only on a run in stages (result.stage). Its game was made by every step of its chain: each step’s figures, first to last (this run last), and them added up. A plan makes no game, so this is the only record that has its figures. Taken from each step’s result.json when the game is stamped, else, when an earlier run has gone since, kept from the record already in the game.",
+      "type": "object",
+      "required": [
+        "steps",
+        "total",
+        "complete"
+      ],
+      "properties": {
+        "steps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "stage",
+              "model"
+            ],
+            "properties": {
+              "id": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The step’s run id: its folder in runs/."
+              },
+              "stage": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "plan",
+                  "build",
+                  "content"
+                ]
+              },
+              "model": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The model ID, as in result.model.",
+                "examples": [
+                  "claude-opus-5-5"
+                ]
+              },
+              "modelName": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "The model as ai-hub writes it.",
+                "examples": [
+                  "Claude Opus 5.5"
+                ]
+              },
+              "effort": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "As aiHub.effort writes it.",
+                "examples": [
+                  "max",
+                  "high-ultracode"
+                ]
+              },
+              "harness": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "Claude Code",
+                  "Codex"
+                ]
+              },
+              "status": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "examples": [
+                  "ok"
+                ]
+              },
+              "startedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "finishedAt": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "format": "date-time"
+              },
+              "wallMinutes": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Wall-clock minutes, all its sessions."
+              },
+              "inputTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Every token sent, cached included."
+              },
+              "outputTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Output, reasoning included."
+              },
+              "cachedTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Cache reads."
+              },
+              "reasoningTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Thinking (part of output)."
+              },
+              "totalTokens": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Input + output."
+              },
+              "costUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "The cost the CLI reported (Claude Code, Grok), else null."
+              },
+              "apiCostUsd": {
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "description": "Its tokens at the labs’ public API list prices, so it compares across CLIs; not what a subscription paid."
+              }
+            }
+          }
+        },
+        "total": {
+          "type": "object",
+          "description": "The steps’ figures added up; null where any step lacks that figure.",
+          "properties": {
+            "wallMinutes": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Wall-clock minutes, all its sessions."
+            },
+            "inputTokens": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Every token sent, cached included."
+            },
+            "outputTokens": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Output, reasoning included."
+            },
+            "cachedTokens": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Cache reads."
+            },
+            "reasoningTokens": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Thinking (part of output)."
+            },
+            "totalTokens": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Input + output."
+            },
+            "costUsd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "The cost the CLI reported (Claude Code, Grok), else null."
+            },
+            "apiCostUsd": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "description": "Its tokens at the labs’ public API list prices, so it compares across CLIs; not what a subscription paid."
+            }
+          }
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "False when fewer steps were found than result.chain has (an earlier run deleted before it was ever stamped here)."
+        }
       }
     },
     "result": {

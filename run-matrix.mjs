@@ -48,7 +48,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, unstamped, upgrade } from './run-record.mjs';
+import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, stepOf, unstamped, upgrade } from './run-record.mjs';
 
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
@@ -499,6 +499,30 @@ const DEFAULT_EXTRA = { claude: ['--dangerously-skip-permissions'],
   grok: ['--always-approve'], agy: ['--dangerously-skip-permissions'], muse: ['--yolo'] };
 const extra = (p) => cfg.extraArgs?.[p] ?? DEFAULT_EXTRA[p] ?? [];
 
+// Each run on its own (the config's isolate; on unless false), so runs compare and nothing of this computer's own
+// setup, or of another run, gets in. No window can open: DISPLAY and WAYLAND_DISPLAY are unset, so a headed browser
+// fails instead (xvfb-run still works). Claude Code reads no CLAUDE.md, no MCP servers and no auto memory (it would
+// share this repo's, which runs inside runs/ read and wrote); Grok no memory and nothing of Claude Code's (CLAUDE.md,
+// skills, rules, MCP servers, hooks); Muse no rules or skills of other CLIs. No switch was found for Codex's
+// ~/.codex/AGENTS.md, Grok's ~/.grok/AGENTS.md or agy's ~/.gemini/GEMINI.md: those still load.
+const ISOLATE = cfg.isolate !== false;
+const ISOLATE_ENV = {
+  claude: { CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1', CLAUDE_CODE_DISABLE_CLAUDE_MDS: '1' },
+  grok: { GROK_MEMORY: '0', ...Object.fromEntries(['AGENTS', 'SKILLS', 'RULES', 'MCPS', 'HOOKS'].map((k) => [`GROK_CLAUDE_${k}_ENABLED`, '0'])) },
+};
+const ISOLATE_ARGS = { claude: ['--strict-mcp-config'], muse: ['--no-foreign-personal-context'] };
+const NO_WINDOW = ['DISPLAY', 'WAYLAND_DISPLAY'];
+// A CLI's extra flags, then the isolating ones it doesn't have already.
+const flagsOf = (p) => [...extra(p), ...(ISOLATE ? ISOLATE_ARGS[p] ?? [] : []).filter((a) => !extra(p).includes(a))];
+function agentEnv(p) {
+  if (!ISOLATE) return process.env;
+  const env = { ...process.env, ...ISOLATE_ENV[p] };
+  for (const k of NO_WINDOW) delete env[k];
+  return env;
+}
+// The same as a shell prefix, for Run → Preview.
+const envPrefix = (p) => ISOLATE ? ['env', ...NO_WINDOW.flatMap((k) => ['-u', k]), ...Object.entries(ISOLATE_ENV[p] ?? {}).map(([k, v]) => `${k}=${v}`)].join(' ') + ' ' : '';
+
 // Each returns the command line for one run. promptFile is the run's prompt.md,
 // for CLIs that can read the prompt from a file instead of stdin.
 const providers = {
@@ -513,7 +537,7 @@ const providers = {
     if (effort) argv.push('--effort', effort);
     // Always set Ultracode explicitly so a global setting can't leak into the comparison.
     argv.push('--settings', JSON.stringify({ ultracode: !!run.ultracode }));
-    argv.push(...extra('claude'));
+    argv.push(...flagsOf('claude'));
     return { bin: binOf('claude'), argv, promptInArgs: !!goal };
   },
   codex(agent, effort) {
@@ -544,7 +568,7 @@ const providers = {
     const goal = goalMessage(run);
     const argv = ['exec', '--json', '--model', agent.model];
     if (effort) argv.push('--reasoning-effort', effort);
-    argv.push(...extra('muse'), ...(goal ? [goal] : ['--prompt-file', promptFile]));
+    argv.push(...flagsOf('muse'), ...(goal ? [goal] : ['--prompt-file', promptFile]));
     return { bin: binOf('muse'), argv, promptInArgs: true };
   },
 };
@@ -559,7 +583,7 @@ function terminalOf(run, resumes = false) {
   const head = `# ${run.agent.id} ${parseEffort(run.effort ?? 'default').label}${run.ultracode ? '-uc' : ''}${where} (${CLIS[run.agent.provider] ?? run.agent.provider})`;
   if (resumes) {
     const cut = cutOf(run), p = cut ? { dir: cut.dir, r: { sessionId: cutSession(cut).sessionId } } : prevRun(run);
-    return [`${head}: carries on with its session where it ${cut ? 'was cut off' : 'stopped'}`, `d=${sh(rel(p.dir))}`, `(cd "$d/work" && ${sh(binOf('claude'))} -p … --resume ${sh(p.r.sessionId)} …)`];
+    return [`${head}: carries on with its session where it ${cut ? 'was cut off' : 'stopped'}`, `d=${sh(rel(p.dir))}`, `(cd "$d/work" && ${envPrefix('claude')}${sh(binOf('claude'))} -p … --resume ${sh(p.r.sessionId)} …)`];
   }
   let text;
   try { text = st ? stageTexts(run).text : buildPrompt(run); } catch (e) { return [head, `# can't start: ${e.message}`]; }
@@ -567,7 +591,7 @@ function terminalOf(run, resumes = false) {
   const args = argv.map((a) => a === '\0prompt.md' ? '../prompt.md' : a === text ? '"$(cat ../prompt.md)"' : sh(a));
   const make = st && run.parentDir ? `cp -r ${sh(rel(run.parentDir) + '/work')} "$d/work"   # a copy of the folder it continues from (without node_modules, .git)`
     : 'mkdir -p "$d/work"';
-  return [head, `d=${sh(dir)}`, make, `(cd "$d/work" && ${[sh(bin), ...args].join(' ')}${promptInArgs ? '' : ' < ../prompt.md'})`];
+  return [head, `d=${sh(dir)}`, make, `(cd "$d/work" && ${envPrefix(run.agent.provider)}${[sh(bin), ...args].join(' ')}${promptInArgs ? '' : ' < ../prompt.md'})`];
 }
 
 if (args.rename.length) { try { renameVariants(args.rename); } catch (e) { console.error(e.message); process.exit(1); } process.exit(0); }
@@ -1143,7 +1167,7 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null, base 
   const exitCode = await new Promise((resolve) => {
     // On Windows, npm .cmd shims need a shell; quote args so prompts survive it.
     const a = isWin ? argv.map((x) => `"${String(x).replace(/"/g, '\\"')}"`) : argv;
-    const child = spawn(bin, a, { cwd: path.join(dir, 'work'), shell: isWin, detached: !isWin, env: process.env });
+    const child = spawn(bin, a, { cwd: path.join(dir, 'work'), shell: isWin, detached: !isWin, env: agentEnv(run.agent.provider) });
     const c = { run, child, start, err, timer: null };
     live.set(run.id, c);
     if (base) writeUnfinished(dir, { base, part: { n: part, startedAt: new Date(start).toISOString(), cliVersion: cliVersions[run.agent.provider],
@@ -1227,7 +1251,7 @@ async function runOne(run) {
   const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
   // What the run is made with, kept in unfinished.json while it runs, so a cut-off run carries on as itself.
   const base = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
-    variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), ...stageFields(run, work, parent, given), timeZone: TIME_ZONE };
+    variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), ...stageFields(run, work, parent, given), timeZone: TIME_ZONE, isolated: ISOLATE };
   console.log(`▶ ${run.id}${parent ? `  (${run.stage.id}, from ${parent.dir})` : ''}`);
   const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, limitOf(run), 0, null, base);
 
@@ -1249,7 +1273,7 @@ async function runOne(run) {
   const result = { id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
     variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
     wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...staged, ...exitInterview(home, !!run.stage, staged.expectsGame),
-    startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(), timeZone: TIME_ZONE };
+    startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(), timeZone: TIME_ZONE, isolated: ISOLATE };
   fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
   fs.rmSync(path.join(home, UNFINISHED), { force: true });
   finished().set(run.key, { r: result, dir: id }); // so the runs continuing from it can start
@@ -1591,7 +1615,7 @@ function stampGame(dir, r, combo) {
   let html; try { html = fs.readFileSync(file, 'utf8'); } catch { return; }
   // What only the run knew (its template, each variant's text as sent) is kept from the record already in the game
   // (schema 1 too) when it's stamped again without the run at hand (--stamp, --reparse).
-  const was = upgrade(readRecord(html))?.prompt ?? {};
+  const old = upgrade(readRecord(html)), was = old?.prompt ?? {};
   let history = []; try { history = JSON.parse(fs.readFileSync(path.join(outDir, 'prompt-history.json'), 'utf8')); } catch {}
   const version = history.find((e) => e.hash === r.promptVersion);
   // Each section's variant as it was sent: the run's own, else the one in the record already there, else the config's
@@ -1617,9 +1641,17 @@ function stampGame(dir, r, combo) {
   const questions = Object.fromEntries(Object.entries(sections).map(([d, s]) => [d, questionsOf(s.text)]).filter(([, q]) => q.length));
   const exit = read(path.join('work', EXIT_FILE));
   const interview = { file: exit == null ? null : EXIT_FILE, ...(exit == null ? {} : parseInterview(exit, questions)), reply: read('reply.md') };
+  // A stage run's earlier steps (the plan it was built from …), first first: from their result.json, else, when one
+  // has gone since, as the record already in the game has them.
+  let earlier = [];
+  if (r.stage) {
+    for (let id = r.parentId, seen = new Set(); id && !seen.has(id);) { seen.add(id); const p = readResult(id); if (!p) break; earlier.unshift(stepOf(p)); id = p.parentId; }
+    const kept = old?.stages?.steps?.slice(0, -1) ?? [];
+    if (kept.length > earlier.length) earlier = kept;
+  }
   const page = unstamped(html);
   fs.writeFileSync(file, stampHtml(page, makeRecord({ result: r, lab: labOf({ model: r.model, provider: r.provider }),
-    cli: CLIS[r.provider] ?? r.provider, page, prompt, interview })));
+    cli: CLIS[r.provider] ?? r.provider, page, prompt, interview, earlier })));
 }
 
 // Take runs round-robin across CLIs so parallel slots go to different services (each keeps

@@ -9,6 +9,8 @@
 //   schema, tool, stampedAt, id, lab, cli
 //   aiHub      AI Hub catalogue fields: named and written the way ai-hub's catalogue has them (its data/overrides.json),
 //              so an import can take them as they are
+//   stages     only on a run in stages: each step's model, time, tokens and cost (the plan's too, which makes no game
+//              of its own), first to last, and them added up
 //   result     the run's result.json as the runner wrote it (everything the dashboard shows of a run), minus its
 //              session id and the plan's usage, which are the account's
 //   prompt     the prompt as filled for this run, its template, each section's variant and the /goal message
@@ -142,13 +144,33 @@ export function hubFields(result, page = '', answers = null) {
   // the genre if there's none, and anything else is left out, so the type is Game.
   if (hub.type && !HUB_TYPES.includes(hub.type)) { const g = hubValue('genre', hub.type); if (HUB_GENRES.includes(g)) hub.genre ??= g; delete hub.type; }
   hub.type ??= 'Game';
-  const effort = String(result.effort ?? '').replace(/-uc$/, '-ultracode') || null;
+  const effort = effortName(result.effort);
   Object.assign(hub, { model: displayModel(result.model), effort, harness: HARNESS[result.provider] ?? result.provider ?? null, sourceDate: result.startedAt ?? null });
   // The catalogue's own fields first, in one order for every game, then any others (the hub's session fields, say).
   const first = Object.fromEntries(HUB_ORDER.filter((k) => k in hub).map((k) => [k, hub[k]]));
   return { ...first, ...hub, provenance: { sourceKind: 'cc-matrix-run', artifactId: result.id, sourceDate: result.startedAt ?? null } };
 }
 const HUB_ORDER = ['name', 'tagline', 'description', 'type', 'genre', 'source', 'series', 'players', 'controls', 'tags', 'model', 'effort', 'harness', 'sourceDate'];
+// An effort as the catalogue writes it: high-uc → high-ultracode.
+const effortName = (e) => String(e ?? '').replace(/-uc$/, '-ultracode') || null;
+
+// ------------------------------------------------------------ the steps of a run in stages
+// A later stage's game was made by every step of its chain: the plan it was built from, the build a content pass
+// added to. A plan makes no game, so its figures would be in no record: a stage run's record has each step's, first
+// to last (its own last), and them added up.
+const STEP_SUMS = ['wallMinutes', 'inputTokens', 'outputTokens', 'cachedTokens', 'reasoningTokens', 'totalTokens', 'costUsd', 'apiCostUsd'];
+export function stepOf(r) {
+  return { id: r.id ?? null, stage: r.stage ?? null, model: r.model ?? null, modelName: displayModel(r.model), effort: effortName(r.effort),
+    harness: HARNESS[r.provider] ?? r.provider ?? null, status: r.status ?? null, startedAt: r.startedAt ?? null, finishedAt: r.finishedAt ?? null,
+    ...Object.fromEntries(STEP_SUMS.map((k) => [k, typeof r[k] === 'number' ? r[k] : null])) };
+}
+// earlier: the steps before this run (stepOf each), first first. complete is false when fewer steps were found than
+// its chain has (an earlier run deleted since, say); a total is null when any step lacks that figure.
+export function stagesOf(earlier, result) {
+  const steps = [...earlier, stepOf(result)];
+  const add = (k) => steps.some((s) => typeof s[k] !== 'number') ? null : Math.round(steps.reduce((n, s) => n + s[k], 0) * 1e6) / 1e6;
+  return { steps, total: Object.fromEntries(STEP_SUMS.map((k) => [k, add(k)])), complete: steps.length >= (result.chain?.length ?? steps.length) };
+}
 
 // ------------------------------------------------------------ the record
 // Every text in it written from ~ instead of the home folder (a reply or an error naming a file, say).
@@ -162,11 +184,11 @@ function scrubbed(value, home) {
 
 // A run's record (schema 2). result: its result.json; page: the game (for what ai-hub reads from its head); prompt:
 // { version, number, savedAt, firstRanAt, template, text, stageText?, goal, sections }; interview: { file, answers |
-// error + text, reply }.
-export function makeRecord({ result, lab = null, cli = null, page = '', prompt = {}, interview = {}, home = os.homedir() }) {
+// error + text, reply }; earlier: for a stage run, the steps before it (stepOf each), first first.
+export function makeRecord({ result, lab = null, cli = null, page = '', prompt = {}, interview = {}, earlier = [], home = os.homedir() }) {
   const res = Object.fromEntries(Object.entries(result).filter(([k, v]) => !PRIVATE.includes(k) && v !== undefined));
   return scrubbed({ schema: SCHEMA, tool: 'cc-matrix', stampedAt: new Date().toISOString(), id: result.id, lab, cli,
-    aiHub: hubFields(result, page, interview.answers), result: res, prompt, interview }, home);
+    aiHub: hubFields(result, page, interview.answers), ...(result.stage ? { stages: stagesOf(earlier, result) } : {}), result: res, prompt, interview }, home);
 }
 
 // A record in schema 2's shape. Schema 1 (games stamped before 2026-11-02) had result.json's fields at its top level
