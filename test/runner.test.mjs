@@ -174,6 +174,14 @@ test('/goal: the message is the command and TASK.md holds the prompt; Codex gets
   const unmet = result(sb, 'opus-low__u__on');
   assert.deepEqual(pick(unmet), [false, 9, true, 'The game exists, but the transcript does not show every feature working.']);
   assert.equal(unmet.status, 'ok'); // the run itself finished: the goal is a flag of its own
+  // Claude Code ending the turn itself prints an empty result; the reply is the last response's text.
+  const unmetReply = path.join(sb.out, 'opus-low__u__on', 'reply.md');
+  assert.match(fs.readFileSync(unmetReply, 'utf8'), /^Done\.\n\n## Source Information/);
+  assert.equal(unmet.replyChars, fs.readFileSync(unmetReply, 'utf8').length);
+  // A run parsed before that has no reply.md: --reparse fills it in (and leaves a reply.md that's there alone).
+  fs.rmSync(unmetReply);
+  fs.writeFileSync(path.join(sb.out, 'opus-low__u__on', 'result.json'), JSON.stringify({ ...unmet, replyChars: 0 }));
+  fs.writeFileSync(path.join(sb.out, 'opus-low__a__on', 'reply.md'), 'kept');
   assert.deepEqual(pick(x), [undefined, undefined, undefined, undefined]);
   // results.csv has it too; --reparse reads it again, and leaves a run whose transcript is gone as it was.
   const csv = fs.readFileSync(path.join(sb.out, 'results.csv'), 'utf8').split('\n'), head = csv[0].split(','), row = csv.find((l) => l.startsWith('opus-low__u__on,')).split(',');
@@ -181,6 +189,9 @@ test('/goal: the message is the command and TASK.md holds the prompt; Codex gets
   fs.writeFileSync(path.join(sb.out, 'opus-low__a__on', 'result.json'), JSON.stringify({ ...result(sb, 'opus-low__a__on'), goalMet: false, goalChecks: 0 }));
   assert.equal(runner(sb, ['--reparse']).status, 0);
   assert.deepEqual(pick(result(sb, 'opus-low__a__on')), [true, 1, undefined, undefined]);
+  assert.match(fs.readFileSync(unmetReply, 'utf8'), /^Done\.\n\n## Source Information/);
+  assert.ok(result(sb, 'opus-low__u__on').replyChars > 0);
+  assert.equal(fs.readFileSync(path.join(sb.out, 'opus-low__a__on', 'reply.md'), 'utf8'), 'kept');
   fs.rmSync(path.join(sb.env.CLAUDE_CONFIG_DIR, 'projects'), { recursive: true, force: true });
   assert.equal(runner(sb, ['--reparse']).status, 0);
   assert.deepEqual(pick(result(sb, 'opus-low__u__on')), [false, 9, true, 'The game exists, but the transcript does not show every feature working.']);

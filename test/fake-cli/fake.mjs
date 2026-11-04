@@ -195,8 +195,11 @@ export async function run(cli) {
       for (const [k, v] of Object.entries(b)) u[k] = (u[k] ?? 0) + v;
     }
     const cost = 0.0425 + (since?.totalCostUSD ?? 0), apiMs = 1500 + (since?.totalAPIDuration ?? 0);
+    // Claude Code ending a /goal turn itself (the check blocked it 9 times) prints an empty result: the answer is
+    // only in the last response.
+    const forced = cli === 'claude' && goal && /FAKE:goal=unmet/.test(prompt);
     line({ type: 'result', subtype: fail ? 'error_during_execution' : 'success', is_error: !!(fail || limit), ...(fail ? { errors: [fail] } : {}),
-      duration_ms: 2000, duration_api_ms: apiMs, num_turns: 4, ...(goal ? { result_index: 1 } : {}), result: fail ? '' : reply,
+      duration_ms: 2000, duration_api_ms: apiMs, num_turns: 4, ...(goal ? { result_index: 1 } : {}), result: fail || forced ? '' : reply,
       session_id: sessionId, total_cost_usd: cost, ...(cli === 'claude' ? { subagent_stats: { spawned: 1 }, ttft_ms: 900 } : {}), modelUsage });
     if (cli === 'grok' && process.env.GROK_HOME) grokSession(sessionId);
     if (transcript) claudeTranscript(transcript, { totalCostUSD: cost, totalAPIDuration: apiMs, modelUsage }, goal && !fail && !limit ? goalChecks(prompt) : []); // a session that errored got no check

@@ -762,15 +762,20 @@ function claudePlan(events) {
 
 // Claude Code's stream-json, which Grok's streaming-messages-json copies: one event per line, then the
 // result line. Runs from before stream-json saved only the result line, so they have no tool counts.
+// last: the latest response's text (see parseClaude).
 function readStream(text) {
-  const s = { tools: {}, ids: new Set(), results: [], toolErrors: 0, compactions: 0, limits: [] };
+  const s = { tools: {}, ids: new Set(), results: [], toolErrors: 0, compactions: 0, limits: [], last: null };
   for (const l of text.split('\n')) {
     if (!l.startsWith('{')) continue;
     let e; try { e = JSON.parse(l); } catch { continue; }
     const content = Array.isArray(e.message?.content) ? e.message.content : [];
     if (e.type === 'assistant') { // a response arrives in several events, one per content block
       if (e.message.id) s.ids.add(e.message.id);
-      for (const b of content) if (b.type === 'tool_use' || b.type === 'server_tool_use') add(s.tools, b.name);
+      if (!e.message.id || s.last?.id !== e.message.id) s.last = { id: e.message.id, text: [], madeUp: e.message.model === '<synthetic>' };
+      for (const b of content) {
+        if (b.type === 'tool_use' || b.type === 'server_tool_use') add(s.tools, b.name);
+        else if (b.type === 'text' && b.text) s.last.text.push(b.text);
+      }
     } else if (e.type === 'user') s.toolErrors += content.filter((b) => b.type === 'tool_result' && b.is_error).length;
     else if (e.type === 'system' && e.subtype === 'compact_boundary') s.compactions++;
     else if (e.type === 'rate_limit_event' && e.rate_limit_info) s.limits.push(e.rate_limit_info);
@@ -794,10 +799,14 @@ function minusSince(j, since) {
     duration_api_ms: j.duration_api_ms == null ? null : j.duration_api_ms - (since.totalAPIDuration ?? 0) };
 }
 
+// The reply is the result line's text. When Claude Code ends a /goal turn itself (the check blocked the stop
+// 9 times in a row), that text is empty, though the agent's last response holds its final answer: the reply is
+// then that response's text, as for a session that ended without its runner (see sessionEnd).
 function parseClaude(text, agent, ctx) {
   const s = readStream(text), j = minusSince(s.results.at(-1), ctx?.since);
   if (!j) return { isError: true };
-  return { reply: j.result, costUsd: j.total_cost_usd, costSource: j.total_cost_usd != null ? 'reported' : 'none',
+  const last = s.last && !s.last.madeUp ? s.last.text.join('\n').trim() : '';
+  return { reply: j.result || (j.is_error ? j.result : last), costUsd: j.total_cost_usd, costSource: j.total_cost_usd != null ? 'reported' : 'none',
     ...usageTotals(j), apiMinutes: j.duration_api_ms ? j.duration_api_ms / 60000 : null,
     // Each /goal round ends with a result line, whose num_turns counts that round only.
     turns: s.results.reduce((n, r) => n + (r.num_turns ?? 0), 0) || j.num_turns,
@@ -1674,7 +1683,11 @@ function reparseAll() {
         { cwd: path.join(outDir, d, 'work'), start: Date.parse(p.startedAt), end: Date.parse(p.finishedAt), since: p.since })); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
     const m = combineParts(ms);
     if (r.sessionLog === 'read' && m.sessionLog !== 'read') { console.log(`· ${d}: session log ${m.sessionLog ?? 'not found'} now; kept its figures`); continue; }
-    m.replyChars = String(ms.findLast((x) => x.reply)?.reply ?? '').trim().length;
+    const reply = String(ms.findLast((x) => x.reply)?.reply ?? '').trim(), replyFile = path.join(outDir, d, 'reply.md');
+    m.replyChars = reply.length;
+    // A reply read now that wasn't then (a /goal turn Claude Code ended itself, see parseClaude) fills in reply.md;
+    // one that's there is left as it is.
+    if (reply && !(fs.existsSync(replyFile) && fs.statSync(replyFile).size)) fs.writeFileSync(replyFile, reply);
     for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k]; else delete r[k];
     if (r.status !== 'ok' && m.error) r.error = m.error; // e.g. Claude Code's usage limit, which was "exit code 1" before
     try { if (r.entry) r.todos = markers(unstamped(fs.readFileSync(path.join(outDir, r.entry), 'utf8'))); } catch {}
@@ -1779,8 +1792,8 @@ function measureOutput(work, given = null) {
 // alone. Most of it can't be in the prompt: time, tokens and cost are only known at the end. The format, and the
 // tools that read it back, are in run-record.mjs: an inert <script type="application/json" id="cc-matrix-run">
 // block just before </body>, with the AI Hub's catalogue fields, result.json, the prompt and the exit interview.
-// Stamping again replaces it (--reparse refreshes stamped games, --stamp stamps finished ones), and kb, loc, todos
-// and gameSha256 are measured without it.
+// Stamping again replaces it when it changed (--reparse refreshes stamped games, --stamp stamps finished ones), and
+// kb, loc, todos and gameSha256 are measured without it.
 const isStamped = (r) => { try { return r.delivered && STAMP_RE.test(fs.readFileSync(path.join(outDir, r.entry), 'utf8')); } catch { return false; } };
 function stampGame(dir, r, combo) {
   if (!r.delivered || !r.entry) return;
@@ -1823,9 +1836,13 @@ function stampGame(dir, r, combo) {
     const kept = old?.stages?.steps?.slice(0, -1) ?? [];
     if (kept.length > earlier.length) earlier = kept;
   }
-  const page = unstamped(html);
-  fs.writeFileSync(file, stampHtml(page, makeRecord({ result: r, lab: labOf({ model: r.model, provider: r.provider }),
-    cli: CLIS[r.provider] ?? r.provider, page, prompt, interview, earlier })));
+  const page = unstamped(html), rec = makeRecord({ result: r, lab: labOf({ model: r.model, provider: r.provider }),
+    cli: CLIS[r.provider] ?? r.provider, page, prompt, interview, earlier });
+  // A game whose record would only get a new stampedAt is left as it is, so stamping again (--reparse, --stamp)
+  // rewrites only the games whose records changed.
+  const stamped = readRecord(html), same = (a) => JSON.stringify({ ...a, stampedAt: null });
+  if (stamped && same(stamped) === same(rec)) return;
+  fs.writeFileSync(file, stampHtml(page, rec));
 }
 
 // Take runs round-robin across CLIs so parallel slots go to different services (each keeps

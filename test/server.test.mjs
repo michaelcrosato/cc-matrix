@@ -256,6 +256,34 @@ test('variants runs used: their text from the config while it matches, else read
   assert.deepEqual((await dd.api('/api/variants')).json, ran);
 });
 
+test('feedback: each exit interview\'s answers with the questions the run was sent, also after their text is edited', async (t) => {
+  const s = sandbox({ template: 'Make a small game. Save exit-interview.json.\n\nTesting: {{testing}}\n\nTesting Feedback\n\n{{testingFeedback}}\n',
+    dimensions: { testing: [{ id: 'a', text: 'Test it.' }], testingFeedback: [{ id: 'tf', text: '- How many issues?\n- How many critical?' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  assert.equal(runner(s, []).status, 0);
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const [id] = fs.readdirSync(s.out).filter((d) => fs.existsSync(path.join(s.out, d, 'result.json')));
+  // The fake answers four testing questions where two were asked: the extra two have no question. engineFeedback
+  // isn't a dimension here, so its answers have none either; objects (sourceInformation, aiHub) aren't lists.
+  const asked = [{ question: 'How many issues?', answer: '3 issues' }, { question: 'How many critical?', answer: '1 critical' },
+    { question: null, answer: 'the smoke test' }, { question: null, answer: 'none' }];
+  let fb = (await dd.api('/api/feedback')).json;
+  assert.deepEqual(Object.keys(fb), [id]);
+  assert.deepEqual(fb[id].testingFeedback, asked);
+  assert.deepEqual(fb[id].engineFeedback.map((a) => a.question), [null, null, null, null, null, null]);
+  assert.deepEqual(Object.keys(fb[id]).sort(), ['engineFeedback', 'promptFeedback', 'testingFeedback']);
+  // The game's title from its exit interview is in the results, for Insights' title check.
+  assert.equal((await dd.api('/api/results')).json.find((r) => r.id === id).hubName, 'Fake Game');
+  // The questions edited since: the run's are read back out of the prompt it was sent.
+  const cfg = (await dd.api('/api/config')).json.config;
+  cfg.dimensions.testingFeedback[0].text = '- Something else?';
+  assert.equal((await dd.api('/api/config', 'PUT', cfg)).status, 200);
+  await new Promise((r) => setTimeout(r, 1000)); // past the signature cache
+  fb = (await dd.api('/api/feedback')).json;
+  assert.deepEqual(fb[id].testingFeedback, asked);
+});
+
 test('a running batch takes changes: limits, pause and ending a run, checked first and answered with its state', async (t) => {
   const sb2 = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: `FAKE:sleep=1500 ${id}` })) },
     agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });

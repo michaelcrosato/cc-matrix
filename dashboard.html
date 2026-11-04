@@ -224,13 +224,27 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
 .finding .ftitle { font-weight: 650; font-size: 14.5px; flex: 1 1 260px; min-width: 0; }
 .finding dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 6px 12px; margin: 10px 0 0; }
 .finding dt { color: var(--muted); font-size: 12.5px; padding-top: 1px; }
-.finding dd { margin: 0; }
+.finding dd { margin: 0; min-width: 0; } /* a wide table in it scrolls instead of widening the page */
 .finding code, .audit-p code { font-family: ui-monospace, "Cascadia Mono", "Ubuntu Mono", Menlo, monospace; font-size: 12.5px; background: var(--code); padding: 1px 5px; border-radius: 5px; overflow-wrap: anywhere; }
 .sev-critical, .sev-high { color: var(--bad); } .sev-medium { color: var(--warn); } .sev-low, .sev-info { color: var(--muted); }
 .tag.sev-critical, .tag.sev-high { background: color-mix(in srgb, var(--bad) 12%, var(--panel)); }
 .tag.sev-medium { background: color-mix(in srgb, var(--warn) 14%, var(--panel)); }
 .tag.st-fixed { color: var(--ok); } .tag.st-open, .tag.st-yours { color: var(--warn); }
 .audit-list { margin: 8px 0 0; padding-left: 20px; } .audit-list li + li { margin-top: 6px; }
+
+/* ---- Insights: what the agents said ---- */
+.fb-group { border-top: 1px solid var(--line); padding: 2px 0; }
+.fb-group > summary { cursor: pointer; padding: 8px 0; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; list-style: none; }
+.fb-group > summary::-webkit-details-marker { display: none; }
+.fb-group > summary::before { content: "▸"; color: var(--muted); width: 12px; flex: none; }
+.fb-group[open] > summary::before { content: "▾"; }
+.fb-group > summary strong { font-weight: 650; }
+.fb-list { list-style: none; margin: 0 0 8px; padding: 0; }
+.fb-list li { padding: 8px 0 8px 12px; border-left: 3px solid var(--line); margin-top: 6px; }
+.fb-list .who { font-size: 12px; color: var(--muted); display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.fb-list .ans { white-space: pre-wrap; overflow-wrap: anywhere; margin-top: 2px; }
+.fb-search { flex: 1 1 220px; min-width: 0; }
+mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inherit; border-radius: 3px; padding: 0 1px; }
 
 /* ---- Touch screens: bigger targets, and 16px text in fields so iOS Safari doesn't zoom in on focus ---- */
 @media (pointer: coarse) {
@@ -335,7 +349,7 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
   .tiles { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; }
   .tile { min-width: 0; }
   .tile .v { font-size: 22px; }
-  .finding dl { grid-template-columns: 1fr; gap: 2px; }
+  .finding dl { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .cmpctl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 10px; }
   .cmpctl > select, .cmpctl > .row { width: 100%; min-width: 0; } .cmpctl > .row select { flex: 1; min-width: 0; }
   .cmpctl .cl { color: var(--muted); font-size: 13px; }
@@ -2328,7 +2342,7 @@ const runFlags = () => cached('flags', () => {
     if (!r.hasReply) items.push({ sev: 60, tag: 'no reply', text: r.rounds > 1 ? `No final reply: the last of its ${r.rounds} /goal rounds ended without text` : 'No final reply: its last message was empty' });
     if (r.exitInterview === 'missing') items.push({ sev: 55, tag: 'no exit interview', text: 'Its prompt asks for exit-interview.json beside the game, and it left none' });
     if (r.exitInterview === 'invalid') items.push({ sev: 50, tag: 'bad exit interview', text: 'Its exit-interview.json isn\'t one JSON object, so its answers aren\'t in the game\'s record as fields' });
-    if (r.goalMet === false) items.push({ sev: 45, tag: 'goal not met', text: `Its /goal: ${goalText(r)}` });
+    if (goalState(r) === 'no') items.push({ sev: 45, tag: 'goal not met', text: `Its /goal: ${goalText(r)}` });
     if (r.plannerInterview === 'missing') items.push({ sev: 55, tag: 'no planner review', text: 'Its instructions ask for planner-exit-interview.json, and it left none' });
     if (r.plannerInterview === 'invalid') items.push({ sev: 50, tag: 'bad planner review', text: 'Its planner-exit-interview.json isn\'t a JSON list of questions and answers' });
     if (r.todos > 0) items.push({ sev: 40 + Math.min(r.todos, 20), tag: `${r.todos} TODO`, text: `${r.todos} TODO/FIXME left in the game file` });
@@ -2460,7 +2474,7 @@ function renderInsights() {
     h('p', { class: 'hint' }, `${rows.length} of ${plural(results.length, 'run')}. Everything below uses these; what's usual for a setup is learned from all runs.`));
   if (!rows.length) return morph($('#tab-insights'), head, h('div', { class: 'card', key: 'empty' }, h('p', { class: 'muted', style: 'margin:0' },
     results.length ? 'No runs match these filters.' : 'No runs yet. Start a batch on the Run tab; this page fills in as runs finish.')));
-  morph($('#tab-insights'), head, tilesCard(rows), checksCard(rows), lookCard(rows), effectsCard(rows), spreadCard(rows),
+  morph($('#tab-insights'), head, tilesCard(rows), checksCard(rows), lookCard(rows), feedbackCard(rows), effectsCard(rows), spreadCard(rows),
     h('div', { class: 'grid2', key: 'timefail' }, timeCard(rows), failCard(rows)));
 }
 
@@ -2497,7 +2511,7 @@ function checksCard(rows) {
   const reviews = ok.filter((r) => r.plannerInterview), noReview = reviews.filter((r) => r.plannerInterview !== 'ok').length;
   if (reviews.length) add(noReview ? 'warn' : 'ok', 'Planners leave the review their instructions ask for',
     noReview ? `${noReview} of ${reviews.length} left none or one that isn't a list of questions and answers (listed under Needs a look).` : `All ${reviews.length} did.`);
-  const goals = ok.filter((r) => r.goalMet != null), unmet = goals.filter((r) => !r.goalMet), forced = unmet.filter((r) => r.goalForced).length;
+  const goals = ok.filter(goalRead), unmet = goals.filter((r) => !r.goalMet), forced = unmet.filter((r) => r.goalForced).length;
   add(!goals.length ? 'na' : unmet.length ? 'warn' : 'ok', 'Finished runs meet their /goal',
     !goals.length ? 'None of these runs has a /goal whose checks were read (Claude Code; node run-matrix.mjs --reparse reads older runs).'
       : unmet.length ? `${unmet.length} of ${goals.length} never passed the goal check${forced ? `, ${forced} of them ended by Claude Code after the check blocked them 9 times in a row` : ''} (listed under Needs a look; filter by goal met).`
@@ -2505,6 +2519,15 @@ function checksCard(rows) {
   const counted = ok.filter((r) => r.todos != null), todo = counted.filter((r) => r.todos > 0).length;
   add(!counted.length ? 'na' : todo ? 'warn' : 'ok', 'No TODO or FIXME left in games',
     !counted.length ? 'Counted for new runs (or after node run-matrix.mjs --reparse).' : todo ? `${todo} of ${counted.length} games still have some.` : `None in ${plural(counted.length, 'game')}.`);
+  // A plan's builds make one game, so they should agree on its title: the name on its title screen (the exit
+  // interview's AI Hub name), else its file's GameTitle-SOURCE. One that adds a subtitle still agrees.
+  const titleOf = (r) => r.hubName ?? gameName(r) ?? '', tkey = (r) => titleOf(r).toLowerCase().replace(/[^a-z0-9]/g, '');
+  const agree = (a, b) => a.startsWith(b) || b.startsWith(a);
+  const kids = [...groupBy(ok.filter((r) => r.parentId && r.delivered), (r) => r.parentId).values()].filter((rs) => rs.length > 1);
+  const split = kids.filter((rs) => rs.some((a) => rs.some((b) => !agree(tkey(a), tkey(b)))));
+  if (kids.length) add(split.length ? 'warn' : 'ok', 'Builds of one plan use its title', split.length
+    ? `The builds of ${split.length} of ${plural(kids.length, 'plan')} gave their game different titles: ${split.slice(0, 3).map((rs) => [...new Map(rs.map((r) => [tkey(r), titleOf(r)])).values()].join(' / ')).join('; ')}${split.length > 3 ? '; …' : ''}. A builder that picks a title of its own (the brief's Game Title asks for a random pick) makes the plan's game under another name.`
+    : `The builds of each of ${plural(kids.length, 'plan')} kept its title.`);
   const reps = [...groupBy(ok, (r) => r.id.replace(/__r\d+$/, '')).entries()].map(([k, rs]) => {
     const t = rs.map((r) => r.wallMinutes).filter((x) => x > 0);
     return { k, spread: t.length > 1 ? Math.max(...t) / Math.min(...t) : null };
@@ -2558,6 +2581,77 @@ function lookRow(r, why) {
       h('button', { class: 'icon', title: 'Raw CLI output', onclick: () => showFile(r.id, 'agent.out', 'Output') }, 'out'),
       h('button', { class: 'icon', title: 'Everything about this run', onclick: () => showRun(r) }, 'details'),
       reviewed(r) ? null : h('button', { class: 'icon', title: 'Mark as looked at, which clears it from this list', onclick: () => saveReview(r, { seen: true }) }, 'looked at')));
+}
+
+// What the agents said: one question's answers across the runs in view, from their exit interviews (exit-interview.json:
+// Testing, Engine and Prompt Feedback …) and planners' reviews of their prompt (plannerAnswers), by model + effort, with
+// a search. /api/feedback is read when the tab first needs it, and again when runs change.
+let feedbackData = null, feedbackRev = null, feedbackBusy = false;
+function needFeedback() {
+  if (feedbackBusy || (feedbackData && feedbackRev === rev.results)) return;
+  const at = rev.results; feedbackBusy = true;
+  api('/api/feedback').then((x) => { feedbackData = x ?? {}; }).catch(() => { feedbackData ??= {}; })
+    .finally(() => { feedbackRev = at; feedbackBusy = false; if (tab === 'insights') renderInsights(); });
+}
+// testingFeedback → Testing feedback
+const listLabel = (k) => k === 'plannerReview' ? 'Planner\'s review' : k.replace(/([a-z0-9])([A-Z])/g, (m, a, b) => `${a} ${b.toLowerCase()}`).replace(/^./, (c) => c.toUpperCase());
+// The game's file name without the model, effort and time it ends with: GameTitle-SOURCE.
+const gameName = (r) => { const f = String(r.entry ?? '').split('/').pop(), esc = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return f ? f.replace(new RegExp(`-${esc(r.model ?? r.agent)}-${esc(r.effort)}-\\d{8}-\\d{6}\\.html?$`), '').replace(/\.html?$/, '') : null; };
+// Every question answered in rows, in the prompt's order (each dimension's questions, then planners' reviews), each
+// with its answers. Different wordings of a question are different questions; an answer past the questions asked is
+// kept under one of its own.
+function feedbackQuestions(rows) {
+  const data = feedbackData ?? {}, dims = Object.keys(cfg.dimensions), qs = new Map();
+  for (const r of rows) {
+    const lists = { ...data[r.id] };
+    if (r.plannerAnswers?.length) lists.plannerReview = r.plannerAnswers;
+    for (const [list, answers] of Object.entries(lists)) answers.forEach((a, i, all) => {
+      const question = a.question || (all.some((x) => x.question) ? `Answer ${i + 1}, past the questions asked` : `Question ${i + 1}, its wording not known`);
+      const key = `${list}\n${question}`;
+      const li = list === 'plannerReview' ? 998 : dims.includes(list) ? dims.indexOf(list) : 997;
+      if (!qs.has(key)) qs.set(key, { key, list, question, rank: li * 1000 + Math.min(i, 999), items: [] });
+      const answer = String(a.answer ?? '').trim();
+      if (answer) qs.get(key).items.push({ r, answer });
+    });
+  }
+  return [...qs.values()].sort((a, b) => a.rank - b.rank || b.items.length - a.items.length);
+}
+function feedbackCard(rows) {
+  const head = [h('h2', {}, 'What the agents said'), h('p', { class: 'sub' }, 'Every answer to one question, by model + effort, from the runs in view: their exit interviews (exit-interview.json) and the planners\' reviews of their prompt. A search finds a word in all of them; the list of questions then says how many answers have it.')];
+  if (!meta.canFeedback) return h('div', { class: 'card', key: 'feedback' }, head, h('p', { class: 'muted' },
+    'The dashboard\'s server started before it could read the answers: restart it (Run tab → ⟳ Restart dashboard, or start it again) and they show here.'));
+  needFeedback();
+  if (!feedbackData) return h('div', { class: 'card', key: 'feedback' }, head, h('p', { class: 'muted' }, 'Reading the answers…'));
+  const all = feedbackQuestions(rows);
+  if (!all.length) return h('div', { class: 'card', key: 'feedback' }, head, h('p', { class: 'muted' }, 'None of these runs left an exit interview or a planner\'s review.'));
+  const needle = String(iv.fbSearch ?? '').trim().toLowerCase(), has = (t) => !needle || t.toLowerCase().includes(needle);
+  const pick = all.find((x) => x.key === iv.fbQuestion) ?? all[0], items = pick.items.filter((i) => has(i.answer));
+  const set = (patch) => { Object.assign(iv, patch); saveIv(); renderInsights(); };
+  const marked = (t) => { if (!needle) return t; const out = [], low = t.toLowerCase(); let i = 0;
+    for (let j; (j = low.indexOf(needle, i)) >= 0; i = j + needle.length) out.push(t.slice(i, j), h('mark', {}, t.slice(j, j + needle.length)));
+    out.push(t.slice(i)); return out; };
+  const groups = groupBy(items, (i) => fieldVal(i.r, 'agent+effort')), keys = sortVals('agent+effort', [...groups.keys()]);
+  const asText = () => `${listLabel(pick.list)}: ${pick.question}${needle ? ` (answers with "${needle}")` : ''}\n\n` + keys.map((k) => `## ${k}\n\n`
+    + groups.get(k).map((i) => `- ${i.r.source ?? ''}${gameName(i.r) ? ` (${gameName(i.r)})` : ''}: ${i.answer.replace(/\s*\n+\s*/g, ' ')}`).join('\n')).join('\n\n');
+  return h('div', { class: 'card', key: 'feedback' }, head,
+    h('div', { class: 'row' },
+      h('select', { 'aria-label': 'Question', style: 'flex:1 1 320px; min-width:0; max-width:100%', onchange: (e) => set({ fbQuestion: e.target.value }) },
+        all.map((x) => { const n = x.items.filter((i) => has(i.answer)).length;
+          return h('option', { value: x.key, selected: x === pick }, `${listLabel(x.list)} · ${x.question} (${needle ? `${n} of ${x.items.length}` : x.items.length})`); })),
+      h('input', { type: 'search', class: 'fb-search', placeholder: 'Search the answers', 'aria-label': 'Search the answers', value: iv.fbSearch ?? '',
+        oninput: (e) => set({ fbSearch: e.target.value }) }),
+      h('button', { class: 'btn', title: 'Copy these answers as plain text, by model + effort', disabled: !items.length,
+        onclick: (e) => { const b = e.currentTarget; navigator.clipboard?.writeText(asText()).then(() => { b.textContent = 'Copied ✔'; setTimeout(() => { b.textContent = 'Copy'; }, 1500); }, () => {}); } }, 'Copy')),
+    h('p', { class: 'hint' }, needle ? `${plural(items.length, 'answer')} of ${pick.items.length} have "${needle}".` : `${plural(items.length, 'answer')} from ${plural(new Set(items.map((i) => i.r.id)).size, 'run')}.`),
+    keys.map((k) => { const list = groups.get(k);
+      return h('details', { class: 'fb-group', key: 'fb:' + k, open: keys.length <= 2 },
+        h('summary', {}, h('strong', {}, k), h('span', { class: 'muted' }, plural(list.length, 'answer'))),
+        h('ul', { class: 'fb-list' }, list.map((i) => h('li', { key: i.r.id },
+          h('div', { class: 'who' }, playLink(i.r), h('button', { class: 'linkish', title: i.r.id, onclick: () => showRun(i.r) }, i.r.source ?? i.r.id),
+            gameName(i.r) ? h('span', {}, gameName(i.r)) : null),
+          h('div', { class: 'ans' }, marked(i.answer)))))); }),
+    items.length ? null : h('p', { class: 'muted' }, 'No answer to this question has that.'));
 }
 
 // How each choice moves time, cost, output and size with everything else held equal: the same
@@ -2746,7 +2840,7 @@ function renderResults() {
   const sum = (rows, f) => rows.reduce((a, r) => a + (+r[f] || 0), 0);
   const gRows = sortVals(rv.group, [...groups.keys()]).map((k) => [k, groups.get(k)]);
   const maxCost = Math.max(0, ...gRows.map(([, rs]) => avg(rs, 'costUsd').v || 0));
-  const goalCol = filtered.some((r) => r.goalMet != null); // a share of runs that met their /goal, where any was read
+  const goalCol = filtered.some(goalRead); // a share of runs that met their /goal, where any was read
   const averages = h('div', { class: 'card', key: 'averages' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Averages by group'),
       h('span', { class: 'muted' }, 'Group by'),
@@ -2758,7 +2852,7 @@ function renderResults() {
       h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', ...(goalCol ? ['Goal met'] : []), 'Avg time', 'Avg cost', '', 'Total cost', 'Avg list price', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
       h('tbody', {}, gRows.map(([k, rs]) => {
         const c = avg(rs, 'costUsd'), lp = avg(rs, 'apiCostUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
-        const known = rs.filter((r) => r.goalMet != null), met = known.filter((r) => r.goalMet).length;
+        const known = rs.filter(goalRead), met = known.filter((r) => r.goalMet).length;
         return h('tr', { key: k },
           h('td', {}, h('strong', {}, valLabel(rv.group, k))),
           h('td', { class: 'num' }, rs.length),
@@ -2992,9 +3086,12 @@ const resumeTag = (r) => r.resumes ? h('span', { class: 'tag', style: 'margin-le
     title: 'Failed partway with its session still on disk: Resume failed (Run tab → Options) carries on with it instead of starting over' }, 'resumable') : null;
 
 // How a run's /goal went (goalMet etc. in result.json, read from its Claude Code transcript): yes, no, skipped (a CLI
-// without headless /goal got the plain prompt), unknown (sent one, but the transcript isn't on this computer; hasGoal
-// comes from the server) or '' (no /goal). A field to filter, group and compare by; goalText says it in words.
-const goalState = (r) => r.goalMet === true ? 'yes' : r.goalMet === false ? 'no' : r.goalSkipped ? 'skipped' : r.hasGoal ? 'unknown' : '';
+// without headless /goal got the plain prompt), unknown (sent one, but the transcript isn't on this computer, hasGoal
+// coming from the server; or a finished run none of whose checks gave a verdict) or '' (no /goal). A field to filter,
+// group and compare by; goalText says it in words.
+const goalState = (r) => r.goalMet === true ? 'yes' : r.goalMet === false ? (r.goalChecks === 0 && r.status === 'ok' ? 'unknown' : 'no')
+  : r.goalSkipped ? 'skipped' : r.hasGoal ? 'unknown' : '';
+const goalRead = (r) => ['yes', 'no'].includes(goalState(r)); // a verdict was read: met or not
 function goalText(r, reason = true) {
   const checks = r.goalChecks ? plural(r.goalChecks, 'check') : 'no check';
   return { yes: `Met${r.goalChecks > 1 ? ` at check ${r.goalChecks}, after ${r.goalChecks - 1} that didn't pass` : ''}`,
@@ -3002,6 +3099,7 @@ function goalText(r, reason = true) {
       + (reason && r.goalReason ? `. The last check said: ${r.goalReason}` : ''),
     skipped: 'Skipped: this CLI can\'t run /goal headless, so it got the plain prompt',
     unknown: r.provider !== 'claude' ? `Sent a /goal, but ${PROVIDERS[r.provider] ?? r.provider} doesn't save its goal checks where they can be read, so whether it was met isn't known`
+      : r.goalMet === false ? 'Sent a /goal, but its session ended without a check giving a verdict, so whether it was met isn\'t known'
       : 'Sent a /goal, but its session\'s transcript isn\'t on this computer, so whether it was met isn\'t known (node run-matrix.mjs --reparse on the computer that ran it fills it in)',
   }[goalState(r)] ?? 'No /goal';
 }
@@ -3131,10 +3229,38 @@ function runDetails(r) {
 // decide, and how it was checked. Read marks stay in this browser.
 const SEVS = ['critical', 'high', 'medium', 'low', 'info'];
 const STATUS = { fixed: 'Fixed', yours: 'Your call', open: 'Not fixed', note: 'Note' };
-// Plain text with `code` spans and blank-line paragraphs.
-const prose = (t) => String(t ?? '').split(/\n{2,}/).map((para) => h('p', { class: 'audit-p', style: 'margin:0 0 6px' },
-  para.split('`').map((bit, i) => i % 2 ? h('code', {}, bit) : bit)));
-const inline = (t) => String(t ?? '').split('`').map((bit, i) => i % 2 ? h('code', {}, bit) : bit);
+// Plain text with a little Markdown: `code` and **bold** spans, and blank-line paragraphs. A paragraph that starts
+// with "- " or "1. " is a list (an item's indented "- " lines are its own list, and a line without a marker goes on
+// the item before), and one whose lines all start with "|" a table (a |---| line under the first makes it the head).
+const inline = (t) => String(t ?? '').split('`').map((bit, i) => i % 2 ? h('code', {}, bit) : bit.split('**').map((b, j) => j % 2 ? h('strong', {}, b) : b));
+const MARK = /^([-*]|\d+\.)\s+(.*)$/, RULE = /^\|[\s|:-]+\|$/;
+function proseList(lines) {
+  const items = [], first = lines[0].trim().match(MARK);
+  for (const raw of lines) {
+    const deep = /^\s{2,}/.test(raw), m = raw.trim().match(MARK), it = items.at(-1);
+    if (m && (!deep || !it)) items.push({ text: m[2], subs: [] });
+    else if (m) it.subs.push(m[2]);
+    else if (it?.subs.length) it.subs[it.subs.length - 1] += ' ' + raw.trim();
+    else if (it) it.text += ' ' + raw.trim();
+  }
+  const sub = (s) => s.length ? h('ul', { class: 'audit-list' }, s.map((x) => h('li', {}, inline(x)))) : null;
+  const gap = 'margin:4px 0 8px';
+  return /\d/.test(first[1]) ? h('ol', { class: 'audit-list', style: gap, start: parseInt(first[1], 10) }, items.map((x) => h('li', {}, inline(x.text), sub(x.subs))))
+    : h('ul', { class: 'audit-list', style: gap }, items.map((x) => h('li', {}, inline(x.text), sub(x.subs))));
+}
+function proseTable(lines) {
+  const cells = (l) => l.replace(/^\|/, '').replace(/\|$/, '').split('|').map((c) => c.trim());
+  const head = RULE.test(lines[1] ?? ''), rows = lines.filter((l) => !RULE.test(l)).map(cells);
+  return h('div', { class: 'scroll', style: 'margin:4px 0 8px' }, h('table', { class: 'pin' },
+    head ? h('thead', {}, h('tr', {}, rows[0].map((c) => h('th', {}, inline(c))))) : null,
+    h('tbody', {}, (head ? rows.slice(1) : rows).map((r) => h('tr', {}, r.map((c) => h('td', {}, inline(c))))))));
+}
+const prose = (t) => String(t ?? '').split(/\n{2,}/).map((para) => {
+  const lines = para.split('\n').filter((l) => l.trim());
+  if (lines.length && MARK.test(lines[0].trim())) return proseList(lines);
+  if (lines.length > 1 && lines.every((l) => l.trim().startsWith('|'))) return proseTable(lines.map((l) => l.trim()));
+  return h('p', { class: 'audit-p', style: 'margin:0 0 6px' }, inline(para));
+});
 const openFindings = (on) => document.querySelectorAll('#tab-audit details.finding').forEach((d) => { d.open = on; });
 function markRead(ids, on) {
   for (const id of ids) on ? auditRead.add(id) : auditRead.delete(id);
@@ -3214,7 +3340,7 @@ function renderAudit() {
 // ------------------------------------------------------------------- data
 async function loadSetup() {
   const c = await api('/api/config');
-  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume, canQueue: !!c.canQueue, canRestart: !!c.canRestart, boot: c.boot ?? null };
+  meta = { path: c.path, outDir: c.outDir, platform: c.platform, canResume: !!c.canResume, canQueue: !!c.canQueue, canRestart: !!c.canRestart, canFeedback: !!c.canFeedback, boot: c.boot ?? null };
   cfg = c.config || { templateFile: 'prompt-template.md', agents: [], dimensions: {} };
   cfg.agents ??= []; cfg.dimensions ??= {}; cfg.bins ??= {}; cfg.extraArgs ??= {};
   savedCfg = JSON.stringify(cfg);
