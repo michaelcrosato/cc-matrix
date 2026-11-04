@@ -1,0 +1,17 @@
+I wrote **PLAN.md** in the work folder. It starts with the title, **EUROPHORIA FOOTBALL**, which `secrets.randbelow(50)` (the OS's random generator) picked from 50 riffs on "European football".
+
+**The game:** over-the-top arcade 5-a-side football. Kipperton Athletic, a broke fishing-town club, gets into Europe's biggest cup because of a typo. The crowd's Euphoria is the team's power bar. When it fills, it triggers a burst called Europhoria: flares, the fans' giant banner, and a Super Strike that the defending player can stop in a timing mini-game.
+
+**Genre and camera:** arcade sports with a story-driven cup run. The camera is a side-on TV-broadcast view raised 40°, a custom engine view. Three-quarter and top-down views are options in Settings.
+
+**What the plan covers:**
+- **Architecture:** about 40 code modules on the my-3D2dge engine. The match simulation is kept apart from drawing and sound, and every controller (player, AI, network, attract demo) feeds it the same inputs. All content is data, and a build step produces the single HTML file.
+- **Engine changes:** six small, listed changes: gibberish voices in dialogue boxes, shirt patterns and numbers, whole-body tilt for keeper dives and bicycle kicks, extra audio channels, accented letters, and a fallback for the button-symbol setting.
+- **Every system has numbers:** ball physics, passing, shooting with aftertouch, headers, volleys, bicycle kicks, skill moves, tackles, keepers, referee, cards, dives, VAR, set pieces and shootouts. The team AI uses formations and five tactic profiles; "parking the bus" is a literal bus.
+- **Around the matches:** camera, replays, HUD, two-voice commentary, crowd, weather and matchday events. Audio is all in code: songs, a crowd engine, chants and gibberish voices.
+- **TASK.md's required features:** 10-foot UI with PlayStation glyphs by default and Xbox in Settings, keyboard and mouse, and the touch-only notice. Also the 10-second attract mode, dev mode with live sliders and reset, local play for 1–4, AI Hub online versus (shared world, 2–4 players), saves and the About screen.
+- **Content:** 6 teams with full rosters, 5 stadiums plus a training ground, and the cup story beat by beat with tabloid headlines. Also sample commentary lines, 51 stickers, 9 training drills, and a list of which motion-capture clips to cut from the engine's library.
+- **Build order:** 13 milestones with "done when" checks. The riskiest parts come early: animation, AI and netcode. A risk table gives a fallback for each.
+- **Testing:** one command that prints only failures and a count. It runs unit and rules tests, an AI balance soak, determinism checks, and a scripted playthrough of the whole game. It also tests the online mode, first with a simulated hub in Node, then with the real hub harness under latency and packet loss, plus browser checks. Screenshots are only for things a script can't check.
+
+`/tmp` on this machine was full during the session and lost some command output; it's at 92% now, with Claude Code's own temp folder using about 3.2 GB of it. I didn't delete anything there. The plan tells the builders to use a temp folder inside their dev folder instead. I also deleted my scratch copies of the engine and hub repos.

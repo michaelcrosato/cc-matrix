@@ -1,0 +1,1 @@
+Read TASK.md (what to build) and PLAN.md (how to build it, written by claude-opus-5-5 at max effort) in this folder. Build the game TASK.md describes, following the plan and using the title it gives; where they disagree, TASK.md wins. Deliver everything TASK.md asks for, including its file name, and the sections it asks for in your final reply.

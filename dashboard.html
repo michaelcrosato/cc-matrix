@@ -88,7 +88,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 body[data-tab="results"] main { max-width: none; }
 /* Setup · Advanced: one box per stage. Run → Advanced: a picked model is a tag with ✕. */
 .stagebox { border-top: 1px solid var(--line); padding: 12px 0 4px; } .stagebox:first-of-type { border-top: 0; }
-.stagebox textarea { width: 100%; margin-top: 6px; display: block; }
+.stagebox textarea { width: 100%; margin-top: 3px; display: block; }
+.stagebox .boxlabel { display: block; margin-top: 10px; font-size: 13px; }
+pre.envfile { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 460px; overflow: auto; margin: 8px 0 0; padding: 10px 12px;
+  background: var(--chip); border-radius: 8px; font-size: 12.5px; line-height: 1.5; }
+.qa { margin-top: 12px; } .qa dt { color: var(--muted); font-size: 12.5px; margin-top: 8px; } .qa dd { margin: 2px 0 0; white-space: pre-wrap; }
 .tag.on { background: var(--chip-on, var(--chip)); color: var(--ink); }
 /* Setup: dimension cards move by dragging their grip; the line shows where it lands. */
 .grip { cursor: grab; color: var(--muted); padding: 2px 4px; user-select: none; font-size: 16px; line-height: 1; }
@@ -200,7 +204,7 @@ select.on { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); ba
 td.br, td.errcell { display: none; }
 td.scorecell { text-align: right; }
 .lbl { color: var(--muted); font-size: 12px; margin-right: 4px; }
-td.dimcell .lbl, td.num .lbl, td.eff .lbl { display: none; }
+td.dimcell .lbl, td.num .lbl, td.eff .lbl, td.goalcell .lbl { display: none; }
 table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
 .vrow { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; padding: 7px 0; border-bottom: 1px solid var(--line); }
 .vrow:last-child { border-bottom: 0; }
@@ -270,7 +274,8 @@ table.look td.run { min-width: 170px; } table.look td.why { min-width: 260px; }
   table.runs td.errcell::before { content: attr(data-err); }
   table.runs td.scorecell { text-align: left; }
   /* card lines: who · effort · status / variants / error / numbers / review / actions */
-  table.runs td.who, table.runs td.eff, table.runs td.st { order: 1; }
+  table.runs td.who, table.runs td.eff, table.runs td.st, table.runs td.goalcell { order: 1; }
+  table.runs td.goalcell .lbl { display: inline; } table.runs td.goalcell.none { display: none; }
   table.runs td.b1 { order: 2; } table.runs td.dimcell { order: 3; }
   table.runs td.errcell { order: 4; } table.runs td.b2 { order: 5; }
   table.runs td.num, table.runs td.when { order: 6; } table.runs td.b3 { order: 7; }
@@ -494,13 +499,14 @@ const GOAL_DIM = 'goal';
 // Efforts that actually run for this model (Ultracode is skipped outside Claude Code).
 const effortsOf = (a) => (a.efforts?.length ? a.efforts : ['default']).map(effName)
   .filter((e) => a.provider === 'claude' || !e.endsWith('-uc'));
-const RESERVED = ['model', 'effort', 'lab', 'environment', 'stamp', 'date'];
+const RESERVED = ['model', 'effort', 'lab', 'environment', 'machine', 'stamp', 'date'];
 // What the runner fills these with (runVars in run-matrix.mjs), for the Setup hint and the chips' tooltips.
 const RUN_VARS = {
   model: 'the model ID, as in CLIs → Models (claude-opus-5-5)',
   effort: 'the effort level, with -ultracode when Ultracode is on (medium, high-ultracode)',
   lab: 'the lab that made the model (Anthropic, OpenAI, Google, xAI, Meta)',
   environment: 'the CLI and operating system (Claude Code CLI (headless); Linux; browser unknown)',
+  machine: 'what this computer has, for the agents: environments/<this computer\'s name>.md, which node check-environment.mjs writes and dates (re-run it after installing anything); what it can\'t check, like having no controller, is written by hand below it',
   stamp: 'when the run started, to the second, as YYYYMMDD-HHMMSS in this computer\'s time zone (20261029-075312 = Oct 29, 2026, 7:53:12 am); the same everywhere in one run, so it ties the game\'s file name to its run',
   date: 'the same moment as {{stamp}}, written YYYY-MM-DD HH:MM:SS (2026-10-29 07:53:12)',
 };
@@ -593,6 +599,7 @@ $('#theme').onclick = () => {
 // ------------------------------------------------------------------ state
 let cfg = null, savedCfg = '', tmpl = '', savedTmpl = '', meta = {}, results = [], status = {}, logSince = 0, logText = '';
 let clis = {}, cliCheckedAt = null, cliError = null, smokes = {}, smokeGoal = store.get('matrix.smokeGoal', false);
+let machine = null, machineBusy = false; // this computer's environment file (CLIs → This computer; /api/machine)
 // rev: what the server last said about the results, config, prompt and tests (see poll). onDisk: the
 // config or prompt changed on disk while Setup had unsaved edits. audit: audit.json, for the Audit tab.
 let rev = {}, onDisk = false, audit = null, offline = false;
@@ -780,6 +787,41 @@ function clisCard() {
             (c?.skipped ?? []).map((f) => h('div', { class: 'mono muted', style: 'font-size:12px', title: 'Not loaded: runs are isolated' }, f + ' · skipped'))));
       })))),
     h('p', { class: 'hint' }, 'Global instruction files are added to every run of that CLI, so keep them neutral or the comparison is skewed. Runs are isolated unless the config says "isolate": false: Claude Code loads no CLAUDE.md, MCP servers or auto memory, Grok nothing of Claude Code\'s and no memory, Muse no other CLI\'s files, and no run can open a window. The files marked skipped aren\'t loaded; the others have no switch, so they still are.'));
+}
+
+// CLIs → This computer: what the agents are told about this computer (environments/<computer>.md, filled into the
+// prompt by {{machine}}), as they get it, with when it was checked. Check again runs check-environment.mjs, which
+// finds out the part between its markers (it starts each browser once, so it takes a few seconds).
+async function loadMachine() { try { machine = await api('/api/machine'); } catch { machine = null; } render(); }
+async function checkMachineNow() {
+  machineBusy = true; render();
+  try { const r = await api('/api/machine', 'POST', {}, 180000); machine = r.machine; if (!r.ok) alert(`The check didn't finish:\n\n${r.output.slice(-1500)}`); }
+  catch (e) { alert(e.message); }
+  machineBusy = false; render();
+}
+const checkedWhen = (m) => `${m.checkedAt} (${m.ageDays === 0 ? 'today' : m.ageDays === 1 ? 'yesterday' : `${m.ageDays} days ago`})`;
+function machineCard() {
+  const m = machine;
+  return h('div', { class: 'card', id: 'machinecard', key: 'machine' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'This computer'),
+      m?.exists ? h('span', { class: m.stale ? 'warn' : 'muted' }, m.checkedAt ? `checked ${checkedWhen(m)}${m.quick ? ', browsers not started' : ''}` : 'not dated') : null,
+      h('button', { class: 'btn', disabled: machineBusy || !m, onclick: checkMachineNow },
+        machineBusy ? 'Checking…' : m?.exists ? 'Check again' : 'Check this computer')),
+    h('p', { class: 'sub' }, 'What the agents are told about this computer, wherever the prompt says ', h('span', { class: 'mono' }, '{{machine}}'), '. ',
+      'Check again finds out the computer, space, display, browsers, tools and network and dates them (node check-environment.mjs); ',
+      'what no script can check, like there being no controller to hold, is written by hand in ', h('span', { class: 'mono' }, m?.file ?? 'environments/'), ' and kept.'),
+    !m ? h('p', { class: 'muted' }, 'Loading…')
+      : !m.exists ? h('p', { class: 'warns', style: 'margin:8px 0 0' }, `This computer (${m.host}) has no environment file yet, so runs whose prompt uses {{machine}} fail at the start. Check this computer writes one.`)
+      : [m.stale ? h('p', { class: 'warns', style: 'margin:8px 0 0' }, `Checked ${m.ageDays} days ago: check again, so the agents aren't told about tools that have changed since.`) : null,
+        h('pre', { class: 'envfile', 'aria-label': 'What the agents are told about this computer' }, m.text)]);
+}
+// The Run tab and Start warn when the prompt uses {{machine}} and this computer's file is missing or old.
+const usesMachine = () => [tmpl, ...(cfg.stages ?? []).flatMap((st) => [st.text, st.goal]), ...Object.values(cfg.dimensions ?? {}).flat().map((v) => v.text)]
+  .some((t) => /\{\{machine\}\}/.test(t ?? ''));
+function machineNote() {
+  if (!machine || !usesMachine()) return null;
+  if (!machine.exists) return `This computer (${machine.host}) has no environment file, so runs whose prompt uses {{machine}} fail at the start. CLIs → This computer writes one.`;
+  return machine.stale ? `This computer's environment file was checked ${machine.ageDays} days ago, and the agents are told what it says. CLIs → This computer checks it again.` : null;
 }
 
 // ------------------------------------------------------------ smoke tests
@@ -1140,7 +1182,7 @@ function cliCmdsCard() {
 // CLIs: what this machine can run. The models here are the ones the Run tab sweeps and the stages pick from.
 function renderClis() {
   cfg.bins ??= {}; cfg.extraArgs ??= {};
-  morph($('#tab-clis'), onDiskBanner(), clisCard(), modelsCard(), cliCmdsCard(), savebar());
+  morph($('#tab-clis'), onDiskBanner(), clisCard(), machineCard(), modelsCard(), cliCmdsCard(), savebar());
 }
 
 // Setup · Advanced → Stages: the steps of runs in stages (Run → Advanced; stageRuns in run-matrix.mjs). Each has a name, a
@@ -1178,9 +1220,14 @@ function stagesCard() {
             onclick: () => { x.models = x.models.filter((y) => y !== k); if (!x.models.length) delete x.models; changed(true); } }, '✕'))),
         pickSelect(x.models ?? [], (k) => { (x.models ??= []).push(k); changed(true); }, `Add a model to ${x.id}`),
         (x.models ?? []).length ? null : h('span', { class: 'hint', style: 'margin:0' }, 'none yet')),
-      h('textarea', { class: 'fit', rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
+      // The two boxes: what the agent is told, and the /goal condition Claude Code checks before it may stop.
+      h('label', { class: 'boxlabel', for: `stage-${i}-text` }, h('strong', {}, 'Instructions'),
+        h('span', { class: 'muted' }, ' — what the agent is told to do: its message, or STAGE.md in its folder when the stage has a goal')),
+      h('textarea', { class: 'fit', id: `stage-${i}-text`, rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
         placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt above filled for the run, is in their folder.', oninput: (e) => { x.text = e.target.value; changed(); } }),
-      h('textarea', { class: 'fit', rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
+      h('label', { class: 'boxlabel', for: `stage-${i}-goal` }, h('strong', {}, 'Done when (/goal)'),
+        h('span', { class: 'muted' }, ' — what Claude Code checks each time the agent tries to stop. Codex never gets it')),
+      h('textarea', { class: 'fit', id: `stage-${i}-goal`, rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
         placeholder: 'Optional: done when … (sent as /goal on Claude Code, Grok, agy and Muse, with the text above in STAGE.md; Codex gets the text alone)',
         oninput: (e) => { if (e.target.value) x.goal = e.target.value; else delete x.goal; changed(); } }))),
     h('div', { class: 'row', style: 'margin-top:10px' },
@@ -1626,6 +1673,7 @@ function renderRun() {
           ? h('button', { class: 'btn danger', onclick: stop, disabled: status.stopping }, status.stopping ? 'Stopping…' : '■ Stop')
           : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))),
     dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, `CLIs or Setup has unsaved changes; they will be saved when you ${running && meta.canQueue ? 'queue' : 'start'}.`) : null,
+    machineNote() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, machineNote(), ' ', h('button', { class: 'linkish', onclick: () => showTab('clis') }, 'Open CLIs')) : null,
     s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with an earlier version of the prompt or of a variant's text. They still count as done, so they're skipped (Setup lists the prompt's versions; Results → Compare by prompt shows what a change did). To redo one with the current text, delete it in Results (✕); to run a variant's new text beside its old runs, give the variant a new short name.`) : null);
 
   // Models & efforts
@@ -1856,7 +1904,7 @@ async function start() {
     + 'A run starts once the run it continues from has finished OK; if that one fails, the runs after it are left for the next batch.' : '';
   const forgets = status.saved ? '\n\nThe batch cut off before (Pick up where you left off, above) is forgotten: Resume it instead to run it as it was started. '
     + 'Its cut-off runs still carry on whenever a batch has them.' : '';
-  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}${resumes}, ${sel.opts.concurrency || 1} at a time${budget}?${order}${forgets}\n\nAgents run with permission prompts off.${note}\n\n`
+  if (!confirm(`Start ${n} run${n === 1 ? '' : 's'}${resumes}, ${sel.opts.concurrency || 1} at a time${budget}?${order}${forgets}\n\nAgents run with permission prompts off.${note}${machineNote() ? `\n\n${machineNote()}` : ''}\n\n`
     + `Once a run starts, its model, effort, prompt and time limit are fixed and it runs to the end. While the batch runs you can still change `
     + `Parallel runs, Max per CLI, Budget, Time limit and Retry failed, and pause it: changes apply to the runs not started yet. `
     + `Nothing that's running is ended unless you confirm it.`)) return;
@@ -1877,7 +1925,7 @@ async function queue() {
     + 'They run from Setup and the prompt as they are now, so you can change them for the next batch straight away. '
     + 'They start in the slots the batches before them can\'t use: those keep every slot they still need (a build waiting for its plan too), so they\'re never held up. '
     + 'Runs one of them has already are left out, and a build on a plan being made there waits for it.\n\n'
-    + `Parallel runs, Max per CLI, Budget, Time limit and Pause are shared by all the batches.\n\nAgents run with permission prompts off.${unprovenNote(s, staged)}`)) return;
+    + `Parallel runs, Max per CLI, Budget, Time limit and Pause are shared by all the batches.\n\nAgents run with permission prompts off.${unprovenNote(s, staged)}${machineNote() ? `\n\n${machineNote()}` : ''}`)) return;
   try { await api('/api/run', 'POST', { ...batchOf(s), add: true }); await poll(); } catch (e) { alert(e.message); }
 }
 async function endBatch(b) {
@@ -2155,18 +2203,20 @@ const mval = (r, k) => { const m = METRICS[k]; if (m.get) return m.get(r);
 const LADDER = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max', 'ultra'];
 const effBase = (r) => parseEffort(r.effort).base ?? 'default';
 const effRank = (e) => { const p = parseEffort(e), i = LADDER.indexOf(p.base); return (i < 0 ? 99 : i) * 2 + (p.ultracode ? 1 : 0); };
-const FIELD_LABEL = { 'agent+effort': 'model + effort', agent: 'model', provider: 'CLI', model: 'model ID', cli: 'CLI version', promptVersion: 'prompt', from: 'continues from', path: 'stages' };
+const FIELD_LABEL = { 'agent+effort': 'model + effort', agent: 'model', provider: 'CLI', model: 'model ID', cli: 'CLI version', promptVersion: 'prompt', from: 'continues from', path: 'stages',
+  metGoal: 'goal met' };
 const fieldLabel = (f) => FIELD_LABEL[f] ?? f;
 const fieldVal = (r, f) => f === 'agent+effort' ? `${r.agent} · ${r.effort}${r.stage ? ` · ${r.stage}` : ''}` : String(r[f] ?? '');
 const valLabel = (f, v) => f === 'promptVersion' ? promptLabel(v) : f === 'provider' ? PROVIDERS[v] ?? v : f === 'stage' && !v ? 'matrix run' : v || '—';
 const runFields = () => cached('fields:' + Object.keys(cfg.dimensions), () => ['agent', 'provider', 'effort', 'ultracode',
   ...Object.keys(cfg.dimensions), ...(results.some((r) => r.cli) ? ['cli'] : []), ...(results.some((r) => r.promptVersion) ? ['promptVersion'] : []), 'status',
-  ...(results.some((r) => r.resumes) ? ['resumed'] : []), ...(results.some((r) => r.stage) ? ['stage', 'from', 'path'] : [])]);
+  ...(results.some((r) => r.resumes) ? ['resumed'] : []), ...(results.some((r) => r.metGoal) ? ['metGoal'] : []),
+  ...(results.some((r) => r.stage) ? ['stage', 'from', 'path'] : [])]);
 // Values in a useful order: models and variants as in Setup, efforts low to high, prompts oldest first.
 function sortVals(f, vals) {
   const agents = cfg.agents.map((a) => a.id), variants = cfg.dimensions[f]?.map((v) => v.id);
   const rank = f === 'agent' ? (v) => agents.indexOf(v) : f === 'provider' ? (v) => Object.keys(PROVIDERS).indexOf(v)
-    : f === 'effort' ? effRank : f === 'promptVersion' ? (v) => promptVersions().list.indexOf(v)
+    : f === 'effort' ? effRank : f === 'promptVersion' ? (v) => promptVersions().list.indexOf(v) : f === 'metGoal' ? (v) => ['yes', 'no', 'unknown', 'skipped'].indexOf(v)
     : f === 'agent+effort' ? (v) => { const [a, e] = v.split(' · '), i = agents.indexOf(a); return (i < 0 ? 999 : i) * 1000 + effRank(e); }
     : variants ? (v) => variants.indexOf(v) : () => 0;
   const rk = (v) => { const x = rank(v); return x < 0 ? 1e9 : x; };
@@ -2278,6 +2328,9 @@ const runFlags = () => cached('flags', () => {
     if (!r.hasReply) items.push({ sev: 60, tag: 'no reply', text: r.rounds > 1 ? `No final reply: the last of its ${r.rounds} /goal rounds ended without text` : 'No final reply: its last message was empty' });
     if (r.exitInterview === 'missing') items.push({ sev: 55, tag: 'no exit interview', text: 'Its prompt asks for exit-interview.json beside the game, and it left none' });
     if (r.exitInterview === 'invalid') items.push({ sev: 50, tag: 'bad exit interview', text: 'Its exit-interview.json isn\'t one JSON object, so its answers aren\'t in the game\'s record as fields' });
+    if (r.goalMet === false) items.push({ sev: 45, tag: 'goal not met', text: `Its /goal: ${goalText(r)}` });
+    if (r.plannerInterview === 'missing') items.push({ sev: 55, tag: 'no planner review', text: 'Its instructions ask for planner-exit-interview.json, and it left none' });
+    if (r.plannerInterview === 'invalid') items.push({ sev: 50, tag: 'bad planner review', text: 'Its planner-exit-interview.json isn\'t a JSON list of questions and answers' });
     if (r.todos > 0) items.push({ sev: 40 + Math.min(r.todos, 20), tag: `${r.todos} TODO`, text: `${r.todos} TODO/FIXME left in the game file` });
     const bundle = fits.kb?.usual(r) && r.kb >= 2 * fits.kb.usual(r);
     for (const k of FLAG_METRICS) {
@@ -2441,6 +2494,14 @@ function checksCard(rows) {
   const asked = ok.filter((r) => r.exitInterview), noExit = asked.filter((r) => r.exitInterview !== 'ok').length;
   add(!asked.length ? 'na' : noExit ? 'warn' : 'ok', 'Finished runs leave the exit interview their prompt asks for',
     !asked.length ? 'None of these runs\' prompts asks for one (exit-interview.json).' : noExit ? `${noExit} of ${asked.length} left none or one that isn't valid JSON (listed under Needs a look).` : `All ${asked.length} did.`);
+  const reviews = ok.filter((r) => r.plannerInterview), noReview = reviews.filter((r) => r.plannerInterview !== 'ok').length;
+  if (reviews.length) add(noReview ? 'warn' : 'ok', 'Planners leave the review their instructions ask for',
+    noReview ? `${noReview} of ${reviews.length} left none or one that isn't a list of questions and answers (listed under Needs a look).` : `All ${reviews.length} did.`);
+  const goals = ok.filter((r) => r.goalMet != null), unmet = goals.filter((r) => !r.goalMet), forced = unmet.filter((r) => r.goalForced).length;
+  add(!goals.length ? 'na' : unmet.length ? 'warn' : 'ok', 'Finished runs meet their /goal',
+    !goals.length ? 'None of these runs has a /goal whose checks were read (Claude Code; node run-matrix.mjs --reparse reads older runs).'
+      : unmet.length ? `${unmet.length} of ${goals.length} never passed the goal check${forced ? `, ${forced} of them ended by Claude Code after the check blocked them 9 times in a row` : ''} (listed under Needs a look; filter by goal met).`
+      : `All ${goals.length} did.`);
   const counted = ok.filter((r) => r.todos != null), todo = counted.filter((r) => r.todos > 0).length;
   add(!counted.length ? 'na' : todo ? 'warn' : 'ok', 'No TODO or FIXME left in games',
     !counted.length ? 'Counted for new runs (or after node run-matrix.mjs --reparse).' : todo ? `${todo} of ${counted.length} games still have some.` : `None in ${plural(counted.length, 'game')}.`);
@@ -2685,20 +2746,25 @@ function renderResults() {
   const sum = (rows, f) => rows.reduce((a, r) => a + (+r[f] || 0), 0);
   const gRows = sortVals(rv.group, [...groups.keys()]).map((k) => [k, groups.get(k)]);
   const maxCost = Math.max(0, ...gRows.map(([, rs]) => avg(rs, 'costUsd').v || 0));
+  const goalCol = filtered.some((r) => r.goalMet != null); // a share of runs that met their /goal, where any was read
   const averages = h('div', { class: 'card', key: 'averages' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Averages by group'),
       h('span', { class: 'muted' }, 'Group by'),
       h('select', { 'aria-label': 'Group by', onchange: (e) => { rv.group = e.target.value; rerender(); } },
         groupFields.map((g) => h('option', { value: g, selected: rv.group === g }, fieldLabel(g))))),
-    h('p', { class: 'sub' }, 'Plain averages per group, everything else mixed in. Cost averages only runs whose CLI reported a cost (n shown); list price is every run\'s tokens at the labs\' public API prices. Score averages only scored runs.'),
+    h('p', { class: 'sub' }, 'Plain averages per group, everything else mixed in. Cost averages only runs whose CLI reported a cost (n shown); list price is every run\'s tokens at the labs\' public API prices. Score averages only scored runs.'
+      + (goalCol ? ' Goal met counts only runs whose /goal checks were read (n shown).' : '')),
     gRows.length ? h('div', { class: 'scroll' }, h('table', { class: 'pin' },
-      h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', 'Avg time', 'Avg cost', '', 'Total cost', 'Avg list price', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
+      h('thead', {}, h('tr', {}, h('th', {}, fieldLabel(rv.group)), ['Runs', 'Delivered', ...(goalCol ? ['Goal met'] : []), 'Avg time', 'Avg cost', '', 'Total cost', 'Avg list price', 'Avg output tok', 'Avg score'].map((t) => h('th', { class: 'num' }, t)))),
       h('tbody', {}, gRows.map(([k, rs]) => {
         const c = avg(rs, 'costUsd'), lp = avg(rs, 'apiCostUsd'), sc = avg(rs, 'score'), del = rs.filter((r) => r.delivered).length;
+        const known = rs.filter((r) => r.goalMet != null), met = known.filter((r) => r.goalMet).length;
         return h('tr', { key: k },
           h('td', {}, h('strong', {}, valLabel(rv.group, k))),
           h('td', { class: 'num' }, rs.length),
           h('td', { class: 'num' }, `${Math.round(100 * del / rs.length)}%`),
+          goalCol ? h('td', { class: 'num', style: 'white-space:nowrap', title: known.length ? `${met} of ${plural(known.length, 'run')} with a /goal whose checks were read met it` : 'No /goal checks read in this group' },
+            known.length ? `${Math.round(100 * met / known.length)}%` : '—', known.length && known.length < rs.length ? h('span', { class: 'muted' }, ` (n=${known.length})`) : null) : null,
           h('td', { class: 'num' }, fmtMin(avg(rs, 'wallMinutes').v)),
           h('td', { class: 'num', style: 'white-space:nowrap' }, c.n ? `${fmtUsd(c.v)}` : '—', c.n && c.n < rs.length ? h('span', { class: 'muted' }, ` (n=${c.n})`) : null),
           h('td', {}, c.v ? h('div', { class: 'bar', title: 'Relative avg cost' }, h('span', { style: `width:${Math.round(100 * c.v / maxCost)}%` })) : null),
@@ -2713,8 +2779,10 @@ function renderResults() {
   const same = filtered.length > 1 ? dims.filter((d) => new Set(filtered.map((r) => r[d] ?? '')).size === 1) : [];
   const shownDims = dims.filter((d) => !same.includes(d));
   const staged = filtered.some((r) => r.stage); // runs in stages shown: their stage and what each continues from get columns
+  const goalShown = filtered.some((r) => r.metGoal); // any run shown was sent a /goal: whether it was met gets a column
   const cols = [
     ['', null], ['model', 'agent'], ['effort', 'effort'], ...(staged ? [['stage', 'stage'], ['from', 'from']] : []), ...shownDims.map((d) => [d, d]), ['status', 'status'],
+    ...(goalShown ? [['goal met', 'metGoal']] : []),
     ['time', 'wallMinutes', 1], ['cost', 'costUsd', 1], ['list $', 'apiCostUsd', 1], ['out tok', 'outputTokens', 1], ['KB', 'kb', 1],
     ['score', 'score', 1], ['notes', 'notes'], ['finished', 'finishedAt'], ['', null]];
   const sk = rv.sort.k, sd = rv.sort.d;
@@ -2761,6 +2829,7 @@ function renderResults() {
         fl ? h('button', { class: 'tag ' + (fl.items[0].bad ? 'bad' : 'warn'), style: 'margin-left:4px',
           title: `${fl.items.map((i) => i.text).join('\n')}\n\nClick for details`, onclick: () => showRun(r) }, `⚑ ${fl.items[0].tag}${fl.items.length > 1 ? ` +${fl.items.length - 1}` : ''}`) : null,
         err ? h('div', { class: 'hint hide-cards', style: 'margin:2px 0 0; min-width:220px; max-width:300px; white-space:normal', title: r.error }, err) : null),
+      goalShown ? goalCell(r) : null,
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'time'), fmtMin(r.wallMinutes)),
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'cost'), r.costUsd != null ? fmtUsd(r.costUsd) : h('span', { class: 'muted', title: 'This CLI does not report cost' }, 'n/a')),
       h('td', { class: 'num' }, h('span', { class: 'lbl' }, 'list $'), r.apiCostUsd != null ? h('span', { title: 'Its tokens at the lab\'s public API list price' }, fmtUsd(r.apiCostUsd)) : '—'),
@@ -2792,7 +2861,8 @@ const playLink = (r) => r.entry ? h('a', { href: runUrl(r.entry), target: '_blan
 function compareCard(rows) {
   const c = rv.cmp ??= { f: 'agent+effort', a: '', b: '', by: '', matched: true };
   const fields = ['agent+effort', 'agent', 'effort', 'provider', 'ultracode', ...Object.keys(cfg.dimensions),
-    ...(rows.some((r) => r.cli) ? ['cli'] : []), ...(rows.some((r) => r.promptVersion) ? ['promptVersion'] : []), ...(rows.some((r) => r.resumes) ? ['resumed'] : [])];
+    ...(rows.some((r) => r.cli) ? ['cli'] : []), ...(rows.some((r) => r.promptVersion) ? ['promptVersion'] : []), ...(rows.some((r) => r.resumes) ? ['resumed'] : []),
+    ...(rows.some((r) => r.metGoal) ? ['metGoal'] : [])];
   const valsOf = (f) => sortVals(f, [...new Set(rows.map((r) => fieldVal(r, f)))]);
   if (!fields.includes(c.f) || valsOf(c.f).length < 2) c.f = fields.find((f) => valsOf(f).length > 1) ?? 'agent+effort';
   const vals = valsOf(c.f);
@@ -2904,6 +2974,8 @@ const fileButtons = (r) => [
   h('button', { class: 'icon', title: 'Agent reply (Source Information, feedback)', disabled: !r.hasReply, onclick: () => showFile(r.id, 'reply.md', 'Reply') }, 'reply'),
   r.hasInterview ? h('button', { class: 'icon', title: 'Exit interview (exit-interview.json): the agent\'s answers, as they go into the game\'s record',
     onclick: () => showFile(r.id, 'work/exit-interview.json', 'Exit interview') }, 'interview') : null,
+  r.plannerInterview && r.plannerInterview !== 'missing' ? h('button', { class: 'icon', title: 'The planner\'s review of its prompt (planner-exit-interview.json)',
+    onclick: () => showFile(r.id, 'work/planner-exit-interview.json', 'Planner\'s review') }, 'review') : null,
   h('button', { class: 'icon', title: 'Prompt sent', onclick: () => showFile(r.id, 'prompt.md', 'Prompt') }, 'prompt'),
   r.goal && r.goal !== 'off' ? h('button', { class: 'icon', title: 'The /goal message sent', onclick: () => showFile(r.id, 'goal.md', 'Goal') }, 'goal') : null,
   h('button', { class: 'icon', title: 'Error output', onclick: () => showFile(r.id, r.parts?.length > 1 ? `agent.${r.parts.length}.err` : 'agent.err', 'Errors', r.error) }, 'log'),
@@ -2912,10 +2984,31 @@ const fileButtons = (r) => [
     onclick: () => showFile(r.id, `agent.${i + 2}.out`, `Output ${i + 2}`) }, `out ${i + 2}`))];
 // ⟳ on a run that carried on with its session (Resume failed); "resumable" on a failed one that could.
 const resumeTag = (r) => r.resumes ? h('span', { class: 'tag', style: 'margin-left:4px', title: `Resumed ${r.resumes === 1 ? 'once' : `${r.resumes} times`}`
-    + `${r.parts?.some((p) => p.cutOff) ? ' (it was cut off by a quit or restart of the dashboard)' : ''}: ${r.resumes + 1} sessions, whose time, tokens and cost are added up` },
+    + `${r.parts?.some((p) => p.cutOff) ? ' (it was cut off by a quit or restart of the dashboard)' : ''}`
+    + `${r.parts?.some((p) => p.endedAlone) ? ' (its agent finished on its own after its runner was gone; that part is read from its session)' : ''}`
+    + `: ${r.resumes + 1} sessions, whose time, tokens and cost are added up` },
     `⟳${r.resumes > 1 ? ` ${r.resumes}` : ''}`)
   : r.resumable && r.status !== 'ok' ? h('span', { class: 'tag', style: 'margin-left:4px',
     title: 'Failed partway with its session still on disk: Resume failed (Run tab → Options) carries on with it instead of starting over' }, 'resumable') : null;
+
+// How a run's /goal went (goalMet etc. in result.json, read from its Claude Code transcript): yes, no, skipped (a CLI
+// without headless /goal got the plain prompt), unknown (sent one, but the transcript isn't on this computer; hasGoal
+// comes from the server) or '' (no /goal). A field to filter, group and compare by; goalText says it in words.
+const goalState = (r) => r.goalMet === true ? 'yes' : r.goalMet === false ? 'no' : r.goalSkipped ? 'skipped' : r.hasGoal ? 'unknown' : '';
+function goalText(r, reason = true) {
+  const checks = r.goalChecks ? plural(r.goalChecks, 'check') : 'no check';
+  return { yes: `Met${r.goalChecks > 1 ? ` at check ${r.goalChecks}, after ${r.goalChecks - 1} that didn't pass` : ''}`,
+    no: `Never met (${checks}${r.goalForced ? '; Claude Code ended the turn itself after the check had blocked it 9 times in a row' : ''})`
+      + (reason && r.goalReason ? `. The last check said: ${r.goalReason}` : ''),
+    skipped: 'Skipped: this CLI can\'t run /goal headless, so it got the plain prompt',
+    unknown: r.provider !== 'claude' ? `Sent a /goal, but ${PROVIDERS[r.provider] ?? r.provider} doesn't save its goal checks where they can be read, so whether it was met isn't known`
+      : 'Sent a /goal, but its session\'s transcript isn\'t on this computer, so whether it was met isn\'t known (node run-matrix.mjs --reparse on the computer that ran it fills it in)',
+  }[goalState(r)] ?? 'No /goal';
+}
+const goalCell = (r) => { const g = goalState(r), title = goalText(r);
+  return h('td', { class: 'goalcell' + (g ? '' : ' none'), title }, h('span', { class: 'lbl' }, 'goal'),
+    g === 'yes' ? h('span', { class: 'tag ok' }, 'met') : g === 'no' ? h('span', { class: 'tag warn' }, 'not met')
+      : h('span', { class: 'muted' }, g === 'skipped' ? 'skipped' : g === 'unknown' ? '?' : '—')); };
 
 // Score, notes and "looked at" all go to runs/scores.json; any of them counts as reviewed. Saved with
 // the run's startedAt, so a re-run of it starts unreviewed. Everything showing the run redraws.
@@ -2985,11 +3078,13 @@ function runDetails(r) {
         : h('span', { class: 'tag', title: r.changed?.includes(d) ? 'This variant\'s text was edited after the run' : null }, `${d}=${r[d] ?? '—'}${r.changed?.includes(d) ? ' (old text)' : ''}`))),
     r.error ? h('p', { class: 'errs' }, `${causeOf(r.error)}: ${r.error}`) : null,
     fl ? h('div', { class: 'warns', style: 'margin-bottom:10px' }, fl.items.map((i) => h('div', {}, i.text))) : null,
+    // A failed run isn't flagged, so what its last goal check said goes here.
+    r.goalReason && !fl?.items.some((i) => i.tag === 'goal not met') ? h('p', { class: 'hint', style: 'margin:0 0 10px' }, `Goal not met. The last check said: ${r.goalReason}`) : null,
     r.chain ? stageTrail(r) : null,
     h('div', { class: 'grid2' },
       h('table', {}, h('tbody', {},
         line('Time', fmtMin(r.wallMinutes), usual('wallMinutes')),
-        r.parts?.length > 1 ? line('Sessions', r.parts.length, `resumed: ${r.parts.map((p, i) => `${i + 1}. ${fmtMin(p.wallMinutes)}${p.exitCode === 0 ? '' : p.cutOff ? ' (cut off)' : ' (failed)'}`)
+        r.parts?.length > 1 ? line('Sessions', r.parts.length, `resumed: ${r.parts.map((p, i) => `${i + 1}. ${fmtMin(p.wallMinutes)}${p.exitCode === 0 ? '' : p.cutOff ? ' (cut off)' : p.endedAlone ? ' (finished after its runner was gone)' : ' (failed)'}`)
           .join(' · ')}. Time, tokens and cost are all of them together${r.parts.some((p) => p.cutOff) ? '; a session cut off never reported its totals, so its tokens are from its transcript' : ''}.`) : null,
         line('API time', r.apiMinutes != null ? fmtMin(r.apiMinutes) : null, r.apiMinutes && r.wallMinutes ? `${pct(r.apiMinutes / r.wallMinutes)} of the time` : ''),
         line('Cost', r.costUsd != null ? fmtUsd(r.costUsd) : null, r.costUsd != null ? [usual('costUsd'), r.costSource === 'estimated'
@@ -3012,11 +3107,15 @@ function runDetails(r) {
         line('TODO / FIXME', r.todos),
         line('Reply', r.hasReply ? (r.replyChars ? `${fmtNum(r.replyChars)} characters` : 'yes') : 'none'),
         r.exitInterview ? line('Exit interview', { ok: 'yes', invalid: 'not valid JSON', missing: 'none' }[r.exitInterview] ?? r.exitInterview, 'exit-interview.json, in the game\'s record') : null,
+        r.metGoal ? line('Goal met', { yes: 'yes', no: 'no', skipped: 'skipped', unknown: 'not known' }[r.metGoal], goalText(r, false)) : null,
+        r.plannerInterview ? line('Planner\'s review', { ok: 'yes', invalid: 'not valid', missing: 'none' }[r.plannerInterview] ?? r.plannerInterview, 'planner-exit-interview.json: its review of the prompt it was given') : null,
         line('Plan usage', r.plan ? planText(r.plan) : null, r.plan ? planNote(r.plan) : ''),
         line('First token', r.firstTokenMs != null ? fmtSecs(r.firstTokenMs / 1000) : null),
         line('CLI version', r.cli),
         line('Prompt', promptLabel(r.promptVersion)),
         line('Started', when(r.startedAt)), line('Finished', when(r.finishedAt))))),
+    r.plannerAnswers?.length ? h('dl', { class: 'qa' }, h('strong', {}, 'Its review of the prompt'),
+      r.plannerAnswers.map((x) => [h('dt', {}, x.question), h('dd', {}, x.answer)])) : null,
     r.gone ? null : h('div', { class: 'row', style: 'margin-top:12px' },
       h('label', { class: 'muted', for: 'dlg-score' }, 'Score'),
       h('input', { type: 'number', id: 'dlg-score', min: 0, max: 10, step: 0.5, inputmode: 'decimal', class: 'score', value: r.score ?? '', onchange: (e) => saveScore(r, e.target) }),
@@ -3129,6 +3228,7 @@ async function loadResults() {
     r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
     if (r.cliVersion) r.cli = `${SHORT[r.provider] ?? r.provider} ${r.cliVersion}`; // versions only compare within a CLI
     r.resumed = r.resumes ? 'yes' : 'no'; // a field to filter and compare by (Resume failed)
+    r.metGoal = goalState(r); // and how its /goal went (see goalCell)
     if (r.chain?.length) { // runs in stages: the step it continues from, and every step to it
       const p = r.chain.at(-2);
       r.from = p ? `${p.agent} · ${p.effort} · ${p.stage}` : 'the brief';
@@ -3243,6 +3343,7 @@ function setPill() {
   offline = false;
   await loadAudit();
   loadClis(); // takes a few seconds (it asks each CLI); the page works meanwhile
+  loadMachine();
   await poll(); // batch status first, so a view of the last batch opens on it
   showTab(tab);
 })();

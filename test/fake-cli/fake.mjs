@@ -9,7 +9,10 @@
 //   FAKE:hang             codex: write its session logs, then work until stopped and exit 0 like the real one,
 //                         never printing the turn's usage. claude (not when resumed): get going (a response and a
 //                         dev file, the response in its transcript as it's made, like the real one), then work until
-//                         stopped, never printing the result; FAKE:hang=state also saves the session's totals as it stops
+//                         stopped, never printing the result; FAKE:hang=state also saves the session's totals as it stops.
+//                         FAKE:hang=alone: get going, then a second later finish the game on its own (its last response
+//                         and the session's totals in its transcript, like a real one left going after its runner died),
+//                         printing nothing more, and exit 0
 //   FAKE:nogame           finish OK without writing a game file
 //   FAKE:noreply          finish OK with an empty final reply
 //   FAKE:todo             leave a TODO in the game
@@ -21,6 +24,9 @@
 //   FAKE:badexit          leave an exit-interview.json that isn't valid JSON
 //   FAKE:hubmeta          put AI Hub session <meta> tags (hub:session, hub:session-players, hub:players) in the game's head
 //   FAKE:saypath          end the reply with the work folder's full path
+//   FAKE:noreview         leave no planner-exit-interview.json (written whenever the prompt names that file)
+//   FAKE:goal=unmet       claude with /goal: its transcript has 9 goal checks that weren't met and Claude Code ending the
+//                         turn itself (by default, one check that was)
 // A run in stages gets its stage's text as the message (or in STAGE.md, with /goal) and the brief in TASK.md;
 // both are read. Given a game already (a later stage), the fake adds to it, so the game it leaves is its own.
 // FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
@@ -91,7 +97,7 @@ export async function run(cli) {
   // claude --resume <id>: the same session, so the usage limit it stopped on has passed.
   const resume = cli === 'claude' ? after(argv, '--resume') : undefined;
   const limit = cli === 'claude' && !resume ? prompt.match(/FAKE:limit(=start)?/) : null;
-  const hang = cli === 'claude' && !resume ? prompt.match(/FAKE:hang(=state)?/) : null;
+  const hang = cli === 'claude' && !resume ? prompt.match(/FAKE:hang(=state|=alone)?/) : null;
   const transcript = cli === 'claude' && process.env.CLAUDE_CONFIG_DIR
     ? path.join(process.env.CLAUDE_CONFIG_DIR, 'projects', process.cwd().replace(/[^a-zA-Z0-9]/g, '-'), `${resume ?? 'fake-session'}.jsonl`) : null;
   if (resume && !(transcript && fs.existsSync(transcript))) { process.stderr.write(`No conversation found with session ID: ${resume}\n`); process.exit(1); }
@@ -115,6 +121,10 @@ export async function run(cli) {
     if (/exit-interview\.json/.test(prompt) && !/FAKE:noexit/.test(prompt))
       fs.writeFileSync('exit-interview.json', /FAKE:badexit/.test(prompt) ? '{"sourceInformation": {"date": "' : JSON.stringify(EXIT(cli, model), null, 2));
   }
+  // A stage's review of its prompt, when its text asks for one: each question with its answer.
+  if (!fail && /planner-exit-interview\.json/.test(prompt) && !/FAKE:noreview/.test(prompt))
+    fs.writeFileSync('planner-exit-interview.json', JSON.stringify([{ question: 'What was confusing?', answer: `Which file wins for the file name (${model}).` },
+      { question: 'What would you change in this prompt?', answer: 'Nothing.' }], null, 2));
   if (/FAKE:saypath/.test(prompt)) reply += `\n\nThe game is in ${process.cwd()}`;
   if (/FAKE:noreply/.test(prompt)) reply = '';
   const tok = { input: 1200, cacheRead: 9000, cacheWrite: 800, output: 640, reasoning: 120 };
@@ -135,8 +145,19 @@ export async function run(cli) {
         const at = new Date().toISOString();
         fs.appendFileSync(transcript, jsonl([{ type: 'user', timestamp: at, message: { content: 'turn' } }, { type: 'assistant', timestamp: at, message: msg }]));
       }
+      if (hang[1] === '=alone') return setTimeout(() => { // its runner is gone by now: nobody reads its output
+        fs.writeFileSync(`Fake-Game-${model}.html`, `<!doctype html><title>Fake</title><script>${'let x = 1;\n'.repeat(200)}</script>`);
+        if (/exit-interview\.json/.test(prompt)) fs.writeFileSync('exit-interview.json', JSON.stringify(EXIT(cli, model), null, 2));
+        const at = new Date().toISOString(), last = { id: 'msg_h2', model, content: [{ type: 'text', text: reply }],
+          usage: { input_tokens: 20, cache_creation_input_tokens: 100, cache_read_input_tokens: 6000, output_tokens: 300 } };
+        if (transcript) fs.appendFileSync(transcript, jsonl([{ type: 'user', timestamp: at, message: { content: [{ type: 'tool_result', tool_use_id: 'h1', content: 'ok' }] } },
+          { type: 'assistant', timestamp: at, message: last }, { type: 'last-prompt', sessionId },
+          { type: 'cost-state', totalCostUSD: 0.05, totalAPIDuration: 900, modelUsage: { [model]: { inputTokens: 120, outputTokens: 700,
+            cacheReadInputTokens: 11000, cacheCreationInputTokens: 700, costUSD: 0.05 } } }]));
+        process.exit(0);
+      }, 1000);
       process.on('SIGTERM', () => {
-        if (hang[1] && transcript) claudeTranscript(transcript, { totalCostUSD: 0.03, totalAPIDuration: 700,
+        if (hang[1] === '=state' && transcript) claudeTranscript(transcript, { totalCostUSD: 0.03, totalAPIDuration: 700,
           modelUsage: { [model]: { inputTokens: 100, outputTokens: 400, cacheReadInputTokens: 5000, cacheCreationInputTokens: 600, costUSD: 0.03 } } });
         process.exit(143);
       });
@@ -178,7 +199,7 @@ export async function run(cli) {
       duration_ms: 2000, duration_api_ms: apiMs, num_turns: 4, ...(goal ? { result_index: 1 } : {}), result: fail ? '' : reply,
       session_id: sessionId, total_cost_usd: cost, ...(cli === 'claude' ? { subagent_stats: { spawned: 1 }, ttft_ms: 900 } : {}), modelUsage });
     if (cli === 'grok' && process.env.GROK_HOME) grokSession(sessionId);
-    if (transcript) claudeTranscript(transcript, { totalCostUSD: cost, totalAPIDuration: apiMs, modelUsage });
+    if (transcript) claudeTranscript(transcript, { totalCostUSD: cost, totalAPIDuration: apiMs, modelUsage }, goal && !fail && !limit ? goalChecks(prompt) : []); // a session that errored got no check
     process.exit(fail || limit ? 1 : 0);
   }
   if (cli === 'codex') {
@@ -235,11 +256,20 @@ export async function run(cli) {
 const pad = (n) => String(n).padStart(2, '0');
 const jsonl = (rows) => rows.map((r) => JSON.stringify(r)).join('\n') + '\n';
 
-// Claude Code: a turn in the session's transcript, and the cost-state it saves as the process ends (the session's
-// totals so far, which --resume restores).
-function claudeTranscript(file, totals) {
+// Claude Code: a turn in the session's transcript (and what else it wrote then: `entries`), and the cost-state it saves
+// as the process ends (the session's totals so far, which --resume restores).
+function claudeTranscript(file, totals, entries = []) {
   fs.mkdirSync(path.dirname(file), { recursive: true });
-  fs.appendFileSync(file, jsonl([{ type: 'user', timestamp: new Date().toISOString(), message: { content: 'turn' } }, { type: 'cost-state', ...totals }]));
+  fs.appendFileSync(file, jsonl([{ type: 'user', timestamp: new Date().toISOString(), message: { content: 'turn' } }, ...entries, { type: 'cost-state', ...totals }]));
+}
+// What /goal leaves in a Claude Code transcript: a sentinel as the goal is set, then a verdict each time the agent
+// tries to stop. Not met 9 times in a row, Claude Code ends the turn itself.
+function goalChecks(prompt) {
+  const at = new Date().toISOString(), check = (met, reason) => ({ type: 'attachment', timestamp: at, attachment: { type: 'goal_status', met, condition: 'fake', reason } });
+  const set = { type: 'attachment', timestamp: at, attachment: { type: 'goal_status', met: false, sentinel: true, condition: 'fake' } };
+  if (!/FAKE:goal=unmet/.test(prompt)) return [set, check(true, 'The game is in the folder.')];
+  return [set, ...Array.from({ length: 9 }, () => check(false, 'The game exists, but the transcript does not show every feature working.')),
+    { type: 'system', subtype: 'informational', timestamp: at, content: 'A hook blocked the turn from ending 9 consecutive times — overriding and ending turn.' }];
 }
 
 // Codex: the main thread's rollout (2 requests, plan limits at the start and end) and one subagent's, which
