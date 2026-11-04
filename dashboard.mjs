@@ -13,6 +13,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { readRecord } from './run-record.mjs';
 
 // Restart (on the page) starts the dashboard again, so it runs its code as it is now. For that, `node dashboard.mjs`
 // keeps the dashboard itself in a child process and starts it again whenever it exits with RESTART_CODE; any other
@@ -776,6 +777,49 @@ function variantLibrary() {
   return value;
 }
 
+// Every run's feedback, for Insights → What the agents said: each list in its exit-interview.json (testingFeedback,
+// engineFeedback …), its answers paired with the questions they answer, the bullets of that dimension's section as the
+// run was sent it (as run-record.mjs pairs them for the game's record; null for an answer past the last question).
+// A planner's review is in its result.json already (plannerAnswers). { runId: { list: [{ question, answer }] } }
+let feedbackCache = null;
+const bullets = (t) => String(t ?? '').split('\n').map((l) => l.match(/^\s*[-*•]\s+(.+?)\s*$/)?.[1]).filter(Boolean);
+function feedback() {
+  const rv = revs(), key = [rv.results, rv.config, rv.template, rv.history].join('|');
+  if (feedbackCache?.key === key) return feedbackCache.value;
+  const dims = readJSON(CONFIG, {}).dimensions ?? {};
+  let tmpl = ''; try { tmpl = fs.readFileSync(templatePath(), 'utf8'); } catch {}
+  const templates = new Map(readJSON(HISTORY, []).map((e) => [e.hash, e.text]));
+  templates.set(textHash(tmpl), tmpl);
+  const value = {};
+  for (const e of fs.readdirSync(OUT, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(OUT, e.name), j = readJSON(path.join(dir, 'work', 'exit-interview.json'), null);
+    if (!j || typeof j !== 'object' || Array.isArray(j)) continue;
+    const r = readJSON(path.join(dir, 'result.json'), null);
+    if (!r?.id) continue;
+    let changed = null, sent = null;
+    let rec; // the record in its game, read only when needed: it holds each section's text as sent
+    const recorded = (d) => { if (rec === undefined) try { rec = r.entry ? readRecord(fs.readFileSync(path.join(OUT, r.entry), 'utf8')) : null; } catch { rec = null; }
+      return rec?.prompt?.sections?.[d]?.text; };
+    const questions = (d) => { // its variant's text while that's unchanged, else as read back from what it was sent
+      const v = dims[d]?.find((x) => x.id === r[d]);
+      if (v && !(changed ??= changedVariants(dir, r, dims, tmpl)).includes(d)) return bullets(variantText(v));
+      const qs = bullets(sentVariant(sent ??= sentSections(dir, r, templates), d, r.variantHashes?.[d] ?? null));
+      return qs.length ? qs : bullets(recorded(d));
+    };
+    const lists = {};
+    for (const [d, list] of Object.entries(j)) {
+      if (!Array.isArray(list) || !list.length || list.some((a) => a == null || (typeof a === 'object' && !('answer' in a)))) continue;
+      const qs = questions(d);
+      lists[d] = list.map((a, i) => typeof a === 'object' ? { question: String(a.question ?? qs[i] ?? '') || null, answer: String(a.answer ?? '') }
+        : { question: qs[i] ?? null, answer: String(a) });
+    }
+    if (Object.keys(lists).length) value[r.id] = lists;
+  }
+  feedbackCache = { key, value };
+  return value;
+}
+
 // A review (score, notes, "looked at") belongs to one attempt at a run: it's saved with the run's
 // startedAt, so a re-run (Retry failed, or after ✕) starts unreviewed instead of inheriting it.
 // Reviews saved before that have no startedAt and still apply.
@@ -810,6 +854,10 @@ function results() {
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
     if (fs.existsSync(path.join(dir, 'goal.md'))) r.hasGoal = true; // sent a /goal: goalMet says how it went, once read
     r.hasInterview = fs.existsSync(path.join(dir, 'work', 'exit-interview.json'));
+    if (r.hasInterview) { // the game's title as on its title screen (the AI Hub fields), for Insights
+      const name = readJSON(path.join(dir, 'work', 'exit-interview.json'), null)?.aiHub?.name;
+      if (typeof name === 'string' && name.trim()) r.hubName = name.trim();
+    }
     if (resumable(dir, r)) r.resumable = true;
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;
@@ -892,10 +940,10 @@ const server = http.createServer(async (req, res) => {
     if (p.startsWith('/runs/') && m === 'GET') return serveRunFile(req, res, p.slice(6));
     if (p === '/api/audit' && m === 'GET') return send(res, 200, readJSON(AUDIT, null));
 
-    // canResume, canQueue, canRestart: this server takes Resume failed, queued batches and Restart (a page newer than its
-    // server hides them). boot: this start of the server.
+    // canResume, canQueue, canRestart, canFeedback: this server takes Resume failed, queued batches and Restart, and serves
+    // /api/feedback (a page newer than its server hides them). boot: this start of the server.
     if (p === '/api/config' && m === 'GET') return send(res, 200, { config: readJSON(CONFIG, null), path: CONFIG, outDir: OUT, platform: process.platform, rev: revs(true),
-      canResume: true, canQueue: true, canRestart: true, boot: BOOT });
+      canResume: true, canQueue: true, canRestart: true, canFeedback: true, boot: BOOT });
     if (p === '/api/config' && m === 'PUT') {
       const c = await body(req);
       if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });
@@ -987,6 +1035,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/results' && m === 'GET') return send(res, 200, results());
     if (p === '/api/variants' && m === 'GET') return send(res, 200, variantLibrary());
+    if (p === '/api/feedback' && m === 'GET') return send(res, 200, feedback());
     if (p === '/api/score' && m === 'PUT') {
       const { id, score, notes, seen, startedAt } = await body(req);
       if (!runDir(id)) return send(res, 400, { error: 'No such run.' });

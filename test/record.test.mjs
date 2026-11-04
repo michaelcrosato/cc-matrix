@@ -132,6 +132,16 @@ test('stamping again keeps the texts the run was sent, paths are written from ~,
     assert.ok(!JSON.stringify(recordOf(sb, id)).includes(sb.dir));
     assert.ok(read(path.join(sb.out, id), 'reply.md').endsWith(`The game is in ${path.join(sb.out, id, 'work')}`));
   }
+  // Stamping again with nothing new leaves the game as it was (not even a new stampedAt); a change to its record
+  // (here its reply) stamps it again.
+  const game = path.join(sb.out, result(sb, id).entry), first = fs.readFileSync(game, 'utf8');
+  for (const how of ['--stamp', '--reparse']) {
+    assert.equal(runner(sb, [how], home).status, 0);
+    assert.equal(fs.readFileSync(game, 'utf8'), first, how);
+  }
+  fs.appendFileSync(path.join(sb.out, id, 'reply.md'), '\nOne more line.');
+  assert.equal(runner(sb, ['--stamp'], home).status, 0);
+  assert.match(recordOf(sb, id).interview.reply, /One more line\.$/);
   // The variant's text is edited since (same short name): stamped again either way, the record keeps the text sent.
   const cfg = JSON.parse(read(sb.dir, 'config.json')); cfg.dimensions.testing[0].text = 'edited since'; fs.writeFileSync(sb.config, JSON.stringify(cfg));
   for (const how of ['--stamp', '--reparse']) {
