@@ -173,6 +173,21 @@ try:
         pins = page.evaluate("pinsOf('testing').map((p) => p.id)")
         check('pin and unpin on a variant\'s row change the field\'s pins', 'light' in pins and 'test-full' not in pins, str(pins))
         page.get_by_role('button', name='Discard').click(); page.wait_for_timeout(300)
+        # Setup · Advanced: a stage's name follows its text the same way: edited after a run used it, plan → plan-v2 with
+        # a note saying why, and typing on keeps focus; the old text brings the old name back
+        c = json.load(open(conf)); c['stages'] = [{'id': 'plan', 'text': 'Plan TASK.md. FAKE:plan', 'game': False}]; json.dump(c, open(conf, 'w'), indent=2)
+        subprocess.run(['node', os.path.join(ROOT, 'run-matrix.mjs'), '--config', conf, '--out', runs, '--stage', 'plan=opus:medium', '--only', 'testing=light'],
+                       check=True, capture_output=True, env=env)
+        page.goto(base + '/#advanced'); page.wait_for_selector('#tab-advanced.on >> text=Instructions'); page.wait_for_timeout(1500)
+        stage_name = page.get_by_label('Stage 1 name')
+        page.get_by_label('plan text').click(); page.keyboard.press('End'); page.keyboard.type(' Twice.', delay=10); page.wait_for_timeout(300)
+        renamed, note = stage_name.input_value(), page.locator('#tab-advanced').inner_text()
+        for _ in range(7): page.keyboard.press('Backspace')
+        page.wait_for_timeout(300)
+        check('editing a stage that ran renames it (plan → plan-v2) and says why; the old text brings the old name back',
+              renamed == 'plan-v2' and 'New name: 1 finished run of "plan" used other text' in note and stage_name.input_value() == 'plan',
+              f'{renamed} → {stage_name.input_value()}')
+        c = json.load(open(conf)); c.pop('stages', None); json.dump(c, open(conf, 'w'), indent=2); page.wait_for_timeout(2500)
         page.goto(base + '/#run'); page.wait_for_selector('#tab-run.on > *')
         # a batch from the Run tab: the log follows its end, the pill shows progress
         many = [{'id': f'm{i}', 'text': f'FAKE:sleep=150 m{i}'} for i in range(30)]

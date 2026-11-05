@@ -194,6 +194,9 @@ const promptVersion = textHash(template ?? '');
 // Saved with each run too (variantHashes), so the dashboard can tell exactly which runs used a
 // variant's text from before an edit.
 const variantHashes = (combo) => Object.fromEntries(dimNames.map((d) => [d, textHash(variantText(combo[d]).trim())]));
+// And a stage run's stage: its text and goal as set (not filled), hashed the same way, so the dashboard can tell the
+// runs made with an earlier text. Runs are matched by their chain and brief, not by what their stage said.
+const stageHashes = (st) => ({ text: textHash((st.text ?? '').trim()), goal: textHash((st.goal ?? '').trim()) });
 const LABS = { claude: 'Anthropic', codex: 'OpenAI', grok: 'xAI', agy: 'Google', muse: 'Meta' };
 const CLIS = { claude: 'Claude Code CLI', codex: 'Codex CLI', grok: 'Grok CLI', agy: 'Antigravity CLI', muse: 'Muse Code CLI' };
 // agy also serves other labs' models (Claude, GPT-OSS), so the model name decides the lab first.
@@ -203,13 +206,15 @@ const OS = { win32: 'Windows', darwin: 'macOS', linux: 'Linux' }[process.platfor
 
 // {{machine}}: what this computer has, for the agents: environments/<computer>.md beside the config, which node
 // check-environment.mjs writes (and keeps up to date between its markers) and the rest of which is written by hand.
-// Filled without its title and its notes to whoever edits it; read once. Named as check-environment.mjs names it.
+// Filled without its title and its notes to whoever edits it, its headings a level down so they sit under the
+// prompt's own (## What this computer doesn't have → ###); read once. Named as check-environment.mjs names it.
+// dashboard.mjs shows it the same way.
 const machineFile = () => path.join(configDir, 'environments', `${os.hostname().replace(/[^\w.-]/g, '-')}.md`);
 let machineText;
 function machine() {
   if (machineText === undefined) {
     let t = null; try { t = fs.readFileSync(machineFile(), 'utf8'); } catch {}
-    machineText = t ? t.replace(/<!--[\s\S]*?-->\n?/g, '').replace(/^# .*\n+/, '').trim() : null;
+    machineText = t ? t.replace(/<!--[\s\S]*?-->\n?/g, '').replace(/^# .*\n+/, '').replace(/^(#{1,5}) /gm, '#$1 ').trim() : null;
   }
   return machineText || undefined;
 }
@@ -217,7 +222,7 @@ function machine() {
 // Placeholders the runner fills per run (in addition to the dimensions).
 function runVars(run, d = new Date()) {
   return { model: run.agent.model, effort: `${run.effort ?? 'default'}${run.ultracode ? '-ultracode' : ''}`, lab: labOf(run.agent),
-    environment: `${CLIS[run.agent.provider] ?? run.agent.provider} (headless); ${OS}; browser unknown`, machine: machine(),
+    environment: `${CLIS[run.agent.provider] ?? run.agent.provider} (headless); ${OS}`, machine: machine(),
     stamp: stampOf(d),
     date: `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` };
 }
@@ -540,7 +545,7 @@ function stageRuns() {
 }
 if (stageMode) {
   const ids = STAGES.map((s) => s.id);
-  if (new Set(ids).size !== ids.length || ids.some((id) => !/^\w+$/.test(id))) { console.error(`Stage names must be unique letters, numbers or _ (${ids.join(', ')})`); process.exit(1); }
+  if (new Set(ids).size !== ids.length || ids.some((id) => !/^[\w-]+$/.test(id))) { console.error(`Stage names must be unique letters, numbers, - or _ (${ids.join(', ')})`); process.exit(1); }
   if (args.repeat > 1) console.error('Note: Repeat isn\'t used for runs in stages.');
   queue = stageRuns().slice(0, args.limit);
 }
@@ -583,7 +588,7 @@ const NO_WINDOW = ['DISPLAY', 'WAYLAND_DISPLAY'];
 const flagsOf = (p) => [...extra(p), ...(ISOLATE ? ISOLATE_ARGS[p] ?? [] : []).filter((a) => !extra(p).includes(a))];
 // Every run also gets a temp folder of its own, tmp/ beside work/ (TMPDIR, TMP, TEMP, and CLAUDE_CODE_TMPDIR for Claude
 // Code's own files): /tmp is shared by the runs going at once, and on some computers it's held in memory. Not copied
-// to a later stage, like the rest outside work/.
+// to a later stage, like the rest outside work/, and deleted once the run has finished (dropTmp).
 const TMP_VARS = ['TMPDIR', 'TMP', 'TEMP', 'CLAUDE_CODE_TMPDIR'];
 function agentEnv(p, dir) {
   const env = ISOLATE ? { ...process.env, ...ISOLATE_ENV[p] } : { ...process.env };
@@ -591,6 +596,9 @@ function agentEnv(p, dir) {
   if (dir) { const tmp = path.join(dir, 'tmp'); fs.mkdirSync(tmp, { recursive: true }); for (const k of TMP_VARS) env[k] = tmp; }
   return env;
 }
+// A finished run's temp folder, OK or failed: nothing reads it after the agent (what it left running is stopped and its
+// game checked by then), and a later stage isn't given it. A cut-off run keeps its own, to carry on with.
+const dropTmp = (home) => { try { fs.rmSync(path.join(home, 'tmp'), { recursive: true, force: true }); } catch {} };
 // The same as a shell prefix, for Run → Preview.
 const envPrefix = (p) => (ISOLATE ? ['env', ...NO_WINDOW.flatMap((k) => ['-u', k]), ...Object.entries(ISOLATE_ENV[p] ?? {}).map(([k, v]) => `${k}=${v}`)].join(' ') + ' ' : '')
   + TMP_VARS.map((k) => `${k}="$d/tmp"`).join(' ') + ' ';
@@ -1425,6 +1433,7 @@ async function runOne(run) {
     const now = new Date().toISOString();
     let hashes; try { hashes = variantHashes(run.combo); } catch {} // a variant whose file can't be read is why we're here
     fs.writeFileSync(resFile, JSON.stringify({ id: run.id, ...run.fields, model: run.agent.model, promptVersion, variantHashes: hashes,
+      ...(run.stage ? { stageHashes: stageHashes(run.stage) } : {}),
       status: 'failed', exitCode: null, error: `Not started: ${e.message}`, wallMinutes: 0, startedAt: now, finishedAt: now }, null, 2));
     finished().set(run.key, { r: readResult(run.id), dir: run.id }); tell('done', run, run.id);
     done++; console.log(`✘ ${run.id}  not started: ${e.message}`);
@@ -1439,8 +1448,9 @@ async function runOne(run) {
   // goalSkipped: a goal (a goal variant, or a stage's goal) on a CLI without headless /goal, so it got the plain text.
   const goalSkipped = (run.stage ? !!stageTexts(run).goal : !!goalText(run.combo)) && !goalMessage(run);
   // What the run is made with, kept in unfinished.json while it runs, so a cut-off run carries on as itself.
+  const made = { variantHashes: variantHashes(run.combo), ...(run.stage ? { stageHashes: stageHashes(run.stage) } : {}) };
   const base = { id: run.id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
-    variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), ...stageFields(run, work, parent, given), timeZone: TIME_ZONE, isolated: ISOLATE };
+    ...made, ...(goalSkipped ? { goalSkipped } : {}), ...stageFields(run, work, parent, given), timeZone: TIME_ZONE, isolated: ISOLATE };
   console.log(`▶ ${run.id}${parent ? `  (${run.stage.id}, from ${parent.dir})` : ''}`);
   const { exitCode, metrics, start } = await spawnAgent(run, dir, prompt, limitOf(run), 0, null, base);
 
@@ -1460,7 +1470,7 @@ async function runOne(run) {
   const id = status === 'ok' ? withTitle(run.id, measured, run) : run.id, home = path.join(outDir, id);
   const staged = stageFields(run, path.join(home, 'work'), parent, given);
   const result = { id, ...run.fields, model: run.agent.model, cliVersion: cliVersions[run.agent.provider], promptVersion,
-    variantHashes: variantHashes(run.combo), ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
+    ...made, ...(goalSkipped ? { goalSkipped } : {}), status, exitCode,
     wallMinutes: (end - start) / 60000, ...metrics, ...measured, ...staged, ...exitInterview(home, !!run.stage, staged.expectsGame),
     ...(run.stage ? plannerInterview(home) : {}), ...goalOutcome(home, { provider: run.agent.provider, sessionId: metrics.sessionId }),
     startedAt: new Date(start).toISOString(), finishedAt: new Date(end).toISOString(), timeZone: TIME_ZONE, isolated: ISOLATE };
@@ -1472,6 +1482,7 @@ async function runOne(run) {
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  ${result.wallMinutes.toFixed(1)}m  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
   await checkSaved(home, result);
+  dropTmp(home);
   if (!args.broker) writeReport(); // with --broker the dashboard writes it, from the config as it is now
 }
 
@@ -1549,6 +1560,7 @@ async function resumeOne(run, prev, carrying = false) {
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
   await checkSaved(path.join(outDir, id), result);
+  dropTmp(path.join(outDir, id));
   if (!args.broker) writeReport();
 }
 
@@ -1567,7 +1579,7 @@ function saveParts(run, from, r, parts, part, metrics, status) {
   let planChars; try { if (r.stage) planChars = fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8').length; } catch {}
   const measured = measureOutput(work, given), id = status === 'ok' ? withTitle(from, measured, run) : from, home = path.join(outDir, id);
   const result = { id, ...run.fields, model: r.model, cliVersion: r.cliVersion, promptVersion: r.promptVersion,
-    variantHashes: r.variantHashes, ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode: part.exitCode,
+    variantHashes: r.variantHashes, ...(r.stageHashes ? { stageHashes: r.stageHashes } : {}), ...(r.goalSkipped ? { goalSkipped: true } : {}), status, exitCode: part.exitCode,
     wallMinutes: all.reduce((s, p) => s + (p.wallMinutes ?? 0), 0), ...m, ...measured, ...kept, ...(planChars != null ? { planChars } : {}),
     ...exitInterview(home, !!r.stage, r.expectsGame), ...(r.stage ? plannerInterview(home) : {}),
     ...goalOutcome(home, { provider: run.agent.provider, sessionId: m.sessionId ?? r.sessionId }),
@@ -1596,6 +1608,7 @@ function foldEnded(run, cut, { s, e }) {
   done++; tell('done', run, id);
   console.log(`${status === 'ok' ? '✔' : '✘'} ${cut.dir}  finished on its own after its runner was gone: ` +
     `${parts.length ? `${p.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all` : `${p.wallMinutes.toFixed(1)}m`}  ${fmtUsd(m.costUsd)}  out:${m.outputTokens ?? '?'} tok (from its session)${id !== cut.dir ? `  → ${id}` : ''}`);
+  dropTmp(path.join(outDir, id));
   if (!args.broker) writeReport();
 }
 // A part that ended on its own after its runner was gone (foldEnded; --reparse measures it again), from its session:

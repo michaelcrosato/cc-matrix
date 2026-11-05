@@ -66,7 +66,8 @@ const TOOLS = [['node', ['--version']], ['npm', ['--version']], ['python3', ['--
   ['gh', ['--version']], ['curl', ['--version']], ['wget', ['--version']], ['jq', ['--version']], ['ffmpeg', ['-version']], ['ffprobe', ['-version']],
   ['sqlite3', ['--version']], ['zip', ['-v']], ['unzip', ['-v']], ['rustc', ['--version']], ['cargo', ['--version']], ['go', ['version']],
   ['java', ['-version']], ['lighthouse', ['--version']], ['shot-scraper', ['--version']], ['xvfb-run', null], ['magick', ['-version']],
-  ['sox', ['--version']], ['esbuild', ['--version']], ['bun', ['--version']], ['deno', ['--version']], ['uv', ['--version']], ['tsc', ['--version']]];
+  ['sox', ['--version']], ['esbuild', ['--version']], ['bun', ['--version']], ['deno', ['--version']], ['uv', ['--version']], ['tsc', ['--version']],
+  ['wasm-bindgen', ['--version']]];
 function tools() {
   const have = [], missing = [];
   for (const [cmd, argv] of TOOLS) {
@@ -76,29 +77,57 @@ function tools() {
   }
   return { have, missing };
 }
+// Rust's toolchains (rustup's), and which have the wasm32 target a Rust engine needs to build for the browser: a repo
+// that pins a toolchain (rust-toolchain.toml) gets the one installed here, or downloads it.
+function rust() {
+  const home = process.env.RUSTUP_HOME || path.join(os.homedir(), '.rustup');
+  let all = []; try { all = fs.readdirSync(path.join(home, 'toolchains')).filter((x) => !x.startsWith('.')); } catch {}
+  if (!all.length) return null;
+  const name = (x) => x.replace(/-(x86_64|aarch64|i686|arm\w*|riscv64\w*)-.*$/, '');
+  const wasm = all.filter((x) => fs.existsSync(path.join(home, 'toolchains', x, 'lib', 'rustlib', 'wasm32-unknown-unknown')));
+  return `rustup's toolchains ${all.map(name).join(', ')}; ${wasm.length ? `the wasm32-unknown-unknown target on ${wasm.map(name).join(', ')}` : 'no wasm32 target'}`;
+}
 
 // Playwright: the Python package and the browsers it has downloaded; with the browsers started, each one's version,
-// whether it has WebGL (and how it renders) and WebGPU.
+// whether it has WebGL (and how it renders) and WebGPU. WebGPU is only there on a secure page, so the probe opens a
+// file:// one (a blank page never has it). Chromium without WebGPU is asked again with check-game.py's WEBGPU flags,
+// the ones WebGPU engines need here (in software, on SwiftShader; checked on shardfall, riftlight and my-3dge).
 const PROBE = String.raw`
-import json
+import json, shutil, tempfile
+from pathlib import Path
 from playwright.sync_api import sync_playwright
+WEBGPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgpu-adapter=swiftshader']
+JS = r"""async () => { const c = document.createElement('canvas'), g = c.getContext('webgl2') || c.getContext('webgl');
+  const d = g && g.getExtension('WEBGL_debug_renderer_info');
+  let gpu = null;
+  try { const a = navigator.gpu && await navigator.gpu.requestAdapter(); if (a && await a.requestDevice()) gpu = [a.info?.vendor, a.info?.architecture].filter(Boolean).join(' ') || 'yes'; } catch {}
+  return { version: navigator.userAgent.match(/(Chrome|Firefox|Version)\/(\d+(\.\d+)?)/)?.[2] ?? null,
+    webgl: g ? (typeof WebGL2RenderingContext !== 'undefined' && g instanceof WebGL2RenderingContext ? 2 : 1) : 0,
+    renderer: g ? String(d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) : null, webgpu: gpu }; }"""
+home = Path(tempfile.mkdtemp()); page = home / 'probe.html'; page.write_text('<!doctype html><title>probe</title>')
+def look(kind, flags=[]):
+    b = kind.launch(args=flags)
+    try:
+        p = b.new_page(); p.goto(page.as_uri()); return p.evaluate(JS)
+    finally:
+        b.close()
 out = {}
 with sync_playwright() as p:
     for name in ['chromium', 'firefox', 'webkit']:
         try:
-            b = getattr(p, name).launch(); page = b.new_page()
-            out[name] = page.evaluate(r"""() => { const c = document.createElement('canvas'), g = c.getContext('webgl2') || c.getContext('webgl');
-              const d = g && g.getExtension('WEBGL_debug_renderer_info');
-              return { version: navigator.userAgent.match(/(Chrome|Firefox|Version)\/(\d+(\.\d+)?)/)?.[2] ?? null,
-                webgl: g ? (typeof WebGL2RenderingContext !== 'undefined' && g instanceof WebGL2RenderingContext ? 2 : 1) : 0,
-                renderer: g ? String(d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER)) : null, webgpu: !!navigator.gpu }; }""")
-            b.close()
+            out[name] = look(getattr(p, name))
+            if name == 'chromium' and not out[name]['webgpu']:
+                gpu = look(p.chromium, WEBGPU)['webgpu']
+                if gpu: out[name].update(webgpu=gpu, webgpuFlags=' '.join(WEBGPU))
         except Exception as e:
             out[name] = {'error': str(e).split('\n')[0][:160]}
+shutil.rmtree(home, ignore_errors=True)
 print(json.dumps(out))
 `;
+// Python's Playwright, by version (the browsers it has downloaded are for that version), or null.
+const pyPlaywright = versionOf(run('python3', ['-c', 'import importlib.metadata as m; print(m.version("playwright"))']));
 function browsers() {
-  const py = versionOf(run('python3', ['-c', 'import importlib.metadata as m; print(m.version("playwright"))']));
+  const py = pyPlaywright;
   const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(os.homedir(), '.cache', 'ms-playwright');
   let builds = []; try { builds = fs.readdirSync(cache).filter((d) => /^(chromium|firefox|webkit)-\d+$/.test(d)); } catch {}
   const nodeGlobal = (() => { const root = run('npm', ['root', '-g'])?.trim(); return !!root && fs.existsSync(path.join(root, 'playwright')); })();
@@ -112,11 +141,14 @@ function browsers() {
     const x = probe?.[n];
     if (!x) return names[n];
     if (x.error) return `${names[n]} (won't start: ${x.error})`;
-    const soft = /swiftshader|llvmpipe|software/i.test(x.renderer ?? '') ? ', software-rendered' : '';
-    return `${names[n]} ${x.version ?? ''}`.trim() + ` (${x.webgl ? `WebGL ${x.webgl}${soft}` : 'no WebGL'}${x.webgpu ? ', WebGPU' : ''})`;
+    const soft = (s) => /swiftshader|llvmpipe|lavapipe|software/i.test(s ?? '') ? ', software-rendered' : '';
+    const webgpu = x.webgpu ? `; WebGPU${soft(x.webgpu)}${x.webgpuFlags ? `, when started with ${x.webgpuFlags}` : ''}` : '';
+    return `${names[n]} ${x.version ?? ''}`.trim() + ` (${x.webgl ? `WebGL ${x.webgl}${soft(x.renderer)}` : 'no WebGL'}${webgpu})`;
   });
+  const gpu = probe && Object.values(probe).some((x) => x.webgpu);
   lines.push(`Playwright ${py ? `${py} for Python (from playwright.sync_api import sync_playwright)` : '(no Python package)'}, with ${each.join(', ') || 'no browsers'} already downloaded`
-    + `${probe && !Object.values(probe).some((x) => x.webgpu) ? '; no WebGPU' : ''}. Phone and tablet device profiles are built in.`);
+    + `${probe && !gpu ? '; no WebGPU' : ''}. Phone and tablet device profiles are built in.`);
+  if (gpu) lines.push('WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game\'s state instead.');
   lines.push(nodeGlobal ? 'Playwright for Node is installed globally.'
     : `For Node, \`npm install playwright${py ? `@${py}` : ''}\` in your folder${py ? ' uses the browsers already downloaded; another version downloads its own' : ''}.`);
   if (process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE) lines.push(`Playwright runs here with PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE} (already set for runs): this OS isn't one it supports by name.`);
@@ -151,7 +183,8 @@ No script can check these, so they're written by hand. Test with the stand-ins; 
 - Other agents run here at the same time. Keep one or two browsers open at once, and close them when you're done.
 - Keep every file you make inside your own folder, not ${os.tmpdir()} or a parent folder: ${os.tmpdir()} is shared.
 - The browsers are already downloaded: don't run \`playwright install\` or \`playwright install-deps\`.
-`;
+${onPath('uv') ? `- The system Python has ${pyPlaywright ? 'Playwright and nothing else' : 'no packages'}. For one (Pillow, numpy …), use uv: \`uv run --with pillow python script.py\``
+  + `${pyPlaywright ? `, adding \`--with playwright==${pyPlaywright}\` when the script drives a browser too (a newer Playwright can't find the browsers here)` : ''}.\n` : ''}`;
 
 const when = new Date(), pad = (n) => String(n).padStart(2, '0');
 const stamp = `${when.getFullYear()}-${pad(when.getMonth() + 1)}-${pad(when.getDate())} ${pad(when.getHours())}:${pad(when.getMinutes())}`;
@@ -162,6 +195,7 @@ const checked = [BEGIN, `Checked ${stamp} (${Intl.DateTimeFormat().resolvedOptio
   `- **Display:** ${display()}.`,
   ...browsers().map((l, i) => i ? `  ${l}` : `- **Browsers:** ${l}`),
   `- **Tools:** ${t.have.join(', ') || 'none found'}.`,
+  rust() ? `- **Rust:** ${rust()}.` : null,
   t.missing.length ? `- **Not installed:** ${t.missing.join(', ')}.` : null,
   `- **Network:** ${await network()}.`,
   earlyoom() ? `- **Memory:** ${earlyoom()}` : null,

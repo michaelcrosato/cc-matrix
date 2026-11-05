@@ -40,7 +40,7 @@ Scope
 
 {{scope}}
 
-Attract Mode: {{attractMode}} 
+Attract Mode: {{attractMode}}
 
 Multiplayer: {{multiplayer}}
 
@@ -56,12 +56,12 @@ Narrative tone: {{tone}}
 
 Testing Feedback
 
-{{testingFeedback}} 
+{{testingFeedback}}
 
 Engine Feedback
 
 {{engineFeedback}}
 
-Prompt Feedback 
+Prompt Feedback
 
 {{promptFeedback}}

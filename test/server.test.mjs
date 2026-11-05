@@ -256,6 +256,39 @@ test('variants runs used: their text from the config while it matches, else read
   assert.deepEqual((await dd.api('/api/variants')).json, ran);
 });
 
+test('stage texts runs used, and a run whose stage was edited since is marked: by its stageHashes, or an older one by what it was sent', async (t) => {
+  const plan = { id: 'plan', text: 'Plan TASK.md. FAKE:plan', goal: 'PLAN.md exists', game: false };
+  const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'variant A' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }],
+    stages: [plan] });
+  assert.equal(runner(s, ['--stage', 'plan=opus:max']).status, 0);
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const ran = [{ id: 'plan', text: plan.text, goal: plan.goal, runs: 1 }], settle = () => new Promise((r) => setTimeout(r, 1000)); // past the signature cache
+  const changed = async () => (await dd.api('/api/results')).json[0].changed;
+  assert.deepEqual([(await dd.api('/api/stage-texts')).json, await changed()], [ran, undefined]);
+  // The stage's text edited: the run is marked, and the text it used is read back from what it was sent.
+  const cfg = (await dd.api('/api/config')).json.config;
+  cfg.stages[0].text = 'Plan it another way.';
+  assert.equal((await dd.api('/api/config', 'PUT', cfg)).status, 200);
+  await settle();
+  assert.deepEqual([(await dd.api('/api/stage-texts')).json, await changed()], [ran, ['stage']]);
+  // A run from before stageHashes: its prompt.md and goal.md say what it used.
+  const dir = path.join(s.out, fs.readdirSync(s.out).find((d) => d.includes('.plan__'))), file = path.join(dir, 'result.json');
+  const { stageHashes, ...older } = JSON.parse(fs.readFileSync(file, 'utf8'));
+  assert.ok(stageHashes.text && stageHashes.goal);
+  fs.writeFileSync(file, JSON.stringify(older));
+  await settle();
+  assert.deepEqual(await changed(), ['stage']);
+  cfg.stages[0].text = plan.text; cfg.stages[0].goal = 'PLAN.md is done';
+  assert.equal((await dd.api('/api/config', 'PUT', cfg)).status, 200);
+  await settle();
+  assert.deepEqual([await changed(), (await dd.api('/api/stage-texts')).json], [['stage'], ran]);
+  cfg.stages[0].goal = plan.goal;
+  assert.equal((await dd.api('/api/config', 'PUT', cfg)).status, 200);
+  await settle();
+  assert.equal(await changed(), undefined);
+});
+
 test('feedback: each exit interview\'s answers with the questions the run was sent, also after their text is edited', async (t) => {
   const s = sandbox({ template: 'Make a small game. Save exit-interview.json.\n\nTesting: {{testing}}\n\nTesting Feedback\n\n{{testingFeedback}}\n',
     dimensions: { testing: [{ id: 'a', text: 'Test it.' }], testingFeedback: [{ id: 'tf', text: '- How many issues?\n- How many critical?' }] },

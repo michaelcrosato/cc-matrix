@@ -519,7 +519,7 @@ const RUN_VARS = {
   model: 'the model ID, as in CLIs → Models (claude-opus-5-5)',
   effort: 'the effort level, with -ultracode when Ultracode is on (medium, high-ultracode)',
   lab: 'the lab that made the model (Anthropic, OpenAI, Google, xAI, Meta)',
-  environment: 'the CLI and operating system (Claude Code CLI (headless); Linux; browser unknown)',
+  environment: 'the CLI and operating system (Claude Code CLI (headless); Linux)',
   machine: 'what this computer has, for the agents: environments/<this computer\'s name>.md, which node check-environment.mjs writes and dates (re-run it after installing anything); what it can\'t check, like having no controller, is written by hand below it',
   stamp: 'when the run started, to the second, as YYYYMMDD-HHMMSS in this computer\'s time zone (20261029-075312 = Oct 29, 2026, 7:53:12 am); the same everywhere in one run, so it ties the game\'s file name to its run',
   date: 'the same moment as {{stamp}}, written YYYY-MM-DD HH:MM:SS (2026-10-29 07:53:12)',
@@ -533,16 +533,20 @@ const STAGE_VARS = {
   parentAgent: 'that run\'s name in Models',
   chain: 'every step so far (plan: claude-opus-5-5 max → build: claude-opus-5-5 xhigh)',
 };
+// "Add plan → build → content": the stages as they were last used (Nov 4 2026, simple on purpose: add detail once runs
+// show it's needed), and a content pass in the same style.
 const DEFAULT_STAGES = [
   { id: 'plan', game: false,
-    text: 'Read TASK.md in this folder: it describes a game to build. Don\'t build it yet: plan it. Write PLAN.md in this folder for the developers who will build it from TASK.md and your plan; they may be other AI models, working without you. Start PLAN.md with the game\'s title, picked as TASK.md says. Cover the architecture and modules, every system and mechanic TASK.md asks for, the content (levels, enemies, items, story beats), the order to build in with milestones, the riskiest parts and how to de-risk them, and how to test each part. Be specific enough that a capable developer can build the whole demo from TASK.md and PLAN.md alone. Then reply with a short summary of the plan.',
-    goal: 'PLAN.md exists in this folder and covers the title, architecture, every system, the content, the build order and testing for everything TASK.md asks for.' },
+    text: 'You are the game director. TASK.md is the CEO\'s brief. Write PLAN.md: the plan other AI agents will build the game from, without you. Leave the game\'s title to them: each builder picks its own, as TASK.md says.\n\n'
+      + 'Then review the prompt you were given (TASK.md and these instructions): save planner-exit-interview.json in this folder, a JSON list of {"question", "answer"}, one for each of these questions:\n'
+      + '- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?',
+    goal: 'PLAN.md covers everything TASK.md asks for.' },
   { id: 'build',
-    text: 'Read TASK.md (what to build) and PLAN.md (how to build it, written by {{parentModel}} at {{parentEffort}} effort) in this folder. Build the game TASK.md describes, following the plan and using the title it gives; where they disagree, TASK.md wins. Deliver everything TASK.md asks for, including its file name, and the sections it asks for in your final reply.',
-    goal: 'the bundled single .html file exists in this folder\'s root, every feature in TASK.md is implemented with no TODOs, placeholders or stubs, and your final reply contains the Source Information, Engine Feedback and Prompt Feedback sections.' },
+    text: 'Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md, which is filled in for you. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted.',
+    goal: 'Everything in PLAN.md that can be done on this computer is done, and everything TASK.md asks you to hand in is in this folder.' },
   { id: 'content',
-    text: 'The game in this folder was built from TASK.md and PLAN.md; the steps so far: {{chain}}. Its framework is done. Your job is content and polish on top of it: more of what TASK.md asks for (levels, enemies, items, quests, music, effects, story) and fixes for anything broken. Keep the game\'s title, engine and architecture, and extend them rather than starting over. Save the result as a new bundled single .html in this folder\'s root, named as TASK.md says but with the game\'s current title, and in your final reply list what you added and give the sections TASK.md asks for.',
-    goal: 'a new bundled single .html with the added content exists in this folder\'s root, nothing that worked before is broken, and your final reply lists what you added and contains the Source Information, Engine Feedback and Prompt Feedback sections.' },
+    text: 'Add content and polish to the game in this folder: more of what PLAN.md and TASK.md ask for, and fixes for anything broken. Keep its title, engine and architecture. Take your file names and what to hand in from TASK.md, which is filled in for you, but keep the game\'s title.',
+    goal: 'Nothing that worked before is broken, what you added works, and everything TASK.md asks you to hand in is in this folder.' },
 ];
 // The pins a config starts with (see pinsOf), per field name. Most fields get "use the source", "your choice" and,
 // where the engine has a say, "use the engine"; a text already run here is word for word the same, so picking it keeps
@@ -620,7 +624,8 @@ let rev = {}, onDisk = false, audit = null, offline = false;
 // prompts: every version of the prompt, oldest first: { v, hash, at, text } (runs/prompt-history.json).
 let prompts = [];
 // variantLib: every variant finished runs used, per dimension: { id, text, runs }, text null when it can't be told (/api/variants).
-let variantLib = {};
+// stageLib: the same for the stages: every stage text and goal finished runs used, [{ id, text, goal, runs }] (/api/stage-texts).
+let variantLib = {}, stageLib = [];
 // View state that isn't worth a URL: open panels, per browser.
 let ui = store.get('matrix.ui', { saveOpen: null, filtersOpen: false, auditFilter: { sev: '', area: '', status: '', unread: false } });
 const saveUi = () => store.set('matrix.ui', ui);
@@ -915,7 +920,7 @@ function validate() {
   errors.push(...bad);
   const sids = new Set();
   (cfg.stages ?? []).forEach((st, i) => {
-    if (!/^\w+$/.test(st.id || '')) errors.push(`Stage ${i + 1}: name must be letters, numbers or _`);
+    if (!/^[\w-]+$/.test(st.id || '')) errors.push(`Stage ${i + 1}: name must be letters, numbers, - or _`);
     else if (sids.has(st.id)) errors.push(`Stage name "${st.id}" is used twice`);
     sids.add(st.id);
     if (!(st.text || '').trim()) warnings.push(`Stage "${st.id}" has no text yet, so its runs can't start`);
@@ -947,6 +952,11 @@ function validate() {
   for (const [d, vs] of Object.entries(cfg.dimensions)) for (const v of vs) {
     const n = results.filter((r) => r[d] === v.id && r.changed?.includes(d)).length;
     if (n) warnings.push(`${d} "${v.id}": ${plural(n, 'finished run')} used its earlier text. They count as done for its text now, so that won't run for them. To give them a name of their own: node run-matrix.mjs --rename-variant ${d}:${v.id}=new-name`);
+  }
+  // The same for a stage edited after it ran where its name couldn't follow (on disk, say).
+  for (const st of cfg.stages ?? []) {
+    const n = results.filter((r) => r.stage === st.id && r.changed?.includes('stage')).length;
+    if (n) warnings.push(`Stage "${st.id}": ${plural(n, 'finished run')} used other text or another goal for it. They count as done for it now, so this text won't run for their briefs. To run it on its own, give the stage a new name (${stageStem(st.id)}-v2, say).`);
   }
   return { errors, warnings, used };
 }
@@ -1025,6 +1035,41 @@ function renameNote(d, v) {
   if (n) return `Now "${v.id}": ${plural(n, 'finished run')} used this text, so ${n === 1 ? 'it counts' : 'they count'} for it.`;
   const m = runs(was.id, false);
   return m ? `New short name: ${plural(m, 'finished run')} of "${was.id}" used its old text, so the new text runs on its own. Put the old text back to keep "${was.id}".` : null;
+}
+// A stage's name follows its text and goal the same way: runs in stages are matched by their chain, which names each
+// step's stage, so a name stands for one text. Edited after runs used its name, a stage gets a new one (plan → plan-v2,
+// -v3 …), so the new text runs on its own while those runs keep theirs; the text put back, or one that ran under
+// another of its names (plan-v2's, say), gets that name back. Named by hand, it keeps the name it's given.
+const stageStem = (id) => id.replace(/-v\d+$/, '');
+function stageNameFor(st) {
+  const was = edits.get(st), t = (st.text ?? '').trim(), g = (st.goal ?? '').trim();
+  if (t === was.text && g === was.goal) return was.id;
+  const taken = (id) => cfg.stages.some((x) => x !== st && x.id === id);
+  const before = stageLib.find((p) => p.text === t && p.goal === g && stageStem(p.id) === stageStem(was.id) && !taken(p.id));
+  if (before) return before.id;
+  if (!stageLib.some((p) => p.id === was.id)) return was.id;
+  const m = was.id.match(/^(.*)-v(\d+)$/), stem = m ? m[1] : was.id;
+  let n = m ? +m[2] + 1 : 2;
+  while (taken(`${stem}-v${n}`) || stageLib.some((p) => p.id === `${stem}-v${n}`)) n++;
+  return `${stem}-v${n}`;
+}
+// Under a stage whose name stageNameFor changed: why.
+function stageRenameNote(st) {
+  const was = edits.get(st);
+  if (!was || st.id === was.id) return null;
+  const t = (st.text ?? '').trim(), g = (st.goal ?? '').trim(), same = (p) => p.text === t && p.goal === g;
+  const n = stageLib.filter((p) => p.id === st.id && same(p)).reduce((k, p) => k + p.runs, 0);
+  if (n) return `Now "${st.id}": ${plural(n, 'finished run')} used this text, so ${n === 1 ? 'it counts' : 'they count'} for it.`;
+  const m = stageLib.filter((p) => p.id === was.id && !same(p)).reduce((k, p) => k + p.runs, 0);
+  return m ? `New name: ${plural(m, 'finished run')} of "${was.id}" used other text, so this text runs on its own.`
+    + (was.text == null ? '' : ` Put the old text back to keep "${was.id}".`) : null;
+}
+// A stage's new name, with the Run → Advanced picks made under its old one (sel.offStagePicks, "stage|model:effort").
+function renameStage(st, id) {
+  if (id === st.id) return false;
+  sel.offStagePicks = (sel.offStagePicks ?? []).map((k) => k.startsWith(`${st.id}|`) ? id + k.slice(st.id.length) : k); saveSel();
+  st.id = id;
+  return true;
 }
 const lineOf = (t, n) => { const s = t.replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s || '(empty)'; };
 // A variant as "+ Add…" and the Results and Insights filters all show it: short name · text · runs (no text when it
@@ -1207,10 +1252,17 @@ function stagesCard() {
   const edit = (fn) => { cfg.stages ??= []; fn(cfg.stages); if (!cfg.stages.length) delete cfg.stages; changed(true); };
   const rename = (x, e) => {
     const n = e.target.value.trim();
-    if (!/^\w+$/.test(n) || list.some((y) => y !== x && y.id === n)) { alert('Use letters, numbers or _ only, and a name no other stage has.'); e.target.value = x.id; return; }
-    sel.offStagePicks = (sel.offStagePicks ?? []).map((k) => k.startsWith(`${x.id}|`) ? n + k.slice(x.id.length) : k); saveSel();
-    x.id = n; changed(true);
+    if (!/^[\w-]+$/.test(n) || list.some((y) => y !== x && y.id === n)) { alert('Use letters, numbers, - or _ only, and a name no other stage has.'); e.target.value = x.id; return; }
+    renameStage(x, n); edits.delete(x); // named by hand: no longer renamed for its text
+    changed(true);
   };
+  // Typing in a stage's text or goal: its name follows them (stageNameFor), as a variant's short name follows its text.
+  const typed = (x, set) => {
+    if (!edits.has(x)) edits.set(x, { id: x.id, text: (x.text ?? '').trim(), goal: (x.goal ?? '').trim() });
+    set(); changed(renameStage(x, stageNameFor(x)));
+  };
+  // The ready-made stages, each named as a stage that ran with its text was, or anew where runs used its name for other text.
+  const addDefaults = (l) => { for (const d of structuredClone(DEFAULT_STAGES)) { l.push(d); edits.set(d, { id: d.id, text: null, goal: null }); renameStage(d, stageNameFor(d)); } };
   return h('div', { class: 'card', key: 'stages' },
     h('h2', {}, 'Stages'),
     h('p', { class: 'sub' }, 'In order: each continues from the one before it. A stage\'s models each run it on every session of the stage before (models come from ',
@@ -1226,6 +1278,7 @@ function stagesCard() {
         h('button', { class: 'icon', title: 'Move up', 'aria-label': `Move stage ${x.id} up`, disabled: i === 0, onclick: () => edit((l) => moveIn(l, i, -1)) }, '↑'),
         h('button', { class: 'icon', title: 'Move down', 'aria-label': `Move stage ${x.id} down`, disabled: i === list.length - 1, onclick: () => edit((l) => moveIn(l, i, 1)) }, '↓'),
         h('button', { class: 'icon', title: 'Remove stage', 'aria-label': `Remove stage ${x.id}`, onclick: () => { if (confirm(`Remove stage "${x.id}"? Its finished runs stay.`)) edit((l) => l.splice(i, 1)); } }, '✕')),
+      stageRenameNote(x) ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, stageRenameNote(x)) : null,
       h('div', { class: 'row', style: 'gap:6px; margin:8px 0 2px' },
         h('span', { class: 'muted', style: 'min-width:56px' }, 'Models'),
         (x.models ?? []).map((k) => h('span', { class: 'tag' + (validPick(k) ? ' on' : ' bad'), key: k, style: 'font-size:13px; padding:3px 4px 3px 10px',
@@ -1238,14 +1291,14 @@ function stagesCard() {
       h('label', { class: 'boxlabel', for: `stage-${i}-text` }, h('strong', {}, 'Instructions'),
         h('span', { class: 'muted' }, ' — what the agent is told to do: its message, or STAGE.md in its folder when the stage has a goal')),
       h('textarea', { class: 'fit', id: `stage-${i}-text`, rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
-        placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt above filled for the run, is in their folder.', oninput: (e) => { x.text = e.target.value; changed(); } }),
+        placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt above filled for the run, is in their folder.', oninput: (e) => typed(x, () => { x.text = e.target.value; }) }),
       h('label', { class: 'boxlabel', for: `stage-${i}-goal` }, h('strong', {}, 'Done when (/goal)'),
         h('span', { class: 'muted' }, ' — what Claude Code checks each time the agent tries to stop. Codex never gets it')),
       h('textarea', { class: 'fit', id: `stage-${i}-goal`, rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
         placeholder: 'Optional: done when … (sent as /goal on Claude Code, Grok, agy and Muse, with the text above in STAGE.md; Codex gets the text alone)',
-        oninput: (e) => { if (e.target.value) x.goal = e.target.value; else delete x.goal; changed(); } }))),
+        oninput: (e) => typed(x, () => { if (e.target.value) x.goal = e.target.value; else delete x.goal; }) }))),
     h('div', { class: 'row', style: 'margin-top:10px' },
-      list.length ? null : h('button', { class: 'btn primary', title: 'Plan, build and content stages with texts to start from', onclick: () => edit((l) => l.push(...structuredClone(DEFAULT_STAGES))) }, 'Add plan → build → content'),
+      list.length ? null : h('button', { class: 'btn primary', title: 'Plan, build and content stages with texts to start from', onclick: () => edit(addDefaults) }, 'Add plan → build → content'),
       h('button', { class: 'btn', onclick: () => edit((l) => { let n = l.length + 1; while (l.some((y) => y.id === `stage${n}`)) n++; l.push({ id: `stage${n}`, text: '' }); }) }, '+ Add stage')),
     list.length ? [h('p', { class: 'hint', style: 'margin:12px 0 4px' }, 'Besides the dimensions and the placeholders in Setup · Basic ({{source}}, {{model}}, {{stamp}} …), a stage\'s text and goal can use:'),
       h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, Object.entries(STAGE_VARS).map(([n, what]) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${what}`)))] : null);
@@ -3180,7 +3233,9 @@ function runDetails(r) {
     h('div', { class: 'chips', style: 'margin-bottom:10px' },
       h('span', { class: 'tag ' + (r.status === 'ok' ? 'ok' : 'bad') }, r.status), resumeTag(r),
       h('span', { class: 'tag' }, `${PROVIDERS[r.provider] ?? r.provider} · ${r.model ?? r.agent}`), h('span', { class: 'tag' }, `effort ${r.effort}`),
-      r.stage ? h('span', { class: 'tag on', title: r.expectsGame === false ? 'This stage plans; it isn\'t expected to leave a game' : null }, `stage ${r.stage}`) : null,
+      r.stage ? h('span', { class: 'tag on', title: [r.expectsGame === false ? 'This stage plans; it isn\'t expected to leave a game' : null,
+        r.changed?.includes('stage') ? 'This stage\'s text or goal was edited after the run' : null].filter(Boolean).join('. ') || null },
+        `stage ${r.stage}${r.changed?.includes('stage') ? ' (old text)' : ''}`) : null,
       Object.keys(cfg.dimensions).map((d) => d === GOAL_DIM && r.goalSkipped
         ? h('span', { class: 'tag', title: 'Codex has no headless /goal: this run got the same prompt without it' }, `${d}=${r[d]}* (no /goal)`)
         : r.predates?.includes(d) ? h('span', { class: 'tag', title: `This run is from before {{${d}}} existed, so it counts as ${r[d]} (set in Setup)` }, `${d}=${r[d]} (before this field)`)
@@ -3363,7 +3418,8 @@ async function loadSetup() {
   onDisk = false; cache = {};
 }
 async function loadResults() {
-  const [rows, lib] = await Promise.all([api('/api/results'), api('/api/variants').catch(() => variantLib)]);
+  const [rows, lib, stageTexts] = await Promise.all([api('/api/results'), api('/api/variants').catch(() => variantLib), api('/api/stage-texts').catch(() => stageLib)]);
+  stageLib = stageTexts;
   for (const r of rows) {
     r.ultracode = r.ultracode === true || r.ultracode === 'on' ? 'on' : 'off';
     if (r.cliVersion) r.cli = `${SHORT[r.provider] ?? r.provider} ${r.cliVersion}`; // versions only compare within a CLI

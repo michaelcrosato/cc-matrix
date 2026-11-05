@@ -212,9 +212,9 @@ test('{{machine}}: what this computer has, from environments/<computer>.md besid
   const r = runner(sb, ['--rerun-failed']);
   assert.equal(r.status, 0, r.all);
   assert.equal(result(sb, 'opus-low__a').status, 'ok');
-  // Filled without the file's title and the notes to whoever edits it.
+  // Filled without the file's title and the notes to whoever edits it, its headings a level down, under the prompt's.
   const prompt = fs.readFileSync(path.join(sb.out, 'opus-low__a', 'prompt.md'), 'utf8');
-  assert.match(prompt, /## Environment\nChecked today\.\n\n- \*\*Tools:\*\* node\n\n## What this computer doesn't have\n\n- No controller\.\n/);
+  assert.match(prompt, /## Environment\nChecked today\.\n\n- \*\*Tools:\*\* node\n\n### What this computer doesn't have\n\n- No controller\.\n/);
   assert.doesNotMatch(prompt, /<!--|# box/);
 });
 
@@ -492,6 +492,25 @@ test('stages: a stage\'s goal goes to /goal with its text in STAGE.md; Codex get
   assert.equal(fs.readFileSync(path.join(sb.out, claudeRun.id, 'work', 'STAGE.md'), 'utf8'), 'Build Zelda as TASK.md says.\n');
   assert.equal(callFor(sb, codexRun.id).stdin, 'Build Zelda as TASK.md says.\n');
   assert.deepEqual([codexRun.goalSkipped, claudeRun.goalSkipped, codexRun.delivered], [true, undefined, true]);
+});
+
+test('stages: a name can have a hyphen (build-v2), and each run records a hash of its stage\'s text and goal as set, not filled in', (t) => {
+  const text = 'Build {{source}} as TASK.md says.', goal = 'the game for {{source}} exists';
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents: stageAgents, stages: [{ id: 'build-v2', text, goal }], template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  const r = runner(sb, ['--stage', 'build-v2=opus:high']);
+  assert.equal(r.status, 0, r.all);
+  const [run] = allResults(sb), hash = (s) => crypto.createHash('sha1').update(s).digest('hex').slice(0, 8);
+  assert.match(run.id, /^opus-high\.build-v2__/);
+  assert.deepEqual([run.stage, run.chain, run.stageHashes], ['build-v2', [{ stage: 'build-v2', agent: 'opus', effort: 'high' }], { text: hash(text), goal: hash(goal) }]);
+  // The same picks find it done.
+  assert.equal(JSON.parse(runner(sb, ['--stage', 'build-v2=opus:high', '--dry-run', '--json']).stdout.trim()).alreadyDone, 1);
+  // A name with other characters is refused.
+  const bad = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents: stageAgents, stages: [{ id: 'build v2', text }], template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(bad));
+  const rb = runner(bad, ['--stage', 'build v2=opus:high']);
+  assert.notEqual(rb.status, 0);
+  assert.match(rb.all, /Stage names must be unique letters, numbers, - or _/);
 });
 
 test('folder names from folderName: the source and start time, then the game\'s title once it\'s made', (t) => {
@@ -1064,6 +1083,7 @@ test('cut off by a quit or restart: a Claude Code session that got going carries
   assert.match(c.out, /■ sol-max__h stopped \(discarded: Codex CLI can't carry on a session, so it starts over next time\)/);
   assert.deepEqual(fs.readdirSync(sb.out).filter((d) => fs.statSync(path.join(sb.out, d)).isDirectory()), [id]);
   assert.ok(fs.existsSync(path.join(dir, 'unfinished.json')) && !fs.existsSync(path.join(dir, 'result.json')));
+  assert.ok(fs.statSync(path.join(dir, 'tmp')).isDirectory(), 'a cut-off run keeps its temp folder, to carry on with');
   const u = JSON.parse(fs.readFileSync(path.join(dir, 'unfinished.json'), 'utf8'));
   assert.deepEqual([u.base.id, u.base.model, u.part.n, u.runner, u.agent, u.part.endedAt > u.part.startedAt], [id, 'claude-opus-5-5', 0, null, null, true]);
 
@@ -1084,6 +1104,7 @@ test('cut off by a quit or restart: a Claude Code session that got going carries
   assert.deepEqual([x.startedAt, x.parts[0].finishedAt], [u.part.startedAt, u.part.endedAt]);
   assert.ok(fs.existsSync(path.join(dir, 'work', 'src', 'partial.js')) && x.delivered, 'the work from before it was cut off is gone');
   assert.ok(!fs.existsSync(path.join(dir, 'unfinished.json')));
+  assert.ok(!fs.existsSync(path.join(dir, 'tmp')), 'its temp folder goes once it has finished');
   // The cut-off part never printed its totals: its tokens are its response's in the transcript (the stream only has
   // the response's start), priced at list price. The part after it adds its own.
   const expected = [0.0549, 400 + 660, 5700 + 11015, 600 + 805, 1 + 2, 1 + 2]; // $0.0124 + $0.0425
@@ -1212,14 +1233,14 @@ test('a cut-off run ended mid-way as it carries on stays cut off, and carries on
   assert.deepEqual([x.status, x.resumes, x.parts.map((p) => !!p.cutOff), x.outputTokens], ['ok', 1, [true, false], 1060]);
 });
 
-test('a run gets a temp folder of its own, and what its agent leaves running is stopped', { skip: process.platform !== 'linux' && 'reads /proc' }, async (t) => {
+test('a run gets a temp folder of its own, deleted once it has finished, and what its agent leaves running is stopped', { skip: process.platform !== 'linux' && 'reads /proc' }, async (t) => {
   const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:leftover' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
   const pidFile = path.join(sb.out, 'opus-low__a', 'work', 'leftover.pid');
   t.after(() => { try { process.kill(+fs.readFileSync(pidFile, 'utf8'), 'SIGKILL'); } catch {} cleanup(sb); });
   assert.equal(runner(sb, []).status, 0);
   const dir = path.join(sb.out, 'opus-low__a'), c = callFor(sb, 'opus-low__a');
   assert.deepEqual([c.tmp, c.claudeTmp], [path.join(dir, 'tmp'), path.join(dir, 'tmp')]);
-  assert.ok(fs.statSync(path.join(dir, 'tmp')).isDirectory());
+  assert.ok(!fs.existsSync(path.join(dir, 'tmp')), 'nothing reads it after the run, so it goes');
   // The process it left (in a session of its own, so ending the agent's group missed it) is stopped and recorded.
   const pid = +fs.readFileSync(pidFile, 'utf8'), alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
   await waitFor(() => !alive(), 5000);
