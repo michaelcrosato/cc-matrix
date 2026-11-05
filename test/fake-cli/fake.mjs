@@ -27,13 +27,18 @@
 //   FAKE:noreview         leave no planner-exit-interview.json (written whenever the prompt names that file)
 //   FAKE:goal=unmet       claude with /goal: its transcript has 9 goal checks that weren't met and Claude Code ending the
 //                         turn itself (by default, one check that was)
+//   FAKE:leftover         leave a process running in the work folder when it exits (its pid in leftover.pid), in a
+//                         session of its own like a server Claude Code started in the background
+//   FAKE:throwgame        a game that throws as it loads and logs a console error
 // A run in stages gets its stage's text as the message (or in STAGE.md, with /goal) and the brief in TASK.md;
 // both are read. Given a game already (a later stage), the fake adds to it, so the game it leaves is its own.
-// FAKE_LOG=<file> appends {cli, argv, cwd, stdin} per call, for tests to check the command line.
+// FAKE_LOG=<file> appends {cli, argv, cwd, stdin, goal, env, tmp} per call, for tests to check the command line (tmp: the
+// temp folder it was given, TMPDIR).
 // With CODEX_HOME or GROK_HOME set, codex and grok also write session logs there the way the real ones
 // do (a Codex subagent thread; Grok /goal helper sessions), for the runner to find. With CLAUDE_CONFIG_DIR
 // set, claude keeps its session's transcript there and `--resume <id>` carries on with it like the real
 // one: the limit has passed, and the totals it reports include what the session used before.
+import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -91,7 +96,12 @@ export async function run(cli) {
     : `${msg ?? ''}${/TASK\.md/.test(msg ?? '') ? `\n${read('TASK.md')}` : ''}`;
   // env: what keeps a run on its own (the runner's isolate), as the CLI got it.
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(DISPLAY|WAYLAND_DISPLAY|CLAUDE_CODE_DISABLE_(AUTO_MEMORY|CLAUDE_MDS)|GROK_(MEMORY|CLAUDE_\w+_ENABLED))$/.test(k)));
-  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal, env }) + '\n');
+  if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal, env,
+    tmp: process.env.TMPDIR ?? null, claudeTmp: process.env.CLAUDE_CODE_TMPDIR ?? null }) + '\n');
+  if (/FAKE:leftover/.test(prompt ?? '')) { // a server it started and never stopped, in a session of its own
+    const left = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: process.cwd(), detached: true, stdio: 'ignore' });
+    fs.writeFileSync('leftover.pid', String(left.pid)); left.unref();
+  }
 
   const fail = prompt.match(/FAKE:fail=([^\n]*)/)?.[1];
   // claude --resume <id>: the same session, so the usage limit it stopped on has passed.
@@ -114,8 +124,9 @@ export async function run(cli) {
     fs.writeFileSync(path.join('src', 'main.js'), 'console.log("game");\n');
     const given = fs.readdirSync('.').filter((f) => /\.html$/.test(f)).length; // a later stage adds content to the game it was given
     const head = /FAKE:hubmeta/.test(prompt) ? '<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:players" content="1-4">' : '';
-    const body = `<!doctype html><title>Fake</title>${head}<script>${'let x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}`
-      + `${given ? `// content added by ${cli} ${model}\n` : ''}</script>`;
+    const broke = /FAKE:throwgame/.test(prompt) ? 'console.error("fake console error");\nthrow new Error("fake game broke");\n' : '';
+    const body = `<!doctype html><title>Fake</title>${head}<script>${'var x = 1;\n'.repeat(200)}${/FAKE:todo/.test(prompt) ? '// TODO finish\n' : ''}`
+      + `${given ? `// content added by ${cli} ${model}\n` : ''}${broke}</script>`;
     fs.writeFileSync(`${prompt.match(/FAKE:game=(\S+)/)?.[1] ?? `Fake-Game-${model}`}.html`, body);
     // The exit interview, when the prompt asks for one: exit-interview.json beside the game (see EXIT above).
     if (/exit-interview\.json/.test(prompt) && !/FAKE:noexit/.test(prompt))
@@ -146,7 +157,7 @@ export async function run(cli) {
         fs.appendFileSync(transcript, jsonl([{ type: 'user', timestamp: at, message: { content: 'turn' } }, { type: 'assistant', timestamp: at, message: msg }]));
       }
       if (hang[1] === '=alone') return setTimeout(() => { // its runner is gone by now: nobody reads its output
-        fs.writeFileSync(`Fake-Game-${model}.html`, `<!doctype html><title>Fake</title><script>${'let x = 1;\n'.repeat(200)}</script>`);
+        fs.writeFileSync(`Fake-Game-${model}.html`, `<!doctype html><title>Fake</title><script>${'var x = 1;\n'.repeat(200)}</script>`);
         if (/exit-interview\.json/.test(prompt)) fs.writeFileSync('exit-interview.json', JSON.stringify(EXIT(cli, model), null, 2));
         const at = new Date().toISOString(), last = { id: 'msg_h2', model, content: [{ type: 'text', text: reply }],
           usage: { input_tokens: 20, cache_creation_input_tokens: 100, cache_read_input_tokens: 6000, output_tokens: 300 } };

@@ -30,6 +30,8 @@
 //        --reparse                    re-read tokens/cost from each run's saved agent.out and the CLIs' session
 //                                     logs (after parser or price changes); games already holding their record get the new figures
 //        --stamp                      write each finished run's record into its game file (stampGame, run-record.mjs); new runs get it as they end
+//        --check-games                load each finished run's game headless that hasn't been checked yet (checkGame);
+//                                     new runs get it as they end when the config has gameCheck
 //        --fold-ended                 cut-off runs whose session ended on its own after its runner was gone get their
 //                                     result from the session now, without a batch that has them (see foldEnded)
 //        --rename-variant dim:old[@hash]=new   file the runs that used an earlier text of a variant under a short name of
@@ -49,7 +51,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, stepOf, unstamped, upgrade } from './run-record.mjs';
 
 // ------------------------------------------------------------------ args
@@ -78,6 +80,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--report') args.report = true;
   else if (a === '--reparse') args.reparse = true;
   else if (a === '--stamp') args.stamp = true;
+  else if (a === '--check-games') args.checkGames = true;
   else if (a === '--fold-ended') args.foldEnded = true;
   else if (a === '--rename-variant') args.rename.push(next());
   else if (a === '--rerun-failed') args.rerunFailed = true;
@@ -578,14 +581,19 @@ const ISOLATE_ARGS = { claude: ['--strict-mcp-config'], muse: ['--no-foreign-per
 const NO_WINDOW = ['DISPLAY', 'WAYLAND_DISPLAY'];
 // A CLI's extra flags, then the isolating ones it doesn't have already.
 const flagsOf = (p) => [...extra(p), ...(ISOLATE ? ISOLATE_ARGS[p] ?? [] : []).filter((a) => !extra(p).includes(a))];
-function agentEnv(p) {
-  if (!ISOLATE) return process.env;
-  const env = { ...process.env, ...ISOLATE_ENV[p] };
-  for (const k of NO_WINDOW) delete env[k];
+// Every run also gets a temp folder of its own, tmp/ beside work/ (TMPDIR, TMP, TEMP, and CLAUDE_CODE_TMPDIR for Claude
+// Code's own files): /tmp is shared by the runs going at once, and on some computers it's held in memory. Not copied
+// to a later stage, like the rest outside work/.
+const TMP_VARS = ['TMPDIR', 'TMP', 'TEMP', 'CLAUDE_CODE_TMPDIR'];
+function agentEnv(p, dir) {
+  const env = ISOLATE ? { ...process.env, ...ISOLATE_ENV[p] } : { ...process.env };
+  if (ISOLATE) for (const k of NO_WINDOW) delete env[k];
+  if (dir) { const tmp = path.join(dir, 'tmp'); fs.mkdirSync(tmp, { recursive: true }); for (const k of TMP_VARS) env[k] = tmp; }
   return env;
 }
 // The same as a shell prefix, for Run → Preview.
-const envPrefix = (p) => ISOLATE ? ['env', ...NO_WINDOW.flatMap((k) => ['-u', k]), ...Object.entries(ISOLATE_ENV[p] ?? {}).map(([k, v]) => `${k}=${v}`)].join(' ') + ' ' : '';
+const envPrefix = (p) => (ISOLATE ? ['env', ...NO_WINDOW.flatMap((k) => ['-u', k]), ...Object.entries(ISOLATE_ENV[p] ?? {}).map(([k, v]) => `${k}=${v}`)].join(' ') + ' ' : '')
+  + TMP_VARS.map((k) => `${k}="$d/tmp"`).join(' ') + ' ';
 
 // Each returns the command line for one run. promptFile is the run's prompt.md,
 // for CLIs that can read the prompt from a file instead of stdin.
@@ -655,7 +663,8 @@ function terminalOf(run, resumes = false) {
   const args = argv.map((a) => a === '\0prompt.md' ? '../prompt.md' : a === text ? '"$(cat ../prompt.md)"' : sh(a));
   const make = st && run.parentDir ? `cp -r ${sh(rel(run.parentDir) + '/work')} "$d/work"   # a copy of the folder it continues from (without node_modules, .git)`
     : 'mkdir -p "$d/work"';
-  return [head, `d=${sh(dir)}`, make, `(cd "$d/work" && ${envPrefix(run.agent.provider)}${[sh(bin), ...args].join(' ')}${promptInArgs ? '' : ' < ../prompt.md'})`];
+  const tmp = 'mkdir -p "$d/tmp"   # its temp folder';
+  return [head, `d=${sh(dir)}`, make, tmp, `(cd "$d/work" && ${envPrefix(run.agent.provider)}${[sh(bin), ...args].join(' ')}${promptInArgs ? '' : ' < ../prompt.md'})`];
 }
 
 if (args.rename.length) { try { renameVariants(args.rename); } catch (e) { console.error(e.message); process.exit(1); } process.exit(0); }
@@ -1272,6 +1281,63 @@ const TIME_ZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 
 const lastLine = (file) => { try { return fs.readFileSync(file, 'utf8').trim().split('\n').pop().trim().slice(0, 500); } catch { return ''; } };
 
+// leftovers: what a run's agent left running once it exited, like a test server it never stopped. Claude Code runs a
+// background command in a session of its own, so ending the agent's process group misses it. Stopped (SIGTERM): a
+// process started since the run did, with no terminal (so never someone's shell), whose working folder or command
+// line is in the run's folder. Linux only (it reads /proc). Returns their command lines, for result.json.
+let procClock = null;
+function stopLeftovers(dir, since) {
+  if (process.platform !== 'linux') return [];
+  try {
+    procClock ??= { tck: +spawnSync('getconf', ['CLK_TCK'], { encoding: 'utf8' }).stdout.trim() || 100,
+      boot: +fs.readFileSync('/proc/stat', 'utf8').match(/^btime (\d+)/m)[1] * 1000 };
+  } catch { return []; }
+  const root = path.resolve(dir), inside = (x) => x === root || x.startsWith(root + path.sep), out = [];
+  let pids = []; try { pids = fs.readdirSync('/proc').filter((p) => /^\d+$/.test(p) && +p !== process.pid); } catch {}
+  for (const p of pids) {
+    try {
+      // /proc/<pid>/stat after "(name) ": state, ppid, pgrp, session, tty_nr … and starttime 20th, in clock ticks.
+      const stat = fs.readFileSync(`/proc/${p}/stat`, 'utf8'), f = stat.slice(stat.lastIndexOf(')') + 2).split(' ');
+      if (+f[4] !== 0 || procClock.boot + (+f[19] / procClock.tck) * 1000 < since - 1000) continue;
+      let cwd = ''; try { cwd = fs.readlinkSync(`/proc/${p}/cwd`).replace(/ \(deleted\)$/, ''); } catch {}
+      const cmd = fs.readFileSync(`/proc/${p}/cmdline`, 'utf8').split('\0').filter(Boolean).join(' ');
+      if (!inside(cwd) && !cmd.includes(root + path.sep)) continue;
+      process.kill(+p, 'SIGTERM');
+      out.push(cmd.slice(0, 200));
+    } catch {}
+  }
+  return out;
+}
+
+// gameCheck: a run's game, loaded once in headless Chromium and left alone for a few seconds (check-game.py), when the
+// config's gameCheck is on (true, or { "seconds": n }; 60 by default: an attract mode starts after 10 s of the game's
+// own time, which a slow software renderer stretches): its page errors, console errors and failed
+// requests (each a count, and the first few as *First), how long it took to load, and a screenshot, game-check.png
+// in the run's folder. { skipped } when Playwright for Python or its Chromium isn't installed. Kept out of the game's
+// record (see PRIVATE in run-record.mjs): it's about this computer's look at the game, not the run.
+const CHECK_GAME = fileURLToPath(new URL('./check-game.py', import.meta.url));
+function checkGame(home, entry) {
+  const secs = +(cfg.gameCheck?.seconds ?? 60) || 60;
+  return new Promise((resolve) => {
+    let out = '';
+    const child = spawn(isWin ? 'python' : 'python3', [CHECK_GAME, path.join(outDir, entry), path.join(home, 'game-check.png'), String(secs)],
+      { stdio: ['ignore', 'pipe', 'ignore'] });
+    const timer = setTimeout(() => child.kill('SIGKILL'), (secs + 90) * 1000);
+    child.stdout.on('data', (d) => { out += d; });
+    child.on('error', () => { clearTimeout(timer); resolve({ skipped: 'Python 3 is not installed' }); });
+    child.on('close', () => {
+      clearTimeout(timer);
+      try { resolve(JSON.parse(out.trim().split('\n').pop())); } catch { resolve({ error: 'the check printed nothing it could read' }); }
+    });
+  });
+}
+// After a run is saved: its game checked (when gameCheck is on and it left one), and result.json written again with it.
+async function checkSaved(home, result) {
+  if (!cfg.gameCheck || !result.delivered || !result.entry) return;
+  result.gameCheck = await checkGame(home, result.entry);
+  fs.writeFileSync(path.join(home, 'result.json'), JSON.stringify(result, null, 2));
+}
+
 // Start the agent in dir/work, wait for it to exit (or hit `limit` minutes) and parse its output. A resumed
 // run's later parts write their own output files (partFile) and say what the session had used before (since).
 // base: the run's record so far, written with this part to unfinished.json as the agent starts (see UNFINISHED).
@@ -1285,7 +1351,7 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null, base 
   const exitCode = await new Promise((resolve) => {
     // On Windows, npm .cmd shims need a shell; quote args so prompts survive it.
     const a = isWin ? argv.map((x) => `"${String(x).replace(/"/g, '\\"')}"`) : argv;
-    const child = spawn(bin, a, { cwd: path.join(dir, 'work'), shell: isWin, detached: !isWin, env: agentEnv(run.agent.provider) });
+    const child = spawn(bin, a, { cwd: path.join(dir, 'work'), shell: isWin, detached: !isWin, env: agentEnv(run.agent.provider, dir) });
     const c = { run, child, start, err, timer: null };
     live.set(run.id, c);
     if (base) writeUnfinished(dir, { base, part: { n: part, startedAt: new Date(start).toISOString(), cliVersion: cliVersions[run.agent.provider],
@@ -1303,6 +1369,8 @@ async function spawnAgent(run, dir, prompt, limit, part = 0, since = null, base 
   try { metrics = readMetrics(run.agent.provider, fs.readFileSync(outPath, 'utf8'), run.agent, { cwd: path.join(dir, 'work'), start, end: Date.now(), since }); }
   catch (e) { metrics = { isError: true, parseError: e.message }; }
   metrics.replyChars = String(metrics.reply ?? '').trim().length;
+  const left = stopLeftovers(dir, start);
+  if (left.length) metrics.leftovers = left;
   // The time limit ending a run makes it a failure, also when the CLI exits 0 on being stopped (Codex does).
   if (timedOut) metrics.isError = true;
   if ((exitCode !== 0 || metrics.isError) && !metrics.error)
@@ -1403,6 +1471,7 @@ async function runOne(run) {
   spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  ${result.wallMinutes.toFixed(1)}m  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
+  await checkSaved(home, result);
   if (!args.broker) writeReport(); // with --broker the dashboard writes it, from the config as it is now
 }
 
@@ -1479,6 +1548,7 @@ async function resumeOne(run, prev, carrying = false) {
   spent += metrics.costUsd ?? 0; done++; tell('done', run, id);
   console.log(`${status === 'ok' ? '✔' : '✘'} ${run.id}  resumed: ${part.wallMinutes.toFixed(1)}m more, ${result.wallMinutes.toFixed(1)}m in all  ` +
     `${fmtUsd(metrics.costUsd)}  out:${metrics.outputTokens ?? '?'} tok${id !== run.id ? `  → ${id}` : ''}`);
+  await checkSaved(path.join(outDir, id), result);
   if (!args.broker) writeReport();
 }
 
@@ -1683,11 +1753,13 @@ function reparseAll() {
         { cwd: path.join(outDir, d, 'work'), start: Date.parse(p.startedAt), end: Date.parse(p.finishedAt), since: p.since })); } catch (e) { console.log(`· ${d}: ${e.message}`); continue; }
     const m = combineParts(ms);
     if (r.sessionLog === 'read' && m.sessionLog !== 'read') { console.log(`· ${d}: session log ${m.sessionLog ?? 'not found'} now; kept its figures`); continue; }
-    const reply = String(ms.findLast((x) => x.reply)?.reply ?? '').trim(), replyFile = path.join(outDir, d, 'reply.md');
+    const replies = ms.map((x) => String(x.reply ?? '').trim()), reply = replies.findLast(Boolean) ?? '', replyFile = path.join(outDir, d, 'reply.md');
     m.replyChars = reply.length;
-    // A reply read now that wasn't then (a /goal turn Claude Code ended itself, see parseClaude) fills in reply.md;
-    // one that's there is left as it is.
-    if (reply && !(fs.existsSync(replyFile) && fs.statSync(replyFile).size)) fs.writeFileSync(replyFile, reply);
+    // A reply read now that wasn't then (a /goal turn Claude Code ended itself, see parseClaude) fills in reply.md, and
+    // so does a resumed run's last reply where reply.md still holds an earlier part's (an error that part ended on,
+    // say). A reply.md that's neither is left as it is.
+    let had = ''; try { had = fs.readFileSync(replyFile, 'utf8').trim(); } catch {}
+    if (reply && (!had || (had !== reply && replies.slice(0, -1).includes(had)))) fs.writeFileSync(replyFile, reply);
     for (const k of metricKeys) if (m[k] !== undefined) r[k] = m[k]; else delete r[k];
     if (r.status !== 'ok' && m.error) r.error = m.error; // e.g. Claude Code's usage limit, which was "exit code 1" before
     try { if (r.entry) r.todos = markers(unstamped(fs.readFileSync(path.join(outDir, r.entry), 'utf8'))); } catch {}
@@ -1700,6 +1772,26 @@ function reparseAll() {
     if (isStamped(r)) stampGame(path.join(outDir, d), r); // the record in the game gets the new figures too
   }
   console.log(`Reparsed ${n} run(s).`);
+}
+
+// --check-games: the game check (checkGame) for every finished run that left a game and has had none yet, two at a
+// time, whatever the config's gameCheck says.
+async function checkAllGames() {
+  cfg.gameCheck ||= true;
+  const todo = [];
+  for (const d of fs.existsSync(outDir) ? fs.readdirSync(outDir) : []) {
+    const r = readResult(d);
+    if (r?.id && r.delivered && r.entry && !r.gameCheck) todo.push([d, r]);
+  }
+  let n = 0;
+  const one = async () => { for (let x; (x = todo.shift());) {
+    const [d, r] = x; await checkSaved(path.join(outDir, d), r); n++;
+    const g = r.gameCheck ?? {};
+    console.log(`· ${d}: ${g.skipped ? `skipped (${g.skipped})` : g.error ? `couldn't check (${g.error})`
+      : `${g.pageErrors} page error(s), ${g.consoleErrors} console error(s), ${g.failedRequests} failed request(s)`}`);
+  } };
+  await Promise.all([one(), one()]);
+  console.log(`Checked ${n} game(s).`);
 }
 
 // --stamp: put the record into every finished run's game that delivered one (or refresh it).
@@ -2074,6 +2166,7 @@ async function smoke() {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 if (args.reparse) { reparseAll(); writeReport(); process.exit(0); }
+if (args.checkGames) { await checkAllGames(); process.exit(0); }
 if (args.stamp) { stampAll(); process.exit(0); }
 if (args.foldEnded) { foldAllEnded(); writeReport(); process.exit(0); }
 if (args.smoke) { await smoke(); process.exit(0); }

@@ -7,7 +7,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { sandbox, cleanup, runner, result, calls, callFor, RUNNER, waitFor } from './helpers.mjs';
 
 const one = { testing: [{ id: 'a', text: 'variant A' }] };
@@ -128,7 +128,8 @@ test('runs are isolated unless the config says not: no window, and no CLAUDE.md,
     for (const k of Object.keys(sb.env)) if (/^(DISPLAY|WAYLAND_DISPLAY|CLAUDE_CODE_DISABLE_|GROK_)/.test(k)) delete sb.env[k]; // this machine's own
     // Run → Preview shows the command as it runs (before the batch: it lists the runs not done yet).
     const preview = JSON.parse(runner(sb, ['--dry-run', '--json'], desktop).stdout).terminal.find((s) => s.includes('claude-opus-5-5')) ?? '';
-    assert.equal(/env -u DISPLAY -u WAYLAND_DISPLAY CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \S*claude -p/.test(preview), isolate !== false, preview);
+    assert.equal(/env -u DISPLAY -u WAYLAND_DISPLAY CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 TMPDIR="\$d\/tmp" /.test(preview), isolate !== false, preview);
+    assert.match(preview, / TMPDIR="\$d\/tmp" TMP="\$d\/tmp" TEMP="\$d\/tmp" CLAUDE_CODE_TMPDIR="\$d\/tmp" \S*claude -p/); // a temp folder either way
     assert.equal(runner(sb, ['-j', '4'], desktop).status, 0);
     const [cc, cx, gx, mx] = ['opus-high__a', 'sol-max__a', 'grok-xhigh__a', 'muse-max__a'].map((id) => callFor(sb, id));
     if (isolate === false) {
@@ -569,9 +570,10 @@ test('the dry run shows each run as the terminal session it stands for', (t) => 
   const claude = block(d, '# opus medium (Claude Code CLI)');
   assert.match(claude[1], /^d=\S+\/opus-medium__z$/);
   assert.equal(claude[2], 'mkdir -p "$d/work"');
-  assert.match(claude[3], /^\(cd "\$d\/work" && env -u DISPLAY -u WAYLAND_DISPLAY CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 \S+\/claude -p --output-format stream-json --verbose --model claude-opus-5-5 --effort medium --settings '\{"ultracode":false\}' --dangerously-skip-permissions --strict-mcp-config < \.\.\/prompt\.md\)$/);
-  assert.match(block(d, '# sol max (Codex CLI)')[3], /\/codex exec --json -m gpt-6\.1-sol -c model_reasoning_effort=max --yolo - < \.\.\/prompt\.md\)$/);
-  assert.match(block(d, '# flash high (Antigravity CLI)')[3], /\/agy -p "\$\(cat \.\.\/prompt\.md\)" --output-format stream-json --model gemini-3\.8-flash --effort high --dangerously-skip-permissions\)$/);
+  assert.equal(claude[3], 'mkdir -p "$d/tmp"   # its temp folder');
+  assert.match(claude[4], /^\(cd "\$d\/work" && env -u DISPLAY -u WAYLAND_DISPLAY CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 CLAUDE_CODE_DISABLE_CLAUDE_MDS=1 TMPDIR="\$d\/tmp" TMP="\$d\/tmp" TEMP="\$d\/tmp" CLAUDE_CODE_TMPDIR="\$d\/tmp" \S+\/claude -p --output-format stream-json --verbose --model claude-opus-5-5 --effort medium --settings '\{"ultracode":false\}' --dangerously-skip-permissions --strict-mcp-config < \.\.\/prompt\.md\)$/);
+  assert.match(block(d, '# sol max (Codex CLI)')[4], /\/codex exec --json -m gpt-6\.1-sol -c model_reasoning_effort=max --yolo - < \.\.\/prompt\.md\)$/);
+  assert.match(block(d, '# flash high (Antigravity CLI)')[4], /\/agy -p "\$\(cat \.\.\/prompt\.md\)" --output-format stream-json --model gemini-3\.8-flash --effort high --dangerously-skip-permissions\)$/);
   // A later stage starts in a copy of the folder of the run it continues from.
   const s = dry(['--stage', 'plan=opus:max', '--stage', 'build=sol:max']), plan = s.ids.find((id) => id.includes('.plan'));
   const build = block(s, '# sol max · 2 build (Codex CLI)');
@@ -642,6 +644,15 @@ test('--resume-failed: a Claude run that stopped partway carries on with its ses
   fs.writeFileSync(path.join(dir, 'result.json'), JSON.stringify({ ...x, costUsd: 1, outputTokens: 1 }));
   assert.match(runner(sb, ['--reparse']).stdout, /Reparsed 2 run/);
   assert.deepEqual(sum(result(sb, id)), expected);
+  // A reply.md still holding the first part's reply (the limit it stopped on) gives way to the last part's; one that's
+  // neither is left as it is.
+  const replyMd = path.join(dir, 'reply.md'), last = fs.readFileSync(replyMd, 'utf8');
+  fs.writeFileSync(replyMd, first.error);
+  assert.equal(runner(sb, ['--reparse']).status, 0);
+  assert.equal(fs.readFileSync(replyMd, 'utf8'), last.trim());
+  fs.writeFileSync(replyMd, 'notes of my own');
+  assert.equal(runner(sb, ['--reparse']).status, 0);
+  assert.equal(fs.readFileSync(replyMd, 'utf8'), 'notes of my own');
 
   // With Retry failed too, one that can't resume starts over.
   const again = runner(sb, ['--resume-failed', '--rerun-failed']);
@@ -1181,7 +1192,8 @@ test('cut off by a crash, then finished on its own: its result comes from its se
 });
 
 test('a cut-off run ended mid-way as it carries on stays cut off, and carries on again next time', async (t) => {
-  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang FAKE:sleep=1500' }] } });
+  // The part that carries on takes 5 s, so it's still going when it's ended, however busy the computer is.
+  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang FAKE:sleep=5000' }] } });
   t.after(() => cleanup(sb));
   const id = 'opus-low__h', dir = path.join(sb.out, id);
   const c = controlled(sb, []);
@@ -1198,4 +1210,45 @@ test('a cut-off run ended mid-way as it carries on stays cut off, and carries on
   assert.equal(runner(sb, []).status, 0);
   const x = result(sb, id);
   assert.deepEqual([x.status, x.resumes, x.parts.map((p) => !!p.cutOff), x.outputTokens], ['ok', 1, [true, false], 1060]);
+});
+
+test('a run gets a temp folder of its own, and what its agent leaves running is stopped', { skip: process.platform !== 'linux' && 'reads /proc' }, async (t) => {
+  const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'FAKE:leftover' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  const pidFile = path.join(sb.out, 'opus-low__a', 'work', 'leftover.pid');
+  t.after(() => { try { process.kill(+fs.readFileSync(pidFile, 'utf8'), 'SIGKILL'); } catch {} cleanup(sb); });
+  assert.equal(runner(sb, []).status, 0);
+  const dir = path.join(sb.out, 'opus-low__a'), c = callFor(sb, 'opus-low__a');
+  assert.deepEqual([c.tmp, c.claudeTmp], [path.join(dir, 'tmp'), path.join(dir, 'tmp')]);
+  assert.ok(fs.statSync(path.join(dir, 'tmp')).isDirectory());
+  // The process it left (in a session of its own, so ending the agent's group missed it) is stopped and recorded.
+  const pid = +fs.readFileSync(pidFile, 'utf8'), alive = () => { try { process.kill(pid, 0); return true; } catch { return false; } };
+  await waitFor(() => !alive(), 5000);
+  const r = result(sb, 'opus-low__a');
+  assert.equal(r.leftovers.length, 1);
+  assert.match(r.leftovers[0], /setInterval/);
+});
+
+const hasPlaywright = spawnSync('python3', ['-c', 'import playwright'], { stdio: 'ignore' }).status === 0;
+test('gameCheck: each game loaded headless once, its errors in result.json (not the record); --check-games fills in older runs',
+  { skip: !hasPlaywright && 'Playwright for Python is not installed' }, (t) => {
+  const sb = sandbox({ dimensions: { testing: [{ id: 'ok', text: 'variant A' }, { id: 'bad', text: 'FAKE:throwgame' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }], gameCheck: { seconds: 1 } });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, []).status, 0);
+  const good = result(sb, 'opus-low__ok'), bad = result(sb, 'opus-low__bad');
+  assert.deepEqual([good.gameCheck.pageErrors, good.gameCheck.consoleErrors, good.gameCheck.failedRequests, good.gameCheck.shot], [0, 0, 0, 'game-check.png']);
+  assert.ok(fs.statSync(path.join(sb.out, 'opus-low__ok', 'game-check.png')).size > 0);
+  assert.deepEqual([bad.gameCheck.pageErrors, bad.gameCheck.consoleErrors], [1, 1]);
+  assert.match(bad.gameCheck.pageErrorsFirst[0], /fake game broke/);
+  // The record in the game leaves it out, so a check made later never changes the game file.
+  const game = path.join(sb.out, good.entry), html = fs.readFileSync(game, 'utf8');
+  assert.ok(!html.includes('gameCheck'));
+  // A run checked before this, or with gameCheck off: --check-games gives it one and leaves its game as it was.
+  const { gameCheck, ...unchecked } = good;
+  fs.writeFileSync(path.join(sb.out, 'opus-low__ok', 'result.json'), JSON.stringify(unchecked));
+  const r = runner(sb, ['--check-games']);
+  assert.equal(r.status, 0, r.all);
+  assert.match(r.stdout, /opus-low__ok: 0 page error\(s\), 0 console error\(s\), 0 failed request\(s\)\nChecked 1 game\(s\)\./);
+  assert.equal(result(sb, 'opus-low__ok').gameCheck.pageErrors, 0);
+  assert.equal(fs.readFileSync(game, 'utf8'), html);
 });

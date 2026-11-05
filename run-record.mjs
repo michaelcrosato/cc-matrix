@@ -28,8 +28,10 @@ import { fileURLToPath } from 'node:url';
 export const SCHEMA = 2;
 // What the prompt asks the agent to leave beside the game, its exit interview as one JSON object.
 export const EXIT_FILE = 'exit-interview.json';
-// What the record leaves out of result.json: the CLI's session id and the plan's usage and tier (the account's).
-export const PRIVATE = ['sessionId', 'plan'];
+// What the record leaves out of result.json: the CLI's session id and the plan's usage and tier (the account's), and
+// the runner's game check (gameCheck: this computer's look at the game, which can come later than the run, and would
+// change the game file each time if it were in it).
+export const PRIVATE = ['sessionId', 'plan', 'gameCheck'];
 
 const BLOCK = /<script type="application\/json" id="cc-matrix-run">([\s\S]*?)<\/script>/;
 export const STAMP_RE = /\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/;
