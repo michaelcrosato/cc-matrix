@@ -164,6 +164,32 @@ try:
               return { oneRow: Math.abs(th.top + th.height / 2 - (r('header h1').top + r('header h1').height / 2)) < 8, inView: th.right <= innerWidth, navFits: last.right <= r('#pill').left, h: Math.round(r('header').height) }; }""")
         check('the header holds one row from 1241px up, tabs whole, with the longest pill and badges', all(x['oneRow'] and x['inView'] and x['navFits'] and x['h'] <= 60 for x in rows.values()), json.dumps(rows))
         page.set_viewport_size({'width': 1280, 'height': 900})
+        # Priority: a rule picks a criterion from the drop-down (for now tech stack), then one of its options. The dimension is added in this page only.
+        page.evaluate("cfg.dimensions.techStack = [{ id: 'riftlight', text: 'R' }, { id: 'shardfall', text: 'S' }]; 0")
+        page.locator('#tab-run button[title="Set which runs start first, or hold some"]').click()
+        page.get_by_role('button', name='+ Add rule').click()
+        crit = page.get_by_label('Rule 1: criterion')
+        check('a Priority rule offers a criterion, any by default, and no option until one is picked',
+              crit.input_value() == '' and crit.locator('option').all_inner_texts() == ['any criterion', 'tech stack'] and page.get_by_label('Rule 1: tech stack').count() == 0,
+              str(crit.locator('option').all_inner_texts()))
+        crit.select_option('techStack')
+        opt = page.get_by_label('Rule 1: tech stack')
+        check('picking tech stack offers its variants, and the rule takes the first until another is picked',
+              opt.locator('option').all_inner_texts() == ['riftlight', 'shardfall'] and page.evaluate('sel.opts.priority[0].match.techStack') == 'riftlight', str(opt.locator('option').all_inner_texts()))
+        opt.select_option('shardfall')
+        page.get_by_label('Rule 1: CLI').select_option('claude')
+        m = page.evaluate('sel.opts.priority[0].match')
+        check('the option stays beside the CLI, and the rule says so in words',
+              m.get('techStack') == 'shardfall' and m.get('provider') == 'claude' and 'tech stack shardfall' in page.evaluate('ruleLabel(sel.opts.priority[0])'), json.dumps(m))
+        pv = page.evaluate("api('/api/preview', 'POST', { pick: ['opus:medium'], priority: sel.opts.priority }).then((r) => r.priority)")
+        check('the server takes the rule', 'techStack=shardfall' in (pv or ''), str(pv))
+        page.set_viewport_size({'width': 375, 'height': 667}); page.wait_for_timeout(300); o = page.evaluate(OVERFLOW)
+        check('phone 375px Priority with a criterion and its option: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
+        page.set_viewport_size({'width': 1280, 'height': 900})
+        page.get_by_label('Rule 1: criterion').select_option('')
+        check('any criterion takes the option off the rule', 'techStack' not in page.evaluate('sel.opts.priority[0].match') and page.get_by_label('Rule 1: tech stack').count() == 0)
+        page.get_by_label('Remove rule 1').click()
+        page.evaluate('delete cfg.dimensions.techStack; 0'); page.reload(); page.wait_for_selector('#tab-run.on > *')
         # the tabs in order, and links from when two of them had other names
         names = [re.sub(r'\s+', ' ', x).strip() for x in page.locator('header nav button:visible').all_inner_texts()]
         names = [re.sub(r'\s*\d+$', '', x) for x in names]

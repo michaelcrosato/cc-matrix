@@ -1942,11 +1942,12 @@ function renderRun() {
             + 'whether a run can start, and when it can\'t, the next one in line that can takes the slot. Hold keeps a rule\'s runs from starting until you untick it '
             + '(the ones running finish). Queued batches each follow it, in queue order.')) : null));
   }
-  // One rule: CLI, model, effort and stage (each "any" or one), Hold, and moving it up, down or out.
+  // One rule: CLI, model, effort and stage (each "any" or one), a criterion and then one of its options, Hold, and moving it up, down or out.
   function ruleEditor(list, i, set) {
     const r = list[i], m = r.match ?? {}, upd = (match, hold = !!r.hold) => set(list.map((x, j) => (j === i ? { match, hold } : x)));
     const ag = cfg.agents.find((a) => a.id === m.agent), agents = cfg.agents.filter((a) => !m.provider || a.provider === m.provider);
     const efforts = ag ? prioEfforts(ag) : [...new Set(agents.flatMap(prioEfforts))], stages = (cfg.stages ?? []).map((st) => st.id);
+    const crit = RULE_CRITERIA.find(([k]) => m[k] != null), criteria = RULE_CRITERIA.filter(([k]) => ruleOptions(k).length || m[k] != null);
     const with_ = (k, v) => { const n = { ...m }; if (v) n[k] = v; else delete n[k]; return n; };
     const move = (to) => { const l = [...list]; [l[i], l[to]] = [l[to], l[i]]; set(l); };
     const pick = (label, value, opts, onpick) => h('select', { 'aria-label': `Rule ${i + 1}: ${label}`, style: 'width:100%; min-width:0', onchange: (e) => onpick(e.target.value) },
@@ -1959,7 +1960,10 @@ function renderRun() {
       pick('model', m.agent, [['', 'any model'], ...agents.map((a) => [a.id, a.id])], (v) => {
         const n = with_('agent', v), a2 = cfg.agents.find((a) => a.id === v); if (a2) n.provider = a2.provider; if (a2 && n.effort && !prioEfforts(a2).includes(n.effort)) delete n.effort; upd(n); }),
       pick('effort', m.effort, [['', 'any effort'], ...efforts.map((e) => [e, effortLabel(e)])], (v) => upd(with_('effort', v))),
-      stages.length ? pick('stage', m.stage, [['', 'any stage'], ...stages.map((st) => [st, st])], (v) => upd(with_('stage', v))) : null),
+      stages.length ? pick('stage', m.stage, [['', 'any stage'], ...stages.map((st) => [st, st])], (v) => upd(with_('stage', v))) : null,
+      criteria.length ? pick('criterion', crit?.[0], [['', 'any criterion'], ...criteria], (v) => {
+        const n = { ...m }; if (crit) delete n[crit[0]]; if (v) n[v] = ruleOptions(v)[0]; upd(n); }) : null,
+      crit ? pick(crit[1], m[crit[0]], [...new Set([...ruleOptions(crit[0]), m[crit[0]]])].map((o) => [o, o]), (v) => upd(with_(crit[0], v))) : null),
       h('div', { class: 'row', style: 'gap:6px; margin-top:4px' },
       h('label', { class: 'row grow', style: 'gap:4px', title: 'Its runs don\'t start until you untick this' }, h('input', { type: 'checkbox', checked: !!r.hold, onchange: (e) => upd(m, e.target.checked) }), 'Hold'),
       h('button', { class: 'icon', title: 'Earlier', 'aria-label': `Move rule ${i + 1} up`, disabled: i === 0, onclick: () => move(i - 1) }, '↑'),
@@ -2397,10 +2401,13 @@ const allHeld = (s) => { const n = (o) => Object.values(o ?? {}).reduce((a, b) =
 // What a batch from the Run tab asks the runner for: the matrix's picks, or each stage's.
 // Priority (Run → Options): rules matched top to bottom, each naming run fields (see Priority in run-matrix.mjs).
 const RULE_FIELDS = ['provider', 'agent', 'effort', 'stage'];
+// What a rule can pick from its criterion drop-down, then one of its options: a prompt dimension and its variants. For now just tech stack.
+const RULE_CRITERIA = [['techStack', 'tech stack']];
+const ruleOptions = (k) => (cfg.dimensions?.[k] ?? []).map((v) => v.id);
 const ruleLabel = (r) => {
   const m = r?.match ?? {};
   const parts = [m.agent ? null : m.provider ? PROVIDERS[m.provider] ?? m.provider : null, m.agent ?? null, m.effort ? effortLabel(m.effort) : null, m.stage ?? null,
-    ...Object.entries(m).filter(([k]) => !RULE_FIELDS.includes(k)).map(([k, v]) => `${k} ${v}`)].filter(Boolean);
+    ...Object.entries(m).filter(([k]) => !RULE_FIELDS.includes(k)).map(([k, v]) => `${RULE_CRITERIA.find(([c]) => c === k)?.[1] ?? k} ${v}`)].filter(Boolean);
   return (parts.join(' · ') || 'every run') + (r?.hold ? ' (on hold)' : '');
 };
 const priorityText = (list) => list?.length ? list.map((r, i) => `${i + 1} ${ruleLabel(r)}`).join(' · ') : 'none';
