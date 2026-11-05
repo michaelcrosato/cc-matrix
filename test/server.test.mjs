@@ -433,7 +433,7 @@ test('Priority from the page: Preview shows its order, Start sends it, a held CL
   assert.ok(done.log.some((l) => l === '⚙ Priority: none'), done.log.join('\n'));
 });
 
-test('Run → Monitor: the status says what each run going is, what is queued by model, and Codex\'s limits and credits from its newest log', async (t) => {
+test('Running: the status says what each run going is, what is queued by model, and Codex\'s limits and credits from its newest log', async (t) => {
   const s = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: `FAKE:sleep=4000 ${id}` })) },
     agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
   // A Codex session log past its plan's limit, as Codex writes it: the week used up, and a credit balance.
@@ -458,7 +458,7 @@ test('a queued batch runs from the config and prompt as they were when it was qu
   t.after(async () => { await dd.stop(); cleanup(s); });
   assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['long'] }, concurrency: 1 })).status, 200);
   assert.equal((await dd.api('/api/run', 'POST', { add: true, pick: ['opus:low'], only: { testing: ['v'] } })).status, 200);
-  // Setup changes while it waits for the slot: the variant's text and the prompt
+  // The config changes while it waits for the slot: the variant's text and the prompt
   const c = JSON.parse(fs.readFileSync(s.config, 'utf8')); c.dimensions.testing[1].text = 'new text';
   assert.equal((await dd.api('/api/config', 'PUT', c)).status, 200);
   assert.equal((await dd.api('/api/template', 'PUT', { text: 'Changed prompt.\n\nTesting: {{testing}}\n' })).status, 200);
@@ -538,7 +538,7 @@ test('Restart: the dashboard comes back with its code as it is now, and the batc
   const going = await waitFor(async () => { const x = await statusOf(dd); return x?.active.length === 2 ? x : null; });
   await goingOn(s, 'opus-low__h');
   // late hasn't had its first answer, so it's cut off with nothing to carry on: it starts over
-  fs.writeFileSync(path.join(s.dir, 'prompt.md'), 'Make a small game.\n\nTesting: {{testing}}\n'); // Setup unchanged: the batch's copy is used anyway
+  fs.writeFileSync(path.join(s.dir, 'prompt.md'), 'Make a small game.\n\nTesting: {{testing}}\n'); // unchanged: the batch's copy is used anyway
   const r = await dd.api('/api/restart', 'POST', {});
   assert.deepEqual([r.status, r.json.later], [200, false]);
   const back = await waitFor(async () => { const x = await statusOf(dd); return x && x.boot !== s0.boot && x.running ? x : null; }, 30000);

@@ -140,7 +140,7 @@ const matches = (fields) => (!picks.size || picks.has(`${fields.agent}:${fields.
 // stage to theirs (plan:claude-opus-5-5-max>build:claude-opus-5-5-xhigh), plus the brief (one variant per dimension).
 const chainKey = (chain) => chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join('>');
 
-// A run's folder name (its id) starts with its model-effort (and stage). With "folderName" in the config (Setup · Basic
+// A run's folder name (its id) starts with its model-effort (and stage). With "folderName" in the config (Stage 1
 // → Folder names): then the variants of the dimensions in folderName.fields, the date and time the run started
 // (date: true) and, once it has made its game, the game's title (title: true; see withTitle). Without it, the older
 // scheme: every dimension's variant except those in omitFromName. Runs are matched by the fields in their result.json
@@ -494,7 +494,7 @@ const isDone = (run) => {
 // waits for its parent: it starts once the parent has finished OK, and is left out if the parent fails (see pool).
 // It starts from a copy of the parent's work folder, gets TASK.md (the prompt, filled for this run) and is sent its
 // stage's text, or with a stage goal on a CLI that has /goal, a /goal that points at STAGE.md (see prepareStage).
-// Each stage's models ("agent:effort"): the config's with --stages (Setup · Advanced), a --stage replacing a stage's.
+// Each stage's models ("agent:effort"): the config's with --stages (the stage tabs), a --stage replacing a stage's.
 const STAGES = cfg.stages ?? [];
 const stagePicks = new Map();
 function pickStage(id, list, fromConfig) {
@@ -2220,7 +2220,7 @@ function sayState(force) {
   // left: the runs still to start, per CLI; leftModels: the same per model of each CLI, which the dashboard needs to
   // know how many slots a batch can really use under Max per model (see nextGrant).
   // held: of those, the ones on hold (Priority), which hold no slots either. leftHeads and heldHeads: the same by model,
-  // effort and stage (a run's head, as its folder starts: opus-xhigh.build), for Run → Monitor's table by model.
+  // effort and stage (a run's head, as its folder starts: opus-xhigh.build), for Running's table by model.
   const fin = (v) => v === Infinity ? null : v, left = {}, leftModels = {}, held = {}, leftHeads = {}, heldHeads = {};
   for (const r of pending) if (!isDone(r)) {
     const p = r.agent.provider;
