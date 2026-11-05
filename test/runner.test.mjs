@@ -816,6 +816,18 @@ test('Priority: runs start rule by rule (the first rule a run matches), then the
     ['sol-low__v1', 'sol-low__v2', 'opus-high__v1', 'opus-high__v2', 'opus-low__v1', 'opus-low__v2']);
 });
 
+test('Priority: a rule can name a dimension\'s variant, a tech stack say, alone or beside a CLI, and hold it', (t) => {
+  const sb = sandbox(twoClis(200));
+  t.after(() => cleanup(sb));
+  const dry = JSON.parse(runner(sb, ['--dry-run', '--json', '--priority', 'testing=v1 hold']).stdout.trim().split('\n').pop());
+  assert.equal(dry.held, 3); // both efforts of opus and sol's one, on that variant
+  const out = runner(sb, ['-j', '1', '--priority', '[{"match":{"provider":"codex","testing":"v2"}},{"match":{"testing":"v2"}}]']);
+  assert.equal(out.status, 0, out.stderr);
+  const order = startOrder(sb, ['opus-low__v1', 'opus-low__v2', 'opus-high__v1', 'opus-high__v2', 'sol-low__v1', 'sol-low__v2']);
+  assert.equal(order[0], 'sol-low__v2');
+  assert.deepEqual(order.slice(1, 3).sort(), ['opus-high__v2', 'opus-low__v2']);
+});
+
 test('Priority only orders: the limits still apply, and a run they stop lets the next one in line start', (t) => {
   const sb = sandbox(twoClis(600));
   t.after(() => cleanup(sb));
