@@ -42,6 +42,11 @@ nav { display: flex; gap: 4px; min-width: 0; }
 nav button { background: none; border: 0; padding: 7px 12px; border-radius: 8px; color: var(--muted); font: inherit; cursor: pointer; white-space: nowrap; }
 nav button:hover { color: var(--ink); }
 nav button.on { background: var(--soft); color: var(--ink); font-weight: 600; }
+/* The stages read as steps: a small "Stage 1" over what it is. The gaps set apart what's before, during and after a batch. */
+nav { align-items: center; }
+nav button.step { display: inline-flex; flex-direction: column; align-items: center; gap: 0; padding: 3px 10px; line-height: 1.2; }
+nav button.step small { font-size: 10.5px; font-weight: 500; letter-spacing: .2px; opacity: .8; }
+.navgap { flex: none; width: 1px; height: 20px; margin: 0 3px; background: var(--line); }
 .pill { margin-left: auto; padding: 4px 10px; border-radius: 999px; background: var(--chip); color: var(--muted); font-size: 13px; white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .pill.live { background: var(--soft); color: var(--accent); font-weight: 600; }
 .pill.off { background: color-mix(in srgb, var(--bad) 14%, var(--panel)); color: var(--bad); }
@@ -86,7 +91,7 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .xbar { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; } .xbar > div { height: 1px; } .xbar[hidden] { display: none; }
 /* Results uses the whole window, so a table with many variant columns fits instead of scrolling. */
 body[data-tab="results"] main { max-width: none; }
-/* Setup · Advanced: one box per stage. Run → Advanced: a picked model is a tag with ✕. */
+/* The stage tabs: one box per stage, and a picked model is a tag with ✕. */
 .stagebox { border-top: 1px solid var(--line); padding: 12px 0 4px; } .stagebox:first-of-type { border-top: 0; }
 .stagebox textarea { width: 100%; margin-top: 3px; display: block; }
 .stagebox .boxlabel { display: block; margin-top: 10px; font-size: 13px; }
@@ -94,7 +99,7 @@ pre.envfile { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 460px;
   background: var(--chip); border-radius: 8px; font-size: 12.5px; line-height: 1.5; }
 .qa { margin-top: 12px; } .qa dt { color: var(--muted); font-size: 12.5px; margin-top: 8px; } .qa dd { margin: 2px 0 0; white-space: pre-wrap; }
 .tag.on { background: var(--chip-on, var(--chip)); color: var(--ink); }
-/* Setup: dimension cards move by dragging their grip; the line shows where it lands. */
+/* Stage 1: dimension cards move by dragging their grip; the line shows where it lands. */
 .grip { cursor: grab; color: var(--muted); padding: 2px 4px; user-select: none; font-size: 16px; line-height: 1; }
 .card.drop-before { box-shadow: 0 -3px 0 var(--accent); } .card.drop-after { box-shadow: 0 3px 0 var(--accent); }
 @media (pointer: coarse) { .grip { display: none; } } /* touch: the ↑ ↓ buttons */
@@ -152,7 +157,18 @@ tr.failed td { color: var(--bad); }
 #tab-results table.runs th[draggable] { cursor: grab; } #tab-results table.runs th.dragover { box-shadow: inset 3px 0 0 var(--accent); }
 .colist { border-top: 1px solid var(--line); } .colrow { display: flex; align-items: center; gap: 2px 6px; padding: 4px 0; border-bottom: 1px solid var(--line); }
 .colrow.frozen { background: var(--soft); }
-/* Run → Monitor */
+/* The stage tabs' rail: the chain at a glance */
+.rail { padding: 10px 12px; }
+.railcells { display: flex; align-items: stretch; gap: 4px; overflow-x: auto; scrollbar-width: none; } .railcells::-webkit-scrollbar { display: none; }
+.railcell { flex: 1 1 0; min-width: 104px; display: flex; flex-direction: column; text-align: left; font: inherit; color: var(--ink); background: none; border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; cursor: pointer; }
+.railcell:hover { background: var(--chip); }
+.railcell.on { background: var(--soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.railcell small { color: var(--muted); font-size: 11px; }
+.railcell .what { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; line-height: 1.3; }
+.railarrow { flex: none; align-self: center; color: var(--muted); }
+/* Run → Checks */
+.check { display: grid; grid-template-columns: 1.2em 6.5em minmax(0, 1fr); gap: 0 6px; padding: 6px 0; border-top: 1px solid var(--line); align-items: baseline; }
+/* Run and Running */
 .runbar { padding: 10px 16px; }
 .segbar { display: flex; gap: 1px; height: 8px; border-radius: 4px; overflow: hidden; background: var(--chip); }
 .segbar.big { height: 12px; border-radius: 6px; margin: 10px 0 14px; }
@@ -286,12 +302,16 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
   input[type="checkbox"] { width: 20px; height: 20px; }
 }
 
-/* ---- Tablets and below ---- */
-@media (max-width: 900px) {
-  /* The tabs get a row of their own, scrolling sideways when they don't fit */
+/* ---- Ten tabs take the width: the pill goes short first, then the tabs get a row of their own, scrolling sideways when they don't fit ---- */
+@media (max-width: 1420px) { .pill .full { display: none; } .pill .short { display: inline; } }
+@media (max-width: 1240px) {
   header { padding-bottom: 0; }
   nav { order: 5; flex: 1 0 100%; overflow-x: auto; scrollbar-width: none; margin: 4px calc(-1 * var(--gutter)) 0; padding: 0 var(--gutter) 6px; }
   nav::-webkit-scrollbar { display: none; }
+}
+
+/* ---- Tablets and below ---- */
+@media (max-width: 900px) {
   /* Runs table: one card per run */
   table.runs thead { display: none; }
   table.runs, table.runs tbody { display: block; }
@@ -407,9 +427,15 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
   <h1>Matrix Dashboard</h1>
   <nav>
     <button data-tab="clis" title="What this machine has installed, the models to run and each CLI's command and flags">CLIs</button>
-    <button data-tab="setup" title="The prompt: its sections and their variants, the prompt itself and run folder names">Setup · Basic</button>
-    <button data-tab="advanced" title="Multistage runs: the stages that hand the work from one model or lab to the next">Setup · Advanced</button>
-    <button data-tab="run">Run</button>
+    <span class="navgap" aria-hidden="true"></span>
+    <button data-tab="prompt" class="step" title="The prompt every run starts from: its sections, their variants and its versions"><small>Stage 1</small> Prompt</button>
+    <button data-tab="plan" class="step" title="The plan stage: the models that write PLAN.md, and what they're told"><small>Stage 2</small> Plan</button>
+    <button data-tab="build" class="step" title="The build stage: the models that build a game from each plan, and what they're told"><small>Stage 3</small> Build</button>
+    <button data-tab="extra" class="step" title="Any further stages after the build: more content, polish, a pass by a cheaper model"><small>Stage X</small> Extra</button>
+    <span class="navgap" aria-hidden="true"></span>
+    <button data-tab="run" title="Confirm and check what a batch will run, start it, and change how it runs">Run</button>
+    <button data-tab="running" title="The batch going now, or the last one: how far it is, its runs, failures and limits">Running</button>
+    <span class="navgap" aria-hidden="true"></span>
     <button data-tab="results">Results</button>
     <button data-tab="insights">Insights</button>
     <button data-tab="audit" hidden>Audit</button>
@@ -419,9 +445,12 @@ mark { background: color-mix(in srgb, var(--warn) 30%, transparent); color: inhe
 </header>
 <main>
   <section class="tab" id="tab-clis"></section>
-  <section class="tab" id="tab-setup"></section>
-  <section class="tab" id="tab-advanced"></section>
+  <section class="tab" id="tab-prompt"></section>
+  <section class="tab" id="tab-plan"></section>
+  <section class="tab" id="tab-build"></section>
+  <section class="tab" id="tab-extra"></section>
   <section class="tab" id="tab-run"></section>
+  <section class="tab" id="tab-running"></section>
   <section class="tab" id="tab-results"></section>
   <section class="tab" id="tab-insights"></section>
   <section class="tab" id="tab-audit"></section>
@@ -543,7 +572,7 @@ const GOAL_DIM = 'goal';
 const effortsOf = (a) => (a.efforts?.length ? a.efforts : ['default']).map(effName)
   .filter((e) => a.provider === 'claude' || !e.endsWith('-uc'));
 const RESERVED = ['model', 'effort', 'lab', 'environment', 'machine', 'stamp', 'date'];
-// What the runner fills these with (runVars in run-matrix.mjs), for the Setup hint and the chips' tooltips.
+// What the runner fills these with (runVars in run-matrix.mjs), for Stage 1's hint and the chips' tooltips.
 const RUN_VARS = {
   model: 'the model ID, as in CLIs → Models (claude-opus-5-5)',
   effort: 'the effort level, with -ultracode when Ultracode is on (medium, high-ultracode)',
@@ -553,7 +582,7 @@ const RUN_VARS = {
   stamp: 'when the run started, to the second, as YYYYMMDD-HHMMSS in this computer\'s time zone (20261029-075312 = Oct 29, 2026, 7:53:12 am); the same everywhere in one run, so it ties the game\'s file name to its run',
   date: 'the same moment as {{stamp}}, written YYYY-MM-DD HH:MM:SS (2026-10-29 07:53:12)',
 };
-// Runs in stages (Setup · Advanced, Run → Advanced; stageRuns in run-matrix.mjs). Besides the dimensions and RUN_VARS,
+// Runs in stages (the stage tabs, Run → In stages; stageRuns in run-matrix.mjs). Besides the dimensions and RUN_VARS,
 // a stage's text and goal can use the step its run continues from.
 const STAGE_VARS = {
   parentModel: 'the model of the run this one continues from (claude-opus-5-5)',
@@ -648,7 +677,7 @@ let cfg = null, savedCfg = '', tmpl = '', savedTmpl = '', meta = {}, results = [
 let clis = {}, cliCheckedAt = null, cliError = null, smokes = {}, smokeGoal = store.get('matrix.smokeGoal', false);
 let machine = null, machineBusy = false; // this computer's environment file (CLIs → This computer; /api/machine)
 // rev: what the server last said about the results, config, prompt and tests (see poll). onDisk: the
-// config or prompt changed on disk while Setup had unsaved edits. audit: audit.json, for the Audit tab.
+// config or prompt changed on disk while the page had unsaved edits. audit: audit.json, for the Audit tab.
 let rev = {}, onDisk = false, audit = null, offline = false;
 // prompts: every version of the prompt, oldest first: { v, hash, at, text } (runs/prompt-history.json).
 let prompts = [];
@@ -673,38 +702,46 @@ const cached = (k, fn) => k in cache ? cache[k] : (cache[k] = fn());
 const dirty = () => JSON.stringify(cfg) !== savedCfg || tmpl !== savedTmpl;
 
 // tabs
-const TABS = ['clis', 'setup', 'advanced', 'run', 'results', 'insights', 'audit'];
-let tab = location.hash.slice(1) || store.get('matrix.tab', 'run');
-const tabOk = (t) => TABS.includes(t) && (t !== 'audit' || !!audit);
+const TABS = ['clis', 'prompt', 'plan', 'build', 'extra', 'run', 'running', 'results', 'insights', 'audit'];
+// Links and tabs left open from when these had other names.
+const tabNow = (t) => ({ setup: 'prompt', advanced: 'plan', monitor: 'running' })[t] ?? t;
+let tab = tabNow(location.hash.slice(1) || store.get('matrix.tab', 'run')), tabShown = null;
+const tabOk =(t) => TABS.includes(t) && (t !== 'audit' || !!audit);
 function showTab(t) {
   tipHide();
+  t = tabNow(t);
   if (!tabOk(t)) t = 'run';
-  const moved = t !== tab;
-  tab = t; store.set('matrix.tab', t); history.replaceState(null, '', '#' + t);
+  const moved = t !== tabShown;
+  tab = tabShown = t; store.set('matrix.tab', t); history.replaceState(null, '', '#' + t);
   document.body.dataset.tab = t; // the page's width depends on the tab (see the CSS)
   document.querySelectorAll('nav button').forEach((b) => { b.classList.toggle('on', b.dataset.tab === t); b.toggleAttribute('aria-current', b.dataset.tab === t); });
   document.querySelectorAll('section.tab').forEach((s) => s.classList.toggle('on', s.id === 'tab-' + t));
   render();
-  if (moved) $(`nav button[data-tab="${t}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); // the tab bar scrolls on phones
+  if (moved) {
+    scrollTo({ top: 0 }); // the tabs share one scroll position, which means nothing on the next
+    $(`nav button[data-tab="${t}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); // the tab bar scrolls on phones
+    $('section.tab.on .railcell.on')?.scrollIntoView({ block: 'nearest', inline: 'nearest' }); // so does the rail
+  }
 }
 // Redraws the open tab from the current state. Cheap, and safe at any time (see patch).
 function render() {
   if (!cfg) return;
   if (tab === 'clis') renderClis();
-  else if (tab === 'setup') renderSetup();
-  else if (tab === 'advanced') renderAdvanced();
+  else if (tab === 'prompt') renderPrompt();
+  else if (tab === 'plan' || tab === 'build' || tab === 'extra') renderStageTab(tab);
   else if (tab === 'run') renderRun();
+  else if (tab === 'running') renderRunning();
   else if (tab === 'results') renderResults();
   else if (tab === 'insights') renderInsights();
   else if (tab === 'audit') renderAudit();
   if (tipAnchor && !tipAnchor.isConnected) tipHide(); // its chart mark went away
 }
 document.querySelectorAll('nav button').forEach((b) => b.onclick = () => showTab(b.dataset.tab));
-addEventListener('hashchange', () => { const t = location.hash.slice(1); if (cfg && tabOk(t) && t !== tab) showTab(t); });
+addEventListener('hashchange', () => { const t = tabNow(location.hash.slice(1)); if (cfg && tabOk(t) && t !== tab) showTab(t); });
 
 // ------------------------------------------------------------------- CLIs
 const cliModels = (p) => clis[p]?.models ?? [];
-// The models Setup offers. `key` is the run name (it goes in run folders and results); efforts
+// The models CLIs → Models offers. `key` is the run name (it goes in run folders and results); efforts
 // are the fallback when the CLI can't be asked, otherwise its per-model list wins.
 const CATALOG = [
   { key: 'opus', provider: 'claude', model: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
@@ -950,7 +987,7 @@ function validate() {
   errors.push(...bad);
   const sids = new Set();
   (cfg.stages ?? []).forEach((st, i) => {
-    if (!/^[\w-]+$/.test(st.id || '')) errors.push(`Stage ${i + 1}: name must be letters, numbers, - or _`);
+    if (!/^[\w-]+$/.test(st.id || '')) errors.push(`Stage ${stageNo(i)}: name must be letters, numbers, - or _`);
     else if (sids.has(st.id)) errors.push(`Stage name "${st.id}" is used twice`);
     sids.add(st.id);
     if (!(st.text || '').trim()) warnings.push(`Stage "${st.id}" has no text yet, so its runs can't start`);
@@ -1094,7 +1131,7 @@ function stageRenameNote(st) {
   return m ? `New name: ${plural(m, 'finished run')} of "${was.id}" used other text, so this text runs on its own.`
     + (was.text == null ? '' : ` Put the old text back to keep "${was.id}".`) : null;
 }
-// A stage's new name, with the Run → Advanced picks made under its old one (sel.offStagePicks, "stage|model:effort").
+// A stage's new name, with the Run → In stages picks made under its old one (sel.offStagePicks, "stage|model:effort").
 function renameStage(st, id) {
   if (id === st.id) return false;
   sel.offStagePicks = (sel.offStagePicks ?? []).map((k) => k.startsWith(`${st.id}|`) ? id + k.slice(st.id.length) : k); saveSel();
@@ -1160,7 +1197,7 @@ function pinsModal(d) {
   for (const p of prevVariants(d)) if (p.text != null) add(p.id, p.text, p.runs);
   const list = [...rows.values()].sort((a, b) => isPinned(d, b.text) - isPinned(d, a.text));
   const view = () => h('div', {},
-    h('p', { class: 'hint', style: 'margin-top:0' }, `Pinned variants come first in {{${d}}}'s "+ Add…": pin the ones you use often. Pins are saved with Setup (Save or Ctrl+S).`),
+    h('p', { class: 'hint', style: 'margin-top:0' }, `Pinned variants come first in {{${d}}}'s "+ Add…": pin the ones you use often. Pins are saved with the rest of Stage 1 (Save or Ctrl+S).`),
     list.map((r) => h('div', { class: 'pinrow', key: r.text }, pinButton(d, r),
       h('span', {}, h('b', {}, r.id), r.text ? ` · ${lineOf(r.text, 140)}` : ` · ${d === GOAL_DIM ? 'no goal' : 'empty'}`, r.runs ? h('span', { class: 'muted' }, ` · ${plural(r.runs, 'run')}`) : null))),
     h('div', { class: 'row', style: 'margin-top:12px' }, h('button', { class: 'btn primary', onclick: () => modal.close() }, 'Done')));
@@ -1201,7 +1238,7 @@ function moveDim(from, to) {
   if (t != null) tmpl = t;
   changed(true);
 }
-let dragDim = null; // the field being dragged in Setup
+let dragDim = null; // the field being dragged in Stage 1
 const dropSide = (e) => { const r = e.currentTarget.getBoundingClientRect(); return e.clientY > r.top + r.height / 2 ? 'after' : 'before'; };
 const clearDrop = (el) => el.classList.remove('drop-before', 'drop-after');
 let addPick = null; // the model picked in "+ Add model", kept across redraws
@@ -1239,7 +1276,7 @@ function modelsCard() {
   const pick = all.find((c) => c.key === addPick?.key && c.provider === addPick?.provider && !!c.custom === !!addPick?.custom) ?? all[0];
   return h('div', { class: 'card', id: 'modelcard', key: 'models' },
     h('h2', {}, 'Models'),
-    h('p', { class: 'sub' }, 'Each model and its effort levels to sweep in 1-shot runs. On the Run tab you tick which ones to run. The stages in Setup · Advanced pick from these models too, at any effort they take. Test runs one tiny task through the CLI (about a minute; Grok with /goal takes a few) to check the install, login, model ID, flags and that results are read correctly.'),
+    h('p', { class: 'sub' }, 'Each model and its effort levels to sweep in 1-shot runs. On the Run tab you tick which ones to run. The stage tabs pick from these models too, at any effort they take. Test runs one tiny task through the CLI (about a minute; Grok with /goal takes a few) to check the install, login, model ID, flags and that results are read correctly.'),
     h('div', { class: 'scroll' }, h('table', { class: 'stack models' },
       h('thead', {}, h('tr', {}, ['Model', 'Effort levels', 'Time limit (min)', 'Works?'].map((t) => h('th', {}, t)), h('th', {}, h('span', { class: 'sr-only' }, 'Order and remove')))),
       h('tbody', {}, agentRows))),
@@ -1279,64 +1316,69 @@ function renderClis() {
   morph($('#tab-clis'), onDiskBanner(), clisCard(), machineCard(), modelsCard(), cliCmdsCard(), savebar());
 }
 
-// Setup · Advanced → Stages: the steps of runs in stages (Run → Advanced; stageRuns in run-matrix.mjs). Each has a name, a
-// text (what its runs are asked to do; TASK.md beside it holds the prompt above, filled for the run), an optional
-// goal (sent as /goal) and whether it makes a game. A stage after the first continues from the one before it.
-function stagesCard() {
-  const list = cfg.stages ?? [];
-  const edit = (fn) => { cfg.stages ??= []; fn(cfg.stages); if (!cfg.stages.length) delete cfg.stages; changed(true); };
-  const rename = (x, e) => {
+// ---------------------------------------------------------------- the stage tabs
+// The chain in order: Stage 1 is the prompt (renderPrompt), Stage 2 · Plan is cfg.stages[0], Stage 3 · Build is
+// cfg.stages[1], and Stage X · Extra holds the rest, stages 4, 5 … (stageRuns in run-matrix.mjs knows them only by their
+// order). Each has a name, a text (what its runs are asked to do; TASK.md beside it holds the prompt, filled for the run),
+// an optional goal (sent as /goal) and whether it makes a game. A stage after the first continues from the one before it.
+const stageNo = (i) => i + 2;
+const tabOfStage = (i) => (i === 0 ? 'plan' : i === 1 ? 'build' : 'extra');
+const stageTabName = (t) => ({ prompt: 'Stage 1 · Prompt', plan: 'Stage 2 · Plan', build: 'Stage 3 · Build', extra: 'Stage X · Extra' })[t];
+const tabLink = (t, label) => h('button', { class: 'linkish', onclick: () => showTab(t) }, label ?? stageTabName(t));
+const editStages = (fn) => { cfg.stages ??= []; fn(cfg.stages); if (!cfg.stages.length) delete cfg.stages; changed(true); };
+// The ready-made stages up to stage i, each named as a stage that ran with its text was, or anew where runs used its name
+// for other text.
+function fillStages(l, i) {
+  while (l.length <= i) {
+    const d = structuredClone(DEFAULT_STAGES[l.length]);
+    l.push(d); edits.set(d, { id: d.id, text: null, goal: null }); renameStage(d, stageNameFor(d));
+  }
+}
+// One stage's box: its name, models, instructions and goal.
+function stageBox(i, { movable }) {
+  const list = cfg.stages, x = list[i], no = stageNo(i);
+  const rename = (e) => {
     const n = e.target.value.trim();
     if (!/^[\w-]+$/.test(n) || list.some((y) => y !== x && y.id === n)) { alert('Use letters, numbers, - or _ only, and a name no other stage has.'); e.target.value = x.id; return; }
     renameStage(x, n); edits.delete(x); // named by hand: no longer renamed for its text
     changed(true);
   };
   // Typing in a stage's text or goal: its name follows them (stageNameFor), as a variant's short name follows its text.
-  const typed = (x, set) => {
+  const typed = (set) => {
     if (!edits.has(x)) edits.set(x, { id: x.id, text: (x.text ?? '').trim(), goal: (x.goal ?? '').trim() });
     set(); changed(renameStage(x, stageNameFor(x)));
   };
-  // The ready-made stages, each named as a stage that ran with its text was, or anew where runs used its name for other text.
-  const addDefaults = (l) => { for (const d of structuredClone(DEFAULT_STAGES)) { l.push(d); edits.set(d, { id: d.id, text: null, goal: null }); renameStage(d, stageNameFor(d)); } };
-  return h('div', { class: 'card', key: 'stages' },
-    h('h2', {}, 'Stages'),
-    h('p', { class: 'sub' }, 'In order: each continues from the one before it. A stage\'s models each run it on every session of the stage before (models come from ',
-      h('button', { class: 'linkish', onclick: () => showTab('clis') }, 'CLIs → Models'), ', at any effort they take). A stage with no models stops the chain there. '
-      + 'Untick "makes a game" for a stage that only plans, so its sessions aren\'t flagged for leaving no game.'),
-    list.map((x, i) => h('div', { class: 'stagebox', key: 'stage:' + i },
-      h('div', { class: 'dim-head' },
-        h('span', { class: 'tag' }, String(i + 1)),
-        h('input', { value: x.id, class: 'mono dimname', 'aria-label': `Stage ${i + 1} name`, onchange: (e) => rename(x, e) }),
-        chip('makes a game', x.game !== false, (on) => { if (on) delete x.game; else x.game = false; changed(true); },
-          'Untick for a stage that only plans: its runs aren\'t expected to leave a game, so Insights doesn\'t flag them for it'),
-        h('span', { class: 'grow' }),
-        h('button', { class: 'icon', title: 'Move up', 'aria-label': `Move stage ${x.id} up`, disabled: i === 0, onclick: () => edit((l) => moveIn(l, i, -1)) }, '↑'),
-        h('button', { class: 'icon', title: 'Move down', 'aria-label': `Move stage ${x.id} down`, disabled: i === list.length - 1, onclick: () => edit((l) => moveIn(l, i, 1)) }, '↓'),
-        h('button', { class: 'icon', title: 'Remove stage', 'aria-label': `Remove stage ${x.id}`, onclick: () => { if (confirm(`Remove stage "${x.id}"? Its finished runs stay.`)) edit((l) => l.splice(i, 1)); } }, '✕')),
-      stageRenameNote(x) ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, stageRenameNote(x)) : null,
-      h('div', { class: 'row', style: 'gap:6px; margin:8px 0 2px' },
-        h('span', { class: 'muted', style: 'min-width:56px' }, 'Models'),
-        (x.models ?? []).map((k) => h('span', { class: 'tag' + (validPick(k) ? ' on' : ' bad'), key: k, style: 'font-size:13px; padding:3px 4px 3px 10px',
-            title: validPick(k) ? null : 'Not in CLIs → Models (or not at this effort): left out' }, pickLabel(k),
-          h('button', { class: 'icon', title: `Take ${pickLabel(k)} out of ${x.id}`, 'aria-label': `Remove ${pickLabel(k)} from ${x.id}`, style: 'min-height:20px; padding:0 4px',
-            onclick: () => { x.models = x.models.filter((y) => y !== k); if (!x.models.length) delete x.models; changed(true); } }, '✕'))),
-        pickSelect(x.models ?? [], (k) => { (x.models ??= []).push(k); changed(true); }, `Add a model to ${x.id}`),
-        (x.models ?? []).length ? null : h('span', { class: 'hint', style: 'margin:0' }, 'none yet')),
-      // The two boxes: what the agent is told, and the /goal condition Claude Code checks before it may stop.
-      h('label', { class: 'boxlabel', for: `stage-${i}-text` }, h('strong', {}, 'Instructions'),
-        h('span', { class: 'muted' }, ' — what the agent is told to do: its message, or STAGE.md in its folder when the stage has a goal')),
-      h('textarea', { class: 'fit', id: `stage-${i}-text`, rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
-        placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt above filled for the run, is in their folder.', oninput: (e) => typed(x, () => { x.text = e.target.value; }) }),
-      h('label', { class: 'boxlabel', for: `stage-${i}-goal` }, h('strong', {}, 'Done when (/goal)'),
-        h('span', { class: 'muted' }, ' — what Claude Code checks each time the agent tries to stop. Codex never gets it')),
-      h('textarea', { class: 'fit', id: `stage-${i}-goal`, rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
-        placeholder: 'Optional: done when … (sent as /goal on Claude Code, Grok, agy and Muse, with the text above in STAGE.md; Codex gets the text alone)',
-        oninput: (e) => typed(x, () => { if (e.target.value) x.goal = e.target.value; else delete x.goal; }) }))),
-    h('div', { class: 'row', style: 'margin-top:10px' },
-      list.length ? null : h('button', { class: 'btn primary', title: 'Plan, build and content stages with texts to start from', onclick: () => edit(addDefaults) }, 'Add plan → build → content'),
-      h('button', { class: 'btn', onclick: () => edit((l) => { let n = l.length + 1; while (l.some((y) => y.id === `stage${n}`)) n++; l.push({ id: `stage${n}`, text: '' }); }) }, '+ Add stage')),
-    list.length ? [h('p', { class: 'hint', style: 'margin:12px 0 4px' }, 'Besides the dimensions and the placeholders in Setup · Basic ({{source}}, {{model}}, {{stamp}} …), a stage\'s text and goal can use:'),
-      h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, Object.entries(STAGE_VARS).map(([n, what]) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${what}`)))] : null);
+  // Plan and Build keep their places: only the end of the chain comes off. Stage X's stages move among themselves.
+  const removable = movable || i === list.length - 1;
+  return h('div', { class: 'stagebox', key: 'stage:' + i },
+    h('div', { class: 'dim-head' },
+      h('span', { class: 'tag' }, `Stage ${no}`),
+      h('input', { value: x.id, class: 'mono dimname', 'aria-label': `Stage ${no} name`, title: 'Its name in run folders and Results', onchange: rename }),
+      chip('makes a game', x.game !== false, (on) => { if (on) delete x.game; else x.game = false; changed(true); },
+        'Untick for a stage that only plans: its runs aren\'t expected to leave a game, so Insights doesn\'t flag them for it'),
+      h('span', { class: 'grow' }),
+      movable ? [h('button', { class: 'icon', title: 'Move up', 'aria-label': `Move stage ${x.id} up`, disabled: i === 2, onclick: () => editStages((l) => moveIn(l, i, -1)) }, '↑'),
+        h('button', { class: 'icon', title: 'Move down', 'aria-label': `Move stage ${x.id} down`, disabled: i === list.length - 1, onclick: () => editStages((l) => moveIn(l, i, 1)) }, '↓')] : null,
+      removable ? h('button', { class: 'icon', title: 'Remove stage', 'aria-label': `Remove stage ${x.id}`, onclick: () => { if (confirm(`Remove stage "${x.id}"? Its finished runs stay.`)) editStages((l) => l.splice(i, 1)); } }, '✕') : null),
+    stageRenameNote(x) ? h('p', { class: 'hint', style: 'margin:4px 0 0' }, stageRenameNote(x)) : null,
+    h('div', { class: 'row', style: 'gap:6px; margin:8px 0 2px' },
+      h('span', { class: 'muted', style: 'min-width:56px' }, 'Models'),
+      (x.models ?? []).map((k) => h('span', { class: 'tag' + (validPick(k) ? ' on' : ' bad'), key: k, style: 'font-size:13px; padding:3px 4px 3px 10px',
+          title: validPick(k) ? null : 'Not in CLIs → Models (or not at this effort): left out' }, pickLabel(k),
+        h('button', { class: 'icon', title: `Take ${pickLabel(k)} out of ${x.id}`, 'aria-label': `Remove ${pickLabel(k)} from ${x.id}`, style: 'min-height:20px; padding:0 4px',
+          onclick: () => { x.models = x.models.filter((y) => y !== k); if (!x.models.length) delete x.models; changed(true); } }, '✕'))),
+      pickSelect(x.models ?? [], (k) => { (x.models ??= []).push(k); changed(true); }, `Add a model to ${x.id}`),
+      (x.models ?? []).length ? null : h('span', { class: 'hint', style: 'margin:0' }, 'none yet')),
+    // The two boxes: what the agent is told, and the /goal condition Claude Code checks before it may stop.
+    h('label', { class: 'boxlabel', for: `stage-${i}-text` }, h('strong', {}, 'Instructions'),
+      h('span', { class: 'muted' }, ' — what the agent is told to do: its message, or STAGE.md in its folder when the stage has a goal')),
+    h('textarea', { class: 'fit', id: `stage-${i}-text`, rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
+      placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt from Stage 1 filled for the run, is in their folder.', oninput: (e) => typed(() => { x.text = e.target.value; }) }),
+    h('label', { class: 'boxlabel', for: `stage-${i}-goal` }, h('strong', {}, 'Done when (/goal)'),
+      h('span', { class: 'muted' }, ' — what Claude Code checks each time the agent tries to stop. Codex never gets it')),
+    h('textarea', { class: 'fit', id: `stage-${i}-goal`, rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
+      placeholder: 'Optional: done when … (sent as /goal on Claude Code, Grok, agy and Muse, with the text above in STAGE.md; Codex gets the text alone)',
+      oninput: (e) => typed(() => { if (e.target.value) x.goal = e.target.value; else delete x.goal; }) }));
 }
 
 const onDiskBanner = () => onDisk ? h('div', { class: 'banner', key: 'ondisk' },
@@ -1344,61 +1386,95 @@ const onDiskBanner = () => onDisk ? h('div', { class: 'banner', key: 'ondisk' },
   h('button', { class: 'btn', onclick: async () => { if (!confirm('Load the config and prompt from disk? Your unsaved edits here are discarded.')) return; await loadSetup(); render(); } }, 'Load from disk'),
   h('span', { class: 'muted' }, 'or Save to keep yours.')) : null;
 
-// Setup · Advanced → Who runs each stage: the stages' models in order, how many sessions each stage makes per brief
-// (each model on every session of the stage before) and every path a brief takes through them.
-function pipelineCard() {
-  const stages = cfg.stages ?? [];
-  if (!stages.length) return null;
-  const rows = [];
+// The stages' models in order, how many sessions each makes per brief (each model on every session of the stage before),
+// and every path a brief takes through them.
+function stagePaths() {
+  const stages = cfg.stages ?? [], rows = [];
   let paths = [[]], stopped = false;
   for (const [i, st] of stages.entries()) {
     const ms = (st.models ?? []).filter(validPick);
     if (!stopped && ms.length) paths = paths.flatMap((p) => ms.map((m) => [...p, m]));
-    rows.push({ st, i, ms, count: stopped || !ms.length ? 0 : paths.length, from: i && !stopped ? stages[i - 1].id : null });
+    rows.push({ st, i, ms, count: stopped || !ms.length ? 0 : paths.length });
     if (!ms.length) stopped = true;
   }
+  return { rows, paths: paths[0]?.length ? paths : [], stopped };
+}
+// Above the stage tabs: the whole chain at a glance, each step what's set in it and a way there.
+function stageRail(current) {
+  const { rows, paths, stopped } = stagePaths(), briefs = Object.values(cfg.dimensions).reduce((n, vs) => n * vs.length, 1);
   const made = rows.filter((r) => r.count), total = made.reduce((n, r) => n + r.count, 0);
-  const briefs = Object.values(cfg.dimensions).reduce((n, vs) => n * vs.length, 1);
   const short = (k) => { const [a, e] = k.split(':'); return `${a} ${effortLabel(e)}`; };
-  return h('div', { class: 'card', key: 'pipeline' },
-    h('h2', {}, 'Who runs each stage'),
-    h('table', { class: 'stack' }, srHead('Stage', 'Models', 'Sessions per brief'), h('tbody', {}, rows.map((r) => h('tr', { key: r.st.id },
-      h('td', { style: 'white-space:nowrap; width:1%' }, h('strong', {}, `${r.i + 1} · ${r.st.id}`), r.st.game === false ? h('span', { class: 'tag', style: 'margin-left:6px' }, 'no game') : null),
-      h('td', {}, r.ms.length ? r.ms.map((k, j) => [j ? ', ' : '', h('span', { class: 'mono' }, short(k))]) : h('span', { class: 'muted' }, 'no models yet'),
-        r.from && r.ms.length ? h('div', { class: 'hint', style: 'margin:2px 0 0' }, `each on every ${r.from} session`) : null),
-      h('td', { class: 'num', style: 'white-space:nowrap' }, r.count ? plural(r.count, 'session') : '—'))))),
-    made.length ? h('p', { style: 'margin:10px 0 4px' }, 'Per brief: ', h('strong', {}, made.map((r) => `${r.count} × ${r.st.id}`).join(' → ')), `, ${plural(total, 'session')}`,
-      briefs > 1 ? ` (× ${briefs} briefs, the combinations of the variants in Setup · Basic)` : '', '.') : null,
-    paths.length && paths[0].length ? h('details', { open: paths.length <= 6 }, h('summary', { class: 'hint' }, `${plural(paths.length, 'path')} a brief takes`),
-      h('ul', { class: 'hint', style: 'margin:4px 0 0; padding-left:20px' }, paths.slice(0, 50).map((p) => h('li', { class: 'mono' }, p.map(short).join(' → '))))) : null,
-    stopped && made.length ? h('p', { class: 'hint', style: 'margin:6px 0 0' }, `A stage without models stops the chain there; in Run → Advanced, its sessions already done can still carry on to the stages after it.`) : null);
+  const cell = (t, small, name, ...what) => h('button', { class: 'railcell' + (t === current ? ' on' : ''), key: t, 'aria-current': t === current ? 'step' : null, onclick: () => showTab(t) },
+    h('small', {}, small), h('strong', {}, name), what.map((w) => h('span', { class: 'what' }, w)));
+  const step = (t, small, name, r) => r
+    ? cell(t, small, name, r.st.id, r.ms.length ? `${plural(r.ms.length, 'model')} · ${r.count ? `${r.count} per brief` : 'not reached'}` : 'no models yet')
+    : cell(t, small, name, 'not set up');
+  const extras = rows.slice(2), arrow = (k) => h('span', { class: 'railarrow', key: k, 'aria-hidden': 'true' }, '→');
+  return h('div', { class: 'card rail', key: 'rail' },
+    h('div', { class: 'railcells', role: 'group', 'aria-label': 'The stages in order' },
+      cell('prompt', 'Stage 1', 'Prompt', plural(briefs, 'brief'), plural(Object.keys(cfg.dimensions).length, 'dimension')), arrow('a1'),
+      step('plan', 'Stage 2', 'Plan', rows[0]), arrow('a2'),
+      step('build', 'Stage 3', 'Build', rows[1]), arrow('a3'),
+      extras.length ? cell('extra', 'Stage X', 'Extra', extras.map((r) => r.st.id).join(', '), extras.some((r) => r.count) ? `${extras.reduce((n, r) => n + r.count, 0)} per brief` : 'no models yet')
+        : cell('extra', 'Stage X', 'Extra', 'none yet'), arrow('a4'),
+      cell('run', 'Then', 'Run', 'check it', 'and start')),
+    made.length ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Per brief: ', h('strong', {}, made.map((r) => `${r.count} × ${r.st.id}`).join(' → ')), `, ${plural(total, 'session')}`,
+      briefs > 1 ? ` (× ${briefs} briefs, every combination of Stage 1's variants)` : '', '.') : null,
+    current === 'prompt' ? null : [
+      paths.length ? h('details', { style: 'margin-top:6px' }, h('summary', { class: 'hint' }, `The ${plural(paths.length, 'path')} a brief takes`),
+        h('ul', { class: 'hint', style: 'margin:4px 0 0; padding-left:20px' }, paths.slice(0, 50).map((p) => h('li', { class: 'mono' }, p.map(short).join(' → ')))),
+        stopped ? h('p', { class: 'hint', style: 'margin:6px 0 0' }, 'A stage without models stops the chain there; on the Run tab, its sessions already done can still carry on to the stages after it.') : null) : null,
+      stagesHow()]);
 }
+// How stages work, folded away: mostly for the first time.
+const stagesHow = () => h('details', { style: 'margin-top:6px' }, h('summary', { class: 'hint' }, 'How stages work'),
+  h('p', { class: 'sub', style: 'margin:6px 0' }, 'A 1-shot run is one terminal session: one CLI and model, given the prompt from Stage 1 in a fresh folder. Runs in stages are several sessions in a row in the same project, '
+    + 'the way you\'d hand the work from one lab to another: plan in Claude Code with Opus at max, close it, open Codex in a copy of that folder and build with GPT-6.1 Sol, then open Claude Code '
+    + 'again and add content with Sonnet. Each stage is one of those sessions.'),
+  h('ul', { class: 'sub', style: 'margin:0; padding-left:20px' },
+    h('li', {}, 'What a stage\'s model is told is its text; when it\'s done, optionally, its goal (sent as /goal).'),
+    h('li', {}, 'Every session finds TASK.md in its folder: the prompt from Stage 1, filled for its own model, so its file name and Source Information name that model.'),
+    h('li', {}, 'A stage after the first starts in a copy of the folder of the session before it (without node_modules and .git): a build sees PLAN.md, a content pass sees the game.'),
+    h('li', {}, 'Each stage has its models (from ', tabLink('clis', 'CLIs → Models'), ', at any effort they take): every one of them runs the stage on every session of the stage before, so the stages branch. The Run tab ticks which of them to queue.'),
+    h('li', {}, 'A stage with no models stops the chain there: leave Stage X empty to stop after the build. Results filters and groups by stage and by the run each one continues from.'),
+    h('li', {}, 'Run → Preview shows the queue as the terminal commands it stands for.')),
+  h('p', { class: 'hint', style: 'margin:10px 0 4px' }, 'Besides the dimensions and the placeholders in Stage 1 ({{source}}, {{model}}, {{stamp}} …), a stage\'s text and goal can use:'),
+  h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, Object.entries(STAGE_VARS).map(([n, what]) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${what}`))));
 
-// Setup · Advanced: multistage runs. A basic run is one terminal session; a multistage run is several in a row, each
-// a model (often another lab's CLI) picking up a copy of the folder the one before left, with the next stage's text.
-function renderAdvanced() {
+// Stage 2 and Stage 3: one stage each, in a place of its own in the chain.
+const MAIN_STAGES = {
+  plan: { i: 0, intro: 'A model reads the prompt from Stage 1 and writes PLAN.md for other models to build from. It makes no game. With two or more models here, each builder in Stage 3 builds every plan, which shows what the planner changes.',
+    none: 'No plan stage yet. Without stages, a batch runs the prompt straight to a game (Run → 1-shot).', add: 'Add the plan stage' },
+  build: { i: 1, intro: 'Each model here builds the game from every plan of Stage 2, in a copy of that plan\'s folder. With two or more, they all build the same plan, which shows what the builder changes.',
+    none: 'No build stage yet.', add: 'Add the build stage' },
+};
+function mainStageCard(which) {
+  const { i, intro, none, add } = MAIN_STAGES[which], list = cfg.stages ?? [];
+  return h('div', { class: 'card', key: 'stage-' + which },
+    h('h2', {}, stageTabName(which)),
+    h('p', { class: 'sub' }, intro),
+    list[i] ? stageBox(i, { movable: false }) : [h('p', { class: 'muted', style: 'margin:0 0 10px' }, none),
+      h('button', { class: 'btn primary', title: 'A ready-made stage with a text to start from', onclick: () => editStages((l) => fillStages(l, i)) }, list.length < i ? 'Add the plan and build stages' : add)]);
+}
+// Stage X: whatever comes after the build. Still open: no batch has needed one yet.
+function extraCard() {
+  const list = cfg.stages ?? [];
+  const add = () => editStages((l) => { let n = stageNo(l.length); while (l.some((y) => y.id === `stage${n}`)) n++; l.push({ id: `stage${n}`, text: '' }); });
+  return h('div', { class: 'card', key: 'stage-extra' },
+    h('h2', {}, stageTabName('extra')),
+    h('p', { class: 'sub' }, 'Any further passes after the build, in order: each model here picks up a copy of every run of the stage before. This is the open part of the chain, for more content, a polish or bug-fix pass, or a cheaper model building on what a stronger one made. Batches stop after Stage 3 until a stage here has models.'),
+    list.length < 2 ? h('p', { class: 'muted', style: 'margin:0' }, 'These come after the plan and the build: set up ', tabLink(list.length ? 'build' : 'plan'), ' first.') : [
+      list.slice(2).map((_, j) => stageBox(j + 2, { movable: true })),
+      h('div', { class: 'row', style: 'margin-top:10px' },
+        list.length === 2 ? h('button', { class: 'btn primary', title: 'A ready-made content pass with a text to start from', onclick: () => editStages((l) => fillStages(l, 2)) }, 'Add a content pass') : null,
+        h('button', { class: 'btn', onclick: add }, '+ Add stage'))]);
+}
+function renderStageTab(which) {
   if (!cfg) return;
-  morph($('#tab-advanced'),
-    onDiskBanner(),
-    h('div', { class: 'card', key: 'how' },
-      h('h2', {}, 'Multistage runs'),
-      h('p', { class: 'sub' }, 'A basic run is one terminal session: one CLI and model, given the prompt from Setup · Basic in a fresh folder. A multistage run is several sessions in a row in the same project, '
-        + 'the way you\'d hand the work from one lab to another: plan in Claude Code with Opus at max, close it, open Codex in a copy of that folder and build with GPT-6.1 Sol, then open Claude Code '
-        + 'again and add content with Sonnet. Each stage below is one of those sessions.'),
-      h('ul', { class: 'sub', style: 'margin:0; padding-left:20px' },
-        h('li', {}, 'What a stage\'s model is told is its text; when it\'s done, optionally, its goal (sent as /goal).'),
-        h('li', {}, 'Every session finds TASK.md in its folder: the prompt from Setup · Basic, filled for its own model, so its file name and Source Information name that model.'),
-        h('li', {}, 'A stage after the first starts in a copy of the folder of the session before it (without node_modules and .git): a build sees PLAN.md, a content pass sees the game.'),
-        h('li', {}, 'Each stage has its models: every one of them runs the stage on every session of the stage before, so the stages branch. Run → Advanced ticks which of them to queue.'),
-        h('li', {}, 'To see what the planner changes, give plan two or more models: each builder builds every plan. To see what the builder changes, give build two or more: they all build the same plan. '
-          + 'To stop after the build, leave content without models. Results filters and groups by stage and by the run each one continues from.'),
-        h('li', {}, 'Run → Preview shows the queue as the terminal commands it stands for.'))),
-    pipelineCard(),
-    stagesCard(),
-    savebar());
+  morph($(`#tab-${which}`), onDiskBanner(), stageRail(which), which === 'extra' ? extraCard() : mainStageCard(which), savebar());
 }
 
-// Setup · Basic → Run folder names: model-effort, the dimensions ticked "in folder name", the start date and time,
+// Stage 1 → Run folder names: model-effort, the dimensions ticked "in folder name", the start date and time,
 // and the game's title once it's made (cfg.folderName; runName in run-matrix.mjs). Without folderName, the older
 // scheme: every dimension except those unticked (omitFromName), no date or title.
 function folderNameCard() {
@@ -1414,7 +1490,7 @@ function folderNameCard() {
     fn?.date ? stamp : null, coded ? 'x1a2b3c' : null, fn?.title ? 'GameTitle' : null].filter(Boolean).join('__');
   return h('div', { class: 'card', key: 'foldernames' },
     h('h2', {}, 'Run folder names'),
-    h('p', { class: 'sub' }, 'Each run gets a folder in runs/, named by its model and effort, then the variant of each dimension ticked "in folder name" below, then:'),
+    h('p', { class: 'sub' }, 'Each run gets a folder in runs/, named by its model and effort, then the variant of each dimension ticked "in folder name" above, then:'),
     h('div', { class: 'chips' },
       chip('date and time it started', !!fn?.date, (on) => set('date', on), 'Its start, the same YYYYMMDD-HHMMSS as {{stamp}} in the game\'s file name'),
       chip('game title, once made', !!fn?.title, (on) => set('title', on), 'The agent picks the title while it works, so the folder gets it added when the run has finished OK with its game')),
@@ -1424,7 +1500,7 @@ function folderNameCard() {
       + 'Dimensions left out become a short code (x and 6 characters) when two runs could otherwise share a folder: always with no date, else when one of them has more than one variant.'));
 }
 
-function renderSetup() {
+function renderPrompt() {
   const dimNames = Object.keys(cfg.dimensions);
   const renameDim = (oldName, newName) => {
     const next = {};
@@ -1500,9 +1576,21 @@ function renderSetup() {
         h('button', { class: 'btn', title: 'Paste a list, one variant per line', onclick: () => bulkAdd(d, vs, changed) }, 'Bulk add…'),
         addSelect(d, vs)));
   });
-  morph($('#tab-setup'),
+  morph($('#tab-prompt'),
     onDiskBanner(),
-    folderNameCard(),
+    stageRail('prompt'),
+    // Prompt template
+    h('div', { class: 'card', key: 'prompt' },
+      h('h2', {}, 'Prompt'),
+      h('p', { class: 'sub' }, 'Every run starts from this, filled in for its model and variants: a 1-shot run is sent it, and a run in stages finds it in its folder as TASK.md. ', h('span', {}, 'Saved to '), h('span', { class: 'mono' }, meta.templatePath || cfg.templateFile)),
+      h('textarea', { class: 'mono', id: 'tmplarea', rows: 24, value: tmpl, spellcheck: false, 'aria-label': 'Prompt template',
+        oninput: (e) => { tmpl = e.target.value; updateChips(); updateHistory(); changed(); } }),
+      h('div', { class: 'chips', id: 'tchips', style: 'margin-top:10px' }, chipButtons()),
+      h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Click a chip to insert it at the cursor. Filled automatically for every run, here and in variants\' text:'),
+      h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, RESERVED.map((n) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${RUN_VARS[n]}`))),
+      h('div', { class: 'row', style: 'margin-top:12px' }, h('span', { class: 'muted' }, 'Prompt file'),
+        h('input', { class: 'mono', value: cfg.templateFile || 'prompt-template.md', 'aria-label': 'Prompt file', onchange: (e) => { cfg.templateFile = e.target.value.trim(); changed(); } }),
+        h('span', { class: 'hint', style: 'margin:0' }, 'Change to keep several prompts side by side; the current text is saved to the new file.'))),
     h('div', { class: 'card', key: 'dims', style: 'margin-bottom:8px' },
       h('h2', {}, 'Dimensions'),
       h('p', { class: 'sub', style: 'margin:0' }, 'Each dimension fills its {{placeholder}} in the prompt with one variant per run. Every combination gets run. The prompt is built in this order: drag a dimension by ⠿ (or use ↑ ↓) and its section moves in the prompt too. Order variants however you like; Results follow this order.')),
@@ -1516,19 +1604,8 @@ function renderSetup() {
         if (!/^\w+$/.test(n) || RESERVED.includes(n) || cfg.dimensions[n]) return alert('Use letters, numbers or _ only, and a name not already in use.');
         cfg.dimensions[n] = [{ id: 'v1', text: '', ...(results.length ? { olderRuns: true } : {}) }]; changed(true);
       } }, '+ Add dimension')),
-    // Prompt template
-    h('div', { class: 'card', key: 'prompt' },
-      h('h2', {}, 'Prompt'),
-      h('p', { class: 'sub' }, h('span', {}, 'Saved to '), h('span', { class: 'mono' }, meta.templatePath || cfg.templateFile)),
-      h('textarea', { class: 'mono', id: 'tmplarea', rows: 24, value: tmpl, spellcheck: false, 'aria-label': 'Prompt template',
-        oninput: (e) => { tmpl = e.target.value; updateChips(); updateHistory(); changed(); } }),
-      h('div', { class: 'chips', id: 'tchips', style: 'margin-top:10px' }, chipButtons()),
-      h('p', { class: 'hint', style: 'margin-bottom:4px' }, 'Click a chip to insert it at the cursor. Filled automatically for every run, here and in variants\' text:'),
-      h('ul', { class: 'hint', style: 'margin:0; padding-left:20px' }, RESERVED.map((n) => h('li', {}, h('span', { class: 'mono' }, `{{${n}}}`), ` — ${RUN_VARS[n]}`))),
-      h('div', { class: 'row', style: 'margin-top:12px' }, h('span', { class: 'muted' }, 'Prompt file'),
-        h('input', { class: 'mono', value: cfg.templateFile || 'prompt-template.md', 'aria-label': 'Prompt file', onchange: (e) => { cfg.templateFile = e.target.value.trim(); changed(); } }),
-        h('span', { class: 'hint', style: 'margin:0' }, 'Change to keep several prompts side by side; the current text is saved to the new file.'))),
     historyCard(),
+    folderNameCard(),
     savebar());
 }
 
@@ -1583,12 +1660,15 @@ function changeNote(prev, p) {
 // The prompt's versions, newest first: when each was edited and first ran, what changed from the one before
 // and how many runs used it. A version gets its number when a batch first runs it, so until then the prompt
 // in the editor (saved or not) is the next version, however many times it's edited.
-function historyCard() {
-  const byV = [...prompts].sort((a, b) => a.v - b.v), last = byV.at(-1), runs = groupBy(results, (r) => r.promptVersion ?? '');
-  const unrec = runs.get('')?.length ?? 0, unsaved = tmpl !== savedTmpl;
-  // Whether the editor holds a version already (by hash once saved, by text while unsaved); if not, it's the next one.
+// Whether the editor holds a version already (by hash once saved, by text while unsaved); if not, it's the next one.
+function promptNow() {
+  const byV = [...prompts].sort((a, b) => a.v - b.v), last = byV.at(-1), unsaved = tmpl !== savedTmpl;
   const same = unsaved ? byV.find((p) => p.text === tmpl) : byV.find((p) => p.hash === meta.promptVersion);
-  const next = same ? null : { v: (last?.v ?? 0) + 1, text: tmpl };
+  return { byV, last, unsaved, same, next: same ? null : { v: (last?.v ?? 0) + 1, text: tmpl } };
+}
+function historyCard() {
+  const { byV, last, unsaved, same, next } = promptNow(), runs = groupBy(results, (r) => r.promptVersion ?? '');
+  const unrec = runs.get('')?.length ?? 0;
   const when = (p) => [p.at ? `edited ${fmtWhen(p.at)}` : '', p.ranAt ? `first run ${fmtWhen(p.ranAt)}` : ''].filter(Boolean).join(' · ');
   const row = (p, prev, key, tag, time, count) => h('div', { class: 'vrow', key },
     h('strong', {}, `v${p.v}`), tag,
@@ -1667,29 +1747,30 @@ function selection() {
   const lists = Object.values(only), combos = lists.reduce((n, l) => n * l.length, 1);
   const count = pick.length * combos * repeat;
   let done = 0, doneOld = 0, resume = 0; // doneOld: of those, made with an older prompt or a variant's old text
+  const toRun = {}; // per pick, runs not done yet
   if (count <= 50000) {
     // Resume failed: failed runs that got partway carry on with their session (the server says which can), and so do
     // runs cut off mid-way whose session had got going, whatever the options (cutKeys).
     const resumable = (r) => r.status !== 'ok' && r.resumable && resumeOn(), cut = cutKeys();
     const doneRuns = new Map(results.filter((r) => r.status === 'ok' || (!cut.all.has(runKey(r)) && !(sel.opts.rerunFailed || resumable(r)))).map((r) => [runKey(r), r]));
     const resumes = new Set([...results.filter(resumable).map(runKey), ...cut.on]);
-    const walk = (i, acc, base) => {
+    const walk = (i, acc, base, k) => {
       if (i === lists.length) {
         for (let r = 1; r <= repeat; r++) {
           const key = [base, ...acc, repeat > 1 ? `r${r}` : null].filter(Boolean).join('__'), d = doneRuns.get(key);
           if (d) { done++; if (d.changed?.length || (d.promptVersion && meta.promptVersion && d.promptVersion !== meta.promptVersion)) doneOld++; }
-          else if (resumes.has(key)) resume++;
+          else { toRun[k] = (toRun[k] ?? 0) + 1; if (resumes.has(key)) resume++; }
         }
         return;
       }
-      for (const v of lists[i]) walk(i + 1, [...acc, v], base);
+      for (const v of lists[i]) walk(i + 1, [...acc, v], base, k);
     };
-    for (const k of pick) { const [a, e] = k.split(':'); walk(0, [], `${a}-${e}`); }
+    for (const k of pick) { const [a, e] = k.split(':'); walk(0, [], `${a}-${e}`, k); }
   }
-  return { pick, only, repeat, count, done, doneOld, resume, combos };
+  return { pick, only, repeat, count, done, doneOld, resume, combos, toRun };
 }
 
-// Run → Advanced: per stage, its models from Setup · Advanced that are ticked (sel.offStagePicks: 'stage|agent:effort' unticked). Mirrors stageRuns() in
+// Run → In stages: per stage, its models from its tab that are ticked (sel.offStagePicks: 'stage|agent:effort' unticked). Mirrors stageRuns() in
 // run-matrix.mjs: each pick runs on every run of the stage before it (new in this batch, or finished before when
 // that stage has no picks). byStage[i]: runs it would make, of those already done, and how many it continues from.
 function stageSelection() {
@@ -1699,6 +1780,7 @@ function stageSelection() {
   const picks = stages.map((st) => (st.models ?? []).filter((k) => validPick(k) && !off.has(`${st.id}|${k}`)));
   const last = picks.findLastIndex((p) => p.length), byStage = stages.map(() => ({ count: 0, done: 0, from: 0, fromNew: false }));
   let count = 0, done = 0, resume = 0;
+  const toRun = {}; // per stage and pick ("stage|agent:effort"), runs not done yet
   const lists = dims.map((d) => only[d]), combos = lists.reduce((n, l) => n * l.length, 1);
   if (last >= 0 && combos <= 50000) {
     const have = new Map(); // finished OK stage runs: brief | the steps before | stage
@@ -1721,7 +1803,8 @@ function stageSelection() {
           for (const p of picks[k]) {
             const [agent, effort] = p.split(':'), c = [...chain, { stage: st.id, agent, effort }], key = `${chainKey(c)}__${bk}`;
             byStage[k].count++; count++;
-            if (doneRuns.has(key)) { byStage[k].done++; done++; } else if (resumes.has(key)) resume++;
+            if (doneRuns.has(key)) { byStage[k].done++; done++; }
+            else { toRun[`${st.id}|${p}`] = (toRun[`${st.id}|${p}`] ?? 0) + 1; if (resumes.has(key)) resume++; }
             next.push(c);
           }
         }
@@ -1730,7 +1813,7 @@ function stageSelection() {
     };
     walk(0, []);
   }
-  return { stages: Object.fromEntries(stages.map((st, i) => [st.id, picks[i]]).filter(([, p]) => p.length)), only, count, done, resume, byStage, combos, last };
+  return { stages: Object.fromEntries(stages.map((st, i) => [st.id, picks[i]]).filter(([, p]) => p.length)), only, count, done, resume, byStage, combos, last, toRun };
 }
 
 function chip(label, on, toggle, title, key) {
@@ -1739,29 +1822,27 @@ function chip(label, on, toggle, title, key) {
 }
 const setOff = (arr, key, off) => { const i = arr.indexOf(key); if (off && i < 0) arr.push(key); if (!off && i >= 0) arr.splice(i, 1); };
 
-// Run → Advanced (multistage) instead of Basic (the matrix); Setup · Advanced must have stages.
-const inStages = () => sel.mode === 'stages' && (cfg.stages ?? []).length > 0;
+// In stages (the stage tabs) unless the Run tab says 1-shot; with no stages there's only 1-shot.
+const inStages = () => sel.mode !== 'matrix' && (cfg.stages ?? []).length > 0;
+const pair2 = (key, a, b) => a && b ? h('div', { class: 'grid2', key }, a, b) : a ?? b;
+// Run: everything that confirms, checks and starts a batch, and changes how it runs. Running shows what's going on.
 function renderRun() {
   if (!cfg) return;
-  const view = runViewNow(), staged = inStages();
+  const staged = inStages();
   const rerender = () => { saveSel(); renderRun(); };
   const running = !!status.running, many = running && (status.batches?.length ?? 0) > 1;
-  // While a batch runs, Options shows and changes its settings as they are now (see adjust); Monitor shows it too.
+  // While a batch runs, Options shows and changes its settings as they are now (see adjust).
   const now = running ? status.state : null;
-  if (view === 'monitor') {
-    morph($('#tab-run'), restartedBanner(), !running && status.saved ? savedCard() : null, runBar(view), ...monitorCards(running ? optionsCard() : null));
-    const pre = $('#logpre'); if (pre && logFollow) pre.scrollTop = pre.scrollHeight;
-    return;
-  }
   const s = staged ? stageSelection() : selection();
 
   // Summary + launch
+  const est = batchEstimate(s), parallel = Math.max(1, +(now?.concurrency ?? sel.opts.concurrency) || 1);
   const summary = h('div', { class: 'card', key: 'summary' },
     (cfg.stages ?? []).length ? h('div', { class: 'row', style: 'gap:6px; margin-bottom:12px', role: 'group', 'aria-label': 'How to run' },
-      h('button', { class: 'btn' + (staged ? '' : ' primary'), 'aria-pressed': String(!staged), title: 'Every model and effort ticked below runs every combination of variants',
-        onclick: () => { sel.mode = 'matrix'; rerender(); } }, 'Basic · 1-shot'),
-      h('button', { class: 'btn' + (staged ? ' primary' : ''), 'aria-pressed': String(staged), title: 'A model per stage (plan, build, content…), each continuing from the stage before',
-        onclick: () => { sel.mode = 'stages'; rerender(); } }, 'Advanced · multistage')) : null,
+      h('button', { class: 'btn' + (staged ? ' primary' : ''), 'aria-pressed': String(staged), title: 'A model per stage (plan, build, extra…), each continuing from the stage before',
+        onclick: () => { sel.mode = 'stages'; rerender(); } }, 'In stages'),
+      h('button', { class: 'btn' + (staged ? '' : ' primary'), 'aria-pressed': String(!staged), title: 'No stages: every model and effort ticked below runs the prompt straight to a game, on every combination of variants',
+        onclick: () => { sel.mode = 'matrix'; rerender(); } }, '1-shot')) : null,
     h('div', { class: 'stats' },
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Will run'), h('span', { class: 'big' }, (s.count - s.done).toLocaleString())),
       h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Selected'), h('span', {}, staged ? plural(s.count, 'run') : `${s.count.toLocaleString()} combinations`)),
@@ -1771,15 +1852,15 @@ function renderRun() {
       staged ? h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per stage'), h('span', {}, (cfg.stages ?? []).map((st, i) => s.byStage[i].count
           ? `${st.id} ${s.byStage[i].count}` : null).filter(Boolean).join(' · ') || 'nothing picked'))
         : h('div', { class: 'stat' }, h('span', { class: 'label' }, 'Per model+effort'), h('span', {}, `up to ${s.combos * s.repeat} runs`)),
+      est.known ? h('div', { class: 'stat', title: `From past runs: each run left at the median time and list price of finished runs of its model, effort and stage. Agent time adds them all up; at ${parallel} at a time that's at least ${fmtMin(est.mins / parallel)}.`
+          + (est.unknown ? ` ${plural(est.unknown, 'run')} with no past run to go on ${est.unknown === 1 ? 'isn\'t' : 'aren\'t'} counted.` : '') },
+        h('span', { class: 'label' }, 'Rough estimate'), h('span', {}, `~$${Math.round(est.usd).toLocaleString()} list · ~${est.mins >= 600 ? `${Math.round(est.mins / 60).toLocaleString()}h` : fmtMin(est.mins)} of agent time${est.unknown ? ` · ${est.unknown} unknown` : ''}`)) : null,
       h('div', { class: 'launch' },
         h('button', { class: 'btn', onclick: preview, disabled: !s.count }, 'Preview prompt'),
         running && meta.canQueue ? h('button', { class: 'btn primary', onclick: queue, disabled: !(s.count - s.done) || status.stopping || !!status.updating,
           title: 'Run these too, beside the batch going now: they start in the slots it can\'t use, so it\'s never held up' }, '+ Queue') : null,
         running ? null
-          : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))),
-    dirty() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, `CLIs or Setup has unsaved changes; they will be saved when you ${running && meta.canQueue ? 'queue' : 'start'}.`) : null,
-    machineNote() ? h('p', { class: 'warns', style: 'margin:10px 0 0' }, machineNote(), ' ', h('button', { class: 'linkish', onclick: () => showTab('clis') }, 'Open CLIs')) : null,
-    s.doneOld ? h('p', { class: 'hint', style: 'margin:10px 0 0' }, `${s.doneOld} of the runs already done were made with an earlier version of the prompt or of a variant's text. They still count as done, so they're skipped (Setup lists the prompt's versions; Results → Compare by prompt shows what a change did). To redo one with the current text, delete it in Results (✕); to run a variant's new text beside its old runs, give the variant a new short name.`) : null);
+          : h('button', { class: 'btn primary', onclick: start, disabled: !(s.count - s.done) || !!status.updating, title: status.updating ? `${PROVIDERS[status.updating] ?? status.updating} is updating` : null }, '▶ Start'))));
 
   // Models & efforts
   const allKeys = cfg.agents.flatMap((a) => effortsOf(a).map((e) => `${a.id}:${e}`));
@@ -1788,7 +1869,7 @@ function renderRun() {
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Models & effort'),
         h('button', { class: 'icon', onclick: () => { sel.offPick = []; rerender(); } }, 'all'),
         h('button', { class: 'icon', onclick: () => { sel.offPick = [...allKeys]; rerender(); } }, 'none')),
-      cfg.agents.length ? null : h('p', { class: 'muted' }, 'No models yet. Add some in ', h('button', { class: 'linkish', onclick: () => showTab('clis') }, 'CLIs'), '.'),
+      cfg.agents.length ? null : h('p', { class: 'muted' }, 'No models yet. Add some in ', tabLink('clis', 'CLIs'), '.'),
       h('div', { class: 'scroll' }, h('table', { class: 'stack runmodels' }, srHead('Model', 'Efforts to run', 'Tick all or none'), h('tbody', {}, cfg.agents.map((a) => {
         const effs = effortsOf(a);
         const keys = effs.map((e) => `${a.id}:${e}`);
@@ -1813,6 +1894,9 @@ function renderRun() {
         h('table', { class: 'opts' }, h('tbody', {},
           optRow('Parallel runs', 'concurrency', 'How many agents run at once. Runs take turns across CLIs, so parallel slots go to different services.'),
           optRow('Max per CLI', 'perCli', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit. A limit per model of one CLI is set in CLIs → CLI commands and flags (Max per model).'),
+          h('tr', { key: 'perModel' }, h('td', { style: 'white-space:nowrap' }, 'Max per model'),
+            h('td', {}, h('span', { class: 'muted' }, Object.entries(cfg.perModel ?? {}).map(([p, n]) => `${PROVIDERS[p] ?? p} ${n}`).join(' · ') || 'none'), ' ',
+              h('button', { class: 'linkish', title: 'Set for each CLI in CLIs → CLI commands and flags; a change applies straight away, once saved', onclick: () => showTab('clis') }, 'Change in CLIs'))),
           priorityRow(),
           staged ? null : optRow('Repeat each', 'repeat', now ? 'Run each combination this many times. Fixed once a batch starts.' : 'Run each combination this many times (to see variance)'),
           optRow('Budget ($)', 'budget', 'Stop starting new runs once this much is spent. Spend is counted as each run finishes (that\'s when the CLI reports it), so a run already going can take it past the budget, and a run ended early isn\'t counted. Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'
@@ -1894,39 +1978,102 @@ function renderRun() {
         onchange: (e) => { if (now && !fixed) return adjust(key, e.target); sel.opts[key] = e.target.value; rerender(); } }), h('div', { class: 'hint' }, hint)));
   }
 
-  // Dimensions
-  const dims = h('div', { class: 'grid2', key: 'dims' }, Object.entries(cfg.dimensions).map(([d, vs]) => {
-    sel.offOnly[d] ??= [];
+  // The briefs: a card for each dimension with a choice, one line for those with a single variant (unticking it would run
+  // nothing, so one unticked keeps its card).
+  const allDims = Object.entries(cfg.dimensions); for (const [d] of allDims) sel.offOnly[d] ??= [];
+  const hasChoice = ([d, vs]) => vs.length > 1 || sel.offOnly[d].length > 0;
+  const oneEach = allDims.filter((e) => !hasChoice(e)).map(([d]) => d);
+  const dims = h('div', { key: 'dims' }, h('div', { class: 'grid2', key: 'cards' }, allDims.filter(hasChoice).map(([d, vs]) => {
     return h('div', { class: 'card', key: d },
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, d),
         h('button', { class: 'icon', title: `Tick every ${d} variant`, onclick: () => { sel.offOnly[d] = []; rerender(); } }, 'all'),
         h('button', { class: 'icon', title: `Untick every ${d} variant`, onclick: () => { sel.offOnly[d] = vs.map((v) => v.id); rerender(); } }, 'none')),
       h('div', { class: 'chips' }, vs.map((v) => chip(d === GOAL_DIM && (v.text || '').trim() ? v.id + '*' : v.id, !sel.offOnly[d].includes(v.id), (on) => { setOff(sel.offOnly[d], v.id, !on); rerender(); }, v.text, v.id))),
       d === GOAL_DIM && vs.some((v) => (v.text || '').trim()) ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, '* Not on Codex: it has no headless /goal, so it gets the same prompt without /goal.') : null);
-  }));
+  })), oneEach.length ? h('p', { class: 'hint', key: 'one', style: 'margin:0 0 16px' }, `${plural(oneEach.length, 'more dimension')} with one variant, so nothing to tick: ${oneEach.join(', ')}. `, tabLink('prompt'), ' changes them.') : null);
 
   // A batch cut off before (the dashboard quit or restarted) is offered first, to pick up.
-  morph($('#tab-run'), restartedBanner(), !running && status.saved ? savedCard() : null, runBar(view), summary, models, dims);
+  const clisNow = [...new Set(cfg.agents.filter((a) => pickedAgents(s, staged).has(a.id)).map((a) => a.provider))];
+  morph($('#tab-run'), restartedBanner(), !running && status.saved ? savedCard() : null, runBar('run'), summary,
+    pair2('verify', runChecks(s, staged), cliCard(null, clisNow.length ? clisNow : null)), models, dims);
 }
 
-// Run → Advanced: the models picked for each stage. A pick runs on every run of the stage before it; a stage left
+// Roughly what the runs left would take: each at the median time and list price of the runs of its model, effort and stage
+// (by the stage's name without its -v2) that finished OK.
+function batchEstimate(s) {
+  const usual = cached('usualByPick', () => { const m = new Map();
+    for (const r of results) if (r.status === 'ok') { const k = `${r.stage ? stageStem(r.stage) : ''}|${r.agent}:${r.effort}`; if (!m.has(k)) m.set(k, []); m.get(k).push(r); }
+    return m; });
+  let usd = 0, mins = 0, known = 0, unknown = 0;
+  for (const [pick, n] of Object.entries(s.toRun ?? {})) {
+    const [stage, k] = pick.includes('|') ? pick.split('|') : ['', pick], rs = usual.get(`${stageStem(stage)}|${k}`) ?? [];
+    const t = median(rs.map((r) => r.wallMinutes)), c = median(rs.map((r) => r.apiCostUsd));
+    if (t == null) { unknown += n; continue; }
+    known += n; mins += n * t; usd += n * (c ?? 0);
+  }
+  return { usd, mins, known, unknown };
+}
+// The models a batch picks.
+const pickedAgents = (s, staged) => new Set((staged ? Object.values(s.stages).flat() : s.pick).map((k) => k.split(':')[0]));
+// Run → Checks: what could surprise you about this batch, before it starts, with the way to it. Only errors in the setup
+// stop a batch (Save refuses them).
+function runChecks(s, staged) {
+  const v = validate(), verb = status.running && meta.canQueue ? 'queue' : 'start', picked = pickedAgents(s, staged), rows = [];
+  const agents = cfg.agents.filter((a) => picked.has(a.id)), ps = [...new Set(agents.map((a) => a.provider))];
+  const add = (level, label, ...what) => rows.push({ level, label, what });
+  const list = (title, lines) => h('button', { class: 'linkish', onclick: () => openModal(title, h('div', {}, lines.map((l) => h('p', { style: 'margin:0 0 8px' }, l)))) }, 'Show');
+  // The setup
+  if (v.errors.length) add('bad', 'Setup', `${plural(v.errors.length, 'error')} to fix first: ${v.errors[0]} `, v.errors.length > 1 ? list('Errors in the setup', v.errors) : null);
+  else add(dirty() ? 'warn' : 'ok', 'Setup', dirty() ? `Unsaved changes; they're saved when you ${verb}.` : 'Everything is saved.');
+  if (v.warnings.length) add('warn', 'Warnings', `${plural(v.warnings.length, 'warning')} about the setup. `, list('Warnings about the setup', v.warnings));
+  // The prompt
+  const { same, next } = promptNow();
+  add('ok', 'Prompt', same ? `v${same.v}, which has run before.` : `v${next.v}, new: this batch is the first to run it.`, ' ', tabLink('prompt', 'Stage 1'), ' lists its versions.');
+  if (s.doneOld) add('warn', 'Older runs', `${s.doneOld} of the runs already done were made with an earlier version of the prompt or of a variant's text. They count as done, so they're skipped. `
+    + 'To redo one with the current text, delete it in Results (✕); to run a variant\'s new text beside its old runs, give the variant a new short name.');
+  // The models
+  const missing = agents.filter((a) => clis[a.provider] && !clis[a.provider].installed), unproven = agents.filter((a) => !missing.includes(a) && !hasWorked(a));
+  if (!agents.length) add('warn', 'Models', 'None ticked yet.');
+  if (missing.length) add('bad', 'Models', `CLI not found, so their runs are skipped: ${missing.map((a) => a.id).join(', ')}. `, tabLink('clis', 'Open CLIs'));
+  if (unproven.length) add('warn', 'Models', `No passing test or finished run yet: ${unproven.map((a) => a.id).join(', ')}. `,
+    h('button', { class: 'linkish', title: 'One tiny task through each, about a minute', onclick: () => testModels(unproven) }, 'Test them'));
+  if (agents.length && !missing.length && !unproven.length) add('ok', 'Models', `All ${plural(agents.length, 'model')} have passed a test or finished a run.`);
+  // The plans' limits, as each CLI's latest run saw them
+  const hit = [], soon = Date.now();
+  for (const p of ps) {
+    const name = PROVIDERS[p] ?? p, last = results.filter((r) => r.provider === p && r.finishedAt).reduce((a, r) => !a || String(r.finishedAt) > String(a.finishedAt) ? r : a, null);
+    for (const w of cliWindows(p).wins) if (w.usedPct >= 90 && !(w.resetsAt && Date.parse(w.resetsAt) < soon)) hit.push(`${name}: ${w.name} ${w.usedPct}% used${w.resetsAt ? `, resets ${fmtDayHM(w.resetsAt)}` : ''}.`);
+    if (last && last.status !== 'ok' && causeOf(last.error) === 'Usage or rate limit') hit.push(`${name}: its latest run failed on a limit (${fmtWhen(last.finishedAt)}).`);
+  }
+  if (hit.length) add('warn', 'Limits', hit.join(' '));
+  else if (agents.length) add('ok', 'Limits', 'No CLI at 90% of a limit, as far as its latest run shows.');
+  // This computer
+  if (machineNote()) add('warn', 'This computer', `${machineNote()} `, tabLink('clis', 'Open CLIs'));
+  const bad = rows.filter((r) => r.level !== 'ok').length;
+  return h('div', { class: 'card', key: 'checks' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Checks'),
+      h('span', { class: bad ? 'warn' : 'ok', style: 'font-size:13px' }, bad ? `${plural(bad, 'thing')} to look at` : 'All clear')),
+    rows.map((r) => h('div', { class: 'check', key: r.label + r.level }, h('span', { class: r.level }, { ok: '✔', warn: '⚠', bad: '✘' }[r.level]),
+      h('span', { class: 'muted' }, r.label), h('div', {}, r.what))));
+}
+
+// Run → In stages: the models picked for each stage. A pick runs on every run of the stage before it; a stage left
 // empty contributes the runs it already has (a plan made yesterday), and stages after the last pick don't run.
 function stagePicker(s, rerender) {
   const stages = cfg.stages ?? [], off = sel.offStagePicks ??= [];
   return h('div', { class: 'card', key: 'stagepick' },
-    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Stages'),
-      h('button', { class: 'icon', title: 'Edit the stages, their models and what each is told', onclick: () => showTab('advanced') }, 'edit stages')),
-    h('p', { class: 'sub' }, 'Each stage\'s models from Setup · Advanced: untick any to leave it out of this batch. Each runs on every run of the stage before, starting from a copy of its folder. '
+    h('h2', {}, 'Stages'),
+    h('p', { class: 'sub' }, 'Each stage\'s models, from its tab: untick any to leave it out of this batch. Each runs on every run of the stage before, starting from a copy of its folder. '
       + 'A stage with nothing ticked continues from the runs it already has, so you can build from plans made in an earlier batch.'),
     h('table', { class: 'stack runmodels' }, srHead('Stage', 'Models to run', 'Tick all or none'), h('tbody', {}, stages.map((st, i) => {
       const ms = (st.models ?? []).filter(validPick), keys = ms.map((k) => `${st.id}|${k}`), b = s.byStage[i], prev = stages[i - 1]?.id;
       const on = keys.filter((k) => !off.includes(k)).length;
-      const note = !ms.length ? 'no models set: add them in Setup · Advanced'
+      const note = !ms.length ? `no models set: add them in ${stageTabName(tabOfStage(i))}`
         : on ? `${plural(b.count, 'run')}${b.done ? `, ${b.done} done already` : ''}`
           + (i ? ` · on ${b.fromNew ? `each ${prev} run above` : plural(b.from, `finished ${prev} run`)}` : s.combos > 1 ? ` · one per brief (${s.combos})` : '')
         : i < s.last ? `none ticked: continues from its ${plural(s.byStage[i + 1].from, 'finished run')}` : 'none ticked: not in this batch';
       return h('tr', { key: st.id },
-        h('td', { style: 'min-width:150px' }, h('div', { class: 'row', style: 'gap:2px 6px' }, h('strong', {}, `${i + 1} · ${st.id}`),
+        h('td', { style: 'min-width:150px' }, h('div', { class: 'row', style: 'gap:2px 6px' }, h('button', { class: 'linkish', title: 'Edit this stage', onclick: () => showTab(tabOfStage(i)) }, `Stage ${stageNo(i)} · ${st.id}`),
           st.game === false ? h('span', { class: 'tag', title: 'Its runs aren\'t expected to leave a game' }, 'no game') : null),
           h('div', { class: 'muted', style: 'font-size:12.5px' }, note)),
         h('td', {}, h('div', { class: 'chips' }, ms.map((k, j) => chip(pickLabel(k), !off.includes(keys[j]), (v) => { setOff(off, keys[j], !v); rerender(); }, null, k)))),
@@ -1934,18 +2081,17 @@ function stagePicker(s, rerender) {
           h('button', { class: 'icon', title: `Tick every model of ${st.id}`, onclick: () => { keys.forEach((k) => setOff(off, k, false)); rerender(); } }, 'all'),
           h('button', { class: 'icon', title: `Untick every model of ${st.id}`, onclick: () => { keys.forEach((k) => setOff(off, k, true)); rerender(); } }, 'none')] : null));
     }))),
-    s.last < 0 ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Nothing ticked. Each stage\'s models are set in Setup · Advanced.') : null);
+    s.last < 0 ? h('p', { class: 'hint', style: 'margin:8px 0 0' }, 'Nothing ticked. Each stage\'s models are set on its tab.') : null);
 }
 
-// -------------------------------------------------------------- Run → Monitor
-// Run has two views. Monitor: the batch going (or the last one) — how far it is, each model's runs, the runs going now,
-// failures by cause, each CLI's tally and limits, its options and its log. Set up: what the next batch runs. Monitor
-// shows by itself while a batch runs, Set up otherwise; the switch at the top changes it while this page is open, and
-// Start or + Queue goes to Monitor.
-let runView = null;
-const runViewNow = () => runView ?? (status.running ? 'monitor' : 'setup');
-const setRunView = (v) => { runView = v; renderRun(); scrollTo({ top: 0 }); };
-const renderLive = () => { if (runViewNow() === 'monitor') renderRun(); }; // the timers tick
+// ---------------------------------------------------------------- Running
+// The batch going (or the last one): how far it is, each model's runs, the runs going now, failures by cause, each CLI's
+// tally and limits, and its log. Start and + Queue come here.
+function renderRunning() {
+  if (!cfg) return;
+  morph($('#tab-running'), restartedBanner(), !status.running && status.saved ? savedCard() : null, runBar('running'), ...runningCards());
+  const pre = $('#logpre'); if (pre && logFollow) pre.scrollTop = pre.scrollHeight;
+}
 const fmtHM = (t) => t ? new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
 const fmtDayHM = (t) => t ? new Date(t).toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }) : '';
 const clip = (t, n) => { t = String(t ?? '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1) + '…' : t; };
@@ -1963,17 +2109,16 @@ const segBar = (parts, cls = '') => { const all = parts.reduce((n, [k]) => n + k
     title: parts.filter(([k]) => k).map(([k, , w]) => `${k} ${w}`).join(' · ') }, parts.map(([k, c, w]) => k ? h('span', { class: c, key: c, style: `flex:${k}` }) : null)) : null; };
 const toResults = (filters) => { rv.filters = filters; rv.q = ''; saveRv(); showTab('results'); };
 
-// The bar above both views: which view, the batch's state, and what acts on the whole batch.
-function runBar(view) {
+// The bar on Run and Running: the batch's state, what acts on the whole batch, and the way to the other tab.
+function runBar(page) {
   const st = status, s = st.state, running = !!st.running, hb = batchHealth(), now = restartingNow || st.restarting === 'now';
-  const pick = (v, label, title) => h('button', { class: 'btn' + (view === v ? ' primary' : ''), 'aria-pressed': String(view === v), title, onclick: () => setRunView(v) }, label);
   const line = running ? `${s?.paused ? '⏸ Paused' : st.stopping ? 'Stopping…' : '▶ Running'} · ${st.finished} of ${hb?.total ?? '…'} done · ${st.active.length} going`
     : st.startedAt ? `Last batch: ${st.finished} finished${st.finishedAt ? `, ended ${fmtWhen(st.finishedAt)}` : ''}` : 'No batch running';
-  return h('div', { class: 'card runbar', key: 'runbar' }, h('div', { class: 'row', style: 'gap:8px 12px' },
-    h('div', { class: 'row', role: 'group', 'aria-label': 'Run view', style: 'gap:6px; flex-wrap:nowrap' },
-      pick('monitor', 'Monitor', 'The batch going: its progress, runs, failures and limits'), pick('setup', 'Set up', 'What the next batch runs, and Start or + Queue')),
+  return h('div', { class: 'card runbar', id: 'runbar-' + page, key: 'runbar' }, h('div', { class: 'row', style: 'gap:8px 12px' },
     h('span', { class: 'muted grow', style: 'min-width:0' }, line),
     h('div', { class: 'launch' },
+      page === 'run' ? (st.startedAt ? h('button', { class: 'btn', onclick: () => showTab('running'), title: 'How far it is, its runs, failures and limits' }, 'See it in Running →') : null)
+        : h('button', { class: 'btn', onclick: () => showTab('run'), title: running ? 'Change what the runs not started yet do, or queue another batch' : 'Pick what to run next' }, running ? 'Options on Run →' : 'Go to Run →'),
       running && s ? h('button', { class: 'btn', onclick: togglePause, disabled: st.stopping,
         title: s.paused ? 'Let new runs start again' : 'Hold the queue: no new runs start until you resume' }, s.paused ? '▶ Resume' : '⏸ Pause') : null,
       running ? h('button', { class: 'btn danger', onclick: stop, disabled: st.stopping }, st.stopping ? 'Stopping…' : '■ Stop') : null,
@@ -1981,13 +2126,11 @@ function runBar(view) {
         title: 'Start the dashboard again with its code as it is now; a batch going picks up where it left off' }, now ? 'Restarting…' : '⟳ Restart dashboard') : null)));
 }
 
-function monitorCards(options) {
+function runningCards() {
   const st = status, hb = batchHealth();
-  const pair = (key, a, b) => a && b ? h('div', { class: 'grid2', key }, a, b) : a ?? b;
   if (!st.startedAt) return [h('div', { class: 'card', key: 'mon-empty', id: 'live' }, h('h2', {}, 'No batch yet'),
-    h('p', { class: 'sub' }, 'Nothing has run since the dashboard started. Pick what to run in Set up, then Start.'),
-    h('button', { class: 'btn primary', onclick: () => setRunView('setup') }, 'Set up a batch')), cliCard(null)];
-  return [overviewCard(hb), byModelCard(hb), runningCard(hb), pair('mon-a', cliCard(hb), failuresCard(hb)), pair('mon-b', options, logCard())];
+    h('p', { class: 'sub', style: 'margin:0' }, 'Nothing has run since the dashboard started. Pick what to run on the Run tab, then Start.')), cliCard(null)];
+  return [overviewCard(hb), byModelCard(hb), runningCard(hb), pair2('mon-a', cliCard(hb), failuresCard(hb)), logCard()];
 }
 
 // How far the batch is: every run it has, by where it is, its spend and time, and what needs a look.
@@ -2013,7 +2156,9 @@ function overviewCard(hb) {
       st.running ? stat('Queued', `${queued}`, held ? `${held} on hold` : '') : null,
       stat('Spent', fmtUsd(spent), `${fmtUsd(list)} at list price`, 'What Claude Code and Grok reported (the others report no cost), and every finished run\'s tokens at the labs\' public API prices'),
       stat('Time', fmtMin(mins), hb?.eta && st.running && !s.paused && !allHeld(s) ? `about ${fmtMin(hb.eta)} left at this pace` : '')),
-    hb?.alerts.length && st.running ? h('div', { class: 'warns', style: 'margin-top:10px' }, hb.alerts.map((a) => h('div', {}, a))) : null,
+    hb?.alerts.length && st.running ? h('div', { class: 'warns', style: 'margin-top:10px' }, hb.cliAlerts.map((a) => h('div', {}, a)),
+      hb.slowAlerts.length ? h('div', { title: hb.slowAlerts.join('\n') }, hb.slowAlerts.length === 1 ? hb.slowAlerts[0]
+        : `${hb.slowAlerts.length} runs have taken twice their usual time or more: marked ⚠ in Running now`) : null) : null,
     hb?.flagged.length ? h('div', { class: 'row', style: 'margin-top:8px' },
       h('span', { class: 'warn' }, `⚑ ${plural(hb.flagged.length, 'finished run')} in this batch ${hb.flagged.length === 1 ? 'looks' : 'look'} off`),
       h('button', { class: 'btn', onclick: () => { iv.range = 'batch'; iv.filters = {}; saveIv(); showTab('insights'); } }, 'See in Insights')) : null,
@@ -2141,24 +2286,27 @@ function failuresCard(hb) {
 // Each CLI: its runs in the batch, its plan's limits as its latest run (Codex: its session log) saw them, Codex's
 // credits, and whether its last runs failed on a limit.
 const codexWin = (m) => m === 300 ? '5h' : m === 10080 ? 'week' : m ? `${Math.round(m / 60)}h` : 'window';
-function cliCard(hb) {
-  const st = status, per = hb?.per ?? {}, ps = [...new Set([...Object.keys(per), ...(hb ? [] : cfg.agents.map((a) => a.provider))])];
+// A CLI's plan limits as its latest run saw them (Codex: its session log).
+function cliWindows(p) {
+  const cx = p === 'codex' ? status.codex : null;
+  if (cx?.windows?.length) return { wins: cx.windows.map((w) => ({ name: codexWin(w.minutes), usedPct: w.usedPct != null ? Math.round(w.usedPct) : null, resetsAt: w.resetsAt })), asOf: cx.at };
+  const r = results.filter((x) => x.provider === p && x.plan?.windows?.length).reduce((a, x) => !a || String(x.finishedAt) > String(a.finishedAt) ? x : a, null);
+  return { wins: r?.plan?.windows ?? [], asOf: r?.finishedAt };
+}
+function cliCard(hb, only) {
+  const st = status, per = hb?.per ?? {}, ps = only ?? [...new Set([...Object.keys(per), ...(hb ? [] : cfg.agents.map((a) => a.provider))])];
   if (!ps.length) return null;
-  const latest = (p) => results.filter((r) => r.provider === p && r.plan?.windows?.length).reduce((a, r) => !a || String(r.finishedAt) > String(a.finishedAt) ? r : a, null);
   const ctl = st.running && st.state && !st.stopping;
   return h('div', { class: 'card', key: 'clis' },
-    h('h2', {}, 'By CLI'),
-    h('p', { class: 'sub' }, 'Each CLI\'s runs in this batch, and its plan\'s limits as its latest run saw them.'),
+    h('h2', {}, hb ? 'By CLI' : 'Plan limits'),
+    h('p', { class: 'sub' }, hb ? 'Each CLI\'s runs in this batch, and its plan\'s limits as its latest run saw them.' : 'Each CLI\'s plan limits, as its latest run saw them.'),
     ps.map((p) => {
-      const c = per[p] ?? {}, r = latest(p), cx = p === 'codex' ? st.codex : null;
-      const wins = cx?.windows?.length ? cx.windows.map((w) => ({ name: codexWin(w.minutes), usedPct: w.usedPct != null ? Math.round(w.usedPct) : null, resetsAt: w.resetsAt }))
-        : r?.plan?.windows ?? [];
-      const asOf = cx?.windows?.length ? cx.at : r?.finishedAt;
+      const c = per[p] ?? {}, cx = p === 'codex' ? st.codex : null, { wins, asOf } = cliWindows(p);
       const limit = c.streak && c.last && causeOf(c.last.error) === 'Usage or rate limit' ? c.last : null;
       return h('div', { class: 'clirow', key: p },
         h('div', { class: 'row', style: 'gap:2px 10px' }, h('strong', {}, PROVIDERS[p] ?? p),
           h('span', { class: 'muted grow' }, [hb ? `${c.ok ?? 0} OK` : null, c.failed ? `${c.failed} failed` : null, c.running ? `${c.running} going` : null,
-            c.left ? `${c.left} queued${c.held ? `, ${c.held} on hold` : ''}` : null, cfg.perModel?.[p] ? `max ${cfg.perModel[p]} per model` : null].filter(Boolean).join(' · ')),
+            c.left ? `${c.left} queued${c.held ? `, ${c.held} on hold` : ''}` : null, cfg.perModel?.[p] ? `max ${cfg.perModel[p]} per model` : null, !hb && !wins.length ? 'no limits seen yet' : null].filter(Boolean).join(' · ')),
           c.left && ctl ? h('button', { class: 'icon', title: `Leave ${PROVIDERS[p] ?? p}'s queued runs out of this batch (its running ones finish)`, onclick: () => skipCli(p, c.left) }, 'skip rest') : null),
         wins.length ? h('div', { class: 'limits' }, wins.map((w) => h('div', { class: 'limit', key: w.name },
           h('span', { class: 'muted' }, w.name), h('div', { class: 'bar' + (w.usedPct >= 90 ? ' badbar' : w.usedPct >= 70 ? ' warnbar' : '') },
@@ -2209,14 +2357,15 @@ function batchHealth() {
     if (c.streak >= 3) alerts.push(`${PROVIDERS[p] ?? p}: the last ${c.streak} runs failed (${causeOf(c.last.error)})`);
     else if (c.failed >= 3 && c.failed >= c.ok) alerts.push(`${PROVIDERS[p] ?? p}: ${c.failed} of ${c.ok + c.failed} runs failed this batch, mostly ${mostly(p).toLowerCase()}`);
   }
-  for (const a of active) if (a.slow) alerts.push(`${a.id} has been running ${fmtMin(a.mins)}, ${fmtX(a.mins / a.usual)} the usual ~${fmtMin(a.usual)} for its setup`);
+  const cliAlerts = [...alerts], slowAlerts = active.filter((a) => a.slow).map((a) => `${a.id} has been running ${fmtMin(a.mins)}, ${fmtX(a.mins / a.usual)} the usual ~${fmtMin(a.usual)} for its setup`);
+  alerts.push(...slowAlerts);
   const total = st.planned ?? null, left = total != null ? Math.max(0, total - st.finished - active.length) : null;
   const perMin = st.running && st.finished >= 2 ? st.finished / ((Date.now() - t0) / 60000) : null;
-  return { per, fin, active, alerts, total, left, eta: perMin && left != null ? (left + active.length / 2) / perMin : null,
+  return { per, fin, active, alerts, cliAlerts, slowAlerts, total, left, eta: perMin && left != null ? (left + active.length / 2) / perMin : null,
     flagged: fin.filter((r) => runFlags().has(r.id) && !reviewed(r)) };
 }
 
-// Every run not started yet is on hold (Options → Priority): nothing starts until a hold is lifted.
+// Every run not started yet is on hold (Run → Options → Priority): nothing starts until a hold is lifted.
 const allHeld = (s) => { const n = (o) => Object.values(o ?? {}).reduce((a, b) => a + b, 0); return n(s?.left) > 0 && n(s?.held) >= n(s?.left); };
 
 // What a batch from the Run tab asks the runner for: the matrix's picks, or each stage's.
@@ -2282,11 +2431,12 @@ async function start() {
   try {
     await api('/api/run', 'POST', { ...batchOf(s), concurrency: sel.opts.concurrency, perCli: sel.opts.perCli, budget: sel.opts.budget, timeout: sel.opts.timeout,
       priority: sel.opts.priority ?? [] });
-    resetLog(); runView = 'monitor';
+    resetLog();
     await poll();
+    showTab('running');
   } catch (e) { alert(e.message); }
 }
-// Queue: one more batch beside the ones running, from Setup and the ticks as they are now (saved first), so they can
+// Queue: one more batch beside the ones running, from the stage tabs and the ticks as they are now (saved first), so they can
 // change for the next one straight away. It starts its runs in the slots the batches before it can't use (see run
 // state in dashboard.mjs): theirs keep every slot they still need, so it never holds them up.
 async function queue() {
@@ -2294,11 +2444,11 @@ async function queue() {
   const staged = inStages(), s = staged ? stageSelection() : selection(), n = s.count - s.done;
   const order = staged ? ` in stages (${Object.entries(s.stages).map(([st, p]) => `${st}: ${plural(p.length, 'model')}`).join(' → ')})` : '';
   if (!confirm(`Queue ${plural(n, 'run')}${order} beside the batch running now?\n\n`
-    + 'They run from Setup and the prompt as they are now, so you can change them for the next batch straight away. '
+    + 'They run from the stages and the prompt as they are now, so you can change them for the next batch straight away. '
     + 'They start in the slots the batches before them can\'t use: those keep every slot they still need (a build waiting for its plan too), so they\'re never held up. '
     + 'Runs one of them has already are left out, and a build on a plan being made there waits for it.\n\n'
     + `Parallel runs, Max per CLI, Budget, Time limit and Pause are shared by all the batches.\n\nAgents run with permission prompts off.${unprovenNote(s, staged)}${machineNote() ? `\n\n${machineNote()}` : ''}`)) return;
-  try { await api('/api/run', 'POST', { ...batchOf(s), add: true }); runView = 'monitor'; await poll(); } catch (e) { alert(e.message); }
+  try { await api('/api/run', 'POST', { ...batchOf(s), add: true }); await poll(); showTab('running'); } catch (e) { alert(e.message); }
 }
 async function endBatch(b) {
   if (!confirm(`Take batch ${b.n} out of the queue?\n\n${b.waiting ? 'None of its runs has started.'
@@ -2457,9 +2607,9 @@ function holding() {
     h('button', { class: 'btn', onclick: () => askRestart({}) }, 'Restart now'),
     h('button', { class: 'btn', onclick: () => askRestart({ cancel: true }) }, 'Call it off'));
   const why = s.paused ? `⏸ Paused: no new runs start until you resume${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
-    : s.overBudget ? `Budget spent (${fmtUsd(s.spent)} of ${fmtUsd(s.budget)}): no new runs start${n ? `; ${going} finish${n === 1 ? 'es' : ''}. Raise the budget in Options to carry on` : ''}.`
+    : s.overBudget ? `Budget spent (${fmtUsd(s.spent)} of ${fmtUsd(s.budget)}): no new runs start${n ? `; ${going} finish${n === 1 ? 'es' : ''}. Raise the budget in Run → Options to carry on` : ''}.`
     : n > s.concurrency && left ? `${n} running, more than the ${s.concurrency} now allowed: no new run starts until fewer are running.`
-    : allHeld(s) ? `Every run not started yet is on hold (Options → Priority): none starts until you untick Hold${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
+    : allHeld(s) ? `Every run not started yet is on hold (Run → Options → Priority): none starts until you untick Hold${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
     : null;
   return why ? h('p', { class: 'warns', style: 'margin:0 0 10px' }, why) : null;
 }
@@ -2530,12 +2680,11 @@ function savedCard() {
     s.batches.length > 1 ? h('div', { style: 'margin-top:10px' }, s.batches.map((b) => h('div', { class: 'row', key: 'b' + b.n, style: 'gap:2px 10px; padding:4px 0; border-top:1px solid var(--line)' },
       h('strong', { style: 'white-space:nowrap' }, `Batch ${b.n}`), h('span', { class: 'muted grow', style: 'overflow-wrap:anywhere; min-width:0' }, b.what),
       h('span', {}, `${b.finished} finished${b.done ? ' · done' : ''}`)))) : null,
-    h('p', { class: 'hint' }, `Resume runs ${left.length > 1 ? `its ${left.length} batches` : 'it'} as ${left.length > 1 ? 'they were' : 'it was'} started (${settings}), from the copy of Setup and the prompt made then: `
+    h('p', { class: 'hint' }, `Resume runs ${left.length > 1 ? `its ${left.length} batches` : 'it'} as ${left.length > 1 ? 'they were' : 'it was'} started (${settings}), from the copy of the config and the prompt made then: `
       + 'finished runs are skipped, cut-off ones carry on or start over, and the rest run.'));
 }
 async function resumeSaved() {
-  try { await api('/api/session', 'POST', { resume: true }); resetLog(); } catch (e) { alert(e.message); }
-  poll();
+  try { await api('/api/session', 'POST', { resume: true }); resetLog(); await poll(); showTab('running'); } catch (e) { alert(e.message); poll(); }
 }
 async function forgetSaved() {
   const n = (status.cut ?? []).filter((c) => c.carriesOn).length;
@@ -2586,7 +2735,7 @@ const runFields = () => cached('fields:' + Object.keys(cfg.dimensions), () => ['
   ...Object.keys(cfg.dimensions), ...(results.some((r) => r.cli) ? ['cli'] : []), ...(results.some((r) => r.promptVersion) ? ['promptVersion'] : []), 'status',
   ...(results.some((r) => r.resumes) ? ['resumed'] : []), ...(results.some((r) => r.metGoal) ? ['metGoal'] : []),
   ...(results.some((r) => r.stage) ? ['stage', 'from', 'path'] : [])]);
-// Values in a useful order: models and variants as in Setup, efforts low to high, prompts oldest first.
+// Values in a useful order: models and variants as in the config, efforts low to high, prompts oldest first.
 function sortVals(f, vals) {
   const agents = cfg.agents.map((a) => a.id), variants = cfg.dimensions[f]?.map((v) => v.id);
   const rank = f === 'agent' ? (v) => agents.indexOf(v) : f === 'provider' ? (v) => Object.keys(PROVIDERS).indexOf(v)
@@ -2597,7 +2746,7 @@ function sortVals(f, vals) {
   return [...vals].sort((a, b) => rk(a) - rk(b) || String(a).localeCompare(String(b), undefined, { numeric: true }));
 }
 // One dropdown per field, for a view's filters (state.filters[field] = value). A dimension's variants read as in
-// Setup's "+ Add…": short name · text · runs, the whole text on hover.
+// Stage 1's "+ Add…": short name · text · runs, the whole text on hover.
 const variantTextOf = (f, id) => { const t = cfg.dimensions[f]?.find((x) => x.id === id)?.text ?? prevVariants(f).find((p) => p.id === id && p.text != null)?.text;
   return t == null ? null : t.length > 400 ? t.slice(0, 399) + '…' : t; };
 // A filter whose value no run has any more (its runs were deleted) still shows, so it can't hide everything unseen.
@@ -2899,7 +3048,7 @@ function checksCard(rows) {
   const versions = new Set(rows.map((r) => r.promptVersion).filter(Boolean)), unrec = rows.filter((r) => !r.promptVersion).length;
   const edited = rows.filter((r) => r.changed?.length), editedNames = [...new Set(edited.flatMap((r) => r.changed.map((d) => `${d} "${r[d]}"`)))];
   add(!versions.size && !edited.length ? 'na' : versions.size > 1 || edited.length ? 'warn' : 'ok', 'Runs used the same prompt', !versions.size && !edited.length ? 'The prompt version is recorded for new runs.'
-    : [versions.size > 1 ? `They used ${versions.size} versions of the prompt (${sortVals('promptVersion', [...versions]).map((v) => promptLabel(v).split(' · ')[0]).join(', ')}). Filter by prompt above to compare like with like; Setup → Prompt history shows what changed.` : versions.size ? `One version${unrec ? ` (${plural(unrec, 'older run')} not recorded)` : ''}.` : '',
+    : [versions.size > 1 ? `They used ${versions.size} versions of the prompt (${sortVals('promptVersion', [...versions]).map((v) => promptLabel(v).split(' · ')[0]).join(', ')}). Filter by prompt above to compare like with like; Stage 1 → Prompt history shows what changed.` : versions.size ? `One version${unrec ? ` (${plural(unrec, 'older run')} not recorded)` : ''}.` : '',
       edited.length ? `${plural(edited.length, 'run')} used text that has since been edited (${editedNames.join(', ')}), so they're grouped with runs of the new text. node run-matrix.mjs --rename-variant field:name=new-name gives them a name of their own.` : ''].filter(Boolean).join(' '));
   const cliVers = [...groupBy(rows.filter((r) => r.cliVersion), (r) => r.provider)].map(([p, rs]) => [p, sortVals('cli', [...new Set(rs.map((r) => r.cli))])]);
   const moved = cliVers.filter(([, vs]) => vs.length > 1);
@@ -3655,7 +3804,7 @@ function runDetails(r) {
         `stage ${r.stage}${r.changed?.includes('stage') ? ' (old text)' : ''}`) : null,
       Object.keys(cfg.dimensions).map((d) => d === GOAL_DIM && r.goalSkipped
         ? h('span', { class: 'tag', title: 'Codex has no headless /goal: this run got the same prompt without it' }, `${d}=${r[d]}* (no /goal)`)
-        : r.predates?.includes(d) ? h('span', { class: 'tag', title: `This run is from before {{${d}}} existed, so it counts as ${r[d]} (set in Setup)` }, `${d}=${r[d]} (before this field)`)
+        : r.predates?.includes(d) ? h('span', { class: 'tag', title: `This run is from before {{${d}}} existed, so it counts as ${r[d]} (set in Stage 1)` }, `${d}=${r[d]} (before this field)`)
         : h('span', { class: 'tag', title: r.changed?.includes(d) ? 'This variant\'s text was edited after the run' : null }, `${d}=${r[d] ?? '—'}${r.changed?.includes(d) ? ' (old text)' : ''}`))),
     r.error ? h('p', { class: 'errs' }, `${causeOf(r.error)}: ${r.error}`) : null,
     fl ? h('div', { class: 'warns', style: 'margin-bottom:10px' }, fl.items.map((i) => h('div', {}, i.text))) : null,
@@ -3913,7 +4062,8 @@ async function pollOnce() {
   wasRunning = !!st.running;
   setPill();
   if (changed) { render(); refreshModal(); }
-  else if (tab === 'run') renderLive(); // the timers tick
+  else if (tab === 'running') renderRunning(); // the timers tick
+  else if (tab === 'run') repaint('runbar-run', runBar('run')); // the bar's counts
   if (Object.values(smokes).some((x) => x.running)) renderSmokes(); // "testing… 12s"
 }
 
@@ -3929,6 +4079,8 @@ function setPill() {
   } else full = short = st.updating ? `Updating ${PROVIDERS[st.updating] ?? st.updating}…` : 'Idle';
   morph(pill, h('span', { class: 'full' }, full), h('span', { class: 'short' }, short));
   pill.className = 'pill' + cls; pill.title = full;
+  const going = st.running && !offline ? st.active?.length ?? 0 : 0;
+  morph($('nav button[data-tab="running"]'), 'Running', going ? h('span', { class: 'badge info', title: `${plural(going, 'run')} going now` }, going) : null);
   document.title = `${offline || warn ? '⚠ ' : ''}${st.running && hb?.total ? `${st.finished}/${hb.total} · ` : ''}Matrix Dashboard`;
 }
 
@@ -3958,7 +4110,8 @@ function setPill() {
   await loadAudit();
   loadClis(); // takes a few seconds (it asks each CLI); the page works meanwhile
   loadMachine();
-  await poll(); // batch status first, so a view of the last batch opens on it
+  await poll(); // batch status first
+  if (status.running && !location.hash && store.get('matrix.tab', null) == null) tab = 'running'; // this browser's first look
   showTab(tab);
 })();
 </script>

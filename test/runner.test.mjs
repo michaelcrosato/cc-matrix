@@ -1147,7 +1147,7 @@ test('--broker with a priority: held runs are never offered (so no grant goes un
   assert.deepEqual(ready.map(([k]) => k), ['opus-high__v1', 'opus-high__v2', 'opus-low__v1', 'opus-low__v2']);
   const state = JSON.parse((await waitFor(() => lines.find((l) => l.startsWith('@state ')))).slice(7));
   assert.deepEqual([state.left, state.held, state.leftModels], [{ claude: 4, codex: 2 }, { codex: 2 }, { claude: { m: 4 } }]);
-  assert.deepEqual([state.leftHeads, state.heldHeads], [{ 'opus-high': 2, 'opus-low': 2 }, { 'sol-low': 2 }]); // Run → Monitor's table by model
+  assert.deepEqual([state.leftHeads, state.heldHeads], [{ 'opus-high': 2, 'opus-low': 2 }, { 'sol-low': 2 }]); // Running's table by model
   child.stdin.write(JSON.stringify({ end: true }) + '\n');
   assert.equal(await new Promise((r) => child.on('close', r)), 0);
 });

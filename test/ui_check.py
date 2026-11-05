@@ -15,7 +15,7 @@ from playwright.sync_api import sync_playwright
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 FAKE = os.path.join(ROOT, 'test', 'fake-cli')
 SIZES = [('phone', 375, 667, True), ('tablet', 768, 1024, True), ('small laptop', 1024, 768, False), ('laptop', 1366, 768, False), ('ultrawide', 2560, 1080, False)]
-TABS = ['clis', 'setup', 'advanced', 'run', 'results', 'insights', 'audit']
+TABS = ['clis', 'prompt', 'plan', 'build', 'extra', 'run', 'running', 'results', 'insights', 'audit']
 
 ap = argparse.ArgumentParser()
 ap.add_argument('--engines', default='chromium,webkit,firefox')
@@ -148,13 +148,22 @@ try:
               'Never met (9 checks; Claude Code ended the turn itself' in txt and 'does not show every feature working' in txt, txt[:600])
         page.keyboard.press('Escape'); page.wait_for_timeout(200)
         # CLIs → This computer: the sandbox's computer has no environment file yet, and the card says so (a page of its
-        # own, so the CLIs tab's save bar isn't left beside Setup's for the steps below)
+        # own, so the CLIs tab's save bar isn't left beside Stage 1's for the steps below)
         cp = br.new_page(viewport={'width': 1280, 'height': 900}); cp.goto(base + '/#clis'); cp.wait_for_selector('#machinecard >> text=This computer')
         card = cp.locator('#machinecard').inner_text(); cp.close()
         check('CLIs → This computer says the computer has no environment file yet, and offers to write one',
               'has no environment file yet' in card and 'Check this computer' in card, card[:300])
-        # Setup: bulk add a pasted list of games to {{source}} (numbered, a chosen short name, a duplicate, a comment)
-        page.goto(base + '/#setup'); page.wait_for_selector('text=Bulk add…')
+        # the tabs in order, and links from when two of them had other names
+        names = [re.sub(r'\s+', ' ', x).strip() for x in page.locator('header nav button:visible').all_inner_texts()]
+        names = [re.sub(r'\s*\d+$', '', x) for x in names]
+        check('the tabs read in order, the stages as a progression',
+              names[:9] == ['CLIs', 'Stage 1 Prompt', 'Stage 2 Plan', 'Stage 3 Build', 'Stage X Extra', 'Run', 'Running', 'Results', 'Insights'], str(names))
+        old = {}
+        for was, now in (('setup', 'prompt'), ('advanced', 'plan'), ('monitor', 'running')):
+            page.goto(f'{base}/#{was}'); page.reload(); page.wait_for_selector(f'#tab-{now}.on > *'); old[was] = page.evaluate('location.hash')
+        check('links from when the tabs had other names still land on them', old == {'setup': '#prompt', 'advanced': '#plan', 'monitor': '#running'}, str(old))
+        # Stage 1: bulk add a pasted list of games to {{source}} (numbered, a chosen short name, a duplicate, a comment)
+        page.goto(base + '/#prompt'); page.wait_for_selector('text=Bulk add…')
         page.locator('.card', has=page.locator('.tag', has_text='{{source}}')).get_by_role('button', name='Bulk add…').click()
         page.wait_for_selector('#bulk-text')
         games = '\n'.join(['# my list', '1. Super Mario Kart', '2) F-Zero X', '- mk8 | Mario Kart 8 Deluxe', 'A kart racer', ''] + [f'Game {i}' for i in range(100)])
@@ -166,9 +175,9 @@ try:
         check('bulk add: 103 games pasted at once, names made from the text, duplicates skipped, typing keeps focus',
               focused == 'bulk-text' and len(src) == 104 and src[1:4] == ['SuperMarioKart', 'FZeroX', 'mk8'] and src[-1] == 'Game99', f'{focused} {len(src)} {src[:5]}')
         c = json.load(open(conf)); c['dimensions']['source'] = c['dimensions']['source'][:1]; json.dump(c, open(conf, 'w'), indent=2); page.wait_for_timeout(2500)
-        # Setup: runs are matched by short name, so editing the text of a variant that ran renames it ({{source}}'s from
+        # Stage 1: runs are matched by short name, so editing the text of a variant that ran renames it ({{source}}'s from
         # the text) and the old text brings the old name back; a new source is named from its text; a name that ran is taken
-        page.goto(base + '/#setup'); page.wait_for_selector('text=Bulk add…')
+        page.goto(base + '/#prompt'); page.wait_for_selector('text=Bulk add…')
         card = page.locator('.card', has=page.locator('.tag', has_text='{{source}}'))
         name = card.get_by_label('source variant short name')
         card.get_by_label('source variant text').first.click(); page.keyboard.press('End'); page.keyboard.type(' 2')
@@ -192,15 +201,55 @@ try:
         pins = page.evaluate("pinsOf('testing').map((p) => p.id)")
         check('pin and unpin on a variant\'s row change the field\'s pins', 'light' in pins and 'test-full' not in pins, str(pins))
         page.get_by_role('button', name='Discard').click(); page.wait_for_timeout(300)
-        # Setup · Advanced: a stage's name follows its text the same way: edited after a run used it, plan → plan-v2 with
+        # The stage tabs: with no stages yet, Stage 2 and Stage 3 offer theirs and Stage X waits for them; each lands in its place
+        rail = lambda: re.sub(r'\s+', ' ', page.locator('section.tab.on .railcells').inner_text())
+        c = json.load(open(conf)); c.pop('stages', None); json.dump(c, open(conf, 'w'), indent=2); page.wait_for_timeout(2500)
+        page.goto(base + '/#extra'); page.wait_for_selector('#tab-extra.on .rail'); page.wait_for_timeout(300)
+        check('Stage X waits for the plan and the build', 'set up Stage 2 · Plan first' in re.sub(r'\s+', ' ', page.locator('#tab-extra').inner_text()) and page.get_by_role('button', name='+ Add stage').count() == 0)
+        page.locator('#tab-extra').get_by_role('button', name='Stage 2 · Plan').click(); page.wait_for_selector('#tab-plan.on >> text=No plan stage yet')
+        page.get_by_role('button', name='Add the plan stage').click(); page.wait_for_selector('#tab-plan >> text=Instructions')
+        page.locator('#tab-plan .railcell', has_text='Build').click(); page.wait_for_selector('#tab-build.on >> text=No build stage yet')
+        page.get_by_role('button', name='Add the build stage').click(); page.wait_for_selector('#tab-build >> text=Instructions')
+        page.locator('button[data-tab="extra"]').click(); page.wait_for_selector('#tab-extra.on >> text=Add a content pass')
+        page.get_by_role('button', name='Add a content pass').click(); page.wait_for_selector('#tab-extra .stagebox')
+        page.get_by_role('button', name='+ Add stage').click(); page.wait_for_timeout(200)
+        ids = page.evaluate('cfg.stages.map((x) => x.id)'); labels = page.locator('#tab-extra .stagebox .dim-head .tag').all_inner_texts()
+        check('each stage lands on its tab: plan and build, then Stage X\'s, numbered 4 and 5', ids == ['plan', 'build', 'content', 'stage5'] and labels == ['Stage 4', 'Stage 5'], f'{ids} {labels}')
+        page.get_by_label('Move stage stage5 up').click(); page.wait_for_timeout(200)
+        ids = page.evaluate('cfg.stages.map((x) => x.id)')
+        check('Stage X\'s stages move among themselves, never into Build', ids == ['plan', 'build', 'stage5', 'content'] and page.get_by_label('Move stage stage5 up').is_disabled(), str(ids))
+        page.get_by_label('Remove stage stage5').click(); page.wait_for_timeout(200)
+        page.locator('button[data-tab="plan"]').click(); page.wait_for_selector('#tab-plan.on .rail'); page.wait_for_timeout(200)
+        heads = page.locator('#tab-plan .dim-head button').count()
+        page.locator('button[data-tab="build"]').click(); page.wait_for_selector('#tab-build.on .rail'); page.wait_for_timeout(200)
+        heads += page.locator('#tab-build .dim-head button').count()
+        page.locator('button[data-tab="extra"]').click(); page.wait_for_selector('#tab-extra.on .rail'); page.wait_for_timeout(200)
+        check('Stage 2 and Stage 3 keep their places: no ↑ ↓ there, and no ✕ while a stage comes after them', heads == 0, str(heads))
+        page.locator('#tab-extra').get_by_label('Add a model to content').select_option('opus:medium'); page.wait_for_timeout(200)
+        page.locator('button[data-tab="plan"]').click(); page.wait_for_selector('#tab-plan.on .rail'); page.get_by_label('Add a model to plan').select_option('opus:high'); page.wait_for_timeout(200)
+        page.locator('button[data-tab="build"]').click(); page.wait_for_selector('#tab-build.on .rail'); page.get_by_label('Add a model to build').select_option('opus:medium'); page.get_by_label('Add a model to build').select_option('gpt-6.1-sol:max'); page.wait_for_timeout(200)
+        r = rail()
+        check('the rail shows the whole chain: briefs, each stage\'s models and sessions per brief', all(x in r for x in ['Stage 1 Prompt', '4 briefs', 'Stage 2 Plan plan 1 model · 1 per brief', 'Stage 3 Build build 2 models · 2 per brief', 'Stage X Extra content 2 per brief']), r)
+        page.locator('#tab-build').get_by_text('How stages work').click(); page.wait_for_timeout(200)
+        how = page.locator('#tab-build').inner_text()
+        check('How stages work folds out, with what a stage\'s text can use', 'Every session finds TASK.md' in how and '{{parentModel}}' in how, how[:300])
+        # Run: in stages by default once there are stages, each stage's row leading back to its tab, and Checks saying there are unsaved edits
+        page.locator('button[data-tab="run"]').click(); page.wait_for_selector('#tab-run.on .runbar'); page.wait_for_timeout(300)
+        run = page.locator('#tab-run').inner_text()
+        check('Run is in stages by default, says what each stage will do, and Checks says the edits are saved when you start',
+              page.get_by_role('button', name='In stages', exact=True).get_attribute('aria-pressed') == 'true' and 'Stage 3 · build' in run and 'Unsaved changes; they\'re saved when you start.' in run, run[:500])
+        page.locator('#tab-run').get_by_role('button', name='Stage 4 · content').click(); page.wait_for_selector('#tab-extra.on .stagebox')
+        check('a stage\'s row on Run leads to its tab', page.evaluate('location.hash') == '#extra')
+        page.get_by_role('button', name='Discard').click(); page.wait_for_timeout(400)
+        # A stage's name follows its text the same way as a variant's: edited after a run used it, plan → plan-v2 with
         # a note saying why, and typing on keeps focus; the old text brings the old name back
         c = json.load(open(conf)); c['stages'] = [{'id': 'plan', 'text': 'Plan TASK.md. FAKE:plan', 'game': False}]; json.dump(c, open(conf, 'w'), indent=2)
         subprocess.run(['node', os.path.join(ROOT, 'run-matrix.mjs'), '--config', conf, '--out', runs, '--stage', 'plan=opus:medium', '--only', 'testing=light'],
                        check=True, capture_output=True, env=env)
-        page.goto(base + '/#advanced'); page.wait_for_selector('#tab-advanced.on >> text=Instructions'); page.wait_for_timeout(1500)
-        stage_name = page.get_by_label('Stage 1 name')
+        page.goto(base + '/#plan'); page.wait_for_selector('#tab-plan.on >> text=Instructions'); page.wait_for_timeout(1500)
+        stage_name = page.get_by_label('Stage 2 name')
         page.get_by_label('plan text').click(); page.keyboard.press('End'); page.keyboard.type(' Twice.', delay=10); page.wait_for_timeout(300)
-        renamed, note = stage_name.input_value(), page.locator('#tab-advanced').inner_text()
+        renamed, note = stage_name.input_value(), page.locator('#tab-plan').inner_text()
         for _ in range(7): page.keyboard.press('Backspace')
         page.wait_for_timeout(300)
         check('editing a stage that ran renames it (plan → plan-v2) and says why; the old text brings the old name back',
@@ -212,7 +261,10 @@ try:
         many = [{'id': f'm{i}', 'text': f'FAKE:sleep=150 m{i}'} for i in range(30)]
         c = json.load(open(conf)); c['dimensions']['testing'] += many; json.dump(c, open(conf, 'w'), indent=2)
         page.goto(base + '/#run'); page.wait_for_timeout(1500)
-        page.get_by_role('button', name='Set up', exact=True).click()
+        run = page.locator('#tab-run').inner_text()
+        check('Run says what a batch would take, and Checks covers the setup, the prompt, the models and the limits',
+              all(x in run for x in ['ROUGH ESTIMATE', 'Checks', 'Everything is saved.', 'which has run before', 'Plan limits']) and page.get_by_role('button', name='In stages', exact=True).count() == 0, run[:600])
+        check('Run names the dimensions with one variant instead of a card each', '2 more dimensions with one variant' in run and 'source, goal' in run, run[-300:])
         page.get_by_role('button', name='▶ Start').click()
         page.wait_for_function("document.querySelector('#pill').textContent.includes('Running')", timeout=10000)
         page.wait_for_function("!document.querySelector('#pill').textContent.includes('Running')", timeout=60000)
@@ -224,15 +276,17 @@ try:
         c = json.load(open(conf)); c['dimensions']['testing'] += [{'id': f's{i}', 'text': f'FAKE:sleep=12000 s{i}'} for i in range(4)]; json.dump(c, open(conf, 'w'), indent=2)
         api_state = lambda: json.load(urllib.request.urlopen(base + '/api/status'))
         page.goto(base + '/#run'); page.wait_for_timeout(1500)
-        page.get_by_role('button', name='Set up', exact=True).click()
         page.get_by_role('button', name='▶ Start').click()
         page.wait_for_function("status.running && status.state && status.active.length === 2", timeout=20000)
-        page.wait_for_selector('#tab-run .card h2:text-is("Running now · 2")', timeout=10000)
-        mon = page.locator('#tab-run').inner_text()
-        check('Start goes to Monitor: the batch, its models, the runs going now (a row each), each CLI and the log',
-              all(t in mon for t in ['This batch', 'By model', 'Running now · 2', 'By CLI', 'Log']) and page.locator('#tab-run .card', has_text='Running now').locator('table.monitor tbody tr').count() == 2,
-              mon[:300])
-        page.wait_for_selector('text=Options · this batch')
+        page.wait_for_selector('#tab-running .card h2:text-is("Running now · 2")', timeout=10000)
+        mon = page.locator('#tab-running').inner_text()
+        check('Start goes to Running: the batch, its models, the runs going now (a row each), each CLI and the log, and no Options',
+              all(t in mon for t in ['This batch', 'By model', 'Running now · 2', 'By CLI', 'Log']) and page.locator('#tab-running .card', has_text='Running now').locator('table.monitor tbody tr').count() == 2
+              and 'Parallel runs' not in mon and page.evaluate('location.hash') == '#running', mon[:300])
+        check('the Running tab counts the runs going', page.locator('button[data-tab="running"] .badge').inner_text() == '2')
+        page.get_by_role('button', name='Options on Run →').click(); page.wait_for_selector('#tab-run.on >> text=Options · this batch')
+        check('Run has the batch\'s options, its controls and + Queue while it runs, and a way back to Running',
+              all(page.locator('#tab-run').get_by_role('button', name=n).count() == 1 for n in ['⏸ Pause', '■ Stop', '+ Queue', 'See it in Running →']))
         page.fill('#opt-concurrency', '1'); page.press('#opt-concurrency', 'Enter')
         page.get_by_role('button', name='Let them finish').click(); page.wait_for_timeout(800)
         st = api_state()
@@ -249,32 +303,36 @@ try:
         page.get_by_role('button', name='Let the running ones finish').click()
         page.wait_for_selector('button:has-text("▶ Resume")', timeout=5000)
         check('Pause holds the batch and offers Resume', api_state()['state']['paused'] is True)
+        page.get_by_role('button', name='See it in Running →').click(); page.wait_for_selector('#tab-running.on #live')
+        check('Running has Pause too', page.locator('#tab-running').get_by_role('button', name='▶ Resume').count() == 1)
         rid = page.evaluate('status.active[0]')
         page.get_by_label(f'Restart {rid} later').click()
         page.wait_for_function(f"logText.includes('↺ {rid} requeued')", timeout=10000)
         check('↻ ends a run and puts it back in the queue', rid not in api_state()['active'])
         page.set_viewport_size({'width': 375, 'height': 667}); page.wait_for_timeout(600)
         o = page.evaluate(OVERFLOW)
-        check('phone 375px run tab with the live controls: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
+        check('phone 375px Running with the live controls: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
+        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-phone-running-live.png'), full_page=True)
+        page.locator('button[data-tab="run"]').click(); page.wait_for_selector('#tab-run.on >> text=Options · this batch'); page.wait_for_timeout(300)
+        o = page.evaluate(OVERFLOW)
+        check('phone 375px Run with a batch going: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
         if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-phone-run-live.png'), full_page=True)
         page.set_viewport_size({'width': 1280, 'height': 900})
         page.get_by_role('button', name='▶ Resume').click(); page.wait_for_timeout(800)
         check('Resume lets runs start again', api_state()['state']['paused'] is False)
-        # + Queue (in Set up): another batch beside the running one, listed in Monitor; the runs the first has are left out of it
-        page.get_by_role('button', name='Set up', exact=True).click()
+        # + Queue (on Run): another batch beside the running one, listed in Running; the runs the first has are left out of it
         page.get_by_role('button', name='+ Queue').click()
         page.wait_for_function("status.batches && status.batches.length === 2", timeout=10000)
-        page.wait_for_selector('#live >> text=Batch 2', timeout=5000)
+        page.wait_for_selector('#tab-running.on #live >> text=Batch 2', timeout=5000)
         st = api_state()
         check('+ Queue adds a batch beside the running one, and it leaves out the runs that one has',
               any(l.startswith('+ Batch 2 queued') for l in st['log']) and st['running'], json.dumps(st['batches']))
         page.set_viewport_size({'width': 375, 'height': 667}); page.wait_for_timeout(400)
         o = page.evaluate(OVERFLOW)
-        check('phone 375px run tab with two batches in the queue: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
-        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-phone-run-queue.png'), full_page=True)
+        check('phone 375px Running with two batches in the queue: no sideways scroll', o['page'] <= 0 and not o['items'], json.dumps(o))
+        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-phone-running-queue.png'), full_page=True)
         page.set_viewport_size({'width': 1280, 'height': 900}); page.wait_for_timeout(300)
-        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-run-queue.png'), full_page=True)
-        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-run-live.png'), full_page=True)
+        if args.shots: page.screenshot(path=os.path.join(args.shots, 'chromium-laptop-running-queue.png'), full_page=True)
         boot = api_state()['boot']
         page.get_by_role('button', name='⟳ Restart dashboard').click()
         page.wait_for_selector('#modal[open] >> text=The batch picks up where it left off')

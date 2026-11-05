@@ -88,7 +88,7 @@ function refused(req) {
   return null;
 }
 
-// ---------------------------------------------------------- Run → Monitor
+// ----------------------------------------------------------------- Running
 // What each run going now is: its model, effort, stage and variants, from the unfinished.json its runner wrote as it
 // started (base). Read once per run.
 const activeCache = new Map();
@@ -135,7 +135,7 @@ function codexLimits(fresh = false) {
 }
 
 // ------------------------------------------------------------------- CLIs
-// What the Setup tab shows per CLI: version, the models it offers (with the effort levels
+// What the CLIs tab shows per CLI: version, the models it offers (with the effort levels
 // each takes) and the global instruction files it loads into every run. Checked in the
 // background at start and cached until Re-check.
 const HOME = os.homedir();
@@ -298,7 +298,7 @@ function selectionArgs(sel = {}, config = CONFIG) {
 // ------------------------------------------------------------- run state
 // The batches running now: Start begins one, Queue adds more while it runs. Each is its own runner
 // (run-matrix.mjs --broker) working from a copy of the config and prompt as they were when it was started or
-// queued (see snapshot), so editing Setup for the next batch never changes one that's going. They share Parallel
+// queued (see snapshot), so editing the stage tabs for the next batch never changes one that's going. They share Parallel
 // runs, Max per CLI, the budget, the start gap and Pause, which this server keeps for all of them: a run starts
 // only when schedule() grants it. Batches go in the order they were queued, and a later one only gets the slots
 // the ones before it can't use: their running runs, and every run they still have to start (a build waiting
@@ -515,7 +515,7 @@ async function adjustRun(msg) {
   return sessionState();
 }
 
-// A batch's own copy of the config and prompt as they are now: a queued batch starts later, and Setup may change
+// A batch's own copy of the config and prompt as they are now: a queued batch starts later, and the stage tabs may change
 // meanwhile. A variant whose text is in a file is copied in as text, and the prompt keeps its file's time (the
 // prompt history says when a version was saved). This computer's file goes in too, in environments/: the runner
 // fills {{machine}} from the one beside the config it's given (see machineFile).
@@ -698,7 +698,7 @@ function resumeSession() {
     if (b.done) { batches.push({ n: b.n, sel: b.sel, dir, queuedAt: b.queuedAt, startedAt: b.startedAt, finishedAt: s.savedAt, child: null, exitCode: 0,
       active: new Map(), finished: b.finished ?? 0, planned: b.finished ?? 0, state: null, ready: [], granted: new Map(), taken: new Map(), modelOf: new Map(), keys: new Set(), ended: true, waiters: [] }); continue; }
     let from = dir;
-    if (!dir || !fs.existsSync(path.join(dir, 'config.json'))) { from = snapshot(b.n); note(`⚠ Batch ${b.n}'s copy of the config was gone: it carries on with Setup as it is now.`); }
+    if (!dir || !fs.existsSync(path.join(dir, 'config.json'))) { from = snapshot(b.n); note(`⚠ Batch ${b.n}'s copy of the config was gone: it carries on with the config as it is now.`); }
     waiting.push({ n: b.n, sel: b.sel, dir: from, queuedAt: b.queuedAt, startedAt: b.startedAt, finished: b.finished ?? 0 });
   }
   startWaiting(); saveSession();
@@ -829,7 +829,7 @@ function changedStage(dir, r, stages) {
   const sent = sentStage(dir, r);
   return (sent.text != null && flatText(sent.text) !== flatText(text)) || (sent.goal != null && flatText(sent.goal) !== flatText(goal));
 }
-// Every stage text and goal finished runs used, by the stage's name, so Setup · Advanced can keep a name to one text
+// Every stage text and goal finished runs used, by the stage's name, so the stage tabs can keep a name to one text
 // (runs are matched by their chain, which names each step's stage): [{ id, text, goal, runs }], text or goal null when
 // it can't be told. A run's are its stage's in the config while they still match, else what it was sent, if that
 // hashes as the run's did (a text with {{placeholders}} was sent filled in).
@@ -888,7 +888,7 @@ function sentVariant(sent, d, hash) {
   return null;
 }
 
-// Every variant finished runs used, per dimension, so Setup can bring one back and keep a short name to one text
+// Every variant finished runs used, per dimension, so Stage 1 can bring one back and keep a short name to one text
 // (runs are matched by short name, so a name runs used for other text is taken): { dim: [{ id, text, runs }] }, text
 // null when it can't be told. A run's text is its variant's in the config while that still matches (changedVariants),
 // else it's read back out of the prompt it was sent.
@@ -1213,7 +1213,7 @@ server.on('error', (e) => {
   process.exit(1);
 });
 server.listen(opts.port, '127.0.0.1', () => {
-  checkClis(); // warm the cache so the Setup tab has it on first load
+  checkClis(); // warm the cache so the CLIs tab has it on first load
   const link = `http://localhost:${opts.port}`, again = !!process.env.MATRIX_DASHBOARD_RESTARTED;
   console.log(`${again ? '\n⟳ Restarted. ' : ''}Matrix dashboard: ${link}\nConfig: ${CONFIG}\nRuns:   ${OUT}\nCtrl-C to quit (a running batch keeps its finished results).`);
   if (opts.allowHosts.length) console.log(`Also answering as ${opts.allowHosts.join(', ')}: anyone who can reach that address can start agents.`);
