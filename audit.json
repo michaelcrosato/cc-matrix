@@ -8,10 +8,6 @@
    "detail": "New runs get the game check as they end. This command checks the games already in `runs/` that haven't been checked: about 70 s per game, two at a time. That's about an hour for the 96 v6 games and about 4 hours for all 470 or so. It writes `gameCheck` into each result.json and a `game-check.png` beside it. It never touches the game files."
   },
   {
-   "title": "Keep file names out of PLAN.md (PLAN-2)",
-   "detail": "Optional. The planner copies its own file names into the plan, and every builder has to translate them. It cost time but caused no wrong files. Now that builders draw their own titles, the plan's names will match even less. A line in the plan stage would do it: \"Write paths relative to the dev folder; each builder takes its own file names from its TASK.md.\""
-  },
-  {
    "title": "Watch the goal check in the next batch (GOAL-3)",
    "detail": "If builders still get blocked for lacking an \"independent\" review, either allow one review subagent at the end, or say in the goal that the agent's own tests count."
   }
@@ -206,13 +202,14 @@
    "id": "PLAN-2",
    "severity": "medium",
    "area": "Plan",
-   "status": "yours",
+   "status": "fixed",
    "title": "Plans hard-code the plan run's own file names, and 67 builders had to translate them",
    "found": "The planner's TASK.md names its files after the plan run (`…-claude-opus-5-5-max-20261103-174728`), and 23 of 25 plans copy those names into PLAN.md, 91 times in all. Each builder's TASK.md has its own names. \"TASK.md wins\" settled it, and no build shipped under the planner's names, but 67 builders said it cost time: opus-xhigh baseball wrote that \"every path in the plan had to be translated\".",
-   "did": "Left for you: tell the planner not to write file names (Your call).",
+   "did": "**Decided Nov 4 (you left it to me): keep them out.** The plan stage now adds: \"Leave out TASK.md's file and folder names too, since each builder's TASK.md has its own; write paths relative to the dev folder.\"\n\n- **For:**\n  - Every one of those names is wrong for every builder: the model, effort and start time differ, and now the title too, since builders draw their own.\n  - 23 of 25 v6 plans had them (100 times), and 67 builders said translating them cost time.\n  - It's a fact the planner can't know: its TASK.md was filled in for its own run.\n- **Against:**\n  - One more sentence.\n  - So far it cost time, not failures. No build shipped under the planner's names, and no goal check cited them.\n  - A planner could take it as \"no paths at all\" and drop the module layout that 21 of 25 plans gave. That's why the sentence asks for paths relative to the dev folder.\n\n\"Add plan → build → content\" has the same text. plan-v2 has never run, so it keeps its name.",
    "check": "`grep -c claude-opus-5-5-max` on every PLAN.md, and the prompt-feedback catalogue.",
    "where": [
-    "matrix.config.json: stages[plan].text"
+    "matrix.config.json: stages[plan-v2].text",
+    "dashboard.html: DEFAULT_STAGES"
    ]
   },
   {
@@ -529,6 +526,10 @@
   }
  ],
  "changes": [
+  {
+   "title": "Plans leave out TASK.md's file names",
+   "detail": "The plan stage tells the planner its TASK.md's file and folder names are its own, so it writes paths relative to the dev folder instead (PLAN-2)."
+  },
   {
    "title": "WebGPU in the game check and the machine file",
    "detail": "`check-game.py` starts Chromium with `--enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader`, so WebGPU games run there in software. `check-environment.mjs` probes on a `file://` page and says which flags WebGPU needs (ENV-4)."
