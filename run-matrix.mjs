@@ -52,13 +52,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { EXIT_FILE, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, stepOf, unstamped, upgrade } from './run-record.mjs';
+import { EXIT_FILE, HARNESS, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, stepOf, unstamped, upgrade } from './run-record.mjs';
 
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
   out: 'runs', concurrency: 2, perCli: Infinity, only: [], pick: [], limit: Infinity, repeat: 1, timeout: 0,
   budget: Infinity, dryRun: false, json: false, report: false, reparse: false, stamp: false, foldEnded: false, rename: [], rerunFailed: false, resumeFailed: false, smoke: null, smokeGoal: false, control: false, stage: [], stages: false,
-  broker: false, skipKeys: null };
+  broker: false, skipKeys: null, priority: null };
 for (let i = 2; i < process.argv.length; i++) {
   const a = process.argv[i], next = () => process.argv[++i];
   if (a === '--config') args.config = next();
@@ -88,6 +88,7 @@ for (let i = 2; i < process.argv.length; i++) {
   else if (a === '--control') args.control = true;
   else if (a === '--broker') { args.broker = true; args.control = true; }
   else if (a === '--skip-keys') args.skipKeys = next();
+  else if (a === '--priority') args.priority = next();
   else { console.error(`Unknown flag: ${a}`); process.exit(1); }
 }
 
@@ -563,6 +564,47 @@ if (cutRuns().busy.size) {
 }
 
 
+// Priority (Run → Options → Priority, or --priority): an ordered list of rules for which runs start first. A rule names
+// fields a run has, any of them: provider (or cli), agent (a model row's id; or model), effort, stage, or a dimension's
+// variant (source=FarCry2). A run takes the first rule it matches, and runs start rule by rule, then the ones no rule
+// names; within each, as without a priority (taking turns across CLIs, each in its queue order). It only orders: Parallel
+// runs, Max per CLI, Max per model, the budget, Pause and a build's plan still decide whether a run can start, and when
+// the first can't, the next one that can starts instead. A rule with hold keeps its runs from starting until it's lifted
+// (mid-batch, from the dashboard); a batch from a terminal leaves them out. Given as the dashboard sends it, JSON
+// ([{ "match": { "stage": "plan-v2" } }, { "match": { "provider": "codex" }, "hold": true }]), or written short:
+// "stage=plan-v2; cli=codex hold" (rules split by ;, each its key=value pairs and hold).
+const RULE_ALIASES = { cli: 'provider', model: 'agent' };
+function parsePriority(v) {
+  if (v == null || v === '') return [];
+  let list = v;
+  if (typeof v === 'string' && v.trim().startsWith('[')) list = JSON.parse(v);
+  else if (typeof v === 'string') list = v.split(';').map((part) => {
+    const match = {}; let hold = false;
+    for (const tok of part.trim().split(/[\s,]+/).filter(Boolean)) {
+      if (tok === 'hold') { hold = true; continue; }
+      const m = tok.match(/^(\w+)=([\w.+:-]+)$/);
+      if (!m) throw new Error(`Priority: "${tok}" isn't key=value or hold`);
+      match[m[1]] = m[2];
+    }
+    return { match, hold };
+  }).filter((r) => Object.keys(r.match).length || r.hold);
+  if (!Array.isArray(list)) throw new Error('Priority: expected a list of rules');
+  return list.map((r) => ({ match: Object.fromEntries(Object.entries(r?.match ?? {}).map(([k, x]) => [RULE_ALIASES[k] ?? k, String(x)])), hold: !!r?.hold }));
+}
+let priority = [];
+try { priority = parsePriority(args.priority); } catch (e) { console.error(e.message); process.exit(1); }
+const ruleText = (p) => `${Object.entries(p.match).map(([k, x]) => `${k}=${x}`).join(' ') || 'every run'}${p.hold ? ' (on hold)' : ''}`;
+const priorityText = () => priority.length ? `${priority.map((p, i) => `${i + 1} ${ruleText(p)}`).join(' · ')} · then the rest` : 'none';
+const tierOf = (r) => { const i = priority.findIndex((p) => Object.entries(p.match).every(([k, x]) => String(r.fields[k] ?? '') === x)); return i < 0 ? priority.length : i; };
+const isHeld = (r) => priority[tierOf(r)]?.hold === true;
+// The order runs start in: rule by rule (tierOf), and within one taking turns across CLIs. seq is a run's place in the
+// queue (set as the batch starts), so the order can be made again when the priority changes mid-batch.
+function ordered(list) {
+  const tiers = [];
+  for (const r of [...list].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))) (tiers[tierOf(r)] ??= []).push(r);
+  return tiers.flatMap((t) => (t ? interleave(t) : []));
+}
+
 // -------------------------------------------------------------- providers
 // Flags added to every run of a CLI when matrix.config.json has no extraArgs entry for it.
 // They turn permission prompts off, which a headless run can't answer.
@@ -693,16 +735,22 @@ if (args.dryRun) {
   } catch (e) { error = e.message; }
   const byStage = {};
   for (const r of queue) if (r.stage) byStage[r.stage.id] = (byStage[r.stage.id] ?? 0) + 1;
-  // The batch as terminal sessions (the first 100; Run → Preview shows them): the runs not done yet, in queue order.
-  const todo = queue.filter((r) => !isDone(r) && !ended.includes(r)), terminal = todo.slice(0, 100).map((r) => terminalOf(r, resuming.includes(r)).join('\n'));
+  // The batch as terminal sessions (the first 100; Run → Preview shows them): the runs not done yet, in queue order, or with
+  // a priority in the order it gives (rule by rule), the ones on hold marked.
+  queue.forEach((r, i) => { r.seq = i; });
+  const notDone = queue.filter((r) => !isDone(r) && !ended.includes(r)), todo = priority.length ? ordered(notDone) : notDone;
+  const terminal = todo.slice(0, 100).map((r) => [...(isHeld(r) ? ['# on hold (Priority): starts once its hold is lifted'] : []), ...terminalOf(r, resuming.includes(r))].join('\n'));
   if (args.json) {
     console.log(JSON.stringify({ count: queue.length, byAgent, byStage, alreadyDone: queue.filter(isDone).length, resumes: resuming.length - carrying.length,
       carriesOn: carrying.length, startsOver: cut.length - carrying.length - ended.length, endedAlone: ended.length,
-      ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf), terminal, terminalTotal: todo.length }));
+      ids: queue.map((r) => r.id), sampleId: queue[0]?.id ?? null, sample, error, missingClis: missingClis().map(binOf), terminal, terminalTotal: todo.length,
+      held: todo.filter(isHeld).length, priority: priority.length ? priorityText() : null }));
   } else {
     console.log(`${queue.length} runs  (${Object.entries(byAgent).map(([k, v]) => `${k}: ${v}`).join(', ')})\n`);
+    if (priority.length) console.log(`Priority: ${priorityText()}\n`);
     for (const r of queue) console.log('  ' + r.id + (ended.includes(r) ? '  (finished on its own after it was cut off: its result comes from its session)'
-      : carrying.includes(r) ? '  (carries on: cut off)' : cut.includes(r) ? '  (cut off: starts over)' : resuming.includes(r) ? '  (resumes)' : ''));
+      : carrying.includes(r) ? '  (carries on: cut off)' : cut.includes(r) ? '  (cut off: starts over)' : resuming.includes(r) ? '  (resumes)' : '')
+      + (!isDone(r) && isHeld(r) ? '  (on hold)' : ''));
     if (error) console.log(`\nPrompt error: ${error}`);
     else if (queue[0]) console.log(`\n--- sample prompt (${queue[0].id}) ---\n${sample}`);
     if (terminal.length) console.log(`\n--- in a terminal (${terminal.length === todo.length ? 'every run not done yet' : `the first ${terminal.length} of ${todo.length}`}) ---\n${terminal.join('\n\n')}`);
@@ -968,7 +1016,7 @@ function sessionLogs(provider, m, ctx) {
     for (const [k, n] of Object.entries(x.tools)) add(m.tools ??= {}, k, n);
     m.toolErrors = (m.toolErrors ?? 0) + (x.toolErrors ?? 0); m.toolCalls = total(m.tools ?? {});
   }
-  for (const k of ['apiCalls', 'subagents', 'compactions', 'firstTokenMs', 'plan', 'reasoningTokens']) if (x[k] != null) m[k] = x[k];
+  for (const k of ['apiCalls', 'subagents', 'compactions', 'firstTokenMs', 'plan', 'reasoningTokens', 'contextWindow']) if (x[k] != null) m[k] = x[k];
   if (!x.helpers) return;
   const h = m.helpers = x.helpers;
   m.inputTokens = (m.inputTokens ?? 0) + h.inputTokens;
@@ -1016,7 +1064,7 @@ function codexLogs(m, { start, end, model }) {
     for (const f of spawned) if (!subs.includes(f) && ids.has(f.parent)) { subs.push(f); ids.add(f.id); grew = true; }
   }
   const scan = (f) => {
-    const r = { calls: 0, tools: {}, toolErrors: 0, compactions: 0, limits: [], usage: null, model: null, firstTokenMs: null };
+    const r = { calls: 0, tools: {}, toolErrors: 0, compactions: 0, limits: [], usage: null, model: null, firstTokenMs: null, contextWindow: null };
     const lines = fs.readFileSync(f.file, 'utf8').split('\n');
     const own = f === main ? 0 : Math.max(0, lines.findIndex((l) => l.includes('"thread_settings_applied"') && l.includes(f.id)));
     for (const l of lines.slice(own)) {
@@ -1025,7 +1073,12 @@ function codexLogs(m, { start, end, model }) {
       if (e.type === 'token_usage_record') { if ((p.thread_id ?? f.id) === f.id) r.calls++; } // one per model request
       else if (e.type === 'turn_context') r.model = p.model ?? r.model;
       else if (e.type === 'compacted') r.compactions++;
-      else if (msg === 'token_count') { if (p.info?.total_token_usage) r.usage = p.info.total_token_usage; if (p.rate_limits) r.limits.push(p.rate_limits); }
+      else if (msg === 'token_count') {
+        if (p.info?.total_token_usage) r.usage = p.info.total_token_usage;
+        if (p.info?.model_context_window) r.contextWindow = p.info.model_context_window;
+        if (p.rate_limits) r.limits.push(p.rate_limits);
+      }
+      else if (msg === 'task_started') r.contextWindow = p.model_context_window ?? r.contextWindow;
       else if (msg === 'task_complete') r.firstTokenMs ??= p.time_to_first_token_ms ?? null;
       else if (msg === 'item_completed' && p.thread_id === f.id) {
         const t = snakeCase(p.item?.type);
@@ -1050,8 +1103,11 @@ function codexLogs(m, { start, end, model }) {
   const first = top.limits[0], last = top.limits.at(-1);
   const plan = last && { tier: last.plan_type ?? undefined, windows: ['primary', 'secondary'].filter((k) => last[k]).map((k) =>
     planWindow(codexWindow(last[k].window_minutes), last[k].used_percent ?? null, first[k]?.used_percent ?? null, last[k].resets_at ? last[k].resets_at * 1000 : null)) };
+  // contextWindow: the main thread's usable context, in tokens, as Codex reports it (95% of the model's window). It
+  // comes from the model catalog Codex reads (config.toml's model_context_window, capped by the catalog's
+  // max_context_window), so a model missing from a catalog of your own gets the default window, and this shows it.
   return { helpers: subs.length ? h : null, models, tools, toolErrors, subagents: subs.length, apiCalls: top.calls + h.apiCalls,
-    compactions: top.compactions, firstTokenMs: top.firstTokenMs, plan, main: top.usage };
+    compactions: top.compactions, firstTokenMs: top.firstTokenMs, plan, main: top.usage, contextWindow: top.contextWindow };
 }
 
 // Grok: ~/.grok/sessions/<url-encoded working folder>/<session id>/ (or $GROK_HOME) has usage.json (tokens,
@@ -1745,7 +1801,7 @@ function readMetrics(provider, text, agent, ctx) {
 function reparseAll() {
   const metricKeys = ['costUsd', 'costSource', 'apiCostUsd', 'unpricedModels', 'inputTokens', 'cachedTokens', 'cacheWriteTokens', 'uncachedInputTokens',
     'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents', 'helpers', 'apiCalls', 'toolCalls', 'tools', 'toolErrors',
-    'compactions', 'firstTokenMs', 'plan', 'sessionLog', 'replyChars', 'apiMinutes', 'models'];
+    'compactions', 'contextWindow', 'firstTokenMs', 'plan', 'sessionLog', 'replyChars', 'apiMinutes', 'models'];
   if (!fs.existsSync(outDir)) return;
   let n = 0;
   for (const d of fs.readdirSync(outDir)) {
@@ -1970,8 +2026,9 @@ function skip(run) {
   console.log(`· skip ${run.id} (already ${prev.r.status}${prev.dir !== run.id ? ` as ${prev.dir}` : ''})`);
 }
 
-// Starts runs while there's room: fewer than --concurrency running, the run's CLI under --per-cli,
-// not paused, and the budget not spent. Each can change mid-batch (see control), so it's checked
+// Starts runs while there's room: fewer than --concurrency running, the run's CLI under --per-cli, its model under
+// its CLI's Max per model (the config's perModel, as it was when the batch started), not paused, and the budget not
+// spent. All but Max per model can change mid-batch (see control), so it's checked
 // again whenever a run ends or a setting changes. Lowering a limit never ends a running agent by
 // itself: no new one starts until there's room again. Once the budget is spent the ones already
 // going finish, since what they've spent so far would be thrown away otherwise.
@@ -1980,6 +2037,12 @@ function skip(run) {
 // Runs start at least startGap seconds apart (the config's, default 3; 0 = together), so no two runs of a batch get
 // the same start time, which names their folders and games (stampOf).
 const START_GAP_MS = Math.max(0, +(cfg.startGap ?? 3) || 0) * 1000;
+// Max per model: the config's perModel, by CLI ({ "codex": 3 }), is how many runs of one of that CLI's models may go at
+// once, whatever their effort, for a plan whose limits are per model (Codex's start failing at 4 of one model). The
+// dashboard applies it across its batches, reading the config as it is then (see nextGrant in dashboard.mjs); a batch
+// started here applies it to its own runs.
+const PER_MODEL = Object.fromEntries(Object.entries(cfg.perModel ?? {}).filter(([, n]) => +n >= 1).map(([p, n]) => [p, Math.floor(+n)]));
+const modelLane = (r) => `${r.agent.provider} ${r.agent.model}`;
 const parentOk = (r) => !r.parentKey || finished().get(r.parentKey)?.r.status === 'ok';
 const coming = (key) => elsewhere.has(key) || pending.some((r) => r.key === key) || [...live.values()].some((c) => c.run.key === key);
 function leaveOutOrphans() {
@@ -1995,8 +2058,14 @@ function leaveOutOrphans() {
 }
 
 async function pool() {
-  pending = interleave(queue);
-  const busy = {}, jobs = new Set();
+  queue.forEach((r, i) => { r.seq = i; });
+  pending = ordered(queue);
+  if (!args.control && pending.some(isHeld)) { // nothing could lift the hold
+    const held = pending.filter(isHeld); pending = pending.filter((r) => !isHeld(r));
+    for (const r of held) { skipped++; tell('gone', r); }
+    console.log(`· ${held.length} run(s) on hold left out (they run next time)`);
+  }
+  const busy = {}, busyModel = {}, jobs = new Set();
   let lastStart = -Infinity, gapTimer = null;
   for (;;) {
     while (!stopping) {
@@ -2007,16 +2076,17 @@ async function pool() {
       }
       if (paused || overBudget || jobs.size >= Math.max(1, args.concurrency)) break;
       leaveOutOrphans();
-      const i = pending.findIndex((r) => (busy[r.agent.provider] ?? 0) < args.perCli && parentOk(r));
-      if (i < 0) break; // every CLI left is at its limit, or what's left waits for its parent
+      const i = pending.findIndex((r) => !isHeld(r) && (busy[r.agent.provider] ?? 0) < args.perCli
+        && (busyModel[modelLane(r)] ?? 0) < (PER_MODEL[r.agent.provider] ?? Infinity) && parentOk(r));
+      if (i < 0) break; // every CLI or model left is at its limit, or what's left waits for its parent or is on hold
       if (isDone(pending[i])) { skip(pending.splice(i, 1)[0]); continue; }
       // Too soon after the last start: check again once the gap is up (a timer can fire a little early, so it's re-checked).
       const wait = lastStart + START_GAP_MS - Date.now();
       if (wait > 0) { gapTimer ??= setTimeout(() => { gapTimer = null; wake(); }, wait); break; }
-      const [run] = pending.splice(i, 1), p = run.agent.provider;
-      lastStart = Date.now(); busy[p] = (busy[p] ?? 0) + 1;
+      const [run] = pending.splice(i, 1), p = run.agent.provider, mk = modelLane(run);
+      lastStart = Date.now(); busy[p] = (busy[p] ?? 0) + 1; busyModel[mk] = (busyModel[mk] ?? 0) + 1;
       const job = runOne(run).catch((e) => { done++; console.log(`✘ ${run.id}  ${e.message}`); })
-        .finally(() => { busy[p]--; jobs.delete(job); wake(); });
+        .finally(() => { busy[p]--; busyModel[mk]--; jobs.delete(job); wake(); });
       jobs.add(job);
     }
     sayState();
@@ -2028,8 +2098,9 @@ async function pool() {
 }
 
 // --broker: one of several batches running at once (the dashboard's queue). The dashboard keeps Parallel runs, Max per
-// CLI, the budget, the start gap and Pause for all of them, so a run starts only when it says so. The runner offers
-// the runs that could start now ("@ready [[key, cli], …]", in its order, up to READY_MAX per CLI), starts the ones it's
+// CLI, Max per model, the budget, the start gap and Pause for all of them, so a run starts only when it says so. The runner
+// offers the runs that could start now ("@ready [[key, cli, model], …]", in its order, up to READY_MAX of each model,
+// so a model at its limit doesn't hide the others behind it), starts the ones it's
 // granted ({ grant: [keys] }: "@took key", or "@unused key" for one that can't start any more) and says when a slot
 // is free again ("@freed key"). It also says which runs it will do ("@keys { keys, left }", once), when one has its
 // result ("@done { key, dir }", so a batch waiting on it, a build on another batch's plan, can carry on) and when it
@@ -2043,7 +2114,7 @@ function brokered(busy, jobs) {
   for (const key of grants.splice(0)) {
     const run = pending.find((r) => r.key === key);
     if (run && isDone(run)) { pending.splice(pending.indexOf(run), 1); skip(run); }
-    if (!run || !pending.includes(run) || !parentOk(run)) { console.log(`@unused ${JSON.stringify(key)}`); continue; }
+    if (!run || !pending.includes(run) || !parentOk(run) || isHeld(run)) { console.log(`@unused ${JSON.stringify(key)}`); continue; }
     pending.splice(pending.indexOf(run), 1);
     const p = run.agent.provider;
     busy[p] = (busy[p] ?? 0) + 1; console.log(`@took ${JSON.stringify(key)}`);
@@ -2051,14 +2122,14 @@ function brokered(busy, jobs) {
       .finally(() => { busy[p]--; jobs.delete(job); console.log(`@freed ${JSON.stringify(key)}`); wake(); });
     jobs.add(job);
   }
-  const ready = [], per = {}, open = new Set(pending.map((r) => r.agent.provider)); // CLIs still short of READY_MAX
+  const ready = [], per = {}, open = new Set(pending.map(modelLane)); // models still short of READY_MAX
   for (const r of [...pending]) {
-    const p = r.agent.provider;
-    if (!open.has(p)) continue;
-    if (!parentOk(r)) continue;
+    const p = r.agent.provider, mk = modelLane(r);
+    if (!open.has(mk)) continue;
+    if (isHeld(r) || !parentOk(r)) continue;
     if (isDone(r)) { pending.splice(pending.indexOf(r), 1); skip(r); continue; }
-    ready.push([r.key, p]);
-    if ((per[p] = (per[p] ?? 0) + 1) >= READY_MAX && (open.delete(p), !open.size)) break;
+    ready.push([r.key, p, r.agent.model]);
+    if ((per[mk] = (per[mk] ?? 0) + 1) >= READY_MAX && (open.delete(mk), !open.size)) break;
   }
   const s = JSON.stringify(ready);
   if (s !== lastReady) { lastReady = s; console.log('@ready ' + s); }
@@ -2105,7 +2176,12 @@ function control(msg) {
     const back = args[k] ? skippedRuns.filter((r) => !isDone(r)) : [];
     for (const r of back) { skippedRuns.splice(skippedRuns.indexOf(r), 1); skipped--; }
     pending.push(...back);
+    if (priority.length) pending = ordered(pending); // into their place in the priority, not the end
     console.log(`⚙ ${name}: ${args[k] ? `on${also(back.length, 'skipped earlier are queued again')}` : 'off'}`);
+  }
+  if ('priority' in s) {
+    try { priority = parsePriority(s.priority); pending = ordered(pending); console.log(`⚙ Priority: ${priorityText()}`); }
+    catch (e) { console.log(`⚠ Priority not changed: ${e.message}`); }
   }
   if ('paused' in s && !!s.paused !== paused) {
     paused = !!s.paused;
@@ -2141,10 +2217,18 @@ function control(msg) {
 let lastState = '';
 function sayState(force) {
   if (!args.control) return;
-  const fin = (v) => v === Infinity ? null : v, left = {};
-  for (const r of pending) if (!isDone(r)) left[r.agent.provider] = (left[r.agent.provider] ?? 0) + 1;
+  // left: the runs still to start, per CLI; leftModels: the same per model of each CLI, which the dashboard needs to
+  // know how many slots a batch can really use under Max per model (see nextGrant).
+  // held: of those, the ones on hold (Priority), which hold no slots either.
+  const fin = (v) => v === Infinity ? null : v, left = {}, leftModels = {}, held = {};
+  for (const r of pending) if (!isDone(r)) {
+    const p = r.agent.provider;
+    left[p] = (left[p] ?? 0) + 1;
+    if (isHeld(r)) { held[p] = (held[p] ?? 0) + 1; continue; }
+    const m = (leftModels[p] ??= {}); m[r.agent.model] = (m[r.agent.model] ?? 0) + 1;
+  }
   const s = JSON.stringify({ concurrency: args.concurrency, perCli: fin(args.perCli), budget: fin(args.budget), timeout: args.timeout || null,
-    rerunFailed: args.rerunFailed, resumeFailed: args.resumeFailed, paused, overBudget, spent, left });
+    rerunFailed: args.rerunFailed, resumeFailed: args.resumeFailed, paused, overBudget, spent, left, leftModels, held, priority });
   if (s !== lastState || force) { lastState = s; console.log('@state ' + s); }
 }
 
@@ -2200,10 +2284,14 @@ for (const p of new Set(queue.filter((r) => !isDone(r)).map((r) => r.agent.provi
   const v = spawnSync(binOf(p), ['--version'], { encoding: 'utf8', shell: isWin, timeout: 30000 });
   cliVersions[p] = `${v.stdout ?? ''}${v.stderr ?? ''}`.match(/\d+\.\d+[\w.-]*/)?.[0];
 }
+// Max per model, as the summary says it: ", at most 3 of one Codex model at a time".
+const perModelNote = () => Object.entries(PER_MODEL).filter(([p]) => queue.some((r) => r.agent.provider === p))
+  .map(([p, n]) => `, at most ${n} of one ${HARNESS[p] ?? p} model at a time`).join('');
 // The dashboard reads this line for the batch's progress (runs already done are skipped, not redone).
 const already = queue.filter(isDone).length;
 console.log(`${queue.length} runs${already ? ` (${already} already done)` : ''} → ${outDir}  (` + (args.broker ? 'sharing the limits of the batches running now'
-  : `concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''}`) + ')');
+  : `concurrency ${args.concurrency}${args.perCli < Infinity ? `, at most ${args.perCli} per CLI` : ''}${perModelNote()}${START_GAP_MS && queue.length - already > 1 ? `, starting ${START_GAP_MS / 1000} s apart` : ''}`) + ')');
+if (priority.length) console.log(`Priority: ${priorityText()}.`);
 if (stageMode) { const n = {}; for (const r of queue) n[r.stage.id] = (n[r.stage.id] ?? 0) + 1;
   console.log(`In stages: ${STAGES.filter((s) => n[s.id]).map((s) => `${s.id} ${n[s.id]}`).join(', ')}. A run starts once the one it continues from has finished OK.`); }
 const endedNow = queue.filter((r) => !isDone(r) && endedAlone(cutOf(r))).length;
@@ -2285,7 +2373,7 @@ function writeReport() {
   for (const r of rows) if (r.chain) r.path = r.chain.map((c) => `${c.stage}:${c.agent}-${c.effort}`).join(' > ');
   const cols = ['id', 'agent', 'provider', 'model', 'effort', 'ultracode', 'stage', 'path', 'parentId', ...dims, 'cliVersion', 'promptVersion', 'status', 'wallMinutes', 'apiMinutes', 'costUsd', 'costSource', 'apiCostUsd',
     'inputTokens', 'uncachedInputTokens', 'cachedTokens', 'cacheWriteTokens', 'outputTokens', 'reasoningTokens', 'totalTokens', 'turns', 'rounds', 'subagents',
-    'apiCalls', 'toolCalls', 'toolErrors', 'compactions',
+    'apiCalls', 'toolCalls', 'toolErrors', 'compactions', 'contextWindow',
     'delivered', 'kb', 'loc', 'files', 'todos', 'replyChars', 'exitInterview', 'plannerInterview', 'goalMet', 'goalChecks', 'goalForced', 'score', 'notes', 'error', 'entry', 'startedAt', 'finishedAt', 'timeZone'];
   const cell = (v) => v == null ? '' : typeof v === 'number' ? +v.toFixed(4)
     : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : v;

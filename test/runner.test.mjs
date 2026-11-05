@@ -787,6 +787,62 @@ test('--per-cli keeps one CLI to N runs at a time', (t) => {
   }
 });
 
+test('Max per model (perModel in the config) keeps one model of a CLI to N runs at a time, beside its other models', (t) => {
+  const sb = sandbox({ dimensions: { testing: [1, 2, 3].map((i) => ({ id: 'v' + i, text: 'FAKE:sleep=500' })) }, perModel: { codex: 1 }, agents: [
+    { id: 'sol', provider: 'codex', model: 'gpt-sol', efforts: ['low', 'high'] }, { id: 'terra', provider: 'codex', model: 'gpt-terra', efforts: ['low'] }] });
+  t.after(() => cleanup(sb));
+  const out = runner(sb, ['-j', '6']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /at most 1 of one Codex model at a time/);
+  const spans = (ids) => ids.map((id) => result(sb, id)).map((x) => [Date.parse(x.startedAt), Date.parse(x.finishedAt)]).sort((a, b) => a[0] - b[0]);
+  const sol = spans([1, 2, 3].flatMap((i) => [`sol-low__v${i}`, `sol-high__v${i}`])), terra = spans([1, 2, 3].map((i) => `terra-low__v${i}`));
+  for (const s of [sol, terra]) for (let i = 1; i < s.length; i++) assert.ok(s[i][0] >= s[i - 1][1] - 5, 'two runs of one model overlapped');
+  assert.ok(sol.some(([a, b]) => terra.some(([c, d]) => a < d && c < b)), 'the other model waited too');
+  assert.equal(result(sb, 'sol-low__v1').contextWindow, 997500); // from its session log
+});
+
+const twoClis = (ms) => ({ dimensions: { testing: [1, 2].map((i) => ({ id: 'v' + i, text: `FAKE:sleep=${ms}` })) }, agents: [
+  { id: 'opus', provider: 'claude', model: 'm', efforts: ['low', 'high'] }, { id: 'sol', provider: 'codex', model: 'g', efforts: ['low'] }] });
+const startOrder = (sb, ids) => ids.map((id) => [id, Date.parse(result(sb, id).startedAt)]).sort((a, b) => a[1] - b[1]).map(([id]) => id);
+const spanOf = (sb, id) => { const r = result(sb, id); return [Date.parse(r.startedAt), Date.parse(r.finishedAt)]; };
+
+test('Priority: runs start rule by rule (the first rule a run matches), then the rest', (t) => {
+  const sb = sandbox(twoClis(300));
+  t.after(() => cleanup(sb));
+  const out = runner(sb, ['-j', '1', '--priority', 'cli=codex; model=opus effort=high']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /Priority: 1 provider=codex · 2 agent=opus effort=high · then the rest\./);
+  assert.deepEqual(startOrder(sb, ['opus-low__v1', 'opus-low__v2', 'opus-high__v1', 'opus-high__v2', 'sol-low__v1', 'sol-low__v2']),
+    ['sol-low__v1', 'sol-low__v2', 'opus-high__v1', 'opus-high__v2', 'opus-low__v1', 'opus-low__v2']);
+});
+
+test('Priority only orders: the limits still apply, and a run they stop lets the next one in line start', (t) => {
+  const sb = sandbox(twoClis(600));
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, ['-j', '2', '--per-cli', '1', '--priority', 'cli=codex']).status, 0);
+  const sol = ['sol-low__v1', 'sol-low__v2'].map((id) => spanOf(sb, id)).sort((a, b) => a[0] - b[0]);
+  assert.ok(sol[1][0] >= sol[0][1] - 5, 'two Codex runs at once: Max per CLI still applies');
+  const firstOpus = Math.min(...['opus-low__v1', 'opus-low__v2', 'opus-high__v1', 'opus-high__v2'].map((id) => spanOf(sb, id)[0]));
+  assert.ok(firstOpus < sol[0][1], 'the slot Codex could not use waited instead of going to the next run');
+});
+
+test('Priority: the dry run lists runs in its order, the held ones marked; a batch from a terminal leaves held runs out', (t) => {
+  const sb = sandbox(twoClis(100));
+  t.after(() => cleanup(sb));
+  const dry = JSON.parse(runner(sb, ['--dry-run', '--json', '--priority', 'cli=codex hold; model=opus effort=high']).stdout.trim());
+  assert.equal(dry.held, 2);
+  assert.match(dry.priority, /^1 provider=codex \(on hold\) · 2 agent=opus effort=high · then the rest$/);
+  assert.deepEqual(dry.terminal.map((x) => x.split('\n').find((l) => !l.startsWith('# on hold')).match(/^# (\S+ \S+)/)[1]),
+    ['sol low', 'sol low', 'opus high', 'opus high', 'opus low', 'opus low']);
+  assert.ok(dry.terminal[0].startsWith('# on hold (Priority)') && !dry.terminal[2].startsWith('# on hold'));
+  const out = runner(sb, ['-j', '2', '--priority', '[{"match":{"provider":"codex"},"hold":true}]']);
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /· 2 run\(s\) on hold left out \(they run next time\)/);
+  assert.equal(result(sb, 'opus-low__v1').status, 'ok');
+  assert.ok(!fs.existsSync(path.join(sb.out, 'sol-low__v1')));
+  assert.notEqual(runner(sb, ['--dry-run', '--priority', 'cli codex']).status, 0); // not key=value: refused
+});
+
 test('--dry-run, --reparse and --smoke', (t) => {
   const sb = sandbox({ dimensions: { testing: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low', 'high'] }] });
   t.after(() => cleanup(sb));
@@ -987,6 +1043,24 @@ test('a running run can be dropped, and a CLI\'s queued runs left out of the bat
   assert.deepEqual(c.state().left, {});
 });
 
+test('Priority set mid-batch: the runs not started yet follow it, held ones wait (and say so) until the hold is lifted', async (t) => {
+  const sb = sandbox(twoClis(400));
+  t.after(() => cleanup(sb));
+  const c = controlled(sb, ['-j', '1', '--priority', 'cli=codex hold']);
+  await waitFor(() => c.count('▶ ') === 1);
+  c.send({ set: { priority: [{ match: { agent: 'opus', effort: 'high' } }, { match: { provider: 'codex' }, hold: true }] } });
+  await waitFor(() => c.out.includes('⚙ Priority: 1 agent=opus effort=high · 2 provider=codex (on hold) · then the rest'));
+  await waitFor(() => c.count('✔ ') === 4, 20000); // every Claude run, and then it waits for the held ones
+  await pause(300);
+  assert.equal(c.count('▶ '), 4, c.out);
+  assert.deepEqual([c.state().left, c.state().held], [{ codex: 2 }, { codex: 2 }]);
+  c.send({ set: { priority: [] } });
+  assert.equal(await c.exit, 0, c.out);
+  assert.deepEqual(startOrder(sb, ['opus-low__v1', 'opus-low__v2', 'opus-high__v1', 'opus-high__v2', 'sol-low__v1', 'sol-low__v2']).slice(1, 3),
+    ['opus-high__v1', 'opus-high__v2']); // the first had started before the change
+  assert.ok(Math.min(span(sb, 'sol-low__v1')[0], span(sb, 'sol-low__v2')[0]) > Math.max(...['opus-low__v1', 'opus-low__v2'].map((id) => span(sb, id)[1])) - 5);
+});
+
 test('without --control nothing reads stdin and no state lines are printed', (t) => {
   const sb = sandbox({ dimensions: one, agents: opus });
   t.after(() => cleanup(sb));
@@ -1042,12 +1116,13 @@ test('--broker: a run starts only when the dashboard grants it, says what it did
   const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'A' }, { id: 'b', text: 'B' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
   t.after(() => cleanup(s));
   const child = spawn(process.execPath, [RUNNER, '--config', s.config, '--out', s.out, '--broker'], { env: s.env });
+  t.after(() => child.kill()); // a failed assertion mustn't leave it waiting for grants (the test file would never end)
   const lines = []; let buf = '';
   child.stdout.on('data', (d) => { buf += d; const l = buf.split('\n'); buf = l.pop(); lines.push(...l); });
   const say = (m) => child.stdin.write(JSON.stringify(m) + '\n');
   const line = (re) => waitFor(() => lines.find((l) => re.test(l)));
   assert.deepEqual(JSON.parse((await line(/^@keys /)).slice(6)), { keys: ['opus-low__a', 'opus-low__b'], left: { claude: 2 } });
-  assert.deepEqual(JSON.parse((await line(/^@ready \[\[/)).slice(7)), [['opus-low__a', 'claude'], ['opus-low__b', 'claude']]);
+  assert.deepEqual(JSON.parse((await line(/^@ready \[\[/)).slice(7)), [['opus-low__a', 'claude', 'm'], ['opus-low__b', 'claude', 'm']]);
   await new Promise((r) => setTimeout(r, 300));
   assert.ok(!lines.some((l) => l.startsWith('▶')), 'a run started without a grant');
   say({ grant: ['opus-low__a', 'nope'] });
@@ -1059,6 +1134,21 @@ test('--broker: a run starts only when the dashboard grants it, says what it did
   assert.ok(lines.includes('@gone "opus-low__b"') && lines.some((l) => l.startsWith('■ 1 queued run(s) left out')), lines.join('\n'));
   assert.equal(result(s, 'opus-low__a').status, 'ok');
   assert.ok(!fs.existsSync(path.join(s.out, 'opus-low__b')));
+});
+
+test('--broker with a priority: held runs are never offered (so no grant goes unused), the rest are offered in its order', async (t) => {
+  const s = sandbox(twoClis(100));
+  t.after(() => cleanup(s));
+  const child = spawn(process.execPath, [RUNNER, '--config', s.config, '--out', s.out, '--broker', '--priority', 'model=opus effort=high; cli=codex hold'], { env: s.env });
+  t.after(() => child.kill());
+  const lines = []; let buf = '';
+  child.stdout.on('data', (d) => { buf += d; const l = buf.split('\n'); buf = l.pop(); lines.push(...l); });
+  const ready = JSON.parse((await waitFor(() => lines.find((l) => l.startsWith('@ready [[')))).slice(7));
+  assert.deepEqual(ready.map(([k]) => k), ['opus-high__v1', 'opus-high__v2', 'opus-low__v1', 'opus-low__v2']);
+  const state = JSON.parse((await waitFor(() => lines.find((l) => l.startsWith('@state ')))).slice(7));
+  assert.deepEqual([state.left, state.held, state.leftModels], [{ claude: 4, codex: 2 }, { codex: 2 }, { claude: { m: 4 } }]);
+  child.stdin.write(JSON.stringify({ end: true }) + '\n');
+  assert.equal(await new Promise((r) => child.on('close', r)), 0);
 });
 
 // ------------------------------------------- cut off mid-way (unfinished.json)

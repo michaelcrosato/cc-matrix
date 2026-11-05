@@ -215,6 +215,24 @@ function startSmoke(key, goal) {
 
 // Turn the dashboard's selection into runner flags. sel.stages ({ stage: ['agent:effort', …] }) runs in stages
 // (see stageRuns in run-matrix.mjs) instead of sel.pick. A batch runs from its own copy of the config (see snapshot).
+// Priority (Run → Options → Priority): an ordered list of rules, [{ match: { field: value }, hold }], that each batch's
+// runner orders the runs it hasn't started by (see Priority in run-matrix.mjs). It only orders: the limits here still
+// decide whether a run can start. Checked here so a bad one never reaches a runner.
+function cleanPriority(v) {
+  if (v == null || v === '') return [];
+  if (!Array.isArray(v) || v.length > 50) throw new HttpError(400, 'Priority must be a list of at most 50 rules.');
+  return v.map((r) => {
+    const m = r?.match ?? {}, match = {};
+    if (typeof m !== 'object' || Array.isArray(m)) throw new HttpError(400, 'A priority rule needs match: { field: value }.');
+    for (const [k, x] of Object.entries(m)) {
+      if (!/^\w{1,40}$/.test(k) || typeof x !== 'string' || !/^[\w.+:-]{1,120}$/.test(x)) throw new HttpError(400, `Priority: ${k}=${x} isn't a run field and a value.`);
+      match[k] = x;
+    }
+    return { match, hold: !!r?.hold };
+  });
+}
+const savedPriority = (v) => { try { return cleanPriority(v); } catch { return []; } }; // a kept session's, as best it can
+const priorityArgs = (pr) => (pr?.length ? ['--priority', JSON.stringify(pr)] : []);
 const PICK = /^[\w.-]+:[\w.+-]+$/;
 function selectionArgs(sel = {}, config = CONFIG) {
   const a = ['--config', config, '--out', OUT];
@@ -257,10 +275,14 @@ const note = (line) => { run.log.push(line); if (run.log.length > 3000) run.log.
 const tellBatch = (b, msg) => { if (b.child) b.child.stdin.write(JSON.stringify(msg) + '\n'); };
 // What the page shows for the running batches together: the shared limits, spend and the runs left per CLI.
 function sessionState() {
-  const l = run.limits ?? {}, left = {};
-  for (const b of live()) for (const [p, n] of Object.entries(b.state?.left ?? {})) left[p] = (left[p] ?? 0) + n;
+  const l = run.limits ?? {}, left = {}, held = {};
+  for (const b of live()) {
+    for (const [p, n] of Object.entries(b.state?.left ?? {})) left[p] = (left[p] ?? 0) + n;
+    for (const [p, n] of Object.entries(b.state?.held ?? {})) held[p] = (held[p] ?? 0) + n; // of those, on hold (Priority)
+  }
   return { concurrency: l.concurrency ?? null, perCli: l.perCli === Infinity ? null : l.perCli ?? null, budget: l.budget === Infinity ? null : l.budget ?? null,
-    timeout: l.timeout || null, rerunFailed: !!l.rerunFailed, resumeFailed: !!l.resumeFailed, paused: !!l.paused, overBudget: run.overBudget, spent: spentNow(), left };
+    timeout: l.timeout || null, rerunFailed: !!l.rerunFailed, resumeFailed: !!l.resumeFailed, paused: !!l.paused, overBudget: run.overBudget, spent: spentNow(), left,
+    held, priority: l.priority ?? [] };
 }
 const shortPicks = (ps) => { const l = (ps ?? []).map((p) => String(p).replace(':', ' · ')); return l.length > 4 ? `${l.slice(0, 3).join(', ')} +${l.length - 3} more` : l.join(', '); };
 const describe = (sel) => sel.stages && typeof sel.stages === 'object'
@@ -296,8 +318,8 @@ function brokerLine(b, line) {
   } else if (tag === 'ready') b.ready = v;
   else if (tag === 'keys') { b.keys = new Set(v.keys); b.state ??= { left: v.left, spent: 0 }; startWaiting(); }
   else if (tag === 'took') { const p = b.granted.get(v); b.granted.delete(v); if (p) b.taken.set(v, p); }
-  else if (tag === 'unused') b.granted.delete(v);
-  else if (tag === 'freed') b.taken.delete(v);
+  else if (tag === 'unused') { b.granted.delete(v); b.modelOf.delete(v); }
+  else if (tag === 'freed') { b.taken.delete(v); b.modelOf.delete(v); }
   else if (tag === 'done' || tag === 'gone') {
     const key = tag === 'done' ? v.key : v;
     b.keys?.delete(key);
@@ -328,30 +350,59 @@ function schedule() {
     if (wait > 0) { grantTimer = setTimeout(schedule, wait); return; }
     const g = nextGrant();
     if (!g) return;
-    const [b, key, p] = g;
-    b.granted.set(key, p); lastGrant = Date.now();
+    const [b, key, p, mk] = g;
+    b.granted.set(key, p); if (mk) b.modelOf.set(key, mk); lastGrant = Date.now();
     tellBatch(b, { grant: [key] });
   }
 }
-// The next run to start: the first one offered, batch by batch, that fits under Parallel runs and its CLI's Max per
-// CLI once the slots held for earlier batches are counted. A batch holds one for each run it still has to start
-// (waiting for its plan or not), up to what its CLIs can run at once; the ones it's running count as in use.
+// Max per model: the config's perModel, by CLI ({ "codex": 3 }), read as it is now (CLIs → CLI commands and flags), so
+// a change applies to the batches running too. A config that can't be read just then keeps the caps it had.
+let capsRead = { at: null, caps: {} };
+function modelCaps() {
+  let at = null; try { at = fs.statSync(CONFIG).mtimeMs; } catch {}
+  if (at !== capsRead.at) {
+    const c = readJSON(CONFIG, null);
+    if (c) capsRead = { at, caps: Object.fromEntries(Object.entries(c.perModel ?? {}).filter(([, n]) => +n >= 1).map(([p, n]) => [p, Math.floor(+n)])) };
+  }
+  return capsRead.caps;
+}
+// The next run to start: the first one offered, batch by batch, that fits under Parallel runs, its CLI's Max per CLI and
+// its model's Max per model once the slots held for earlier batches are counted. A batch holds one for each run it still
+// has to start (waiting for its plan or not), up to what its CLIs, and under Max per model each of their models, can run
+// at once; the ones it's running count as in use. A run's model is "cli model" (b.modelOf, from what its runner offered).
 function nextGrant() {
-  const L = run.limits, use = {}, heldCli = {};
+  const L = run.limits, caps = modelCaps(), use = {}, useModel = {}, heldCli = {}, heldModel = {};
   let used = 0, held = 0;
-  for (const b of batches) for (const m of [b.taken, b.granted]) for (const p of m.values()) { use[p] = (use[p] ?? 0) + 1; used++; }
+  for (const b of batches) for (const m of [b.taken, b.granted]) for (const [key, p] of m) {
+    use[p] = (use[p] ?? 0) + 1; used++;
+    const mk = b.modelOf.get(key); if (mk) useModel[mk] = (useModel[mk] ?? 0) + 1;
+  }
   for (const b of live()) {
     if (b.ended) continue;
-    for (const [key, p] of b.ready) {
+    for (const [key, p, model] of b.ready) {
       if (used + held >= L.concurrency) return null;
       if (b.granted.has(key) || b.taken.has(key) || (use[p] ?? 0) + (heldCli[p] ?? 0) >= L.perCli) continue;
-      return [b, key, p];
+      const mk = model == null ? null : `${p} ${model}`;
+      if (mk && caps[p] && (useModel[mk] ?? 0) + (heldModel[mk] ?? 0) >= caps[p]) continue;
+      return [b, key, p, mk];
     }
-    const mine = {}, asked = {};
-    for (const p of b.taken.values()) mine[p] = (mine[p] ?? 0) + 1;
-    for (const p of b.granted.values()) { mine[p] = (mine[p] ?? 0) + 1; asked[p] = (asked[p] ?? 0) + 1; }
+    const mine = {}, asked = {}, mineModel = {}, askedModel = {};
+    for (const [key, p] of b.taken) { mine[p] = (mine[p] ?? 0) + 1; const mk = b.modelOf.get(key); if (mk) mineModel[mk] = (mineModel[mk] ?? 0) + 1; }
+    for (const [key, p] of b.granted) {
+      mine[p] = (mine[p] ?? 0) + 1; asked[p] = (asked[p] ?? 0) + 1;
+      const mk = b.modelOf.get(key); if (mk) { mineModel[mk] = (mineModel[mk] ?? 0) + 1; askedModel[mk] = (askedModel[mk] ?? 0) + 1; }
+    }
     for (const [p, n] of Object.entries(b.state?.left ?? {})) {
-      const k = Math.max(0, Math.min(n - (asked[p] ?? 0), L.perCli - (mine[p] ?? 0)));
+      let k = Math.max(0, Math.min(n - (b.state?.held?.[p] ?? 0) - (asked[p] ?? 0), L.perCli - (mine[p] ?? 0))); // runs on hold hold none
+      const byModel = caps[p] ? b.state?.leftModels?.[p] : null;
+      if (byModel) { // under Max per model it can only use so many of each of its models at once
+        let can = 0;
+        for (const [model, nm] of Object.entries(byModel)) {
+          const mk = `${p} ${model}`, h = Math.max(0, Math.min(nm - (askedModel[mk] ?? 0), caps[p] - (mineModel[mk] ?? 0)));
+          heldModel[mk] = (heldModel[mk] ?? 0) + h; can += h;
+        }
+        k = Math.min(k, can);
+      }
       heldCli[p] = (heldCli[p] ?? 0) + k; held += k;
     }
   }
@@ -374,6 +425,7 @@ function adjustment(b) {
   if ('budget' in s) set.budget = num('budget', 0) || null;
   if ('timeout' in s) set.timeout = num('timeout', 0) || null;
   for (const k of ['rerunFailed', 'resumeFailed', 'paused']) if (k in s) set[k] = !!s[k];
+  if ('priority' in s) set.priority = cleanPriority(s.priority);
   const act = activeRuns(), ids = (x) => (Array.isArray(x) ? x : []).filter((id) => typeof id === 'string' && act.has(id));
   return { set, timeoutRunning: !!b.timeoutRunning, requeue: ids(b.requeue), drop: ids(b.drop),
     skipCli: (Array.isArray(b.skipCli) ? b.skipCli : []).filter((p) => typeof p === 'string' && /^\w+$/.test(p)),
@@ -399,7 +451,7 @@ async function adjustRun(msg) {
     note(L.paused ? `⚙ Paused: no new runs start${going ? ` (${going} still running)` : ''}` : '⚙ Resumed: new runs start again');
   }
   const set = {};
-  for (const k of ['timeout', 'rerunFailed', 'resumeFailed']) if (k in s) { set[k] = s[k]; L[k] = k === 'timeout' ? s[k] || 0 : s[k]; }
+  for (const k of ['timeout', 'rerunFailed', 'resumeFailed', 'priority']) if (k in s) { set[k] = s[k]; L[k] = k === 'timeout' ? s[k] || 0 : s[k]; }
   const answers = [];
   for (const b of live()) {
     const end = msg.endBatch === b.n && !b.ended;
@@ -447,7 +499,7 @@ function startSession(s) {
     gapMs: Math.max(0, +(c.startGap ?? 3) || 0) * 1000, spentBefore: 0, suspended: null,
     limits: { concurrency: Math.max(1, Math.floor(+s.concurrency) || 1), perCli: +s.perCli >= 1 ? Math.floor(+s.perCli) : Infinity,
       budget: +s.budget > 0 ? +s.budget : Infinity, timeout: +s.timeout > 0 ? +s.timeout : 0, paused: false,
-      rerunFailed: !!s.rerunFailed, resumeFailed: !!s.resumeFailed } });
+      rerunFailed: !!s.rerunFailed, resumeFailed: !!s.resumeFailed, priority: cleanPriority(s.priority) } });
   return addBatch(s);
 }
 // Queues a batch: its copy of the config is made now. Retry and Resume failed are the running batches' (they're
@@ -467,10 +519,11 @@ function startWaiting() {
     const w = waiting.shift(), skip = [...new Set(live().flatMap((b) => [...b.keys]))];
     const a = [RUNNER, ...selectionArgs(w.sel, path.join(w.dir, 'config.json')), '--broker'];
     if (run.limits.timeout > 0) a.push('--timeout', String(run.limits.timeout));
+    a.push(...priorityArgs(run.limits.priority));
     if (skip.length) { const f = path.join(w.dir, 'skip-keys.json'); fs.writeFileSync(f, JSON.stringify(skip)); a.push('--skip-keys', f); }
     // A batch picked up after a restart (see resumeSession) keeps when it first started and what it had finished.
     const b = Object.assign(w, { child: spawn(process.execPath, a, { cwd: HERE }), startedAt: w.startedAt ?? new Date().toISOString(), finishedAt: null, exitCode: null,
-      active: new Map(), finished: w.finished ?? 0, planned: null, state: null, ready: [], granted: new Map(), taken: new Map(), keys: null, ended: false, cut: false, waiters: [] });
+      active: new Map(), finished: w.finished ?? 0, planned: null, state: null, ready: [], granted: new Map(), taken: new Map(), modelOf: new Map(), keys: null, ended: false, cut: false, waiters: [] });
     batches.push(b); saveSession();
     b.child.stdin.on('error', () => {}); // the runner may have just exited
     let buf = '';
@@ -586,7 +639,7 @@ function resumeSession() {
   Object.assign(run, { log: [...(s.log ?? [])], startedAt: s.startedAt, finishedAt: null, exitCode: null, settings: s.settings, overBudget: false, stopping: false,
     suspended: null, gapMs: s.gapMs ?? 3000, spentBefore: s.spent ?? 0,
     limits: { concurrency: Math.max(1, Math.floor(+L.concurrency) || 1), perCli: L.perCli ?? Infinity, budget: L.budget ?? Infinity, timeout: L.timeout || 0,
-      paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed } });
+      paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed, priority: savedPriority(L.priority) } });
   const cut = cutOffRuns(), on = cut.filter((c) => c.carriesOn).length;
   note(`⟳ ${s.why === 'restart' ? 'The dashboard restarted' : 'Resumed'} at ${new Date().toLocaleTimeString()}: carrying on with the batch started ${new Date(s.startedAt).toLocaleString()}`
     + (cut.length ? ` (${on ? `${plural(on, 'cut-off run')} carr${on === 1 ? 'ies' : 'y'} on with ${on === 1 ? 'its session' : 'their sessions'}` : ''}${on && cut.length > on ? ', ' : ''}`
@@ -595,7 +648,7 @@ function resumeSession() {
   for (const b of s.batches) {
     const dir = b.dir ? path.join(SNAPS, b.dir) : null;
     if (b.done) { batches.push({ n: b.n, sel: b.sel, dir, queuedAt: b.queuedAt, startedAt: b.startedAt, finishedAt: s.savedAt, child: null, exitCode: 0,
-      active: new Map(), finished: b.finished ?? 0, planned: b.finished ?? 0, state: null, ready: [], granted: new Map(), taken: new Map(), keys: new Set(), ended: true, waiters: [] }); continue; }
+      active: new Map(), finished: b.finished ?? 0, planned: b.finished ?? 0, state: null, ready: [], granted: new Map(), taken: new Map(), modelOf: new Map(), keys: new Set(), ended: true, waiters: [] }); continue; }
     let from = dir;
     if (!dir || !fs.existsSync(path.join(dir, 'config.json'))) { from = snapshot(b.n); note(`⚠ Batch ${b.n}'s copy of the config was gone: it carries on with Setup as it is now.`); }
     waiting.push({ n: b.n, sel: b.sel, dir: from, queuedAt: b.queuedAt, startedAt: b.startedAt, finished: b.finished ?? 0 });
@@ -623,7 +676,8 @@ function savedInfo() {
   }
   const L = saved.limits ?? {};
   return { why: saved.why, savedAt: saved.savedAt, startedAt: saved.startedAt, spent: saved.spent ?? 0, plan: savedPlanCache.plan,
-    limits: { concurrency: L.concurrency, perCli: L.perCli, budget: L.budget, timeout: L.timeout || null, paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed },
+    limits: { concurrency: L.concurrency, perCli: L.perCli, budget: L.budget, timeout: L.timeout || null, paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed,
+      priority: savedPriority(L.priority) },
     batches: saved.batches.map((b) => ({ n: b.n, what: describe(b.sel), stages: !!b.sel?.stages, finished: b.finished ?? 0, done: !!b.done })) };
 }
 
@@ -991,6 +1045,7 @@ const server = http.createServer(async (req, res) => {
       const c = await body(req);
       if (!c || typeof c !== 'object' || Array.isArray(c)) return send(res, 400, { error: 'Expected the config object.' });
       fs.writeFileSync(CONFIG, JSON.stringify(c, null, 2) + '\n'); refreshReport();
+      schedule(); // a raised Max per model can start runs now
       return send(res, 200, { ok: true, rev: revs(true) });
     }
     if (p === '/api/template' && m === 'GET') {
@@ -1006,7 +1061,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/preview' && m === 'POST') {
       const s = await body(req);
-      const r = spawnSync(process.execPath, [RUNNER, ...selectionArgs(s), '--dry-run', '--json'], { cwd: HERE, encoding: 'utf8', maxBuffer: 50e6 });
+      const r = spawnSync(process.execPath, [RUNNER, ...selectionArgs(s), ...priorityArgs(cleanPriority(s?.priority)), '--dry-run', '--json'], { cwd: HERE, encoding: 'utf8', maxBuffer: 50e6 });
       if (r.status !== 0) return send(res, 400, { error: (r.stderr || r.stdout || 'preview failed').trim() });
       return send(res, 200, JSON.parse(r.stdout.trim().split('\n').pop()));
     }

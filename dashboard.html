@@ -633,6 +633,7 @@ const auditRead = new Set(store.get('matrix.auditRead', []));
 let sel = store.get('matrix.sel', { offPick: [], offOnly: {}, opts: { repeat: 1, concurrency: 2, perCli: '', budget: '', timeout: '', rerunFailed: false, resumeFailed: false } });
 let rv = store.get('matrix.results', { group: 'testing', filters: {}, q: '', sort: { k: 'finishedAt', d: -1 } });
 const saveSel = () => store.set('matrix.sel', sel);
+let prioDraft = null; // Options → Priority edited while a batch runs, not applied yet
 // Resume failed is ticked and the dashboard's server takes it (an older one, still running, doesn't).
 const resumeOn = () => !!(meta.canResume && sel.opts.resumeFailed);
 const saveRv = () => store.set('matrix.results', rv);
@@ -1228,11 +1229,16 @@ function modelsCard() {
 function cliCmdsCard() {
   return h('div', { class: 'card', key: 'clicmds' },
     h('h2', {}, 'CLI commands and flags'),
-    h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
+    h('p', { class: 'sub' }, 'Executable names and extra flags added to every run of each CLI. The defaults turn permission prompts off, which a headless run can\'t answer. Press Re-check in CLIs after changing a command. Max per model: at most this many runs of one of that CLI\'s models at once, whatever their effort, for a plan whose limits are per model (Codex\'s: 3 of one model, and 3 of each of the others beside them); it applies to batches running too, from the next run that starts. Paths: config ', h('span', { class: 'mono' }, meta.path || ''), ' · runs ', h('span', { class: 'mono' }, meta.outDir || '')),
     h('div', { class: 'grid2' }, Object.entries(PROVIDERS).map(([p, n]) => h('div', { key: p },
       h('strong', {}, n),
       h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Command'),
         h('input', { class: 'mono grow', value: cfg.bins[p] ?? p, 'aria-label': `${n} command`, oninput: (e) => { cfg.bins[p] = e.target.value.trim(); changed(); } })),
+      h('div', { class: 'row', style: 'margin:6px 0' }, h('span', { class: 'muted', style: 'width:90px' }, 'Max per model'),
+        h('input', { type: 'number', min: 1, step: 1, style: 'width:90px', value: cfg.perModel?.[p] ?? '', placeholder: 'no limit', 'aria-label': `${n}: most runs of one model at once`,
+          oninput: (e) => { const v = Math.floor(+e.target.value); cfg.perModel ??= {}; if (v >= 1) cfg.perModel[p] = v; else delete cfg.perModel[p];
+            if (!Object.keys(cfg.perModel).length) delete cfg.perModel; changed(); } }),
+        h('span', { class: 'muted' }, 'runs of one model at once')),
       h('div', { class: 'muted', style: 'margin-bottom:4px' }, 'Extra flags (one per line)'),
       h('textarea', { class: 'mono', rows: 3, value: (cfg.extraArgs[p] ?? DEFAULT_EXTRA[p] ?? []).join('\n'), 'aria-label': `${n} extra flags`,
         oninput: (e) => { cfg.extraArgs[p] = e.target.value.split('\n').map((s) => s.trim()).filter(Boolean); changed(); } })))));
@@ -1772,7 +1778,8 @@ function renderRun() {
         + 'each change asks first, and nothing running is ended unless you choose that. They stay for the next batch too.') : null,
       h('table', { class: 'opts' }, h('tbody', {},
         optRow('Parallel runs', 'concurrency', 'How many agents run at once. Runs take turns across CLIs, so parallel slots go to different services.'),
-        optRow('Max per CLI', 'perCli', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit.'),
+        optRow('Max per CLI', 'perCli', 'At most this many runs of one CLI at once (to stay inside each plan\'s rate limits). Empty = no limit. A limit per model of one CLI is set in CLIs → CLI commands and flags (Max per model).'),
+        priorityRow(),
         staged ? null : optRow('Repeat each', 'repeat', now ? 'Run each combination this many times. Fixed once a batch starts.' : 'Run each combination this many times (to see variance)'),
         optRow('Budget ($)', 'budget', 'Stop starting new runs once this much is spent. Spend is counted as each run finishes (that\'s when the CLI reports it), so a run already going can take it past the budget, and a run ended early isn\'t counted. Only Claude Code and Grok report cost; Codex, agy and Muse runs don\'t count.'
           + (now ? ` Spent so far in ${many ? 'these batches' : 'this batch'}: ${fmtUsd(now.spent)}.` : '')),
@@ -1791,6 +1798,58 @@ function renderRun() {
       : key === 'timeout' ? ['not started yet', 'Runs not started yet; the running ones too only if you choose that when you change it']
       : ['not started yet', 'Runs not started yet; the running ones keep going as they are'];
     return h('div', {}, h('span', { class: 'tag', title }, text));
+  }
+  // Priority: folded away unless opened (most batches don't need one). Before Start it's this browser's, sent with Start;
+  // while a batch runs it's the batch's, and edits are a draft until Apply, which asks first like every change here.
+  function priorityRow() {
+    if (!now) prioDraft = null; // a draft never applied ends with its batch
+    const live = now ? now.priority ?? [] : null, list = now ? prioDraft ?? live : sel.opts.priority ?? [];
+    const set = (l) => { if (now) prioDraft = l; else sel.opts.priority = l; rerender(); };
+    const drafted = !!now && !!prioDraft && JSON.stringify(prioDraft) !== JSON.stringify(live), open = !!sel.prioOpen || drafted;
+    return h('tr', { key: 'priority' }, h('td', { style: 'white-space:nowrap' }, 'Priority', reach('priority')),
+      h('td', {},
+        h('div', { class: 'row', style: 'gap:4px 8px' },
+          h('button', { class: 'linkish', 'aria-expanded': String(open), title: open ? 'Fold away' : 'Set which runs start first, or hold some',
+            onclick: () => { sel.prioOpen = !open; if (!sel.prioOpen) prioDraft = null; rerender(); } }, `${open ? '▾' : '▸'} ${list.length ? plural(list.length, 'rule') : 'none'}`),
+          open ? null : h('span', { class: 'muted' }, list.length ? priorityText(list) : 'runs take turns across CLIs')),
+        open ? h('div', { class: 'prio' },
+          list.map((_, i) => ruleEditor(list, i, set)),
+          h('div', { class: 'row', style: 'gap:6px; margin-top:6px' },
+            h('button', { class: 'btn', onclick: () => set([...list, { match: { provider: cfg.agents[0]?.provider ?? 'claude' }, hold: false }]) }, '+ Add rule'),
+            drafted ? [h('button', { class: 'btn primary', onclick: () => applyPriority(prioDraft) }, 'Apply'),
+              h('button', { class: 'btn', onclick: () => { prioDraft = null; rerender(); } }, 'Discard')] : null),
+          h('div', { class: 'hint' }, 'Which runs start first: rule by rule, top first, then all the others; within each, runs take turns across CLIs as usual. '
+            + 'A run follows the first rule it matches. It only orders: Parallel runs, Max per CLI, Max per model, the budget and a build\'s plan still decide '
+            + 'whether a run can start, and when it can\'t, the next one in line that can takes the slot. Hold keeps a rule\'s runs from starting until you untick it '
+            + '(the ones running finish). Queued batches each follow it, in queue order.')) : null));
+  }
+  // One rule: CLI, model, effort and stage (each "any" or one), Hold, and moving it up, down or out.
+  function ruleEditor(list, i, set) {
+    const r = list[i], m = r.match ?? {}, upd = (match, hold = !!r.hold) => set(list.map((x, j) => (j === i ? { match, hold } : x)));
+    const ag = cfg.agents.find((a) => a.id === m.agent), agents = cfg.agents.filter((a) => !m.provider || a.provider === m.provider);
+    const efforts = ag ? prioEfforts(ag) : [...new Set(agents.flatMap(prioEfforts))], stages = (cfg.stages ?? []).map((st) => st.id);
+    const with_ = (k, v) => { const n = { ...m }; if (v) n[k] = v; else delete n[k]; return n; };
+    const move = (to) => { const l = [...list]; [l[i], l[to]] = [l[to], l[i]]; set(l); };
+    const pick = (label, value, opts, onpick) => h('select', { 'aria-label': `Rule ${i + 1}: ${label}`, style: 'width:100%; min-width:0', onchange: (e) => onpick(e.target.value) },
+      opts.map(([v, t]) => h('option', { value: v, selected: v === (value ?? '') }, t)));
+    return h('div', { key: 'rule' + i, style: 'display:flex; gap:6px; align-items:flex-start; margin:6px 0' },
+      h('span', { class: 'muted', style: 'padding-top:7px' }, `${i + 1}.`),
+      h('div', { style: 'flex:1; min-width:0' }, h('div', { style: 'display:grid; grid-template-columns:repeat(auto-fit, minmax(8.5em, 1fr)); gap:4px' },
+      pick('CLI', m.provider, [['', 'any CLI'], ...[...new Set(cfg.agents.map((a) => a.provider))].map((p) => [p, PROVIDERS[p] ?? p])], (v) => {
+        const n = with_('provider', v); if (v && ag && ag.provider !== v) { delete n.agent; delete n.effort; } upd(n); }),
+      pick('model', m.agent, [['', 'any model'], ...agents.map((a) => [a.id, a.id])], (v) => {
+        const n = with_('agent', v), a2 = cfg.agents.find((a) => a.id === v); if (a2) n.provider = a2.provider; if (a2 && n.effort && !prioEfforts(a2).includes(n.effort)) delete n.effort; upd(n); }),
+      pick('effort', m.effort, [['', 'any effort'], ...efforts.map((e) => [e, effortLabel(e)])], (v) => upd(with_('effort', v))),
+      stages.length ? pick('stage', m.stage, [['', 'any stage'], ...stages.map((st) => [st, st])], (v) => upd(with_('stage', v))) : null),
+      h('div', { class: 'row', style: 'gap:6px; margin-top:4px' },
+      h('label', { class: 'row grow', style: 'gap:4px', title: 'Its runs don\'t start until you untick this' }, h('input', { type: 'checkbox', checked: !!r.hold, onchange: (e) => upd(m, e.target.checked) }), 'Hold'),
+      h('button', { class: 'icon', title: 'Earlier', 'aria-label': `Move rule ${i + 1} up`, disabled: i === 0, onclick: () => move(i - 1) }, '↑'),
+      h('button', { class: 'icon', title: 'Later', 'aria-label': `Move rule ${i + 1} down`, disabled: i === list.length - 1, onclick: () => move(i + 1) }, '↓'),
+      h('button', { class: 'icon', title: 'Remove this rule', 'aria-label': `Remove rule ${i + 1}`, onclick: () => set(list.filter((_, j) => j !== i)) }, '✕'))));
+  }
+  async function applyPriority(draft) {
+    if (!confirm(`Priority: ${priorityText(draft)}${draft.length ? ', then the rest' : ' (runs take turns across CLIs)'}.\n\n${scopeLine()}`)) return;
+    if (await tellBatch({ set: { priority: draft } })) { prioDraft = null; sel.opts.priority = draft; rerender(); } // it stays for the next batch too
   }
   function optRow(label, key, hint) {
     const whole = ['concurrency', 'repeat', 'perCli'].includes(key), fixed = now && key === 'repeat';
@@ -1893,6 +1952,7 @@ function batchHealth() {
   const cli = (p) => per[p] ??= { ok: 0, failed: 0, running: 0, left: 0, streak: 0, last: null };
   for (const r of fin) { const c = cli(r.provider); if (r.status === 'ok') { c.ok++; c.streak = 0; } else { c.failed++; c.streak++; c.last = r; } }
   for (const [p, n] of Object.entries(st.state?.left ?? {})) cli(p).left = n; // not started yet
+  for (const [p, n] of Object.entries(st.state?.held ?? {})) cli(p).held = n; // of those, on hold (Priority)
   const active = (st.active ?? []).map((id) => {
     const a = agentOfId(id), mins = (Date.now() - Date.parse(st.activeSince?.[id])) / 60000, usual = usualMinutes(id);
     if (a) cli(a.provider).running++;
@@ -1911,6 +1971,8 @@ function batchHealth() {
     flagged: fin.filter((r) => runFlags().has(r.id) && !reviewed(r)) };
 }
 
+// Every run not started yet is on hold (Options → Priority): nothing starts until a hold is lifted.
+const allHeld = (s) => { const n = (o) => Object.values(o ?? {}).reduce((a, b) => a + b, 0); return n(s?.left) > 0 && n(s?.held) >= n(s?.left); };
 function liveHealth(hb) {
   const st = status, n = (x, w) => `${x} ${w}${x === 1 ? '' : 's'}`;
   return h('div', { style: 'margin-bottom:10px' },
@@ -1918,10 +1980,10 @@ function liveHealth(hb) {
       h('div', { class: 'bar grow', style: 'max-width:320px', title: `${st.finished} of ${hb.total} done` },
         h('span', { style: `width:${Math.min(100, Math.round(100 * st.finished / hb.total))}%` })),
       h('span', {}, `${st.finished} of ${hb.total} done`, st.running ? ` · ${hb.active.length} running · ${hb.left} to go` : '',
-        hb.eta && !st.state?.paused ? ` · about ${fmtMin(hb.eta)} left at this pace` : '')) : null,
+        hb.eta && !st.state?.paused && !allHeld(st.state) ? ` · about ${fmtMin(hb.eta)} left at this pace` : '')) : null,
     Object.keys(hb.per).length ? h('div', { class: 'chips' }, Object.entries(hb.per).map(([p, c]) =>
-      h('span', { class: 'tag' + (c.streak >= 3 ? ' bad' : ''), key: p, title: c.last ? `Latest failure: ${c.last.error ?? 'no message'}` : 'No failures this batch' },
-        `${PROVIDERS[p] ?? p}: ✔ ${c.ok}${c.failed ? ` · ✘ ${c.failed}` : ''}${c.running ? ` · ▶ ${c.running}` : ''}${c.left ? ` · ${c.left} ${st.running ? 'queued' : 'not started'}` : ''}`,
+      h('span', { class: 'tag' + (c.streak >= 3 ? ' bad' : ''), key: p, style: 'white-space:normal', title: c.last ? `Latest failure: ${c.last.error ?? 'no message'}` : 'No failures this batch' },
+        `${PROVIDERS[p] ?? p}: ✔ ${c.ok}${c.failed ? ` · ✘ ${c.failed}` : ''}${c.running ? ` · ▶ ${c.running}` : ''}${c.left ? ` · ${c.left} ${st.running ? 'queued' : 'not started'}` : ''}${c.held && st.running ? `, ${c.held} on hold` : ''}${cfg.perModel?.[p] && c.left && st.running ? ` · max ${cfg.perModel[p]} per model` : ''}`,
         c.left && st.running && st.state && !st.stopping ? [' ', h('button', { class: 'icon', title: `Leave ${PROVIDERS[p] ?? p}'s queued runs out of this batch (its running ones finish)`,
           onclick: () => skipCli(p, c.left) }, 'skip rest')] : null))) : null,
     hb.alerts.length && st.running ? h('div', { class: 'warns', style: 'margin-top:8px' }, hb.alerts.map((a) => h('div', {}, a))) : null,
@@ -1931,17 +1993,32 @@ function liveHealth(hb) {
 }
 
 // What a batch from the Run tab asks the runner for: the matrix's picks, or each stage's.
+// Priority (Run → Options): rules matched top to bottom, each naming run fields (see Priority in run-matrix.mjs).
+const RULE_FIELDS = ['provider', 'agent', 'effort', 'stage'];
+const ruleLabel = (r) => {
+  const m = r?.match ?? {};
+  const parts = [m.agent ? null : m.provider ? PROVIDERS[m.provider] ?? m.provider : null, m.agent ?? null, m.effort ? effortLabel(m.effort) : null, m.stage ?? null,
+    ...Object.entries(m).filter(([k]) => !RULE_FIELDS.includes(k)).map(([k, v]) => `${k} ${v}`)].filter(Boolean);
+  return (parts.join(' · ') || 'every run') + (r?.hold ? ' (on hold)' : '');
+};
+const priorityText = (list) => list?.length ? list.map((r, i) => `${i + 1} ${ruleLabel(r)}`).join(' · ') : 'none';
+// The efforts a rule can name for a model: the ones it runs at in 1-shot runs and in the stages.
+const prioEfforts = (a) => [...new Set([...effortsOf(a), ...(cfg.stages ?? []).flatMap((st) => (st.models ?? []).map((k) => String(k).split(':'))
+  .filter(([id]) => id === a.id).map(([, e]) => effName(e)))])];
+// What a Preview or Start goes with: the running batches' priority while they run, else this browser's.
+const priorityNow = () => (status.running && status.state ? status.state.priority ?? [] : sel.opts.priority ?? []);
 const batchOf = (s) => inStages() ? { stages: s.stages, only: s.only, rerunFailed: sel.opts.rerunFailed, resumeFailed: resumeOn() }
   : { pick: s.pick, only: s.only, repeat: s.repeat, rerunFailed: sel.opts.rerunFailed, resumeFailed: resumeOn() };
 async function preview() {
   try {
     const s = inStages() ? stageSelection() : selection();
-    const r = await api('/api/preview', 'POST', batchOf(s));
+    const pr = priorityNow(), r = await api('/api/preview', 'POST', { ...batchOf(s), priority: pr });
     if (dirty()) r.note = 'Preview uses the saved setup. Save to include your latest edits.';
     openModal(`Preview · ${r.count} runs`, h('div', {},
       r.note ? h('p', { class: 'warns' }, r.note) : null,
       r.missingClis?.length ? h('p', { class: 'warns' }, `Not installed, so their runs will be skipped: ${r.missingClis.join(', ')}`) : null,
       r.error ? h('p', { class: 'errs' }, r.error) : null,
+      pr.length ? h('p', { class: 'hint' }, `Priority: ${priorityText(pr)}, then the rest. The sessions below are in that order${r.held ? `; ${plural(r.held, 'run')} on hold don't start until you lift it` : ''}.`) : null,
       r.terminal?.length ? h('details', { open: true, style: 'margin-bottom:12px' },
         h('summary', {}, `In a terminal: ${r.terminal.length === r.terminalTotal ? `the ${plural(r.terminalTotal, 'session')} this batch queues` : `the first ${r.terminal.length} of the ${r.terminalTotal} sessions this batch queues`}`),
         h('p', { class: 'hint' }, 'Each run as you\'d type it from this folder. prompt.md beside each work folder holds what it\'s sent (as in the sample below) and TASK.md in it the prompt filled for that run. '
@@ -1976,7 +2053,8 @@ async function start() {
     + `Parallel runs, Max per CLI, Budget, Time limit and Retry failed, and pause it: changes apply to the runs not started yet. `
     + `Nothing that's running is ended unless you confirm it.`)) return;
   try {
-    await api('/api/run', 'POST', { ...batchOf(s), concurrency: sel.opts.concurrency, perCli: sel.opts.perCli, budget: sel.opts.budget, timeout: sel.opts.timeout });
+    await api('/api/run', 'POST', { ...batchOf(s), concurrency: sel.opts.concurrency, perCli: sel.opts.perCli, budget: sel.opts.budget, timeout: sel.opts.timeout,
+      priority: sel.opts.priority ?? [] });
     resetLog();
     await poll();
   } catch (e) { alert(e.message); }
@@ -2154,6 +2232,7 @@ function holding() {
   const why = s.paused ? `⏸ Paused: no new runs start until you resume${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
     : s.overBudget ? `Budget spent (${fmtUsd(s.spent)} of ${fmtUsd(s.budget)}): no new runs start${n ? `; ${going} finish${n === 1 ? 'es' : ''}. Raise the budget in Options to carry on` : ''}.`
     : n > s.concurrency && left ? `${n} running, more than the ${s.concurrency} now allowed: no new run starts until fewer are running.`
+    : allHeld(s) ? `Every run not started yet is on hold (Options → Priority): none starts until you untick Hold${n ? `; ${going} carr${n === 1 ? 'ies' : 'y'} on` : ''}.`
     : null;
   return why ? h('p', { class: 'warns', style: 'margin:0 0 10px' }, why) : null;
 }
@@ -2203,7 +2282,8 @@ function savedCard() {
   const finished = s.batches.reduce((n, b) => n + b.finished, 0), left = s.batches.filter((b) => !b.done);
   const ran = (c) => c.partStartedAt && c.cutAt ? ` · ran ${fmtMin((Date.parse(c.cutAt) - Date.parse(c.partStartedAt)) / 60000)}` : '';
   const settings = [`${L.concurrency ?? 1} at a time`, L.perCli ? `at most ${L.perCli} per CLI` : null, L.budget ? `budget ${fmtUsd(L.budget)} (spent ${fmtUsd(s.spent)})` : `spent ${fmtUsd(s.spent)}`,
-    L.timeout ? `${L.timeout} min limit` : null, L.rerunFailed ? 'Retry failed' : null, L.resumeFailed ? 'Resume failed' : null, L.paused ? 'paused' : null].filter(Boolean).join(' · ');
+    L.timeout ? `${L.timeout} min limit` : null, L.rerunFailed ? 'Retry failed' : null, L.resumeFailed ? 'Resume failed' : null, L.paused ? 'paused' : null,
+    L.priority?.length ? `priority: ${priorityText(L.priority)}` : null].filter(Boolean).join(' · ');
   return h('div', { class: 'card', key: 'saved' },
     h('h2', {}, 'Pick up where you left off'),
     h('p', { class: 'sub' }, `The batch started ${new Date(s.startedAt).toLocaleString()} was cut off ${when}, at ${new Date(s.savedAt).toLocaleTimeString()}.`),
@@ -3262,6 +3342,7 @@ function runDetails(r) {
         line('Model requests', r.apiCalls != null ? fmtNum(r.apiCalls) : null),
         line('Tool calls', r.toolCalls != null ? fmtNum(r.toolCalls) : null, toolNote(r)),
         line('Compactions', r.compactions, r.compactions ? 'times the context was summarized to make room' : ''),
+        r.contextWindow != null ? line('Context window', fmtTok(r.contextWindow), 'tokens the model could hold, as its CLI reported it') : null,
         line('Subagents', r.subagents, helperNote(r)),
         r.sessionLog && r.sessionLog !== 'read' ? line('Session log', r.sessionLog, 'so any subagents\' or /goal helpers\' usage isn\'t in these figures') : null)),
       h('table', {}, h('tbody', {},
