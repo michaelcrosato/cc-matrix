@@ -1304,18 +1304,21 @@ test('cut off by a crash, then finished on its own: its result comes from its se
 });
 
 test('a cut-off run ended mid-way as it carries on stays cut off, and carries on again next time', async (t) => {
-  // The part that carries on takes 5 s, so it's still going when it's ended, however busy the computer is.
-  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang FAKE:sleep=5000' }] } });
+  const sb = sandbox({ agents: cutAgents.slice(0, 1), dimensions: { testing: [{ id: 'h', text: 'FAKE:hang' }] } });
   t.after(() => cleanup(sb));
   const id = 'opus-low__h', dir = path.join(sb.out, id);
   const c = controlled(sb, []);
   await gotGoing(sb, id);
   c.send({ stop: true, keep: true });
   assert.equal(await c.exit, 0, c.out);
+  // The part that carries on takes 5 s, so it's still going when it's ended, however fast the computer is. Its only message
+  // is "continue", so a FAKE:sleep in the variant's text can't reach it.
+  sb.env.FAKE_SLEEP_MS = '5000';
   const d = controlled(sb, []);
   await waitFor(() => d.out.includes(`▶ ${id}  (carrying on`));
   d.send({ drop: [id] });
   assert.equal(await d.exit, 0, d.out);
+  sb.env.FAKE_SLEEP_MS = '20';
   assert.match(d.out, /■ opus-low__h stopped \(this part discarded; it can be resumed again\)/);
   assert.ok(!fs.existsSync(path.join(dir, 'agent.2.out')) && !fs.existsSync(path.join(dir, 'result.json')));
   assert.equal(JSON.parse(runner(sb, ['--dry-run', '--json']).stdout.trim()).carriesOn, 1);

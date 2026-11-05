@@ -37,6 +37,21 @@ const BLOCK = /<script type="application\/json" id="cc-matrix-run">([\s\S]*?)<\/
 export const STAMP_RE = /\n?<script type="application\/json" id="cc-matrix-run">[\s\S]*?<\/script>\n?/;
 export const unstamped = (html) => String(html).replace(STAMP_RE, '');
 
+// The words of a game's title in its file or folder name, GameTitle-SOURCE-model-effort-stamp as the prompt asks for: what's
+// left once the stamp, the model and effort, and the source are taken off its end. sources: the source's text and short
+// name. The stamp is to the second (YYYYMMDD-HHMMSS), or to the minute in a game made before that and resumed since.
+export function titleWords(file, { model, effort, sources = [] }) {
+  const norm = (x) => String(x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  let tokens = file.replace(/\.html?$/i, '').split(/[-\s]+/).filter(Boolean);
+  const dropEnd = (target) => { const t = norm(target); if (!t) return false;
+    for (let k = 1; k <= tokens.length; k++) if (norm(tokens.slice(-k).join('')) === t) { tokens = tokens.slice(0, -k); return true; }
+    return false; };
+  if (/^\d{8}$/.test(tokens.at(-2) ?? '') && /^\d{4}(\d{2})?$/.test(tokens.at(-1) ?? '')) tokens = tokens.slice(0, -2);
+  if (!dropEnd(`${model}${effort}`)) dropEnd(model);
+  sources.some(dropEnd);
+  return tokens;
+}
+
 // The record in a page (any schema, as written), or null.
 export function readRecord(html) {
   const m = String(html).match(BLOCK);

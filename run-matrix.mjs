@@ -52,7 +52,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { EXIT_FILE, HARNESS, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, stepOf, unstamped, upgrade } from './run-record.mjs';
+import { EXIT_FILE, HARNESS, STAMP_RE, makeRecord, parseInterview, questionsOf, readRecord, renameInRecord, stampHtml, stepOf, titleWords, unstamped, upgrade } from './run-record.mjs';
 
 // ------------------------------------------------------------------ args
 const args = { config: fs.existsSync('matrix.config.json') ? 'matrix.config.json' : 'matrix.config.mjs',
@@ -1553,20 +1553,10 @@ function withTitle(id, measured, run) {
   measured.entry = nid + measured.entry.slice(id.length);
   return nid;
 }
-// The game's title from its file name, GameTitle-SOURCE-model-effort-stamp.html as the prompt asks for: what's left
-// once the stamp, the model and effort, and the source are taken off its end. Letters, digits, . _ - only. The stamp
-// is to the second (YYYYMMDD-HHMMSS), or to the minute in a game made before that and resumed since.
+// The game's title for its folder name, from its file name (see titleWords). Letters, digits, . _ - only.
 function titleOf(file, run) {
-  const norm = (x) => String(x ?? '').toLowerCase().replace(/[^a-z0-9]/g, '');
-  let tokens = file.replace(/\.html?$/i, '').split(/[-\s]+/).filter(Boolean);
-  const dropEnd = (target) => { const t = norm(target); if (!t) return false;
-    for (let k = 1; k <= tokens.length; k++) if (norm(tokens.slice(-k).join('')) === t) { tokens = tokens.slice(0, -k); return true; }
-    return false; };
-  if (/^\d{8}$/.test(tokens.at(-2) ?? '') && /^\d{4}(\d{2})?$/.test(tokens.at(-1) ?? '')) tokens = tokens.slice(0, -2);
-  const v = runVars(run, run.when);
-  if (!dropEnd(`${v.model}${v.effort}`)) dropEnd(v.model);
-  const src = run.combo.source;
-  if (src && !dropEnd(variantText(src))) dropEnd(src.id);
+  const v = runVars(run, run.when), src = run.combo.source;
+  const tokens = titleWords(file, { model: v.model, effort: v.effort, sources: src ? [variantText(src), src.id] : [] });
   const t = tokens.join('-').replace(/[^\w.-]+/g, '-').replace(/-+/g, '-').replace(/^[-.]+|[-.]+$/g, '').slice(0, 60).replace(/[-.]+$/, '');
   return t && !/^(index|game|main)$/i.test(t) ? t : null;
 }

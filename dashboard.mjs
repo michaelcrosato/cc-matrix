@@ -13,7 +13,7 @@ import path from 'node:path';
 import { spawn, spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import { readRecord } from './run-record.mjs';
+import { readRecord, titleWords } from './run-record.mjs';
 
 // Restart (on the page) starts the dashboard again, so it runs its code as it is now. For that, `node dashboard.mjs`
 // keeps the dashboard itself in a child process and starts it again whenever it exits with RESTART_CODE; any other
@@ -90,16 +90,36 @@ function refused(req) {
 
 // ----------------------------------------------------------------- Running
 // What each run going now is: its model, effort, stage and variants, from the unfinished.json its runner wrote as it
-// started (base). Read once per run.
-const activeCache = new Map();
+// started (base), read once per run. steps: how many stages it has come to, itself included; totalSteps: how many it will
+// have been through at the last stage its batch picked. title: its game's title, once its agent has named the game.
+const activeCache = new Map(), titleReadAt = new Map();
 function activeInfo(ids) {
   const out = {};
   for (const id of ids) {
-    if (!activeCache.has(id)) { const b = readJSON(path.join(OUT, id, 'unfinished.json'), null)?.base; if (b) { const { chain, ...rest } = b; activeCache.set(id, rest); } }
-    if (activeCache.has(id)) out[id] = activeCache.get(id);
+    if (!activeCache.has(id)) {
+      const b = readJSON(path.join(OUT, id, 'unfinished.json'), null)?.base;
+      if (b) {
+        const { chain, ...rest } = b, picked = Object.entries(batches.find((x) => x.active.has(id))?.sel?.stages ?? {}).filter(([, ps]) => ps?.length).map(([st]) => st), at = picked.indexOf(rest.stage);
+        activeCache.set(id, { ...rest, steps: chain?.length ?? null, totalSteps: chain && at >= 0 ? chain.length + picked.length - 1 - at : null, title: null });
+      }
+    }
+    const info = activeCache.get(id);
+    if (!info) continue;
+    if (!info.title && Date.now() - (titleReadAt.get(id) ?? 0) >= 10000) { titleReadAt.set(id, Date.now()); info.title = workingTitle(id, info); }
+    out[id] = info;
   }
-  if (activeCache.size > 200) for (const k of [...activeCache.keys()]) if (!ids.includes(k)) activeCache.delete(k);
+  if (activeCache.size > 200) for (const k of [...activeCache.keys()]) if (!ids.includes(k)) { activeCache.delete(k); titleReadAt.delete(k); }
   return out;
+}
+// The title of the game a run going is making: agents name its file or folder in work/ early on (GameTitle-SOURCE-model-
+// effort-stamp, as the prompt asks), and the title is the one thing in it that isn't known already.
+function workingTitle(id, b) {
+  let names; try { names = fs.readdirSync(path.join(OUT, id, 'work')); } catch { return null; }
+  const stamp = id.match(/__(\d{8}-\d{4,6})/)?.[1], ends = new RegExp(`-${stamp ?? '\\d{8}-\\d{4,6}'}(\\.html?)?$`), name = names.find((n) => ends.test(n));
+  if (!name) return null;
+  const text = readJSON(CONFIG, null)?.dimensions?.source?.find((v) => v.id === b.source)?.text;
+  const t = titleWords(name, { model: b.model, effort: `${b.effort ?? 'default'}${b.ultracode ? '-ultracode' : ''}`, sources: [text, b.source] }).join(' ').slice(0, 60).trim();
+  return t && !/^(index|game|main)$/i.test(t) ? t : null;
 }
 // Codex's plan limits and credit balance as its newest session log has them (~/.codex/sessions; the runner reads the
 // same logs, see codexLogs): past its plan's limit, Codex spends credits, which no run's result records. Read at most
