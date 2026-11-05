@@ -1,0 +1,13 @@
+<!doctype html><html><body style="margin:0;background:#000"><canvas id="screen" style="width:100%;height:100%"></canvas>
+<script src="../engine/my-3d2dge.js"></script><script src="../engine/modules/mode7.js"></script>
+<script>
+const E=My3D2dge;
+const game=new E.Game({canvas:'screen',res:[480,270],menu:false});
+const bg=new E.Backdrop({ sky: ['#2a2450', '#8a4a72', '#ee9470', '#f8cf90'], sun: { x: .72, y: .6, r: 20, color: '#ffe0a8' }, layers: [{ kind: 'mountains', color: '#6a4666', y: .55, height: .13, parallax: .1 }] });
+const m7=new E.Mode7({floor:(x,y)=>[(x>>4)+(y>>4)&1?90:110,130,70],size:[4000,4000],wrap:true,sky:bg,fog:{color:'#e8a884',near:380,far:1700}});
+const rigs=[0,1,2].map(i=>new E.Humanoid({size:1,build:['chibi','bulky','heroic'][i],weapon:'gun',hat:'helmet',colors:{cloth:'#7a6a3a'}}));
+m7.cam={x:100,y:0,h:28,angle:-Math.PI/2,pitch:6,fov:60};
+game.start({update(dt){rigs.forEach((r,i)=>r.update(dt,{x:100+(i-1)*30,y:-120,z:0,vx:i?0:20,vy:0,facing:i==2?0:Math.PI/2,point:i==1}))},draw(r){
+ rigs.forEach((rg,i)=>m7.rig(rg,100+(i-1)*30,-120,0)); rigs.forEach((rg,i)=>m7.rig(rg,100+(i-1)*40,-300,0)); m7.rig(rigs[0],80,-60,0);
+ m7.draw(r,m7.cam);}});
+</script></body></html>

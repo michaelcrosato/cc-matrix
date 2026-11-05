@@ -1,0 +1,69 @@
+/* 55-about: the About & Credits pages and the exit interview. One object (G.EXIT) feeds both the screen and
+ * exit-interview.json (tools/exit.mjs writes it), so the two cannot disagree. */
+G.EXIT = {
+  sourceInformation: {
+    date: '2026-11-04 01:24:24',
+    source: 'Dead or Alive Xtreme Beach Volleyball (Team Ninja / Tecmo, Xbox, 2003)',
+    plan: 'PLAN.md (written by claude-opus-5-5 at max effort)',
+    genre: 'Sports (arcade two-on-two beach volleyball), with a light life sim (the vacation calendar, friendship, collecting) and minigames (Pool Hop rhythm, casino)',
+    perspective: 'Matches: a side-on broadcast view of the court, with a Serve Cam toggle. Walkable places: three-quarter ground view. Island map: isometric view.',
+    tech: 'my-3D2dge engine v0.85.2 (handoff package, modified by two patches), plain JavaScript in one HTML file, Playwright 1.63.0 for browser checks, Node 24',
+    artDirection: 'PS1-era pixel art from the engine\'s HD humanoid rigs, with a swimsuit outfit added to the engine (cut, pattern and colours per suit), a sunset resort palette, drawn props and a backdrop per time of day',
+    animation: 'The engine\'s procedural rig poses and attack moves, plus 20 motion-capture clips cut from the engine\'s three libraries (CC0 and CMU) for celebrations, dives, idles and the title, and three hand-keyed clips (a bump, a set and a spike) in the same readable format; two-bone arm IK puts the hands on the ball for serves.',
+    audio: 'All music, sound effects and voices are synthesized in code: nine step-sequenced songs, about 60 chip-synth effects, and letter-by-letter Animalese voices for every speaker',
+    online: 'AI Hub shared-world session: four seats, the host runs the match on the hub clock and sends snapshots, clients send presses and draw the host\'s world',
+    testing: 'One command (node test/run.mjs): headless suites for data, ball physics, match simulations over 12 seeds, vacation rules, casino return and uniformity, story triggers, UI, the attract montage running its real scenes in order, the new features, a scripted game run and Pool Hop; a browser check of the file; and the AI Hub harness in four scenarios (4 players under latency, 2 with a server copy, 2 with the host leaving, 1 player)',
+    research: 'Read the engine\'s API card, guide and examples, the AI Hub protocol and client, and the ai-hub harness notes. The source game was described from general knowledge; no web research was done.',
+    environment: 'Claude Code CLI (headless); Linux (WSL2); headless Chromium via Playwright for browser checks',
+    model: 'Anthropic, claude-haiku-5-5, reasoning effort medium',
+    usage: 'unknown'
+  },
+  testingFeedback: [
+    'About 16 game issues: the slot return was 41% (fixed to about 91%); a Pool Hop slip never recovered; leaving the dev panel or photo mode left game time frozen; the new-vacation seed used Math.random; the broadcast camera did not frame the whole court; the prompt bar overlapped its text; the serve toss ball was not drawn; the attract mode never started; title and attract transitions repeated; the pixel font drew unsupported symbols as question marks; keycap labels were unreadable; character cards overflowed; the location maps had uneven rows; a song name was unknown to the engine; the dev panel and photo mode froze the screen black (the freeze ran during the fade-in, which a screenshot showed); the AI Hub copy referenced an undefined variable (the harness caught it).',
+    'Two were game-breaking: the Pool Hop slip (the run could not continue) and frozen time after the dev panel or photo mode (the game stopped). Both are fixed and covered by the game suite.',
+    'The most helpful test was the headless match run: it played whole matches to the end, which exposed the serve and planner faults and gave the point and touch counts. The scene walk that visits every screen was a close second: it found the scene-level errors quickly.',
+    'The least helpful were the screenshot checks for small details (glyph shapes, keycap contrast): they were slow to read and could not check timing. Browser key scripts with fixed waits could not hit the timing windows, so timing is tested in Node, not in the browser.'
+  ],
+  engineFeedback: [
+    'The fixed-step clock and game.debug/headless mode made the simulation testable: whole matches run in Node, and the same inputs give the same result. The input presets and the menu, pause and settings screens came for free.',
+    'Yes. Scene changes run through a fade, so a scene is entered a fraction of a second after game.go, and the fade runs on game time (so a freeze set at entry stalls it). The pixel font lacks many symbols (middle dot, the controller symbols, accented letters), so the game maps them before drawing. The swimsuit cuts and patterns are drawn over the rig, because the Humanoid has no swimsuit outfit; the rig\'s arms take an IK target through solvePose, which worked without an engine change.',
+    'The closed-form ball and its aim solver, the referee and planner, the human timing judge and the AI (all game code), the match scene and HUD, the text box with the per-letter voice, the vacation rules and saves, and the test harness.',
+    'Getting a ground-view match to read as a side-on broadcast: the camera framing, the zoom limits and the depth order of the net and the bleachers. Also the screen-pixel prompts, which need the device\'s glyph and the keyboard key drawn together.',
+    'Two patches to the engine (marked AOA in engine/my-3d2dge.js): the button-symbol default is PlayStation, and the dialog calls a function voice for every letter. Touch controls are off in the game code, not in the engine. The game\'s own text box does the voices, so the dialog patch is present but not used. The motion-capture runtime (readable.js, mocap.js) and the clip set are separate files, loaded before the game.',
+    'A documented way to make a scene switch instant in headless tests, and a view option for an alternative camera (the Serve Cam) that keeps the same framing rules.'
+  ],
+  promptFeedback: [
+    'The level of detail: exact numbers for each system, the feature checklist, and the test list made it possible to check what was built. The file names and the rule that TASK.md wins were clear.',
+    'The plan and TASK disagreed on the folder name, the date, the model and the scale; TASK was followed. The plan\'s scope (about 2,200 lines of design) is far larger than one medium-effort session, and the shorthand (DEV, GAME.html) took a moment to map to real paths.',
+    'Keeping every item of the plan and the TASK checklist true at once: each system depends on several others, and the sizes of the content (21 suits, 25 gifts, the story counts) made the data work large. The swimsuit and hair engine patches and motion capture were the hardest to justify in the time.',
+    'Ask for a priority order and a smaller first milestone, for example a playable match and one day of vacation, with the rest listed as later work. State which parts may be simplified (for example, swimsuit art as colours) so the trade-off is agreed up front.'
+  ],
+  aiHub: {
+    name: 'Ahead or Alive: Xtreme Beach Volleyball',
+    tagline: 'Stay ahead. Stay alive. Stay tanned.',
+    description: 'A five-day island vacation of two-on-two beach volleyball, friendships, swimsuit shopping, pool hopping and casino nights, ending with a match for the island against its owner.',
+    type: 'Game',
+    genre: 'Sports',
+    source: 'Dead or Alive Xtreme Beach Volleyball',
+    series: 'Dead or Alive',
+    players: '1–4',
+    controls: 'Stick or WASD move · Cross or Space hit on time · Circle or Shift dive · Square or E shot and block · Triangle or Q call',
+    tags: ['sports', 'versus', 'co-op', 'pixel art', 'comedy', 'arcade']
+  }
+};
+G.CREDITS_PAGE = [
+  'AHEAD OR ALIVE: XTREME BEACH VOLLEYBALL', 'An original parody-tribute game, inspired by Dead or Alive Xtreme Beach Volleyball (Team Ninja / Tecmo, 2003). No assets from that game are used.',
+  'Design, code, art, music and writing: the builder (claude-haiku-5-5).', 'Engine: my-3D2dge v0.85.2 (MIT, github.com/michaelcrosato/my-3d2dge), modified.',
+  'AI Hub session client: lib/hub (ai-hub), unmodified. Thanks for playing.'
+];
+const S = G.EXIT.sourceInformation;
+G.ABOUT = { pages: [
+  { title: 'Credits', lines: G.CREDITS_PAGE },
+  { title: 'Source Information', lines: [
+    'Date: ' + S.date, 'Source: ' + S.source, 'Plan: ' + S.plan, 'Genre: ' + S.genre, 'Perspective: ' + S.perspective, 'Tech: ' + S.tech,
+    'Art direction: ' + S.artDirection, 'Animation: ' + S.animation, 'Audio: ' + S.audio, 'Online: ' + S.online, 'Testing: ' + S.testing,
+    'Research: ' + S.research, 'Environment: ' + S.environment, 'Model: ' + S.model, 'Usage: ' + S.usage] },
+  { title: 'Testing Feedback', lines: G.EXIT.testingFeedback },
+  { title: 'Engine Feedback', lines: G.EXIT.engineFeedback },
+  { title: 'Prompt Feedback', lines: G.EXIT.promptFeedback }
+] };

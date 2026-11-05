@@ -1,0 +1,12 @@
+import { load } from '../tests/lib/vm.mjs';
+const errs = []; const { game, SN, E } = load({ quiet: false });
+await game.booted;
+const I = game.input, snap = () => game.debug.snapshot();
+const step = (s) => game.advance(s);
+step(1); console.log('1', snap().scene, game.errors.map(e => e.message));
+I.tap('start'); step(1); console.log('2', snap().scene, snap().screen, game.errors.map(e => e.message));
+I.tap('down'); step(.2); I.tap('confirm'); step(.5); console.log('3', snap().scene, snap().screen, game.errors.map(e => e.message));
+I.tap('confirm'); step(.5); console.log('4 cls', snap().screen); I.tap('confirm'); step(.5); console.log('5 track', snap().screen);
+I.tap('down'); step(.2); I.tap('down'); step(.2); I.tap('confirm'); step(.5); console.log('6', snap().screen); I.tap('down'); step(.2); I.tap('confirm'); step(1.5);
+console.log('7', snap().scene, snap().state, game.errors.map(e => e.message));
+I.tap('confirm'); step(9); console.log('8', snap().scene, snap().state, snap().t, game.errors.map(e => e.message).slice(0, 3));

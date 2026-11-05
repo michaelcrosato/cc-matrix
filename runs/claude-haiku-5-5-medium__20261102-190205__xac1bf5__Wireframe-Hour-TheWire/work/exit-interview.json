@@ -1,0 +1,56 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 19:02",
+    "source": "The Wire (2002-2008), created by David Simon and Ed Burns",
+    "genre": "Stealth, with a listening minigame (adventure)",
+    "perspective": "Third-person 3/4 camera on the Corner (V cycles to the side view); side view in the Wire Room",
+    "tech": "my-3D2dge v0.85.1 engine (handoff package, one file, no dependencies); AI Hub Session Protocol v1, client 1.3.0",
+    "artDirection": "Engine-native pixel art on a PS1-style low-resolution buffer: brick rowhouses, a stash-house roof, streetlamps, dusk lighting",
+    "animation": "Engine-native skeletal rigs (E.Humanoid), telegraphed attacks (E.Attack), takedown and parry actions",
+    "audio": "All code-written: chip-style songs in layers for the Corner and the Wire Room, synth sound effects, and Animalese-style gibberish voices pitched per speaker",
+    "online": "AI Hub parallel mode (1-4 players, each on their own copy, scored on time). No other network use",
+    "testing": "Headless Chromium (Playwright) for the flow, scoring and screens, the WebKit phone profiles via viewport-matrix, and the AI Hub harness for multiplayer (2 players, and 4 with latency, jitter and loss)",
+    "research": "Read the engine handoff docs (API card, kits README, the stealth kit source) and the AI Hub session protocol README",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Ten issues: five found by reading the code before the first run, five by the browser runs (a glyph that rendered as a question mark, a line that could not be flagged until its typing finished, the About screen opening over an open results panel, the touch-only title still showing the keyboard hint, and the mouse click mapping in the new Wire Room code, which the mouse test caught). One harness failure was not the game's: another agent's server held the port the harness used.",
+    "One critical issue, caught in review before any run: the Wire Room would have thrown on entry, because its helper was scoped inside the Corner. It was fixed; no player would have reached it.",
+    "The most helpful test was the AI Hub harness: it names every protocol check, and it passed for 2 players and for 4 players with latency, jitter and packet loss. A close second: a fake standard-mapping gamepad injected into the page, which proved the stick inversion (normal [0.8, -0.6], inverted [-0.8, 0.6]).",
+    "The least helpful test was the timed screenshot wait for attract mode: it took twelve seconds to show what the code already covered, and the Settings screenshot missed the Controller group until a DOM check."
+  ],
+  "engineFeedback": [
+    "The stealth kit was the best part: guards with sight cones, takedowns and parries, and a HUD in one readable file. The Shell's results and settings screens, and the E.Dialog choices, worked without extra code.",
+    "I guessed on the stick inversion, since the settings screen has no axis option: I defined the toggles and wrapped the input in a proxy that inverts only pad sticks, then checked it with a simulated pad. I guessed the guards' weapon name and used 'sword', because the API card has no list of weapon names. game.screen.clientToScreen returned (0.33, 0) for the canvas centre in my test, so I mapped pointers from the canvas rectangle myself. E.Shell screens also stay open across scene changes, so the About screen opened over the results panel until I closed it by hand.",
+    "The most important things I built myself: the Wire Room minigame, the Animalese voices (a blip per letter, pitched per speaker), the scrolling About screen with the feedback text, the attract-mode route, and the AI Hub round glue.",
+    "The hardest part was the size: a 1.2 MB single file and a 66 KB API card. I read the stealth kit closely to learn the patterns, and a full clone of the repository filled the temporary disk, so I had to fetch only the handoff folder.",
+    "I would overhaul the Shell's screen lifetime: a screen should close when its scene changes, or the scene should be able to close it with one call.",
+    "I would add a built-in stick-inversion option to the Controller settings group, and a short list of the rig's weapon names in the API card."
+  ],
+  "promptFeedback": [
+    "The done criteria and the exit-interview shape were precise, and the links to the engine and hub README let me work from the real protocol rather than a guess.",
+    "The folder rules were unclear: the brief says to create the subfolder 'here' and to bundle the HTML 'in root', and I read 'root' as the work folder, where I put the HTML and the JSON. The brainstorm line says 50 titles and I produced 52. The Usage field asks for cost and token estimates that I could not measure.",
+    "The hardest thing was fitting the whole list into one pass: the controller-first UI with glyph swaps, attract mode, touch-only handling, the Wire Room with mouse and keyboard, the multiplayer round, and the test tools. I tested the pad with a simulated controller, not a real one, and I did not test on real iOS Safari.",
+    "The test I would most like to run is a real DualSense in Chrome, to confirm that the two inversion toggles and the glyph swap feel right, followed by a four-player round across separate machines."
+  ],
+  "aiHub": {
+    "name": "Wireframe Hour",
+    "tagline": "Stealth on the Corner. Listening in the Wire Room.",
+    "description": "A three-day Baltimore demo: steal a notebook off a stash-house roof past the corner boys, then flag the real lines in the wire room. Animalese voices, a choice that follows you, and a short timed round on the hub.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "The Wire (2002-2008)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or arrows move, Space jump, J strike, K block, C crouch, Shift sprint, L roll",
+    "tags": [
+      "third-person",
+      "stealth",
+      "pixel art",
+      "exploration",
+      "story"
+    ]
+  }
+}

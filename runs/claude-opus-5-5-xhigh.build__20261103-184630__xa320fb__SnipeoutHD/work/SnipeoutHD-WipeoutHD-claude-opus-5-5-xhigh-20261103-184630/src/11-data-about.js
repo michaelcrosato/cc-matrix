@@ -1,0 +1,73 @@
+// SNIPEOUT HD: About / Credits. The single source for the About screen and tools/exit-interview.mjs (exit-interview.json).
+(() => {
+const SN = globalThis.SN;
+const A = SN.ABOUT = {
+  source: {
+    date: '2026-11-03 18:46:30',
+    source: 'Wipeout HD (Studio Liverpool / Sony Computer Entertainment, 2008)',
+    plan: 'PLAN.md',
+    genre: 'Anti-gravity combat racing (arcade), with a survival score-attack mode (Overclock) and a combat-points mode (Snipeout)',
+    perspective: 'Third-person chase camera (near and far), a cockpit view and a look-back view; trackside TV cameras for the intros, replays, spectating, podium and attract mode',
+    tech: 'my-3D2dge v0.85.2 handoff engine (2D: game loop, scenes, input, pause menu, settings, audio synth, fonts, rigs, HUD) plus the my-3D2dge 3D add-on v0.85.2 (World3D); three.js r182 (WebGPURenderer, falling back to WebGL 2) and Rapier 0.19.3 from the jsDelivr CDN; AI Hub session client 1.4.0; plain JavaScript in one HTML file',
+    artDirection: "The engine's native style: pixel-resolution 3D with toon and lambert light, bloom, the pixel HUD, fonts and menus; new procedural craft, banked neon tracks, tunnels, pads, gantries, sponsor boards and four themed worlds (coast, desert, night city, arctic) plus the black-and-neon Overclock skin",
+    animation: "The engine's systems (Humanoid rigs drawn as cards and live portraits, tweens, timers) plus new procedural animation: craft banking, barrel rolls, airbrake flaps, engine glow and boost flames, exhaust trails, shield flashes, explosions with hull shards, the rescue drone, animated pads, start lights, scenery (Ferris wheel, wind turbines, trains, traffic, aurora) and HUD/menu motion",
+    audio: 'All synthesized in code: six original electronic songs in layers that follow the race (house, big beat, drum and bass, trance, minimal techno, a menu theme), stings, a full sound-effect catalogue, per-craft engine hums with Doppler and pan, and an Animalese/Simlish-style gibberish voice for the announcer, pilots and principals, with subtitles',
+    online: 'AI Hub sessions (ghost mode, 1 to 4 players: everyone races the same seeded event, the others shown as ghosts); local 2-player split-screen Versus',
+    testing: 'All behind one command, node tests/run.mjs (634 checks pass: 605 in Node, 25 in the browser, 4 in the AI Hub harness). Headless Node suites through game.advance and game.debug (unit, physics, race matrix of 32 AI races, weapons, modes with an academy drill bot, flow, a scripted playthrough of the whole season, audio, an AI Hub mock); Playwright browser suites on the bundle from file:// (load, render, keyboard, a stubbed DualSense with analog L2, mouse hover and click, touch-only phone, split screen); the real AI Hub harness at 2 players, 4 players with latency, jitter and loss, and host-leave; screenshots for the look only',
+    research: 'None beyond the plan (no web research during the build): the engine docs, the World3D header and the AI Hub protocol README were read',
+    environment: 'Claude Code CLI (headless); Linux; browser unknown (tested in headless Chromium 1243 via Playwright 1.63.0)',
+    model: 'Anthropic, claude-opus-5-5, reasoning effort xhigh',
+    usage: 'Cost and tokens unknown (no usage meter was available inside this session). Session time about 2 h 45 min of wall-clock time (2026-11-03 18:46 to about 21:30), the build and its tests in one Claude Code session'
+  },
+  labels: { date: 'Date', source: 'Source', plan: 'Plan', genre: 'Genre', perspective: 'Perspective', tech: 'Tech', artDirection: 'Art direction', animation: 'Animation', audio: 'Audio', online: 'Online', testing: 'Testing', research: 'Research', environment: 'Environment', model: 'Model', usage: 'Usage' },
+  sourceRows() { return Object.keys(A.source).map(k => [A.labels[k], A.source[k]]); },
+  testingQ: ['How many issues did testing catch?', 'How many would be considered critical issues / game breaking?', 'What was the most helpful test you ran?', 'What was the least helpful test you ran?'],
+  testingFeedback: [
+    'About 30. The scripts caught 17 real defects: a method and a field both called place (every race crashed), bump damage applied every step of a contact (whole fields eliminated without weapons), replays drifting because live controls were not quantised like the recording, the TV director reading a stale shot (a camera error that froze the title), Snipeout results ordered by finish time instead of points, a rescue setting craft down on the gorge\'s run-up (they fell again and again), Win now during the countdown never ending the race, a season team callback leaking into Quick Race, the academy\'s mine line leaving no real gap and its gates too tight to pass, the AI ignoring each team\'s handling, AI pace and human damage too harsh at Normal, the attract never showing three weapons, menu tiles frozen mid-slide under dialogs, the mouse hit-test only existing after a draw, and a 4-player AI Hub session getting ready too slowly under load. Screenshots caught about 13 more look problems (the hangar camera outside its walls, a missing font glyph, overlapping prompts, toasts and name tags, an overbright exhaust trail, a clipped logo, text running out of its panels).',
+    'Six would have been game breaking: the place collision (no race could run), the replay drift, the TV director error, the rescue loop at the gorge, the leaked team callback (Quick Race started the season) and the per-step bump damage.',
+    'The scripted whole-game playthrough (tests/node/season.mjs): the bot plays the entire season through the real screens, from the prologue through ten events and four Grand Prix rounds to the ending and the credits. It found the AI pace and handling problems that no unit check could, and it proves every screen, unlock, save and dialog chains to the next. The 32-race AI matrix (every track and class, two seeds) was a close second.',
+    'The first screenshots with forced SwiftShader WebGPU flags: they came back white because of the headless environment, not the game. With default flags the renderer falls back to WebGL 2 by itself and draws correctly, so those runs only cost time.'
+  ],
+  engineQ: ['What did you like most about the engine?', 'Did you get stuck or guess wrong?', 'What was the most important thing you had to build yourself?', 'What was the hardest part about using the engine?', 'What did you change in the engine, and why?', 'If you could change one thing about the engine, what would it be?'],
+  engineFeedback: [
+    'The standard features: a pause menu that takes the game\'s own items, settings, rebinding, saves, the boot screen and input.label() came for free, and the exact fixed step with headless game.advance() made the whole game testable in Node. World3D\'s streamed terrain and fixed camera with interpolation between steps carried the 3D side.',
+    'Yes. I first had to await game.booted before advancing a headless game; the headless browser runs a few frames a second and caps each frame at 50 ms of game time, so tests had to wait in game time, not on the wall clock; the 5x7 font had no PlayStation symbols or middle dot; the pause menu is HTML, so dev mode resumes the game and holds the race itself; particles.explosion() adds hit-stop by default.',
+    'The track system and its physics: a spline sliced every 2 m into banked frames, track-space coordinates with a local lookup that keeps overpasses safe, drops, gaps, tunnels, open edges, pads and the pit, the racing line and per-team speed profiles. World3D\'s own track and vehicles cannot model a Wipeout circuit or 600 km/h hover craft. The race director, AI, weapons, replays and HUD are built on it.',
+    'Building three.js geometry in the engine\'s left-handed axes (the toThree swap, triangle winding and normals, the camera roll sign), and checking a WebGPU / WebGL 2 picture in a headless browser that runs at a few frames a second.',
+    'Five changes, each marked SNIPEOUT EDIT: button symbols default to PlayStation, with the choice moved to Settings, Display (and joining players inherit it), because the game is designed around a DualSense; the PlayStation symbols and a few marks added to both pixel fonts so input.label() results print; input.value(action) for analog buttons (L2 / R2 airbrakes); synth extensions (lowpass envelopes, detuned unison, pan, accents, clap and sub-boom drums, sidechain ducking) for electronic music; and a World3D option for the particles\' ground, so sparks land on a deck high above the terrain.',
+    'A banked ribbon track for World3D in track space (s, u, h), with jumps, tunnels and overpasses built in, so 3D racers do not have to rebuild the hardest part.'
+  ],
+  promptQ: ['What did you like most about this prompt?', 'What was confusing?', 'What was the hardest thing to do?', 'What would you change in this prompt?'],
+  promptFeedback: [
+    'Its definition of done: every requirement is checkable (one file, no stubs, dev mode with sliders, a 10-second attract, controller-first prompts, touch-only behaviour, the hub harness), and the plan behind it was detailed enough to build and test against.',
+    'Names: the plan was written for another run (its file names end max-20261103-174728) while TASK.md asks for this run\'s xhigh name, and TASK.md says to draw a title with a random number generator while STAGE.md says to use the plan\'s. I used the plan\'s drawn title (Snipeout HD) with TASK.md\'s file names, since TASK.md wins on names.',
+    'Keeping the whole scope complete with no stubs (eleven modes, a season with a Grand Prix and an ending, an eleven-drill academy, split-screen versus, replays, the attract mode, dev mode, AI Hub sessions), then balancing the AI and combat so a perfect bot, and so a person, can medal at Normal.',
+    'Have the plan leave run-specific names to TASK.md (or generate both together), name a target browser and GPU for visual checks (headless Chromium here could not show the WebGPU path), and say how much time the build has.'
+  ],
+  engineChanges: [
+    'Button symbols default to PlayStation, the option moved to Settings, Display (PlayStation or Xbox): the game is designed around a DualSense.',
+    'The face-button symbols (✕ ○ □ △) and a few HUD marks added to both pixel fonts, so input.label() results print.',
+    'Analog buttons: input.value(action) reads a pad button\'s analog value (L2 / R2 triggers for the airbrakes).',
+    'Synth extensions: a lowpass with an envelope, detuned unison and pan per voice; accent notes; clap and sub-boom drums; sidechain ducking on a drum track.',
+    'World3D: a world may give its own particle ground (sparks land on the track deck, not the terrain below it).'
+  ],
+  credits: [
+    'SNIPEOUT HD. An original game inspired by Wipeout HD. Not affiliated with Sony Interactive Entertainment.',
+    'Built by Anthropic claude-opus-5-5 (reasoning effort xhigh) from the plan PLAN.md, in Claude Code.',
+    'Engine: my-3D2dge v0.85.2 and its 3D add-on (MIT). three.js r182 (MIT). Rapier 0.19.3 (Apache-2.0). AI Hub session client 1.4.0.',
+    'All music, sound and voices synthesized in code. No image, model or sound files.',
+    'Music: ZERO CROSSING by HALCYON DRIFT · RIVIERA BURN by SOLSTICE 9 · SANDGLASS by DUNE//CODE · STACKLINE by NULLPOINT · POLAR VECTOR by AURORA SYSTEMS · CLOCK SKEW by THE AUTHORITY (all fictional artists, original songs).',
+    'Teams: KESTREL DYNAMICS · HAMMERHEAD HEAVY INDUSTRIES · SORA-TEK · VOLTA NERO · CALDERA SYSTEMS · NULL//SET. The Hoverline Championship, the Hoverline Authority, ORACLE, every pilot, principal and sponsor are fictional.',
+    'Sponsors: QWIK-FUEL · OKTA NOODLE · HALCYON BANK · AXON AIR · VANTA PAINTS · MERIDIAN TELECOM · POLARIS COLD STORAGE · NOVA-CHROME · KIBO TEA · ORBIT SOCKS · SOLENNE TOURISM.',
+    'Engine changes made for this game are listed on the Engine Feedback page.',
+    'The Authority reminds all pilots: gravity is optional. Contracts are not.'
+  ],
+  aiHub: {
+    name: 'Snipeout HD', tagline: 'Anti-gravity. Anti-everyone.',
+    description: 'An anti-gravity combat racer: thread banked neon tracks at 600 km/h, snipe rivals with ten weapons and survive Overclock. Season, time trials, split screen and AI Hub ghost races.',
+    type: 'Game', genre: 'Racing', source: 'Wipeout HD', series: 'Wipeout', players: '1–4',
+    controls: 'Stick or A/D steer · ✕ or W thrust · L2/R2 or Q/E airbrakes · □ or Space fire · ○ or Shift absorb',
+    tags: ['3d', 'racing', 'sci-fi', 'vehicles', 'arcade', 'versus']
+  }
+};
+})();

@@ -1,0 +1,111 @@
+// The campaign AI: the muster of a CPU realm (the rival realms and the Hourless Dominion). It uses the same actions a human
+// does (CampaignSim.do), so a rival is never allowed what a player is not. Its choices come from the campaign's seeded
+// random numbers. Rival aggression (dev mode) scales how readily it marches: 0 never marches, 2 marches on near-even odds.
+(() => {
+  const H = G;
+
+  // what a castle is worth in a fight: the knights who could hold it and the monsters that stand with them
+  const strength = (sim, castle) => {
+    let n = 0;
+    for (const k of sim.knightsAt(castle)) if (k.state === 'ready') n += k.level * 6 + k.hp;
+    for (const m of sim.monstersAt(castle)) n += m.hp;
+    return n;
+  };
+  const ownStrength = (sim, K) => K.level * 6 + K.hp + sim.bondedTo(K.id).reduce((n, m) => n + m.hp, 0);
+
+  const muster = (sim, realm) => {
+    const s = sim.s, R = s.realms[realm];
+    const mine = Object.keys(s.castles).filter(c => s.castles[c].owner === realm).sort();
+    if (!mine.length) return;
+
+    // 1. summon one monster at each castle, if the mana is there: the realm's own element first
+    const speciesFor = () => {
+      const pool = H.ids('species').filter(id => {
+        const sp = H.get('species', id);
+        return sp.element === (H.get('realm', realm).element) || (realm === 'dominion' && sp.element === 'hour');
+      });
+      return pool.length ? pool : H.ids('species');
+    };
+    const pool = speciesFor();
+    for (const c of mine) {
+      const sp = pool[sim.rand(0, pool.length - 1)];
+      if (sim.do({ t: 'summon', castle: c, species: sp }, realm) === null) continue;
+    }
+
+    // 2. bind free monsters to ready knights standing at their castles
+    for (const k of Object.values(s.knights)) {
+      if (k.realm !== realm || k.state !== 'ready' || !mine.includes(k.castle)) continue;
+      for (const m of sim.unboundAt(k.castle)) sim.do({ t: 'bind', monster: m.uid, knight: k.id }, realm);
+    }
+
+    // 3. evolve a bound monster when its knight is seasoned and the mana is there
+    for (const m of Object.values(s.monsters)) {
+      if (m.form !== 0 || !m.bondTo) continue;
+      const k = s.knights[m.bondTo];
+      if (k && k.realm === realm && k.level >= 3 && R.mana >= sim.evolveCost(m.species)) sim.do({ t: 'evolve', monster: m.uid }, realm);
+    }
+
+    // 4. equip the treasury's first item on any knight without one
+    for (const k of Object.values(s.knights)) {
+      if (k.realm !== realm || k.items.length || k.state !== 'ready' || !s.stock.length) continue;
+      sim.do({ t: 'equip', knight: k.id, castle: k.castle, item: s.stock[0] }, realm);
+    }
+
+    // 5. reinforce: a ready knight with no march moves to a neighbouring own castle that has no knight and touches an enemy
+    for (const k of Object.values(s.knights)) {
+      if (k.realm !== realm || k.state !== 'ready' || s.marches.some(m => m.knight === k.id)) continue;
+      if (k.id === H.get('realm', realm).ruler) continue;
+      const here = k.castle;
+      if (sim.knightsAt(here).length > 1) continue;
+      const target = sim.adjacentCastles(here).find(c => s.castles[c].owner === realm && !sim.knightsAt(c).length && sim.adjacentCastles(c).some(d => s.castles[d].owner !== realm));
+      if (target) sim.do({ t: 'move', knight: k.id, castle: here, to: target }, realm);
+    }
+
+    // 6. marches: a ready knight attacks a neighbouring enemy castle it outmatches (scaled by rival aggression)
+    const aggression = H.tune.rivalAggression;
+    if (aggression <= 0) return;
+    for (const k of Object.values(s.knights)) {
+      if (k.realm !== realm || k.state !== 'ready' || s.marches.some(m => m.knight === k.id) || !mine.includes(k.castle)) continue;
+      let best = null;
+      for (const c of sim.adjacentCastles(k.castle)) {
+        if (s.castles[c].owner === realm) continue;
+        const enemy = strength(sim, c), own = ownStrength(sim, k) * aggression;
+        if (own < enemy * .9) continue;
+        if (!best || enemy < best.enemy) best = { c, enemy };
+      }
+      if (best) sim.do({ t: 'march', knight: k.id, castle: k.castle, to: best.c }, realm);
+    }
+  };
+
+  H.aiCampaign = { muster, strength };
+  H.AUTOPLAY_ODDS = 1.0;   // the autoplay player marches with a knight that is this many times the castle's strength
+
+  // the autoplay player's muster (plan §14.5): the same building as a CPU realm, plus promotions, and marches only with a
+  // knight that is clearly stronger than the castle it attacks. Its ruler stays home unless the odds are very good.
+  H.autoplayMuster = (sim, realm) => {
+    const s = sim.s;
+    const aggression = H.tune.rivalAggression;
+    H.tune.rivalAggression = 0;
+    try { muster(sim, realm); } finally { H.tune.rivalAggression = aggression; }
+    for (const k of Object.values(s.knights)) {
+      if (k.realm !== realm || k.state !== 'ready' || !s.realms[realm]) continue;
+      if (s.marches.some(m => m.knight === k.id)) continue;
+      const cls = H.get('class', k.cls || H.get('knight', k.id).cls);
+      if (cls.next && k.level >= H.PROMOTE_LEVEL[H.get('class', cls.next).tier]) sim.do({ t: 'promote', knight: k.id }, realm);
+    }
+    for (const k of Object.values(s.knights)) {
+      if (k.realm !== realm || k.state !== 'ready' || s.marches.some(m => m.knight === k.id)) continue;
+      if (!sim.adjacentCastles(k.castle).some(c => s.castles[c].owner === realm)) continue;
+      const ruler = k.id === H.get('realm', realm).ruler;
+      if (ruler) continue;   // the autoplay player's ruler never marches: a fallen ruler ends the game
+      let best = null;
+      for (const c of sim.adjacentCastles(k.castle)) {
+        if (s.castles[c].owner === realm) continue;
+        const enemy = strength(sim, c), own = ownStrength(sim, k);
+        if (own < enemy * (ruler ? 2.2 : H.AUTOPLAY_ODDS)) continue;
+        if (!best || enemy < best.enemy) best = { c, enemy };
+      }
+      if (best) sim.do({ t: 'march', knight: k.id, castle: k.castle, to: best.c }, realm);
+    }
+  };
+})();

@@ -1,0 +1,56 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 12:58",
+    "source": "The Wire (2002-2008)",
+    "genre": "Stealth",
+    "perspective": "Isometric 2.5D",
+    "tech": "my-3D2dge 0.85.1 engine (single file), vanilla JavaScript ES2020, Canvas and HTML UI",
+    "artDirection": "Engine-native pixel art with canvas lighting",
+    "animation": "Engine rig system (E.Humanoid, E.Mover)",
+    "audio": "Synthesized music, sound effects and gibberish voice blips",
+    "online": "none",
+    "testing": "Headless logic checks and browser screenshots",
+    "research": "Engine docs and plan read; no web research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Four issues were found: the title's menu stayed drawn over the field (found in a browser run and fixed); the objective distance read NaN (found in a browser run and fixed); the title logo was drawn twice (found in a screenshot and fixed); and the attract shutter cleared its flag before the bot read it (found in code review before any run, fixed). One of the four blocked the view; none were left open in the paths I ran.",
+    "Critical or game-breaking: one (the menu covering the field, which hid the play view until fixed). Nothing else found was game-breaking in the paths tested.",
+    "The most helpful test was driving the built single-file bundle in headless Chromium and reading the screenshots, because it exercised the real bundle and caught the menu overlap that code reading missed.",
+    "The least helpful test was the console-error check on its own: it passed while the screen was visibly wrong, so it only catches exceptions, not visual faults."
+  ],
+  "engineFeedback": [
+    "The E.Shell HUD, menus and settings did most of the UI work for free: the title, the episode card, the Board, the About pages and the settings screen all came from data specs.",
+    "Yes: the engine's Shell screen stays open when the scene changes, so the title's menu covered the field until I called ui.hide(). I also guessed the objective position format (it wants {x, y}, not an array) and got NaN until I read the API card.",
+    "The content: the mission data, the field's interaction rules, perception and photo scoring, the CornerSim-style sales loop and the Ep1 beats. The engine supplies the render, input and HUD, not the game.",
+    "Getting the Shell's position and screen conventions right and learning the Humanoid rig options. The API card is long (about 67 KB) and I read a large part of it, which cost context.",
+    "Remove or overhaul: the scene-change rule that leaves Shell screens open. A scene switch should close the screens, or the API should say so loudly.",
+    "Make the API card shorter and task-indexed, with worked examples for HUD objectives and Shell screens."
+  ],
+  "promptFeedback": [
+    "The level of detail in the plan: every system has numbers, rules and a build order, so I could start without guessing the design.",
+    "The plan is about five episodes, versus and AI Hub, and it refers to other files and tasks in the same sentence. The task and the plan also disagree on scope, and STAGE.md's instruction to use the plan's title is clear but the scope is not sized for one pass.",
+    "Building a faithful five-episode game with versus and online play in one pass. It is far larger than the time and context available, so I built a vertical slice and say so below.",
+    "A short scope check: pick the first episode, the attract reel and the controls to ship, and say which systems are out of scope for the pass."
+  ],
+  "aiHub": {
+    "name": "WIRETAP",
+    "tagline": "Somebody's always listening.",
+    "description": "Watch a Baltimore corner through a long lens, build a case one photo at a time, and try not to get made.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "The Wire (2002-2008)",
+    "series": "",
+    "players": "1",
+    "controls": "Left stick move, R-stick aim, R2 photo, Cross interact (keyboard: WASD, mouse, E, F, C)",
+    "tags": [
+      "3d",
+      "stealth",
+      "isometric",
+      "story",
+      "comedy"
+    ]
+  }
+}

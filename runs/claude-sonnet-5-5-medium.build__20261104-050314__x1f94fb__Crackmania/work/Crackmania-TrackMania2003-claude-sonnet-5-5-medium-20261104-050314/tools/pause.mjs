@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
+const FILE = fileURLToPath(new URL('..', import.meta.url)) + '../Crackmania-TrackMania2003-claude-sonnet-5-5-medium-20261104-050314.html';
+const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const p = await (await b.newContext({ viewport: { width: 960, height: 540 } })).newPage();
+const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto('file://' + FILE + '?backend=webgl#race/D1'); await p.waitForTimeout(9000);
+await p.keyboard.press('Escape'); await p.waitForTimeout(1500); await p.screenshot({ path: 'check-output/pause.png' });
+const txt = await p.evaluate(() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).join(' | ')); console.log(txt);
+await p.evaluate(() => { const b = [...document.querySelectorAll('button')].find(b => /Dev Mode/.test(b.textContent)); b && b.click(); }); await p.waitForTimeout(2500);
+await p.screenshot({ path: 'check-output/dev.png' }); console.log(JSON.stringify(await p.evaluate(() => window.__crack.game.debug.snapshot().dev)), errs);
+await b.close();

@@ -1,0 +1,14 @@
+<!doctype html><html><head><meta charset="utf-8"></head><body style="margin:0;background:#4a6a8a">
+<canvas id="screen" style="display:none"></canvas><canvas id="out" width="900" height="300" style="image-rendering:pixelated;width:1800px;height:600px"></canvas>
+<script src="../engine/my-3d2dge.js"></script>
+<script src="../src/00-core.js"></script><script src="../src/01-data-cars.js"></script><script src="../src/01-data-cast.js"></script><script src="../src/01-data-world.js"></script><script src="../src/10-road.js"></script><script src="../src/11-art.js"></script><script src="../src/12-cast.js"></script>
+<script>
+const g = document.getElementById('out').getContext('2d'); g.imageSmoothingEnabled = false;
+const E = My3D2dge; let msg = [];
+try {
+  const views = [OB.CHASE_VIEW, new E.View('c2','C2',0,30), E.VIEWS.side, E.VIEWS.brawler, E.VIEWS.threequarter];
+  views.forEach((v, i) => { const rig = OB.Cast.rig('marisol', 3.4); rig.update(1/60, { x: 0, y: 0, z: 0, vx: 0, vy: 0, facing: -Math.PI/2 }); rig.draw(g, 80 + i * 170, 280, v); });
+  msg.push('legU ' + OB.Cast.rig('marisol', 3.4).o.legUpper + ' torso ' + OB.Cast.rig('marisol', 3.4).o.torso);
+} catch (e) { msg.push('ERR ' + e.message + e.stack); }
+document.title = msg.join(' | ');
+</script></body></html>

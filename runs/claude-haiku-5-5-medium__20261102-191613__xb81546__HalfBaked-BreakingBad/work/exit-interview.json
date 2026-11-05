@@ -1,0 +1,56 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 19:16",
+    "source": "Breaking Bad (2008-2013), as a spiritual successor with no characters, text or art reused",
+    "genre": "Stealth, with a timing-based cook minigame and a boss fight",
+    "perspective": "Three-quarter view, switchable to top-down and isometric",
+    "tech": "my-3D2dge v0.85.1 (full engine, vendored and inlined), AI Hub session client (protocol v1), plain JavaScript",
+    "artDirection": "Engine-native procedural pixel art: SNES-scale buffer, drawn 3D rigs, dithered lighting",
+    "animation": "Engine Humanoid rigs (procedural skeletal), E.Attack and E.Combo moves, tweens",
+    "audio": "All chip synth written in code: five songs, engine sound presets, animalese speech for dialogue",
+    "online": "AI Hub parallel session, 1 to 4 players, 8 minute shifts, score = cash earned",
+    "testing": "Unit tests (Node), headless browser playthrough with real key presses, system checks, hub stand-in test, viewport matrix",
+    "research": "Engine and hub documentation only",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 14 issues, found by my own review, the unit tests and the browser runs. Two were game-breaking: the attract run stalled on its first dialogue, and leaving attract drew one frame with the run state already cleared and threw an error. The rest were visual or input problems.",
+    "Two were critical: the attract stall and the attract exit error, both on the required attract feature.",
+    "The full playthrough with real key presses (title, cook, three sales, boss, results). It covers the whole path, and it caught that the boss-defeat dialogue was never shown.",
+    "The viewport matrix. The game draws onto one canvas, so it reports no overflow almost by construction. It confirmed the layouts but could not find game bugs."
+  ],
+  "engineFeedback": [
+    "The scene system, the TileMap with Body and FlowField, Humanoid rigs with E.Combo and E.Attack, and the built-in settings, menu and pause screens. A lot of the game came for free.",
+    "Yes. Dialog plays one voice per letter with no per-letter variation, so I wrapped audio.sfx to jitter pitch for animalese. game.input.anyPressed() ignores keys no action uses, so I wrote my own any-input check. The DEFAULT preset puts dash on Space, the same key as confirm, so I wrote a custom binding table. E.Menu arrow keys stop on a disabled item.",
+    "The glue: the cook minigame, the sight-and-heat rules, the attract AI, the hub wiring and the animalese hook.",
+    "Working out the pixel-font limits (no curly quotes or arrows), and the interplay between blocking dialogue and attract mode: a dialogue box that waits for a player stalls any run that has no player.",
+    "The default input preset. Dash on Space, the same key as confirm, is a problem for keyboard players. Presets should bind each action explicitly, or warn when two actions share a key.",
+    "Give Dialog a per-letter callback so voices can vary by letter without a wrapper, and let the menu skip disabled items when moving with the arrow keys."
+  ],
+  "promptFeedback": [
+    "The clear fixed sections: Source Information, Testing, Engine and Prompt Feedback, plus the JSON shape. Without them I would have guessed at the format.",
+    "How the Usage line should be filled when no cost or token figures are available (I used unknown), and whether the in-game credits must repeat the feedback sections or only the source information (I did both).",
+    "Making the game feel complete in one pass: a stealth system, a cook minigame, a boss, attract mode and a hub round, each with tests, inside one session.",
+    "A test with a real pad. I could only fake pad state in the browser, so stick inversion and the PlayStation and Xbox glyphs on a real controller are checked by reading code, not by playing."
+  ],
+  "aiHub": {
+    "name": "Half Baked",
+    "tagline": "Cook it right. Sell it clean. Never get caught.",
+    "description": "A stealth and cook game about one batch, three buyers and a desert full of agents. Cook the best batch you can, sell it clean, and keep the heat down.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "Breaking Bad (2008-2013)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick or WASD to move; confirm to talk, cook and sell; J or X to strike; Shift or R1 to dash; V or Select to change camera",
+    "tags": [
+      "pixel art",
+      "top-down",
+      "boss fights",
+      "story",
+      "comedy"
+    ]
+  }
+}

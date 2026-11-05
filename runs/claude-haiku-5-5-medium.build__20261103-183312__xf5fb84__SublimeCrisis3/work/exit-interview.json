@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:33:12",
+    "source": "Time Crisis 3 (Namco and Nextech; arcade on System 246, North America February 2003, Japan April 1, 2003; PlayStation 2 October 2003)",
+    "plan": "PLAN.md",
+    "genre": "On-rails light-gun shooter with a cover system: duck behind cover to reload, pop out to shoot",
+    "perspective": "First person on a rail; cover is real geometry lowered by about 12 u; the story is shown by radio and dialogue, with no cutscene camera",
+    "tech": "my-3D2dge v0.85.2 handoff engine (patched: PlayStation button symbols by default); a custom software z-buffer rasterizer (Rail3D) in plain JavaScript; AI Hub client session.js 1.4.0; Playwright 1.63.0 (tests only)",
+    "artDirection": "The engine's PS1-era pixel style: procedural textures painted in code, five banded light levels with 4x4 Bayer dithering, eight-step dithered fog, a gradient sky with a skyline",
+    "animation": "The engine's Humanoid procedural rigs for every soldier and civilian (crouch, point, hurt, down, die, run); the rigs are drawn as billboards from a view that faces the camera",
+    "audio": "Chip synth music and sound effects written in code (no audio files); Animalese voices, one blip per syllable, pitched per speaker",
+    "online": "AI Hub Session Protocol v1, shared-world co-op for 1 to 4 players: the host copy runs the world, the other copies replicate it",
+    "testing": "Headless Node suites (sim rules, the hub's snapshot encoding, build rules), the Autopilot clearing stage 1 in the sim, Chromium smoke and screen-flow runs, the AI Hub harness with 2 and 4 players, a lossy network, a host leaving, and a server-only host",
+    "research": "The engine handoff docs (README, API card, API index, AI guide), the AI Hub protocol README, and the planning notes in PLAN.md; the source facts are as given in PLAN.md (unknown: not re-checked against a live source in this run)",
+    "environment": "Claude Code CLI (headless); Linux under WSL2; Chromium 153 headless through Playwright 1.63.0",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown (no token or cost estimate was reported during the run)"
+  },
+  "testingFeedback": [
+    "About 10 real defects: three were game-breaking (the page never called its start function; areas cleared with no enemies killed because the alive count was stale; AI Hub rounds were voided because the play was never registered). The rest were smaller: a shared event name overwritten, enemies hidden by their own wall, civilians blocking the clear, the Autopilot never shooting the boss's turrets, the server copy staying silent, the HUD and banners showing on the title, and a glyph the pixel font lacks.",
+    "The most helpful test was the headless sim suite that plays a whole stage with the Autopilot: it caught the clear-count and civilian bugs and proved area progression. The AI Hub harness was a close second, because it exercises the real network path and found the unregistered play and the silent server.",
+    "The least helpful checks were the exit-interview checks, which only test that each answer is present, not that it is true, and the screenshot reviews, which I only sampled by eye (about four images), so visual polish is only partly verified.",
+    "Not tested on real hardware: a real phone (the touch-only notice was checked with phone emulation in Chromium, which sets the pointer type but is not a device), a real gamepad (none was attached), and the Xbox glyph option. The 'Controller or keyboard required' screen and the attract run on a phone were checked by emulation."
+  ],
+  "engineFeedback": [
+    "The rig system is the best part: E.Humanoid with rig.update poses and rig.draw from any E.View let me draw soldiers as depth-tested billboards, and the same rig runs headless in Node.",
+    "The billboard facing: the view's yaw convention (0 is north up the screen) is documented, but I had to match it to camera bearings by eye. I also assumed the wheel produced codes; it did not, so I added them as a patch.",
+    "The most important thing I had to build myself was the 3D layer: a z-buffer triangle rasterizer, the banded lighting and fog, and the view-space camera. The engine has no 3D renderer in the handoff.",
+    "The hardest part was finding exact signatures: API-INDEX and AI_GUIDE together are over 300 KB, and the core file is 1.2 MB, so grep and sed in small windows were the only practical way in.",
+    "Two changes to the engine (engine/PATCHES.md): the Button symbols default is now PlayStation, with Xbox listed second, because TASK.md asks for PlayStation glyphs and the engine defaulted to auto; and the mouse wheel now emits WheelUp and WheelDown codes, because the engine had no wheel codes and the weapon switch needs one.",
+    "I would change the documentation layout: a one-page 'how a scene and a loop fit together' with a minimal headless example for each module, so a builder can see the frame order without reading the whole index."
+  ],
+  "promptFeedback": [
+    "I liked the explicit deliverables table, the exact file names, the AI Hub protocol link with its harness check, and the rule that every feature must exist with no stubs. The golden rules and the done checklist made it clear what counted as finished.",
+    "It was confusing that PLAN.md is written for a different run: it names a different title (Tide Crisis 3), folder and model (claude-opus-5-5 at max effort), while TASK.md asks for a title drawn by RNG and this model's name. TASK.md won where they disagreed, but the conflict cost time.",
+    "The hardest part was the scope: the plan describes several thousand lines by my estimate (a moving carrier system, a full enemy roster, four weapons with projectile physics, a dev panel with six tabs, a lag-compensated netcode) and asks for all of it to be done with no stubs, with no statement of which parts are optional or how much time to spend.",
+    "I would change the prompt: mark each plan feature as must-have or stretch; drop the title and folder names from the plan, or make the plan's naming follow the run's; and state an explicit budget (time or tokens) so the scope can be cut in advance, not at the end."
+  ],
+  "aiHub": {
+    "name": "Sublime Crisis 3",
+    "tagline": "Duck, pop, shoot. Beat the tide.",
+    "description": "An original on-rails light-gun shooter inspired by Time Crisis 3: take cover to reload, pop out to shoot, and read the red crisis rings before the king tide. Three stages, three bosses, a training range, and a shared-world co-op round for up to four.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Time Crisis 3",
+    "series": "Time Crisis",
+    "players": "1–4",
+    "controls": "Mouse or stick aims · Fire: click or R2 · Cover: hold right click or L2 · Reload in cover: R or Square",
+    "tags": [
+      "first-person",
+      "pixel art",
+      "arcade",
+      "co-op",
+      "boss fights",
+      "retro"
+    ]
+  }
+}

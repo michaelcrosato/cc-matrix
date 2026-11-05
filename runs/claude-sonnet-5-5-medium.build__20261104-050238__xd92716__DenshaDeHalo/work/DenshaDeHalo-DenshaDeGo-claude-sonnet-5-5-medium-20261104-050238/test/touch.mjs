@@ -1,0 +1,11 @@
+import { chromium } from '../engine/node_modules/playwright/index.mjs';
+import { resolve } from 'node:path';
+const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+const c = await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+const p = await c.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto('file://' + resolve('../DenshaDeHalo-DenshaDeGo-claude-sonnet-5-5-medium-20261104-050238.html')); await p.waitForTimeout(2500);
+await p.touchscreen.tap(422, 150); await p.waitForTimeout(1200);
+console.log(JSON.stringify(await p.evaluate(() => ({ dev: window.__dh.game.input.lastDevice, scene: window.__dh.game.sceneName }))));
+await p.screenshot({ path: 'shots/touch.png' });
+await p.waitForTimeout(11500);
+console.log('after 11 s idle:', await p.evaluate(() => window.__dh.game.sceneName), errs.join() || 'no errors'); await b.close();

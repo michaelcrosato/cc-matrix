@@ -1,0 +1,36 @@
+// A fake standard-mapping DualSense: left stick moves, square swings, triangle places, right stick turns/zooms, glyphs follow the pad.
+import { chromium } from '../../engine/node_modules/playwright/index.mjs';
+import { pathToFileURL, fileURLToPath } from 'node:url'; import path from 'node:path';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const html = path.resolve(root, '..', path.basename(root) + '.html');
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+await page.addInitScript(() => {
+  window.__pad = { axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })), on: false };
+  navigator.getGamepads = () => window.__pad.on ? [{ id: 'DualSense Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 0ce6)', index: 0, connected: true, mapping: 'standard', axes: window.__pad.axes, buttons: window.__pad.buttons, timestamp: performance.now() }] : [];
+});
+const errs = []; page.on('pageerror', e => errs.push(String(e.stack || e).slice(0, 300))); page.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); });
+const fails = []; let n = 0; const check = (w, ok, d = '') => { n++; if (!ok) fails.push(w + ' ' + d); };
+await page.goto(pathToFileURL(html).href); await page.waitForTimeout(1500);
+const btn = async (i, ms = 120) => { await page.evaluate(i => { __pad.on = true; __pad.buttons[i] = { pressed: true, value: 1 }; }, i); await page.waitForTimeout(ms); await page.evaluate(i => { __pad.buttons[i] = { pressed: false, value: 0 }; }, i); await page.waitForTimeout(90); };
+const axes = (a) => page.evaluate(a => { __pad.on = true; __pad.axes = a; }, a);
+await page.evaluate(() => { __pad.on = true; }); await page.waitForTimeout(200);
+await page.evaluate(() => DQ.game.go('play', { new: true, name: 'Pad' })); await page.waitForTimeout(800);
+for (let i = 0; i < 30 && await page.evaluate(() => DQ.dialogOpen()); i++) await btn(0, 150);
+check('cross dismisses dialog', !(await page.evaluate(() => DQ.dialogOpen())));
+check('last device is gamepad', await page.evaluate(() => DQ.game.input.lastDevice === 'gamepad'), await page.evaluate(() => DQ.game.input.lastDevice));
+const x0 = await page.evaluate(() => DQ.S.hero.x); await axes([1, 0, 0, 0]); await page.waitForTimeout(700); await axes([0, 0, 0, 0]); const x1 = await page.evaluate(() => DQ.S.hero.x);
+check('left stick moves', Math.abs(x1 - x0) > 5, x0 + '->' + x1);
+await page.evaluate(() => { DQ.inv.add('felt', 5, true); DQ.S.hotbar[0] = 'felt'; DQ.S.sel = 0; });
+const pl = await page.evaluate(() => DQ.S.stats.placed); await btn(3); await page.waitForTimeout(200); check('triangle places', (await page.evaluate(() => DQ.S.stats.placed)) === pl + 1, await page.evaluate(() => JSON.stringify(DQ.S.toasts.map(t => t.text)) + JSON.stringify(DQ.heroTarget()) + DQ.inv.hotId() + ' sel' + DQ.S.sel));
+for (let i = 0; i < 5; i++) await btn(2, 100); await page.waitForTimeout(500); check('square swings and breaks', (await page.evaluate(() => DQ.S.stats.broken)) >= 1);
+const yaw0 = await page.evaluate(() => DQ.game.yaw); await axes([0, 0, 1, 0]); await page.waitForTimeout(150); await axes([0, 0, 0, 0]); await page.waitForTimeout(500); check('right stick flick turns the camera', Math.abs((await page.evaluate(() => DQ.game.yaw)) - yaw0) >= 89);
+await btn(5); check('R1 next hotbar slot', await page.evaluate(() => DQ.S.sel === 1));
+await btn(8, 150); await page.waitForTimeout(300); check('Create opens satchel', await page.evaluate(() => DQ.ui.top() && DQ.ui.top().panel === 'satchel'));
+await page.screenshot({ path: path.join(root, 'check-output', 'pad_satchel.png') });
+await btn(1); await page.waitForTimeout(200); check('circle closes it', !(await page.evaluate(() => DQ.ui.isOpen())));
+await page.evaluate(() => DQ.game.settings.set('glyphs', 'Xbox')); await page.waitForTimeout(400); await page.screenshot({ path: path.join(root, 'check-output', 'pad_xbox.png') });
+check('Xbox glyph setting applies', await page.evaluate(() => DQ.game.input.glyphs === 'xbox'));
+await btn(9, 150); await page.waitForTimeout(300); check('Options pauses', await page.evaluate(() => DQ.game.paused));
+console.log(errs.length || fails.length ? 'FAIL ' + JSON.stringify(fails.concat(errs)) : n + ' gamepad checks ok');
+await browser.close();

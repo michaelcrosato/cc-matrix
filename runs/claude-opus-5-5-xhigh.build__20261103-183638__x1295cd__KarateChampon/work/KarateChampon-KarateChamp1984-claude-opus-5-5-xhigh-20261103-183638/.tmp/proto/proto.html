@@ -1,0 +1,16 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#000}#screen{width:100%;height:100%;display:block;image-rendering:pixelated}</style></head><body><canvas id="screen"></canvas>
+<script src="../../engine/my-3d2dge.js"></script><script>window.AIHub=undefined;</script><script src="../../build/game.js"></script>
+<script>
+const E=My3D2dge, KC=window.KC; E.VIEWS.kcside=new E.View('kcside','Arcade side',0,0,1.2,1);
+const game=new E.Game({canvas:'screen',res:'ps1',expand:true,view:'kcside',bg:'#203040'});
+const ids=['frontKick','roundKick','backKick','upLunge','frontSweep','jumpSide','upperPunch','block'];
+const F=ids.map((id,i)=>{const f=new KC.Karateka({fid:['taro','mei','negi','buta','kikurage','ika','asari','kyabetsu'][i],side:i%2,x:30+i*48});f.x=30+i*48;return f;});
+const ref=KC.makeOfficial(2.1);
+const bg=new E.Backdrop('dusk');
+let t=0;
+game.start({update(dt){t+=dt; F.forEach((f,i)=>{const id=ids[i]; if(f.st!=='tech'&&!f.airborne){f.face=1; f.startTech(id,null); if(id==='block') f.blockHi=true;} f.update(dt,null); f.pose(dt);});
+ KC.poseStep(ref,dt,{sig:'full',side:1}); ref.update(dt,{x:210,y:-14,z:0,facing:Math.PI/2}); game.focus(200,0,60);},
+ draw(r){bg.draw(r); const fy=Math.round(r.w(0,0,0)[1]); r.overlay(g=>E.px.rect(g,0,fy,r.W,r.H-fy,'#8a6a4a'));
+  r.actor(210,-14,0,(g,ox,oy)=>ref.draw(g,ox,oy,r.view)); F.forEach(f=>f.draw(r)); r.text('PROTO',4,4,'#fff');}});
+window.__g=game;
+</script></body></html>

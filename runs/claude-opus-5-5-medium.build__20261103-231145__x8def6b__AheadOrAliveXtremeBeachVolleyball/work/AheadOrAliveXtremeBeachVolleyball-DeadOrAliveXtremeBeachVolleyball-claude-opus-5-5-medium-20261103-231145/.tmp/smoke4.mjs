@@ -1,0 +1,14 @@
+import { load } from '../test/lib/load.mjs';
+const { game, G } = load({ quiet: false });
+game.advance(1);
+const T = game.debug.tools; T.newVacation('rin', 3);
+const cfg = G.vacationMatchCfg(['tess', 'lola'], { partner: 'mei', points: 7 });
+cfg.cpuAll = true; cfg.after = (r) => { G.done = r; }; G.done = null;
+G.startMatch(cfg, { fade: 0 }); game.advance(.1);
+const M = G.M, P = G.Match.prototype; const miss = {}, why = [];
+const orig = M.aiStep.bind(M);
+M.aiStep = function (p) { const pl = p.plan; if (pl && this.clock >= pl.t) { const B = G.Ball.at(this.L, pl.t), d = Math.hypot(B[0] - p.x, B[1] - p.y); const k = pl.kind + (d > p.reach + 8 + p.diveBonus ? ':MISS' : ':ok'); miss[k] = (miss[k] || 0) + 1; if (d > p.reach + 8) why.push([pl.kind, Math.round(d), Math.round(pl.t - (p.planAt||0)), this.L.kind].join('/')); } return orig(p); };
+const op = M.plan.bind(M); M.plan = function (k) { op(k); for (const p of this.players) if (p.plan) p.planAt = this.clock; };
+G.bus.on('point', e => why.push('PT ' + e.side + ' ' + e.why + ' L=' + (M.L && M.L.kind)));
+for (let k = 0; k < 600 && !G.done; k++) game.advance(1);
+console.log(G.done && G.done.finalScore, JSON.stringify(miss)); console.log(why.join('\n'));

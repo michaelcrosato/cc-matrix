@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+process.env.TMPDIR = resolve('.tmp');
+const b = await chromium.launch();
+const file = 'file://' + resolve('../TideCrisis3-TimeCrisis3-claude-opus-5-5-xhigh-20261103-183153.html');
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto(file); await p.waitForFunction(() => window.TC && TC.game && TC.game.sceneName === 'title', null, { timeout: 30000 });
+await p.evaluate(() => { TC.debug.start({ stage: 2, scene: '2-3', cheats: { god: true } }); }); await p.waitForTimeout(13000); await p.screenshot({ path: 'shots/review_09b_funicular_2-3.png' });
+await p.evaluate(() => { TC.game.go('menu'); }); await p.waitForTimeout(500); await p.evaluate(() => TC.game.menu('settings')); await p.waitForTimeout(700);
+const txt = await p.evaluate(() => document.body.innerText);
+const glyphRow = await p.evaluate(() => { const el = [...document.querySelectorAll('.esh-sh *')].find(e => /glyph/i.test(e.textContent) && e.children.length < 3); if (el) el.scrollIntoView({ block: 'center' }); return el ? el.closest('div').innerText.replace(/\s+/g, ' ').slice(0, 160) : null; });
+await p.waitForTimeout(300); await p.screenshot({ path: 'shots/review_21b_settings_glyphs.png' });
+console.log('glyph row:', glyphRow); console.log('xbox mentioned:', /xbox/i.test(txt), 'playstation mentioned:', /playstation/i.test(txt)); console.log('errors', errs);
+await b.close();

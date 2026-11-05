@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:41:18",
+    "source": "The complete Summer and Winter Olympic Games (over-the-top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade multi-event sports (Track & Field / Winter Games lineage): 12 events with a campaign, local party play for 1-4 and AI Hub ghost heats",
+    "perspective": "Per event, on the engine's 2D views: 2.5D side-on lanes (100m, javelin, 50m freestyle, weightlifting), side view (10m platform, ski jump), a target close-up with a side-view inset (archery), pseudo-3D behind the athlete (downhill, bobsled), three-quarter (figure skating, ice hockey) and top-down (curling)",
+    "tech": "my-3D2dge v0.85.2 handoff (the full engine, with its road, rhythm and songs modules), modified in six places; AI Hub session client 1.4.0 (unmodified); plain JavaScript, no libraries or CDN; Node 24 for the headless tests and the bundler; Playwright 1.63.0 with Chromium for the browser tests, the hub harness and screenshots; one self-contained HTML file",
+    "artDirection": "The engine's native PS1-era pixel art (res ps1 with expand) with HD Humanoid rigs dressed per nation and sport; everything else drawn in code: eight waving flags, twelve pictograms, the Yikes Flame emblem, ten venues (stadium, pool, lawn, iron hall, jumping hill, piste, ice track, ice palace, curling club, arena), crowds of thousands, jumbotrons, medals, laurels and the mascot Yikesy",
+    "animation": "The engine's procedural Humanoid rigs (gaits, poses, flips, downs, the swim stroke) plus a pose layer of 40 new poses through a new engine pose hook with whole-body pitch and roll (sprint blocks, javelin carry and throw, tuck, pike, layout, archer's draw, clean and jerk, ski tuck, V-style flight, telemark, bobsled seats, skating spiral, sit spin and jumps, curling slide and sweep, hockey stances, ceremonies); equipment drawn at the joints",
+    "audio": "All in code on the engine's chip synth: 17 original songs (title fanfare, menu, parade march, an event song each with a hype layer for the turbo, the 3/4 'Waltz of the Yikes' rhythm chart, closing), stings, 40+ synthesized effects, a procedural anthem per nation, a living crowd bed with cheers and gasps, and Animalese/Simlish gibberish voices (formant-filtered syllables) for two commentators, the PA, the rival, a coach and the mascot",
+    "online": "AI Hub Session Protocol v1 in ghost mode ('Hub Heats': three dealt events on the hub's clock, other players as ghosts, progress, one result, time-up, end, our own card); local multiplayer 1-4 on one screen (gamepads and a split keyboard)",
+    "testing": "Headless Node suites (vm, game.advance, scripted input taps and holds, bots and the autopilot) and browser suites (Playwright against the bundled HTML from file://, an emulated phone for the touch-only notice, the AI Hub harness on a local server) behind one command, node tests/run.mjs, printing only failures and one count; plus screenshots and contact sheets for what scripts can't judge",
+    "research": "None online: the engine's and the hub's own docs (API.md, AI_GUIDE.md, the module headers, the hub README and harness) were read; the plan was followed",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "unknown cost and token count (no usage figures are visible to the model); session time about 1 h 50 min (07:41 to 09:31)"
+  },
+  "testingFeedback": [
+    "About 30 game issues across the session (not counting mistakes in the tests themselves). Roughly a third were balance misses found by the bot statistics (each event's perfect bot and skill .9 / .5 / .3 bots measured against target bands: the sprint, javelin, ski jump, downhill, bobsled, curling and hockey all needed retuning, and the YIKES armstand dive was impossible to complete). The rest were bugs: a figure-skating crash (assigning to the rhythm module's read-only total), swimmers who could pass through the wall because the BONK never triggered, an idle javelin thrower and an idle curler that stalled forever, the autopilot dropping every held jump, the attract mode missing a press during a scene fade, the ` key opening and closing the dev panel in one step, no hub traffic or progress during the first five seconds (the AI Hub harness failed), deep links calling a function before it was defined, negative hash indexes giving undefined colours, overlapping HUD and menu text, and a too-small pause menu on a TV.",
+    "Six would have been game breaking: the figure-skating crash, the swim wall pass-through, the two idle stalls (a round that never ends), the AI Hub harness failure (the hub would keep the game out of sessions) and the autopilot hold bug (it hid that the scripted playthrough could not finish figure skating).",
+    "The scripted playthrough of the whole Games through the real input path (taps on every screen, the autopilot in every event, ceremonies, story beats, autosaves and credits), with the second run that fails on purpose to reach the torches, GAMES OVER and CONTINUE; and, for balance, the per-event bot statistics by skill.",
+    "The determinism check (the same seed twice gives the same results): it never failed, because all gameplay randomness went through labelled streams from the start."
+  ],
+  "engineFeedback": [
+    "The fixed-step clock with game.advance and input.tap/hold: every event, the whole 12-day campaign and the hub round run headless, exactly, in seconds, so balance could be measured with bots instead of guessed. Close behind: the procedural Humanoid (dress it, pose it, it animates) and E.Road, which gave the downhill and the bobsled a convincing pseudo-3D view almost for free.",
+    "Yes, a few times. A scene change during a fade freezes the old scene's update, so input checked there was swallowed (fixed by moving the attract-mode exit into E.HOOKS.input). input.tap and input.hold on the same action share one code, so a tap released a hold (the autopilot dropped every figure-skating jump until I stopped tapping held actions). E.Rhythm's total is a getter, so trimming a chart by assigning it threw. r.box needs exactly nine arguments, and a hash shifted with >> went negative and indexed undefined colours (the engine's hex warning found it).",
+    "The EventKit: one contract for twelve different events (race, attempts, program and match formats), the pilots (human, bot, autopilot, perfect cheat), CPU attempts simulated in a sandbox with the same rules or played live as highlights, hype and turbo, results, records and qualifying. After it, the pose layer and the prompt-glyph renderer.",
+    "Characters seen from unusual angles and orientations: a diver upside down, a swimmer level in the water, a skier and a sled from behind on the road view. The rig is built for upright play in the standard views, so whole-body rotation needed an engine change, and the rear view needed a custom View drawn inside the road's overlay.",
+    "Six changes, each marked OLY: (1) E.HOOKS exported, for the hub's Create+Options guard and input seen every step; (2) cosmetic randomness (rig blinks and idle phase, particles, hit numbers) on its own stream instead of Math.random, so the hub card draws no random numbers and tests stay deterministic; (3) font glyphs for the PlayStation symbols and the punctuation the game prints; (4) PlayStation button symbols by default; (5) a pose hook (rig.post) and whole-body pitch and roll about a pivot, for flips, dives, swimming, tumbles and V-style flight; (6) a voice bus with its own volume setting for the gibberish voices, and music ducking under speech.",
+    "A first-class pose and orientation API on the Humanoid: named poses as data, blended in and out, plus whole-body rotation, so sports, acrobatics and vehicles don't need an engine patch."
+  ],
+  "promptFeedback": [
+    "It is concrete about what 'done' means: the 10-foot controller-first rules, the attract mode, the dev sliders with reset, the hub contract, the touch-only behaviour and the exact deliverables, and the plan turned the source into twelve events with targets a test can check.",
+    "Mostly the scale against the instruction to treat it as one complete vertical slice: twelve full events, ceremonies, a campaign, local and online multiplayer and a dev mode is a full game, so 'feature complete' had to mean every listed feature works with a balanced first pass rather than every detail polished. Also 'Usage: estimated API cost and tokens' when the model can't see its own usage.",
+    "Breadth with balance: twelve different mechanics each needed physics, a CPU that plays by the same rules, a target band and a skill curve, and the hockey and curling AIs took several rounds of measuring before a skilled side reliably beat a weak one.",
+    "Let the plan's scope scale with the build effort (or rank the features), and say what to do when the model can't know its usage (write unknown). A short list of the exact browser and screen sizes to check would also help."
+  ],
+  "aiHub": {
+    "name": "OLYMPIYIKES!",
+    "tagline": "Faster. Higher. Yikes.",
+    "description": "Twelve over-the-top Summer and Winter events in one wild fortnight: sprint, swim, fly off a ski jump, sweep stones and win the hockey final for your nation, alone or with up to four players.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "The Olympic Games",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD move · □○ or J K mash · ✕/Space act · △/Shift turbo · R2/L hold",
+    "tags": [
+      "2d",
+      "arcade",
+      "pixel art",
+      "comedy",
+      "versus",
+      "retro"
+    ]
+  }
+}

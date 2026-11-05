@@ -1,0 +1,56 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:50:13",
+    "source": "Operation Wolf (Taito, 1987)",
+    "plan": "PLAN.md",
+    "genre": "Shooter: first-person light-gun rail shooter",
+    "perspective": "First person on a scripted rail: sideways scroll and depth, 2.5D",
+    "tech": "my-3D2dge engine 0.85.2 handoff (JavaScript, 480x270 canvas pixel buffer, E.Game, E.Arcade, E.Input, E.font, chip audio); AI Hub client 1.4.0 (session.js, unmodified); Node vm for tests; Playwright 1.63.0 for screenshots and the hub harness; single HTML bundle",
+    "artDirection": "Pixel art made in code: procedural depth-scaled sprites, dusk and dawn palettes",
+    "animation": "Procedural: soldiers rise and drop from cover, closing telegraph rings, gun recoil, pickup bob, boss weave and sway, rocket and shell flight; the engine rig system is not used",
+    "audio": "Engine chip synth: sound effects defined in code, voice blips for radio captions (not Animalese), engine songs for music",
+    "online": "AI Hub session, mode shared-world, 1-4 players: the host simulates, other copies send inputs and draw from snapshots and events; local co-op on one machine (pads join before and during an operation)",
+    "testing": "Node: 85 checks (unit rules, six bot playthroughs, co-op, a two-copy session through an in-process hub, scene drive-through); browser: screenshots and page errors; AI Hub harness: two-player conformance run passed",
+    "research": "none (used the plan's summary of the source)",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium (Playwright, headless) for screenshots",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About eight issues were caught in the first build, seven in the game; the expansion to six operations and co-op added more, caught by the 85 checks and by the harness run.",
+    "Two would have broken the game in a browser: the canvas size (the game drew at 300x150 with no page CSS) and the first frame running before the bot file loaded (a crash on a deep link into the attract scene). Every other issue was a visible or rule-level defect, not a crash.",
+    "Most helpful: the bot playing each operation headless to its boss, and the screenshots, which showed the canvas and layout faults the logic checks could not.",
+    "Least helpful: the stub-buffer draw pass. It shows that drawing does not throw, not that it looks right."
+  ],
+  "engineFeedback": [
+    "E.Game gives the scene flow, pause menu, settings, input presets, audio and a headless loop for tests. E.Arcade gives the high-score table and initials entry for free.",
+    "Yes. The canvas stayed at its intrinsic 300x150 until I copied the template's canvas CSS; the start order (the first frame runs before later files load) cost a crash; and deep links only apply on a fresh page load.",
+    "The battle rules, the rail and beat generator, the telegraph ring logic, the depth painter for sprites (the engine's Mode 7 and rig systems were not used), the HUD, and the bot.",
+    "The API card is long, and the pixel primitives snap to whole pixels, so depth-scaled sprites needed a run-length painter of my own.",
+    "None. The engine was not changed.",
+    "A documented rule for the canvas size when a fixed res is used, and a note that the first frame can run before later script tags load."
+  ],
+  "promptFeedback": [
+    "The plan's exact names, file layout, test structure and done criteria. They made the deliverables unambiguous.",
+    "The task and the plan ask for far more than one run can build (six operations, AI Hub multiplayer, local co-op, rigs, Mode 7). The plan also names a different model and effort from the task; the task won, as the plan's own order said.",
+    "Multiplayer integration with the AI Hub harness, which needs the hub's client and harness files and a session flow to test.",
+    "Split it into milestones, each with its own done line, so a run can finish one and report the rest."
+  ],
+  "aiHub": {
+    "name": "Operation Wolfpack",
+    "tagline": "Wolves against hyenas, one rail at a time",
+    "description": "A first-person light-gun rail shooter inspired by Operation Wolf: six operations across the Brimstone Coast, shoot the Hyena Legion, spare the civilians, and bring the workers home. Co-op for up to four in one session.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Operation Wolf",
+    "series": "Operation Wolf",
+    "players": "1–4",
+    "controls": "Aim with mouse or stick; hold fire to shoot; grenade on X, K or right click; R reloads; Esc pauses",
+    "tags": [
+      "first-person",
+      "retro",
+      "pixel art",
+      "boss fights"
+    ]
+  }
+}

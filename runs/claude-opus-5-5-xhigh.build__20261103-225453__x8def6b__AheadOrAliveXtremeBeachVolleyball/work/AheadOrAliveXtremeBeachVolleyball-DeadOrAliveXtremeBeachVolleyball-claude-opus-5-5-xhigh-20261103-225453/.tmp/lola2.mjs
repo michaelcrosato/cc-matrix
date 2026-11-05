@@ -1,0 +1,11 @@
+import { load } from '../test/lib/load.mjs';
+import { playUntil } from '../test/lib/bots.mjs';
+const { game, G } = load({});
+game.advance(.3);
+game.go('charselect', null, { fade: 0 }); game.advance(.1); game.scene.pick('tess');
+playUntil(G, game, () => game.sceneName === 'match', 120);
+const M = G.M; M.cpuControl = true; M.perfectPlayer = true; const log = [];
+G.bus.on('touch', e => log.push(M.now.toFixed(1) + ' ' + e.p.cast + ' ' + e.kind + ' ' + e.q));
+G.bus.on('point', e => log.push('  POINT ' + e.side + ' ' + e.why + ' ' + (M.lastPoint && M.lastPoint.kind) + ' last=' + (M.lastTouch && M.lastTouch.cast) + ' L=' + (M.L && M.L.kind)));
+playUntil(G, game, () => M.phase === 'results', 300);
+console.log(log.filter(l => l.includes('POINT') || l.includes('lola')).slice(0, 60).join('\n'));

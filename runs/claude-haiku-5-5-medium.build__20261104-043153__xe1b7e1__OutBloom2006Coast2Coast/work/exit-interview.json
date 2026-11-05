@@ -1,0 +1,59 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 04:31:53",
+    "source": "OutRun 2006: Coast 2 Coast (SEGA / Sumo Digital, 2006), used as inspiration only",
+    "plan": "PLAN.md",
+    "genre": "Arcade road racer, with a passenger-request layer and a checkpoint route",
+    "perspective": "Third-person chase camera on a sprite-scaled pseudo-3D road",
+    "tech": "my-3D2dge engine v0.85.2 (handoff, MIT), JavaScript, Canvas 2D, Web Audio (the engine chip synth)",
+    "artDirection": "Engine pixel art at 480x270, drawn in code (px shapes), dusk and sunrise palettes",
+    "animation": "Engine sprite and px drawing; wheels, wind turbines, balloons, lights and a bobbing passenger",
+    "audio": "Music and effects written in code on the engine synth; voices are syllable babble, no files",
+    "online": "AI Hub ghost mode (Session Protocol v1, client 1.4.0): each copy runs its own Flower Sprint round and sends its car and progress to the others; no other network use",
+    "testing": "tests/run.mjs (155 headless checks through the engine), a fake-hub round, the AI Hub harness in Chromium (2 players; 4 players with latency and loss; host leaving), Chromium runs of the root file over file:// with screenshots of scenes, forks and stages, the radio songs played in Chromium with no warnings, and a touch phone",
+    "research": "Engine docs and the road kit read in full; the AI Hub protocol README; the plan; source facts from public summaries only",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium through Playwright for the browser checks",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About twenty real defects surfaced through the checks and the runs: a stage transition that dropped the carried distance, a goal that re-entered its own stage, a fork that read stage definitions as built stages, a bus used before it was set, a drift exit tied to the wrong value, a curve push applied as a velocity increment, drag that capped top speed near 170 km/h, a time-based traffic spawner, lane changes that oscillated, a garage row count that sent START back to the menu, a hub ready() sent before the hub had welcomed the copy, and a mission photo judged too early.",
+    "Four would have broken a run outright: the stage skip, the goal re-entry, the fork crash and the bus crash on the first race. The browser runs also found the garage row and the hub ready() order, which the protocol checks would have failed.",
+    "Most helpful: the full-route bot runs, which play all 16 forks to their goals with real distances, and the official AI Hub harness in Chromium, which checked the real protocol with latency and loss.",
+    "Least helpful: the draw smoke test. It only shows that drawing runs without an exception on a no-op renderer, so the screenshots in Chromium were the real check of what appears on screen.",
+    "Not verified: the balance on a pad (the bot is the only driver), the feel of the drift, the audio on real speakers, and the look of every stage and ending."
+  ],
+  "engineFeedback": [
+    "Most liked: the road module. E.Road with segments, curves, hills, place() and project() gave a working pseudo-3D road quickly, and the kit gave a complete reference game to read. The split-screen drawing (sc.draw once per viewport, then hud once) made a two-driver race a small job.",
+    "Got stuck on: the game.go options (the fade is the third argument), the pause-menu item and setting shapes, the headless draw path (road.draw needs a canvas stub), and the AI Hub client, whose ready() is dropped unless it is called after the hub has welcomed the copy.",
+    "Most important thing built myself: the car model (acceleration calibrated to each car's 0-100 rating, steering with the curve push, drift, slipstream, off-road, manual gears), the traffic and lane logic, the driver brain, the run and request rules, the missions and their pacers.",
+    "Hardest part: a fork needs two roads drawn at once, and road.draw paints one road over the frame. Without a split-road renderer the fork is only signposted. Versus cars do not collide, because each driver has their own race.",
+    "Changed in the engine (engine/CHANGES.md): analog input (E3), the hub corner guard (E4), the PlayStation glyph default (E5), the synth extension (E6: named presets, chords, accents, slides, FM, unison, filters, pan, drum sounds, track sends to a delay and a convolution reverb, and a voice bus), continuous voices (E7), road dressing (E2: ground, walls, rails and spans) and the 10-foot shell sizes (E8). The fork renderer (E1) is game code on the road module's internals.",
+    "One change I would make: a headless renderer or canvas stub in the engine, so draw code can run in tests without a browser, and a built-in split-road renderer, so forks need no game code."
+  ],
+  "promptFeedback": [
+    "Most liked: the plan is concrete. Every tuning number, every stage layout and every test suite is written down, and the AI Hub protocol is a precise README with a harness to run.",
+    "Confusing: the plan was written for a different run (another model, date and folder names). It asks for far more than one session can build without a cut list, and its stage lengths and its speed model do not agree (a 194,000-unit stage at top speed takes about 59 s, with no losses), so the bot could not meet the 52 to 64 s target until the stages were shortened by 20%.",
+    "Hardest: getting the bot to finish the routes and the balance windows without a pad, and making a fork read as a fork without a split-road renderer.",
+    "Would change: give each run its own names and dates, state what to cut when time runs short, state the stage length and the clock as one rule, and say whether the bot uses the player's physics."
+  ],
+  "aiHub": {
+    "name": "OutBloom 2006: Coast 2 Coast",
+    "tagline": "One day. One road. Every flower in bloom.",
+    "description": "An arcade road racer across the island of Bellafiore: drive to the coast, pick your forks, please your passenger, and race your friends in ghost mode.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "OutRun 2006: Coast 2 Coast",
+    "series": "OutRun",
+    "players": "1–4",
+    "controls": "Steer: stick or A/D • Gas: R2 or W • Brake: L2 or S • Drift: circle or Space • Pause: Options or Esc",
+    "tags": [
+      "arcade",
+      "vehicles",
+      "pixel art",
+      "retro",
+      "comedy",
+      "versus"
+    ]
+  }
+}

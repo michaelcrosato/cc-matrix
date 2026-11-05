@@ -1,0 +1,50 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:47",
+    "source": "Mad Men (2007-2015)",
+    "genre": "Narrative adventure with pitch card-play (Adventure / Life Sim)",
+    "perspective": "Three-quarter view (switchable to isometric and top-down)",
+    "tech": "my-3D2dge v0.85.1 (2D engine, canvas), one HTML file, AI Hub session client 1.3.0",
+    "artDirection": "Engine-native HD pixel look: 3D skeleton Humanoids drawn as pixel art, a lit 1963 office with warm lamps",
+    "animation": "Engine Humanoid rigs (poses, expressions, live portraits), tweens and scripts",
+    "audio": "All code-written: cool-jazz music, typewriter and office sound effects, Animalese-style gibberish voices",
+    "online": "AI Hub Session Protocol v1, parallel mode, 1 to 4 players, each with their own copy of the day",
+    "testing": "Headless engine tests (systems, attract mode, AI Hub), AI Hub harness conformance check, real-browser playthrough with keyboard, mouse, fake gamepad and touch emulation, WebKit viewport matrix",
+    "research": "Read the engine handoff and AI Hub docs; none online about the show, tone from memory",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 12 real defects: the office door sealed by filing cabinets, no TRUTH card from the files, Escape pausing instead of closing the notebook, mouse hover never activating, stick inversion not applied when the property was read-only, HUD and pitch cards overlapping, a card text overflow, and the elevator sitting under the start position.",
+    "Two: the sealed Hollis office door (NPC pathing could never leave the office) and the missing TRUTH card (the ledger gave no card, so the typewriter and pitch were short one theme).",
+    "The headless systems test that drove every interaction through the debug handle, and the browser playthrough with screenshots; the first found logic faults, the second found layout and input-device faults.",
+    "The viewport matrix: it came back clean on all 13 sizes and showed nothing the playthrough had not already shown."
+  ],
+  "engineFeedback": [
+    "The fixed-step headless mode (game.advance) with scripted input, plus ready-made Humanoid rigs, live dialog portraits, lighting, settings, saves and the pause menu, so no standard screens had to be built.",
+    "Yes: Dialog calls onChoice and then onDone on the same object (a chained say() in onChoice fires the new onDone at once); FlowField treats tall walls as separate islands; input.lastDevice does not switch to mouse on movement; the engine's own glyphs setting needed overriding for PlayStation-first.",
+    "The conversation runner (nodes as data with conditions and effects), the two timing mini-games, the notebook, the pitch card game, the attract-mode bot and the gamepad axis inversion wrapper.",
+    "Knowing which behaviours were engine-owned (pause on Escape, click handling, dialog callbacks) versus mine, since the manual lists names but not interaction order.",
+    "Nothing to remove; the pause menu taking Escape unconditionally could be a per-mode setting.",
+    "A first-class option for inverted stick axes and a mouse-hover input flag, both common needs on a controller-first TV game."
+  ],
+  "promptFeedback": [
+    "The clear deliverable list (attract mode, hub, 10-foot controller-first rules, touch-only message) made it easy to check completeness, and the exit-interview JSON shape was exact.",
+    "'Native perspectives' versus the point-and-click row of the playbook, and whether the hub's 'no title screen in a session' also applies to the ending screen.",
+    "Making a single game cover narrative, exploration and two mini-games well enough to feel like a complete vertical slice with one author and no art assets.",
+    "A real DualSense soak test on a TV at 10 feet, checking glyphs, stick feel and dead zones on actual hardware."
+  ],
+  "aiHub": {
+    "name": "Mad Mugs",
+    "tagline": "Faces sell. Souls are extra.",
+    "description": "One Tuesday at a 1963 Madison Avenue agency: find out what the client wants, write the line, then pitch it across the table. A Mad Men spiritual successor with real choices and a few drinks.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Mad Men",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD walk; ✕ or E talk and use; □ or N notebook; △ or V change view; mouse: hover and click to walk and talk",
+    "tags": ["story", "comedy", "retro", "exploration", "3d", "pixel art"]
+  }
+}

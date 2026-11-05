@@ -1,0 +1,10 @@
+import { open, waitStarted } from '../lib/browser.mjs';
+const { browser, page } = await open('', { w: 960, h: 540 }); const ev = f => page.evaluate(f);
+await waitStarted(page); await page.waitForTimeout(800); await ev(() => S7.newGame()); await page.waitForTimeout(800);
+await ev(() => { S7.game.debug.skipCutscene(); S7.game.debug.teleport('00A', 'j2'); S7.st.done['00A:tw1'] = true; S7.game.debug.skipCutscene(); S7.st.mode = 'junction'; S7.sim.setupJunction(S7.graph().nodes.j2, null); S7.st.jLock = false; });
+await page.waitForTimeout(600);
+const z = await ev(() => S7.ui.zones.filter(z => z.kind === 'branch').map(z => ({ r: z.r, i: z.i }))); console.log('zones', JSON.stringify(z), 'opts', await ev(() => S7.st.options.length));
+await ev(() => { window.__c = []; const I = S7.game.input, o = I.clicked.bind(I); I.clicked = () => { const r = o(); if (r) __c.push(r); return r; }; });
+const t = z[z.length - 1], cx = (t.r[0] + 12) * 2, cy = (t.r[1] + 12) * 2; await page.mouse.move(cx, cy); await page.mouse.down(); await page.waitForTimeout(100); await page.mouse.up(); await page.waitForTimeout(500);
+console.log('target css', cx, cy, 'clicks', JSON.stringify(await ev(() => __c)), 'edge', await ev(() => S7.st.edge + ' ' + S7.st.mode), 'locked', await ev(() => !!document.pointerLockElement));
+await browser.close();

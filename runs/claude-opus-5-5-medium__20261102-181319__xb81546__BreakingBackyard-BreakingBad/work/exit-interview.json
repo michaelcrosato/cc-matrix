@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "Breaking Bad (2008-2013), the AMC TV series",
+    "genre": "Crime action-adventure with a chemistry-cook minigame, street dealing, light stealth (DEA sight cones) and boss fights",
+    "perspective": "Three-quarter top-down (engine-native 'threequarter' view); the player can switch to top-down and isometric at any time (V / R3)",
+    "tech": "my-3D2dge engine v0.85.1 (full edition, single JS file, canvas 2D, no dependencies); plain JavaScript in one IIFE; AI Hub Session Protocol v1 client 1.3.0 (session.js); Node 24 build script; tests with Node vm (headless engine) and Playwright 1.63 (Chromium, WebKit, Firefox)",
+    "artDirection": "Engine-native retro-modern pixel art: 320x240 base resolution expanded to any screen, HD shaded Humanoid rigs, data-defined shapes (custom RV, cars, lab tables, reactor tanks, washers), procedural floor textures, a sun-bleached New Mexico palette, canvas lighting with a day-to-night cycle",
+    "animation": "Engine-native procedural skeletal rigs (E.Humanoid) driven by velocity, E.MOVES attacks (jab/cross/hook combo, overhead chops), dodge rolls, poses (hips, wave, kneel, down), tweens and coroutine scripts for the attract demo",
+    "audio": "All code-written: six original chip-synth songs in the engine's step notation (title, town with a tension layer, cook, fight, boss, ending), synthesized sound effects, and gibberish 'Simlish' voice acting with a per-character pitch and waveform for every speaker",
+    "online": "AI Hub ghost mode 'The Cook-Off' for 1-4 players (seeded identical towns, live ghost positions with names in seat colours, progress, result, time-up and end handling); local 2-player drop-in co-op (Dusty) on a second pad or the right half of the keyboard",
+    "testing": "Headless Node tests (46-check full story playthrough, 75 system checks), a Playwright real-input browser playthrough of all five episodes, 15 scene checks in Chromium plus WebKit, the AI Hub harness in 4 scenarios, and viewport-matrix over 24 phone/tablet/desktop/ultrawide profiles in Chromium, WebKit and Firefox. Real iOS Safari and real gamepads were not available (WebKit iPhone profiles and a fake gamepad object stood in)",
+    "research": "No web research; read the engine's handoff docs (README, API card, guide sections, asset card) and the AI Hub protocol README and examples. The show's details are from memory",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "Session time about 61 minutes (18:13 to 19:14 by the system clock); API cost and token counts unknown"
+  },
+  "testingFeedback": [
+    "16 issues: a dialog choice that advanced the story twice (skipping a step), story NPCs that were never placed in the world (Vela's office was empty), Escape closing a menu also opening the pause menu, the cook's measure stage waiting forever without input, no guidance when product ran out mid-objective, deep links overridden by the boot screen, touch-only detection failing on WebKit iPhone profiles, a missing font glyph showing as '?', toasts over the HUD, the title tagline over the menu, a patio table on the start spot, the cook's radio covering its gauges, the shop resetting focus after each purchase, buyers spawning too slowly, narrow-screen HUD collisions, and the About page crashing before its data existed.",
+    "2 were critical: the double-advance after a dialog choice (it silently skipped the Episode 3 sleep step) and the missing NPCs (objectives pointed at empty spots, so the story read as broken).",
+    "The real-input browser playthrough: walking by held keys, cooking by timed key presses, fighting with mouse aim and clicks, menus by keys and mouse. It found the Escape/pause conflict, the out-of-product dead end and, through its screenshots, the missing NPCs.",
+    "The broad viewport-matrix sweep of the in-game town: all 24 profiles came back clean, and with a pixel-art canvas that scales by itself there was little new for it to find after the first phone screenshot."
+  ],
+  "engineFeedback": [
+    "Standard features for free: pause menu, settings, rebinding, glyph families, save slots, boot screen, the canvas HUD primitives and E.Dialog with live portraits. Plus a headless engine with exact fixed steps, so the whole story can be played and tested in Node in a couple of seconds.",
+    "Yes, a few times: the boot sequence overrode a game.go() issued right after game.start() (deep links landed on the title); a Dialog choice closes the box after onChoice, so opening the next line inside onChoice got closed and fired its onDone early; and two players sharing a keyboard silently move player 1 onto F/G/H, which made a prompt test read 'F' instead of 'E'.",
+    "The cook minigame (measure, heat, crystallize, with purity scoring), the DEA patrol loop around E.Suspicion and E.sees (heat, busts, smoke blinding), the 10-foot menus with mouse hover and click, the story/episode event system, the attract-mode demo script, and the AI Hub ghost-mode round.",
+    "Knowing which calls are safe at which moment in the frame (go() during boot, say() inside dialog callbacks, when pausable is read relative to the scene's update) is not in the API card, so it took testing to find out.",
+    "E.Menu's fixed small type. For a 10-foot, controller-first game I had to write my own menu (bigger rows, a note line, mouse rects); a scale or 'tv' option on E.Menu would remove that duplicate work.",
+    "Document the frame order around scene switches and dialog callbacks (or queue say() calls made from callbacks), and expose a built-in 'invert stick X/Y' controller setting next to invert aim, so games don't have to wrap navigator.getGamepads."
+  ],
+  "promptFeedback": [
+    "It is concrete about the player's living room: a DualSense at ten feet, glyphs following the last device, a native-feeling mouse, touch-only behaviour, and even the real-world inverted-axis quirk. That made the input and UI goals unambiguous.",
+    "How much of the source to borrow while staying original (I used original names and riffs on the show's beats), whether 'every feature' includes multiplayer story co-op or only hub support, and the Usage line, since the session cannot see its own token counts.",
+    "Scope: five episodes of story, a minigame, stealth, combat, two bosses, attract mode, local co-op and hub multiplayer in one session, all of it tested, without leaving stubs anywhere.",
+    "A real controller on a real TV (DualSense over Bluetooth in Chrome and Safari), to verify the glyphs, the stick inversion toggles and the rumble on actual hardware instead of a fake gamepad object."
+  ],
+  "aiHub": {
+    "name": "BREAKING BACKYARD",
+    "tagline": "Cook. Deal. Launder. Survive.",
+    "description": "A chemistry teacher, his old student and an RV in the backyard: cook pure product, sell it under the DEA's nose, launder the cash and take on a taco franchise's empire across five episodes. Hub rounds are a 4-minute ghost-mode cook-off.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Breaking Bad",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD or stick move, E or Cross interact, mouse or right stick aim, click or Square punch/shoot, RMB or R1 throw flask, Space or Circle roll, Tab ledger, V view",
+    "tags": [
+      "2d",
+      "pixel art",
+      "story",
+      "comedy",
+      "boss fights",
+      "co-op"
+    ]
+  }
+}

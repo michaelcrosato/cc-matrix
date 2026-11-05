@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "The Wire (HBO, 2002-2008), created by David Simon; original story and characters inspired by its tone",
+    "genre": "Stealth / investigation (surveillance stealth, a pager-code and wiretap puzzle, a case-board puzzle)",
+    "perspective": "Three-quarter top-down (engine threequarter view), switchable to top-down and isometric with V or R3 in the street chapters; side view on the title",
+    "tech": "my-3D2dge v0.85.1 (full engine, one file, HTML5 canvas and Web Audio), AI Hub session client 1.3.0 (protocol 1), plain JavaScript bundled into one HTML file by a small Python script",
+    "artDirection": "The engine's native look: PS1-resolution pixel art expanded to fill the screen, HD Humanoid rigs dressed for West Baltimore, textured TileMap rowhouses and containers, canvas lighting from street lamps and fire drums, rain at night",
+    "animation": "The engine's procedural skeletal rigs (E.Humanoid) driven by velocity and poses, live dialog portraits, E.Mover movement",
+    "audio": "Code-written chip music (seven original songs, stealth layers that add drums when you are watched), code-written sound effects (shutter, pager, phone ring, tape), Animalese-style gibberish voices pitched per character and per vowel",
+    "online": "AI Hub Session Protocol v1, ghost mode: each player runs the corner chapter, sends their detective's position through the hub, sees the others as ghosts, reports progress and a score",
+    "testing": "Headless Chromium (Playwright) screenshots and scripted playthroughs of every scene with state checks; the AI Hub harness (ghost, 2 players; 4 players with latency, jitter and loss; host-leave), all passing; emulated iPhone 13 (WebKit) and Pixel 7 (Chromium) for the touch-only notice and attract mode. Real iOS Safari and a real controller were not available; a full end-to-end scripted playthrough of all four chapters, the ending and the credits on the final bundled file; a full attract-mode cycle through all four chapters",
+    "research": "None online; built from knowledge of the show and the engine's own documentation",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "14 issues: the camera not following during the first briefing, center lines drawn as yellow squares, unreadable heat badges, a missing middle-dot glyph, the case board overflowing a 240-pixel screen, the minimize prompt naming Escape (which pauses), a crash when pinning a photo, fiends stuck behind buildings, the player car missing its body at the pier, the heat panel under the touch menu button, the wall clock over the room title, a syntax error from a bad text edit, and a second crash when the pin button was pressed on a full board, and the attract demo skipping the last chapter (both found by the final end-to-end runs).",
+    "3 were game breaking: the crash when pinning a photo (chapter 3 could not be finished), fiends stuck on buildings (the corner could stall), and the syntax error (a blank page).",
+    "A full scripted playthrough of all four chapters on the bundled file, pressing through dialogs like a player and reading the game state at each step; it found the board crashes and the stuck fiends.",
+    "Waiting in real time for timed events in the browser; reading the state handle told me the same thing faster."
+  ],
+  "engineFeedback": [
+    "Sight, suspicion and sight cones (E.sees, E.Suspicion, r.sightCone) work together out of the box, and dialogs with live portraits made the cast feel real for free.",
+    "I guessed that a Mover takes world directions from an intent object (it does) and that the pixel font had PlayStation symbols (it does not, so I drew the glyphs myself). I also guessed wrong that E.Dialog's voice is fixed per box; it is read per letter, which let me build the gibberish voices.",
+    "The camera lens and photo-evidence system: a reticle on the ground, framing, range and line-of-sight checks for each moment worth a picture, and polaroids made from rig portraits.",
+    "Finding which options wall types and props accept (windows, doors, halos, cones) without reading the source: the options are spread across the card, the index and the guide.",
+    "The overlapping documentation (card, index, guide, kit headers); one searchable reference with an example per option would be enough.",
+    "Add PlayStation and Xbox button glyphs to the pixel font, so input.label() can be printed directly in prompts."
+  ],
+  "promptFeedback": [
+    "The freedom to choose the genre: The Wire is not an action show, and a surveillance game fits it far better than a shooter would.",
+    "The file name pattern [GameTitle-SOURCE-...] leaves word separators open, and multiplayer 'for the game on its own' could mean local or online play.",
+    "Fitting every requirement (attract mode, hub, controller-first UI, glyph families, touch notice, four chapters) into one session while keeping the tone right.",
+    "A real DualSense on a TV at ten feet, to judge prompt size and readability where it matters."
+  ],
+  "aiHub": {
+    "name": "WIRE ME UP",
+    "tagline": "a surveillance story of West Baltimore",
+    "description": "Sit on a West Baltimore corner with a long lens, photograph the hand-to-hands without getting made, crack the crew's pager code, work the wire by the rules, and build the case up to a man nobody has ever photographed.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "The Wire",
+    "series": "",
+    "players": "1–2",
+    "controls": "WASD or stick to move, right mouse or L2 to raise the camera, click or R2 to photograph, C or Circle to crouch, E or Cross to interact",
+    "tags": [
+      "stealth",
+      "story",
+      "top-down",
+      "pixel art",
+      "co-op",
+      "crime"
+    ]
+  }
+}

@@ -1,0 +1,6 @@
+import vm from 'node:vm'; import { readFileSync } from 'node:fs';
+const ctx = { console, performance, setTimeout, clearTimeout, setInterval, clearInterval }; vm.createContext(ctx);
+vm.runInContext(readFileSync('engine/my-3d2dge.js', 'utf8'), ctx); vm.runInContext(readFileSync('build/game.js', 'utf8'), ctx);
+const E = ctx.My3D2dge, game = E.current, dbg = game.debug; await new Promise(r => setTimeout(r, 100));
+const { Sim, R3, Bot } = dbg; const sim = new Sim({ scene: '3-4', stage: 3, players: [{}], cheats: { god: 1, ammo: 1 } }); Bot.setStyle('fair'); Bot.st = {}; const p = sim.players[0];
+for (let i = 0; i < 120 * 40; i++) { const cmd = Bot.command(sim, p, 1 / 120); sim.step(1 / 120, [cmd]); if (i % 240 === 0) { const S = Bot.S(0); const tg = Bot.pickTarget(sim, p, sim.pose(0), S, { react: .3, speed: 2.2, head: .3 }); console.log((i / 120).toFixed(0), sim.phase, 'rail', sim.rail.toFixed(0), 'z', sim.pose(0).z.toFixed(0), 'tg', tg && [tg.id, tg.pri, tg.ax.toFixed(2), tg.ay.toFixed(2), !!tg.pre], 'aim', S.ax.toFixed(2), S.ay.toFixed(2), 'c', p.c.toFixed(1), 'en', sim.enemies.filter(e => !e.dead).map(e => e.type + '@' + [e.x, e.y, e.foot].map(Math.round) + ' p' + e.p.toFixed(1) + e.st).join(' ')); } }

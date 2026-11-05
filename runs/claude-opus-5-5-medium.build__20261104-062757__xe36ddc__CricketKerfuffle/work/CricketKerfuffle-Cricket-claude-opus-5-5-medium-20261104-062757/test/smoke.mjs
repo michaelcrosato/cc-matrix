@@ -1,0 +1,12 @@
+import vm from 'node:vm'; import { readFileSync } from 'node:fs';
+const ctx = { console }; vm.createContext(ctx);
+vm.runInContext(readFileSync(new URL('../engine/my-3d2dge.js', import.meta.url), 'utf8'), ctx);
+vm.runInContext(readFileSync(new URL('../dist/game.js', import.meta.url), 'utf8'), ctx, { filename: 'game.js' });
+const E = ctx.My3D2dge, game = E.current, D = game.debug, I = game.input;
+game.advance(1); console.log('scene', D.snapshot().scene, 'errors', game.errors.length);
+I.tap('confirm'); game.advance(.5); I.tap('confirm'); game.advance(1); console.log('scene', D.snapshot().scene);
+D.startMatch({ mode: 'quick', teams: ['ker', 'mud'], ground: 'green', humans: [[], []], overs: 1 });
+game.advance(1); console.log('scene', D.snapshot().scene, D.snapshot().match && D.snapshot().match.state);
+for (let k = 0; k < 120 && D.snapshot().scene === 'match'; k++) game.advance(1);
+console.log('after', D.snapshot().scene, JSON.stringify(D.snapshot().match && D.snapshot().match.result));
+console.log('errors', game.errors.length, game.errors.slice(0, 3).map(e => (e.stack || e.message || String(e)).split('\n').slice(0, 4).join(' | ')));

@@ -1,0 +1,16 @@
+import { load } from '../tests/lib/load.mjs';
+const { B, game } = load();
+B.reseed(3);
+const P0 = new B.Player(0, null), play = new B.Play({ players: [P0] }), site = play.startSite('hollow-1');
+site.co = { step() {}, done: false }; site.critCo = null;
+const buck = site.S.pattern('stand', { kind: 'buck', from: [-2, 46], at: [0, 46], to: [2, 46], secs: 99 }); buck.pathD = buck.path.length / 2; buck.orders = [['stand', 99]];
+for (let k = 0; k < 30; k++) play.update(1 / 120);
+console.log('buck', buck.x.toFixed(1), buck.y.toFixed(1), buck.z.toFixed(2), 'state', buck.state, 'gone', buck.gone, 'cam', site.lens.x.toFixed(1), site.lens.y.toFixed(1), site.lens.z.toFixed(1));
+const pt = B.aimPointOf(buck, 'heart'), P = site.lens.project(...pt);
+console.log('heart', pt.map(v => v.toFixed(2)), 'screen', P && P.map(v => v.toFixed(1)));
+const r = B.castShot(site, site.lens, P[0], P[1]);
+console.log(r.kind, r.zone, r.t.toFixed(2), r.crossed, 'dist to heart', Math.hypot(pt[0]-site.lens.x, pt[1]-site.lens.y, pt[2]-site.lens.z).toFixed(2));
+const doe = site.S.pattern('stand', { kind: 'doe', from: [-2, 36], at: [0, 36], to: [2, 36], secs: 99 }); doe.orders = [['stand', 99]];
+doe.x = pt[0] * .9 + site.lens.x * .1; doe.y = pt[1] * .9 + site.lens.y * .1; doe.z = site.world.groundAt(doe.x, doe.y); doe.heading = buck.heading; doe.syncRig(0, site);
+console.log('doe', doe.x.toFixed(1), doe.y.toFixed(1), doe.z.toFixed(2), 'origin', doe.rig.origin.map(v=>v.toFixed(2)), 'buck heart z', pt[2].toFixed(2));
+const r2 = B.castShot(site, site.lens, P[0], P[1]); console.log(r2.kind, r2.actor && r2.actor.kind, r2.zone, r2.t.toFixed(2));

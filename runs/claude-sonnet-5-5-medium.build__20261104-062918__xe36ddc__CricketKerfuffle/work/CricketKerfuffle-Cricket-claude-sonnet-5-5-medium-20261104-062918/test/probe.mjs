@@ -1,0 +1,13 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const file = resolve(process.argv[2]);
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+page.on('pageerror', e => console.log('ERR', String(e)));
+await page.goto(pathToFileURL(file).href);
+await page.waitForTimeout(2000);
+await page.evaluate(`My3D2dge.current.debug.startMatch({mode:'quick',overs:1,wickets:2,diff:1,opp:'witt',ground:'green',chaos:'none',seed:5})`);
+await page.waitForTimeout(3000);
+console.log(await page.evaluate(`(()=>{const g=My3D2dge.current,v=g.view;return JSON.stringify({view:v.id,yaw:v.yawDeg,pitch:v.pitchDeg,scale:v.scale,zoom:g.zoom,cam:[g.cam.x,g.cam.y],W:g.W,H:g.H,sSY:v.p(448,330,0),sBY:v.p(448,650,0),sMid:v.p(448,490,0)})})()`));
+await browser.close();

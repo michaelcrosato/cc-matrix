@@ -1,0 +1,50 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 19:40",
+    "source": "Breaking Bad (2008-2013)",
+    "genre": "Crime action-adventure: cooking minigame, selling, money laundering, light stealth against cops, melee and pistol combat, a boss fight",
+    "perspective": "Three-quarter top-down (the engine's threequarter view), switchable in play to top-down and isometric",
+    "tech": "my-3D2dge v0.85.1 (full engine from the handoff package, no edits), plain JavaScript bundled into one HTML file; AI Hub session client 1.3.0 (ghost mode); Node and Python Playwright for tests",
+    "artDirection": "The engine's own PS1/SNES hybrid look: HD pixel-rigged Humanoid characters, textured tile maps, canvas lighting with a day and night cycle, an HTML HUD in a dark green theme",
+    "animation": "The engine's Humanoid skeleton rigs, E.Combo and E.MOVES for melee, poses, hit-stop and shake, particles and tweens",
+    "audio": "All code-written: original songs in the engine's note strings (title, explore, cook, chase, boss, victory, report), synthesised sound effects, and gibberish animalese voices (one tone per letter, a pitch and timbre per speaker). No audio files",
+    "online": "AI Hub session protocol v1, ghost mode, 1 to 4 players: each copy sends its Walt's position and shows the others; the score is cash earned; plays alone too. No other network use",
+    "testing": "Headless Node tests of the rules (46 checks), every game system (77 checks) and a bot that plays days 1 to 5 by the rules with real inputs and beats the boss (11 checks, 7 of 8 dice seeds), and the attract mode played headless through a full loop (16 checks); Python Playwright checks in Chromium for the attract mode, gamepad glyphs, inverted sticks, touch-only mode, About screen and hub tags; the AI Hub harness at 1, 2 and 4 players with latency, jitter and loss, and a host-leave scenario (all pass); screenshots reviewed. Real iOS Safari and a real DualSense were not available",
+    "research": "Light: the show's premise, tone and character types from memory (names are parodies). Read the engine handoff API card and the AI Hub session protocol and harness. No web research on the show",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 14 issues: a wrong camera call, uneven lab map rows, the attract mode freezing on its first dialogue and again on the car wash menu, props sealing the corridor to the RV and jamming the store walkway and car wash bays so the pathfinder got stuck, a start with no money (a soft lock), a $18,000 goal that the launder cap made impossible, the day clock running inside the boss room, a run-on shop line, a leftover setTimeout call, and the boss tuned wrong several times.",
+    "5 critical: the no-money soft lock, props blocking the way to the cook station, the unreachable goal, the clock ending the game in the middle of the boss fight, and the attract mode stalling.",
+    "The scripted playthrough bot. It uses only real inputs (key holds and taps) and the engine's own flow field, from the title to the ending, so it found the stuck-on-props bugs, the soft lock, the clock bug and the balance problems that no unit test could.",
+    "The rules unit tests: 46 checks, all passed the first time and found nothing. They are a good regression guard, but the bugs were all in how the pieces fit together."
+  ],
+  "engineFeedback": [
+    "Everything that comes for free: Humanoid rigs with live portraits, E.Combo and E.MOVES, E.Shell for the HUD, the pause, settings and controls screens, input.label() with PlayStation and Xbox glyphs, saves, boot steps, and above all the exact-step headless mode (game.advance) that let a bot play the whole game in three seconds.",
+    "Yes. I treated game.cam.snap as a method and it is a boolean. I assumed the FlowField knows about solid shapes from map.solid and it does not: bodies stop at props but paths run straight through them, which stuck the player, cops and rivals. I also had to find out that Dialog pages are arrays of lines and that custom Shell screen names work with ui.show.",
+    "The game layer: the economy and its rules, the cooking minigame, an interaction (stations) system with mouse hover, the AI for customers, cops, rivals and the boss, the attract mode's playing bot, the pad axis inversion, and the AI Hub ghost session.",
+    "Keeping what the pathfinder sees and what the bodies hit in agreement (props, one-cell corridors), and making a 3/4 view read well with lighting and a tall HUD at once. Learning which engine pieces are in the agent edition and the full engine, and finding names in a large API.",
+    "Make FlowField read map.solid props (or have map.solid mark the cells blocked) so there is one idea of what is walkable.",
+    "Add a first-class interactables system (nearest station, prompt, mouse hover focus) and per-axis stick inversion in Input; every game with a controller needs both and I had to build them."
+  ],
+  "promptFeedback": [
+    "The concrete checklists: the attract mode after 10 seconds, the 10-foot controller-first rules with PlayStation glyphs by default, the inverted-axis toggles, touch-only behaviour, and the Done list. Each could be tested, and a random title choice by code is a nice touch.",
+    "How big the scope is next to 'a vertical slice of a game engine': feature-complete and polished demo, plus multiplayer, plus attract mode, plus a full test pass. It was also not clear if a hub round should replace the title and story, or if both are needed (I kept both). Typos such as 'woudl' in the feedback questions.",
+    "Balancing an economy and a boss fight without a human playtest, and keeping every system working with every other at once: the bugs lived in the seams, not in the parts.",
+    "A person playing on a TV with a real DualSense from 10 feet: whether text sizes, prompts, stick feel and the dodge timing are right. A bot can prove the game is finishable but not that it feels good."
+  ],
+  "aiHub": {
+    "name": "Walter Whitewash",
+    "tagline": "Cook. Sell. Launder. Don't get caught.",
+    "description": "A chemistry teacher with a cough and a bill cooks blue product, sells it to the corner, launders it at a car wash and dodges the cops, then goes down to the Superlab to face Gus Frying. A parody spiritual successor to Breaking Bad.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "Breaking Bad (2008-2013)",
+    "series": "Breaking Bad",
+    "players": "1–4",
+    "controls": "Move: left stick or WASD · aim: right stick or mouse · interact: Cross or E · attack: Square or J or click · dodge: Circle or Space · switch weapon: Triangle or Q · sprint: R1 or Shift · pills: L1 or H",
+    "tags": ["top-down", "pixel art", "story", "stealth", "boss fights", "comedy"]
+  }
+}

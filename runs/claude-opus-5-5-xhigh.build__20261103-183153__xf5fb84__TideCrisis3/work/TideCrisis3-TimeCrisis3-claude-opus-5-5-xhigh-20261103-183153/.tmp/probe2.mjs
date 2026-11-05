@@ -1,0 +1,20 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+process.env.TMPDIR = resolve('.tmp');
+const b = await chromium.launch();
+const file = 'file://' + resolve('../TideCrisis3-TimeCrisis3-claude-opus-5-5-xhigh-20261103-183153.html');
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+await p.goto(file); await p.waitForFunction(() => window.TC && TC.game && TC.game.sceneName === 'title', null, { timeout: 30000 });
+await p.waitForTimeout(800); await p.keyboard.press('Enter'); await p.waitForTimeout(500);
+const r = await p.evaluate(() => TC.scenes.menu.m.rects[6]);
+const c = await p.evaluate(r => { const c = document.getElementById('screen').getBoundingClientRect(), W = TC.game.screen.W, H = TC.game.screen.H; return [c.left + (r[0] + r[2] / 2) * c.width / W, c.top + (r[1] + r[3] / 2) * c.height / H, W, H, c.width, c.height]; }, r);
+await p.mouse.move(c[0] - 30, c[1] - 40); await p.waitForTimeout(100); await p.mouse.move(c[0], c[1], { steps: 4 }); await p.waitForTimeout(300);
+console.log('rect', r, 'css', c, await p.evaluate(() => ({ ptr: TC.game.input.pointer(), last: TC.game.input.lastDevice, i: TC.scenes.menu.m.i, active: TC.game.input.mouse.active })));
+// briefing escape
+await p.keyboard.press('ArrowDown'); await p.waitForTimeout(150);
+console.log(await p.evaluate(() => [TC.scenes.menu.m.i, TC.scenes.menu.m.items[TC.scenes.menu.m.i].label]));
+await p.evaluate(() => { TC.newRun({ mode: 'stage', stage: 1 }); TC.game.go('briefing', { stage: 1 }); }); await p.waitForTimeout(800);
+await p.keyboard.press('Escape'); await p.waitForTimeout(600);
+console.log('after esc', await p.evaluate(() => ({ scene: TC.game.sceneName, paused: TC.game.paused, menuOpen: TC.game.menuOpen, focus: document.activeElement && document.activeElement.textContent })));
+await p.screenshot({ path: 'shots/probe_brief_esc.png' });
+await b.close();

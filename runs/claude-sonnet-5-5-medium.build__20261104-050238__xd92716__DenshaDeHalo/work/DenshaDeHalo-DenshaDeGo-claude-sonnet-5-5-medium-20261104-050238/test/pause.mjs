@@ -1,0 +1,15 @@
+import { chromium } from '../engine/node_modules/playwright/index.mjs';
+import { resolve } from 'node:path';
+const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = []; p.on('pageerror', e => errs.push('PAGEERR ' + e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+await p.goto('file://' + resolve(process.argv[2] || 'index.html') + '#stage=S1'); await p.waitForTimeout(2500);
+await p.keyboard.press('Escape'); await p.waitForTimeout(700); await p.screenshot({ path: 'shots/pause.png' });
+console.log('buttons', await p.evaluate(() => [...document.querySelectorAll('button')].map(b => b.textContent.trim()).join(' | ')));
+await p.evaluate(() => { const bt = [...document.querySelectorAll('button')].find(b => /Dev Mode/.test(b.textContent)); bt && bt.click(); });
+await p.waitForTimeout(800); await p.screenshot({ path: 'shots/dev.png' });
+console.log(JSON.stringify(await p.evaluate(() => ({ dev: window.__dh.DH.drive.dev.open, paused: window.__dh.game.paused }))));
+await p.keyboard.press('ArrowDown'); await p.keyboard.press('ArrowRight'); await p.keyboard.press('ArrowRight'); await p.waitForTimeout(300);
+console.log(JSON.stringify(await p.evaluate(() => window.__dh.DH.TUNING)));
+console.log(errs.slice(0, 10).join('\n') || 'no errors');
+await b.close();

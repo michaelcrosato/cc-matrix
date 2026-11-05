@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:02:29",
+    "source": "Brigandine: The Legend of Forsena (Hearty Robin, PlayStation, 1998)",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort; followed in its architecture, its mechanics and most of its content counts; presentation details and tuning are not built)",
+    "genre": "Turn-based strategy with a tactical hex battle layer",
+    "perspective": "Overhead map of the continent; a tilted hex board for battles; side-on dialogue scenes",
+    "tech": "JavaScript on the my-3D2dge engine v0.85.2 (unchanged), canvas 2D, Web Audio, AI Hub client session.js v1.4.0; built to one HTML file by tools/build.mjs",
+    "artDirection": "The engine's pixel style: Humanoid and Blob rigs, bespoke beast rigs (quadruped, drake, avian, serpent), a painted continent, castles and banners drawn in code, PlayStation and Xbox button glyphs drawn in pixels",
+    "animation": "The engine's rigs and E.move attack states, poses and walks; beast rigs with walk, wing and sway motion; a bell-by-bell battle event queue (walks, strikes, hurts, deaths, captures, dial turns); a season wipe on the campaign map",
+    "audio": "Season themes, battle themes (attacking and defending, with a tension layer), the hourless and Sanctum themes, event and ending themes, the plan's named sound effects (UI, battle, spells by season, statuses, outcomes, creatures, world and timers), and per-letter Animalese voices driven by each speaker's profile; all synthesised in code, no audio files",
+    "online": "AI Hub Session Protocol v1, shared-world mode, 2 to 4 players: one battle, each player commands their own troop, the host copy runs the world and broadcasts its state",
+    "testing": "546 headless checks (node tests/run.mjs), five browser playthroughs through the real scenes (node tests/run.mjs --browser), balance runs against the plan's targets (not all met; see Not built), Playwright screenshots, and the AI Hub harness in shared-world mode with 2 and 4 players under latency and loss, with a host leaving, and with a host that has no player",
+    "research": "Read the engine's API card, AI guide, kits and source, and the AI Hub README. No web search.",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser unknown (Playwright Chromium used for checks)",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Fourteen issues across all rounds. Nine in the first round (seven broke play, two cosmetic); two in the hub harness; three in the playthroughs and review (a campaign that never advanced its season, a battle that could not restart after its rival lines, and a Keep rule that fired mid-move). Balance work this round exposed further economy problems: upkeep, Meridian's garrison, and knights that wandered from their castles.",
+    "Five critical in the first round: a crash on any battle with the Gray Knight, scenes that could not reach the game object, a resumed campaign with no selected castle, and two screens that threw while drawing. Two of this round's are game-breaking for a campaign: the season that never advanced, and the battle that did not resume after the rival lines.",
+    "The play suite, which drives the real scenes with taps and time, and the browser playthroughs, which run whole campaigns through the screens; the screenshots showed draw errors that headless runs skip.",
+    "The state-hash check, which only tests the hash function against itself."
+  ],
+  "engineFeedback": [
+    "E.Humanoid and E.Blob with the E.move attack states, rigs that pose from plain state every step, and E.Dialog choices, which worked as documented.",
+    "Scenes do not receive their game object, so I set it on each scene. A scene change takes a fade, so tests must wait for it. E.Dialog takes one voice sound rather than a function, so I swap the voice each update.",
+    "The battle and campaign simulations, the story triggers, the skill engine with areas and statuses, the hex board and its event queue, the list widget with pad and mouse focus, the hub host protocol, the beast rigs, and the pixel glyphs for PlayStation symbols.",
+    "Fitting a tilted hex board to the screen with readable units, and making shared-world copies agree without a server.",
+    "Nothing. The engine is used as shipped; all game code is in src/ and the engine is unchanged.",
+    "A per-letter voice callback on E.Dialog, so Animalese can be pitched per character without a pool of sounds."
+  ],
+  "promptFeedback": [
+    "The clear list of what to build and the exact file names, which left no doubt about the deliverables.",
+    "The plan and the brief disagree on file names and scope, and the plan asks for far more content than one session can build well. The title also came from the plan's earlier draw, not one I made.",
+    "Keeping the scope honest. Every feature the brief names is built, and the plan's mechanics, sound-effect list and content counts are built too. The plan's balance targets are not met on measurement: AI-only campaigns are at the length target, but the player on autoplay never takes Meridian. I report that as unfinished.",
+    "A single scope line that says which parts of the plan are required and which are optional."
+  ],
+  "aiHub": {
+    "name": "Brigantime: The Legend of Forseasons",
+    "tagline": "Four seasons, one clock running out",
+    "description": "A tactical strategy game in the spirit of Brigandine. Muster knights and monsters through four seasons, march on rival castles, and fight hex battles with 90 skills, before the Hour-Candle burns out; the Clockwork Sanctum's dials guard the final gate.",
+    "type": "Game",
+    "genre": "Strategy",
+    "source": "Brigandine: The Legend of Forsena",
+    "series": "Brigandine",
+    "players": "1–4",
+    "controls": "Stick or arrows move the cursor; A or Enter chooses; B or Escape backs out; Y or E ends your turns; the mouse hovers and clicks",
+    "tags": [
+      "fantasy",
+      "pixel art",
+      "story",
+      "versus",
+      "retro"
+    ]
+  }
+}

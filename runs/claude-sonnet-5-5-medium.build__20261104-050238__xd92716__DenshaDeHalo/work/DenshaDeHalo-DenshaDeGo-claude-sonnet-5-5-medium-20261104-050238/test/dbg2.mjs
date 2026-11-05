@@ -1,0 +1,14 @@
+import { load } from './lib.mjs';
+const ctx = load(); const DH = ctx.DH, game = DH.game;
+await new Promise(r => setTimeout(r, 100)); game.advance(2);
+const I = game.input; const sc = game.scene; const old = sc.update;
+let seen = [];
+sc.update = function (dt) { seen.push(I.pressed('confirm')); return old.call(this, dt); };
+I.tap('confirm'); game.advance(0.05);
+console.log(seen.filter(Boolean).length, seen.length, game.input === I, game.paused, game.sceneName);
+console.log(Object.keys(game.o), game.o.menu && Object.keys(game.o.menu));
+const m = sc.menu; const op = m.o.onPick; m.o.onPick = (i, it) => { console.log('PICK', i); return op(i, it); };
+const og = game.go.bind(game); game.go = (...a) => { console.log('GO', a[0]); return og(...a); };
+I.tap('confirm'); game.advance(0.05); console.log(game.sceneName, game.errors.map(e => e.message));
+game.advance(2); console.log(game.sceneName);
+process.exit(0);

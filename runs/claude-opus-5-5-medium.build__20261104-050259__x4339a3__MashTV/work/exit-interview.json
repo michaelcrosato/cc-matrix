@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:02:59",
+    "source": "Smash TV (Williams Electronics arcade game, 1990)",
+    "plan": "PLAN.md",
+    "genre": "Twin-stick arena shooter (arcade), 1-4 player co-op",
+    "perspective": "Fixed single-screen arena from a high three-quarter studio camera (threequarter view, pitch 55); Overhead (topdown) as a Settings option",
+    "tech": "my-3D2dge handoff v0.85.2 (commit 4390a98, full edition with the arcade module) with 4 small patches; AI Hub session client aihub-session 1.4.0; plain JavaScript in one IIFE; Node 24.22.1 and Playwright 1.63.0 for tests",
+    "artDirection": "The engine's native PS1-style pixel look (320x240 expanded, HD Humanoid rigs, textured TileMap, canvas lighting) dressed as a retro-future TV studio: neon, chrome, marquee bulbs, sponsor logos, confetti, spotlights and a jumbotron",
+    "animation": "The engine's procedural rig system (Humanoid and Blob, E.MOVES attacks, poses, flips, landings) plus new motion: the mime's trapped-in-a-box joint post-process, cable drops, boss part tweens, wheel spin easing, TV channel flips",
+    "audio": "All synthesized in code: 8 original songs in the engine's notation with layers and 14 stings, about 70 custom sound effects, and Animalese/Simlish Babble voices from a small formant synth for the host, co-host, announcer, bosses, contestants and the crowd",
+    "online": "AI Hub Session Protocol v1, shared-world mode, 1-4 players (the Lightning Round); local co-op 1-4 on one screen",
+    "testing": "One command (npm test) runs 20 suites: 18 headless Node suites driving game.advance and game.debug (including room-sweep over all 26 rooms and a scripted playthrough of the whole game) plus 2 Playwright suites: the deliverable over file:// at 1280x720, 1920x1080 and a touch phone, and the AI Hub harness 4 times (2 players; 4 players at 150 ms +-50 ms with 5% loss; host leaving; a server copy) on an in-process 127.0.0.1 server on an OS-picked port. Screenshots only for looks. Finally a full run of the whole game in Chromium driven only by real keyboard and mouse events (no bots in control, no cheats): title to the Season Finale and Ending A (13.6 min), then again collecting the keys: all three episodes, the Green Room, Ending B, credits, initials, Top Earners and back to the title (12.6 min), 0 errors.",
+    "research": "Read the engine handoff docs (API.md, AI_GUIDE.md sections, ASSETS.md, API-INDEX.md by grep) and the AI Hub protocol README and harness; no web research on the source",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown (no usage figures are visible to the model in this session)"
+  },
+  "testingFeedback": [
+    "About 16 real issues: contestants could not walk out of exit doors; enemy painters crashed on a missing render state (an error every frame); a missing hpPct field; waves advancing before queued spawns arrived; boss phase coroutines killed by the runner right after their intro (bosses never attacked); the recap and ending scenes keeping flags from the previous visit (the run stalled after Episode 2); a party popper bursting twice; the attract mode's boss reel jumping into the recap; an unseeded Math.random in boss cash; tunings not persisting where storage is absent; the camera fit clamped so the arena was cropped; title menu overlapping the logo; lower third covering the session card buttons; illegible wheel labels. The full real-input run then found a disco ball that could stick in a corner forever (the room could never clear), and the boss bar covering Mashy's head.",
+    "5 would be game breaking: no way out of a room after a clear, the per-frame draw crash, bosses that never attacked, the run stalling at the second Prize Recap, and the disco ball stuck in a corner.",
+    "The scripted whole-game playthrough (two bots on the left path through all three episodes, the Green Room, Ending B, initials and Top Earners): it found the recap stall and proved every system connects. The room-sweep, which found the boss coroutine bug, was a close second. The full real-input run to the Season Finale was the only test that found the stuck disco ball.",
+    "The first version of the enemy-count convergence check in the netcode loopback: it compared one instant of host and client during a spawn burst, so it measured latency rather than mirroring, and had to be rewritten as an average."
+  ],
+  "engineFeedback": [
+    "The amount that comes free and works headless: fixed-step game.advance with exact determinism, Humanoid rigs that look good dressed with a few options, the standard pause/settings/controls menus, canvas lighting, and scenes with fades. Writing tests that play the whole game in seconds was easy.",
+    "Yes: I assumed the camera fit would land near zoom 1, but the threequarter view's base scale is about 1.5, so my clamp cropped the arena; I guessed r.overlay text glyphs like the multiplication sign and middle dot exist in the tiny font (they don't); and game.addPlayer also fires allowJoin's onJoin, which I didn't expect.",
+    "The shared-world netcode (host-authoritative world, client mirror with local prediction, snapshots, claims and hurts) and the boss framework with coroutine phases; also the PlayStation/Xbox glyph icons, since the font has no face-button symbols.",
+    "Fitting a fixed single-screen arena to an expanding screen (map.bounds, base view scale and zoom interact), and keeping arrows as aim keys in play while the engine's menus need them to navigate.",
+    "Four small patches, each marked MASH TV PATCH: E.HOOKS exposed so presets can switch per player before the Shell reads navigation; the glyphs setting defaulting to PlayStation with an Xbox option applied to every player; E.Arcade initials and continue reading any player's input; and an audio bus getter so the Babble voices obey volume and mute.",
+    "A built-in per-player input-preset stack for menus versus play (and face-button glyph icons in the font), so twin-stick games don't need a hook to make arrows aim in play and navigate in menus."
+  ],
+  "promptFeedback": [
+    "It is concrete about what done means (single file, exit interview shape, attract mode, dev sliders, controller-first rules) and the plan it pointed to was detailed enough to build from directly.",
+    "The relationship between 'feature-complete demo' and the plan's very large scope (18 rooms, 3 multi-phase bosses, shared-world netcode) at medium effort; and whether Source Information's Plan field should name the file or its author.",
+    "Making shared-world multiplayer pass the hub harness while keeping the same game playable locally with 1-4 players and an attract mode, all in one file.",
+    "Say how much of a large plan to prioritise when time is limited, and give the expected exit-interview usage source (the model cannot see token or cost figures)."
+  ],
+  "aiHub": {
+    "name": "MASH TV",
+    "tagline": "Mash 'em! Cash 'em! Survive the show.",
+    "description": "A 1-4 player twin-stick arena shooter inside the deadliest game show on TV: blast through studio rooms of goons and robots, grab cash and absurd prizes, keep the ratings up and survive to the Season Finale.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Smash TV",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD/left stick move · mouse/right stick aim & fire · Space/L2 slide · E/R1 Showstopper · Q/L1 Showboat",
+    "tags": [
+      "arcade",
+      "co-op",
+      "top-down",
+      "pixel art",
+      "comedy",
+      "boss fights"
+    ]
+  }
+}

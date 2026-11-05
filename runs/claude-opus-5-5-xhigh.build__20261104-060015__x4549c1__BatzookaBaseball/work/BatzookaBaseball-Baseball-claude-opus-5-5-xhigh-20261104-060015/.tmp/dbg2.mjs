@@ -1,0 +1,11 @@
+import { load } from '../tests/lib/load.mjs';
+const { BZ, game, logs } = load();
+BZ.cosmetic = false;
+const ev = {}; const swings = {}; const outs = {}; const contacts = [];
+BZ.bus.on('*', (d, e) => { ev[e] = (ev[e] || 0) + 1; if (e === 'swing') swings[d.kind] = (swings[d.kind] || 0) + 1; if (e === 'out') outs[d.how] = (outs[d.how] || 0) + 1; if (e === 'contact') contacts.push([Math.round(d.EV), Math.round(d.theta), Math.round(d.phi)]); if (e==='call') ev['call_'+d.kind]=(ev['call_'+d.kind]||0)+1; if (e==='playEnd') ev['end_'+d.reason]=(ev['end_'+d.reason]||0)+1; });
+const M = BZ.newMatch({ away: 'krakens', home: 'comets', seed: 1, innings: 3, fast: true });
+for (let i = 0; i < 120 * 300 && M.phase !== 'final' && M.phase !== 'boom'; i++) BZ.match.step(M, 1 / 120);
+console.log('phase', M.phase, M.inning, M.half, 'score', M.teams[0].runs, M.teams[1].runs, 'pitches', M.pitchCount, 'hits', M.teams[0].hits, M.teams[1].hits);
+console.log(JSON.stringify(ev)); console.log('swings', swings, 'outs', outs);
+console.log('contacts', contacts.slice(0, 30).map(c => c.join('/')).join(' '));
+console.log('errors', game.errors.map(e => e.message).slice(0, 5));

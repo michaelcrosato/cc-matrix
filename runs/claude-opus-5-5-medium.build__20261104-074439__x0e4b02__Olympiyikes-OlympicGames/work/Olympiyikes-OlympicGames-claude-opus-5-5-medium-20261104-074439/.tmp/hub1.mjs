@@ -1,0 +1,10 @@
+import { createRequire } from 'node:module'; import { spawn } from 'node:child_process';
+const require = createRequire(new URL('../vendor/my-3d2dge/dist/handoff/package.json', import.meta.url)); const { chromium } = require('playwright');
+const dir = new URL('../.hubtest/', import.meta.url).pathname;
+const server = spawn('python3', ['-u', '-m', 'http.server', '0', '--bind', '127.0.0.1'], { cwd: dir });
+const port = await new Promise(res => { const on = d => { const m = String(d).match(/port (\d+)/); if (m) res(+m[1]); }; server.stdout.on('data', on); server.stderr.on('data', on); });
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1600, height: 1000 } });
+await p.goto(`http://127.0.0.1:${port}/harness.html?game=game.html&${process.argv[2] || 'players=2&auto=1'}`);
+await p.waitForFunction(() => document.body.dataset.complete === 'true', null, { timeout: 600000 });
+const r = await p.evaluate(() => ({ pass: __hubCheck.pass, fails: __hubCheck.checks.filter(c => !c.pass).map(c => c.name + ': ' + c.detail), log: __hubCheck.log.slice(-15) }));
+console.log(JSON.stringify(r, null, 1)); await b.close(); server.kill();

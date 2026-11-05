@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:30:09",
+    "source": "Operation Wolf (Taito, 1987), the arcade light-gun shooter with the mounted submachine gun",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort; where it differed from TASK.md, TASK.md won)",
+    "genre": "Light-gun rail shooter (a shooting gallery that scrolls past in depth), with bosses, escorts and drop-in co-op",
+    "perspective": "First person on a scripted rail: sideways across the battlefield, forward up a river, and backward off a plane's ramp during takeoff",
+    "tech": "my-3D2dge v0.85.2 (the full engine from the handoff package: Mode 7, Humanoid rigs, shapes-as-data, Arcade and Shell modules; 6 logged edits), the AI Hub session client 1.4.0 (Session Protocol v1), plain JavaScript in one HTML file; Node 24 and Playwright 1.63.0 for tests and tools only",
+    "artDirection": "The engine's native procedural pixel art: shaded HD Humanoid rigs dressed per type and cast member, about 60 new shapes-as-data (vehicles, bosses, huts, towers, hangars), string sprites, the 5x7 pixel font and title logos, Mode 7 floors painted per pixel, dawn-to-night-to-sunrise skies; an original setting, the Brimstone Coast",
+    "animation": "The engine's Humanoid rig system (walks and runs from velocity, point and aim, the throw move, kneel, crouch, die, down and cheer poses, faces and portraits) plus new solvePose poses (hands up, bound hostages, panic, the officer's whistle, the rocket on the shoulder, the collar grab, the cackle); procedural vehicles, rotors, dish, tower collapse, the first-person SMG with recoil, brass and reloads, and FX particles",
+    "audio": "All synthesized in code with the engine's chip synth, no audio files: 13 original songs and stings as note data (the Wolfpack March with its howl motif, one theme per operation, the boss theme, the ending), about 60 layered sound effects placed by depth and stereo pan, Animalese-style gibberish voices per speaker with subtitles, barks, a radio crackle and the wolf howl",
+    "online": "AI Hub Session Protocol v1, mode shared-world, 1-4 players: the host runs the world, clients aim and shoot at once and report hits, snapshots and events under the size and rate limits, the game's own card, time-up, leave and end; plus local drop-in co-op for 1-4 controllers",
+    "testing": "Allowed: headless tools and scripted playthroughs (game.advance, game.debug), screenshots for look only, no subagents for review. Used: npm test (22 suites, about 250 checks, failures and one count line), including two whole-game headless playthroughs (a fair bot on RECRUIT with no cheats, and a god bot on VETERAN), an in-memory multi-copy AI Hub test, Playwright on the final file over file://, and the real AI Hub harness in all 5 configurations",
+    "research": "None of my own beyond the given plan (which cites Wikipedia and arcade-history.com on Operation Wolf) and the engine's and hub's documentation",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser for checks: headless Chromium 153 through Playwright",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Cost and tokens: unknown (not visible to me). Session time: about 2 hours 15 minutes (18:30 to about 20:45 local)"
+  },
+  "testingFeedback": [
+    "About 30 issues. The headless suites, the playthroughs and the balance runs found most of them. A few came from screenshots and the browser: bosses not drawn, a HUD crash in the takeoff, missing PlayStation glyphs, and a title-frame crash at boot.",
+    "About 10 were game-breaking. Two bosses never arrived because their final hold sat before the rail's end. CROCODILE could not be killed: an armored later-phase part, and its own hull, covered its weak points. Grenades and mortar shells flew off-screen, so they could not be shot down. The game crashed at boot on a deep link, in the takeoff's HUD, in the takeoff cutscene and in a hub client's mirror. The playthrough bot lost its input after the first operation.",
+    "The headless whole-game playthrough: a fair bot on RECRUIT with no cheats, from the title through all six operations, the cutscenes and the ending to the initials, in about 20 seconds. It found the soft-locks, and together with a per-operation damage report it drove the balance changes.",
+    "The projection round-trip test. It never failed: the engine's Mode 7 math was right from the start."
+  ],
+  "engineFeedback": [
+    "Exact, headless determinism: game.advance, the debug handle and a Sim with its own seeded streams let a test play the whole campaign in seconds. Close behind: Mode 7 with Humanoid rigs gives real depth and parallax cheaply, and the standard pause, settings and rebinding came free.",
+    "Yes, several times: m7.shape ignores params and mats, so I wrote my own shape-sprite cache; a scene's view field is read by the engine, and my cutscene used that name; game.go fails inside boot steps and timers die on a scene change, so deep links needed another route; E.store does not persist headless; input.label returns PlayStation symbols the pixel font could not draw; E.Menu has no scale for 10-foot text.",
+    "The light-gun layer on Mode 7: screen-space hit shapes calibrated to the drawn rigs and shapes, the deterministic Sim (rail, holds, beats, telegraph rings, projectiles you can shoot down, six phased bosses), the bot, and the shared-world netcode with a mirror.",
+    "Making what you hit match what Mode 7 draws: rig heights at quantized view scales, the shapes' scale and facing frames, the order of parts and hulls in depth. And night lighting: Mode 7 draws as an overlay, so the engine's lights do not apply and the game needed its own darkness mask.",
+    "Six edits, logged in engine/CHANGES.md: Mode 7 views keyed by whole-degree pitch (a bobbing boat no longer rebuilds every shape sprite); stereo pan for sfx; PlayStation glyphs by default, PlayStation and Xbox only; Shell settings rows on any screen (the dev sliders); hidden setting groups; and the font glyphs ✕ ○ □ △ · ✓.",
+    "Make Mode 7 a first-class depth renderer: shapes with params, mats and a flash; a light pass; and a pick() hit test for its billboards, like r.pick, so a light-gun game gets aiming, occlusion and lighting from the engine."
+  ],
+  "promptFeedback": [
+    "A clear, testable definition of done, with freedom of genre and design, plus a detailed plan to build from, and the advice to keep the tests behind one quiet command.",
+    "The names: the plan used another run's file names and dates (the max-effort run), so I had to rely on TASK.md winning. The title rule (brainstorm and pick with a random number) against STAGE.md's \"use the title the plan gives\". And \"do not read files outside what you need\" while the engine and hub docs had to be read.",
+    "The scope in one sitting: six operations with six phased bosses, cutscenes, local co-op, AI Hub netcode, the attract mode and dev mode. Then balancing it so a fair player can finish it.",
+    "Split the AI Hub integration from the single-player build, or give a target length for the demo. And let the generic task file name the plan's run-specific tokens, so a plan can be reused without stale names."
+  ],
+  "aiHub": {
+    "name": "Operation Wolfpack",
+    "tagline": "Every bullet counts. Bring them home.",
+    "description": "A first-person light-gun rail shooter for 1-4 players: storm the Brimstone Coast with limited ammo, spare the civilians and rescue five hostages from the Hyena Legion.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Operation Wolf",
+    "series": "",
+    "players": "1–4",
+    "controls": "Mouse or stick aims · click/R2 fires · right click/L2 grenade · R/□ reload · Q/L1 snap to threat",
+    "tags": [
+      "first-person",
+      "arcade",
+      "co-op",
+      "pixel art",
+      "retro",
+      "boss fights"
+    ]
+  }
+}

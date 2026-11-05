@@ -1,0 +1,16 @@
+import { chromium } from 'playwright'; import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url';
+const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); const errs = [];
+p.on('pageerror', e => errs.push('PAGEERR ' + (e.stack || e).toString().slice(0, 500))); p.on('console', m => { if (m.type() === 'error') errs.push('CONSOLE ' + m.text().slice(0, 400)); });
+await p.goto(pathToFileURL(resolve('game/index.html')).href); await p.waitForTimeout(1500);
+const key = async (k, w = 250) => { await p.keyboard.press(k); await p.waitForTimeout(w); };
+await p.evaluate(() => __gd.game.debug.startRun([0])); await p.waitForTimeout(500); await key('Space', 500); await p.waitForTimeout(500);
+await key('Escape', 600); await key('ArrowDown'); await key('ArrowDown'); await key('Enter', 600);
+console.log('devopen', await p.evaluate(() => [__gd.game.paused, document.querySelector('.esh-sh') ? 'shell' : 'noshell']));
+await p.screenshot({ path: 'shots/dev1.png' });
+await key('Enter', 300); await key('ArrowDown'); await key('Enter', 300); await key('KeyQ', 300); await p.screenshot({ path: 'shots/dev2.png' });
+await key('KeyQ', 300); await key('KeyQ', 300);await p.screenshot({ path: 'shots/dev3.png' });
+console.log(await p.evaluate(() => JSON.stringify({ god: __gd.DEV.god, noclip: __gd.DEV.noclip, tune: __gd.TUNE.drain })));
+await key('Escape', 300);
+console.log(errs.length ? errs.join('\n') : 'no page errors');
+await b.close();

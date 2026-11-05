@@ -1,0 +1,23 @@
+// Screenshots of the built file for the look checks (not part of the test command). Writes to the given folder.
+import { chromium } from 'playwright-core';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FILE = join(HERE, '..', '..', 'Crackmania-TrackMania2003-claude-haiku-5-5-medium-20261104-050317.html');
+const OUT = process.argv[2] || join(HERE, '..', '.tmp');
+const browser = await chromium.launch({ headless: true, args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 960, height: 540 } });
+const errors = [];
+page.on('pageerror', e => errors.push(e.message));
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+await page.goto('file://' + FILE, { waitUntil: 'load' });
+await page.waitForTimeout(6000);
+await page.screenshot({ path: join(OUT, 'title.png') });
+await page.keyboard.press('Enter'); await page.waitForTimeout(1200);
+await page.keyboard.press('Enter'); await page.waitForTimeout(2500);
+await page.keyboard.down('ArrowUp'); await page.waitForTimeout(7000); await page.keyboard.up('ArrowUp');
+await page.screenshot({ path: join(OUT, 'race.png') });
+await page.keyboard.press('Escape'); await page.waitForTimeout(800);
+await page.screenshot({ path: join(OUT, 'pause.png') });
+await browser.close();
+console.log('errors', errors.length, errors.slice(0, 5));

@@ -1,0 +1,57 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-02 18:13",
+  "source": "The Sopranos (1999-2007), HBO. An original spiritual successor with parody names and no copied text or art.",
+  "genre": "Action-adventure with beat-em-up brawling, shakedown dialogue choices and a stress-and-diet survival layer",
+  "perspective": "Three-quarter view by default (the engine's native view); the player can switch to top-down or isometric and zoom",
+  "tech": "my-3D2dge v0.85.1 (single-file JS engine, canvas 2D, no other libraries); hand-written JS modules bundled into one HTML file; AI Hub session client 1.3.0",
+  "artDirection": "Engine-native procedural pixel puppets (HD Humanoid rigs and Blobs) on lit TileMap levels at a 400x225 base resolution, with weather, lights and drawn controller glyphs",
+  "animation": "Engine-native skeleton rigs: E.Humanoid moves (jab, cross, hook, haymaker, sweep), poses, expressions, Combo/Attack timing, tweens and scripts",
+  "audio": "Code-written chip music (title, town, fight, therapy, woods, diner, boss), code-written sound effects, and Animalese-style gibberish blips for every voice",
+  "online": "AI Hub session protocol v1, ghost mode, 1-4 players: each copy plays the same seeded Main Street round and sees the others as ghosts. No other networking.",
+  "testing": "Efficient, lightweight testing: headless Chromium smoke runs, an attract-mode autopilot playing the whole episode, keyboard and fake-gamepad checks, the AI Hub harness (2 and 4 players, host-leave) and a 13-viewport WebKit matrix. No real iOS Safari or physical DualSense.",
+  "research": "None online beyond the engine handoff and AI Hub docs; the Sopranos tone is from memory.",
+  "environment": "Claude Code CLI (headless); Linux; browser unknown",
+  "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+  "usage": "Session time about 35 minutes (18:13 to about 18:48). Cost and token counts: unknown."
+ },
+ "testingFeedback": [
+  "About 9 real issues: the attract autopilot's scene changes dropped the demo flag, it snagged on NPCs and lamp posts, it stopped short of exit zones, the woods objective pointed at an unreachable waypoint, a 'move' action warning, em dashes that the font cannot draw, and overlapping HUD, boss-bar and results text. A stale web server also gave a false hub-harness failure.",
+  "Two were game-breaking for the flow (the woods and yard soft-locks of the attract tour); none crashed, and no JS errors appeared in any run.",
+  "Running the attract-mode autopilot through the whole episode while polling game state and taking screenshots: it exercised dialogue, combat, scene changes, saves and the ending in one go.",
+  "The viewport matrix overflow check: it reported all 13 viewports clean, but a full-screen canvas game cannot overflow, so only its screenshots helped. Also my first long run piped through tail, which showed nothing until it finished."
+ ],
+ "engineFeedback": [
+  "The rigs and lighting give a lot of look for free, and the standard features (pause, settings, controls rebinding, save slots) plus Dialog with live portraits, Combo/Attack and FlowField saved a great deal of work.",
+  "Yes: input.label has no 'move' action, FlowField ignores prop colliders so the autopilot walked into NPCs, game.go clears state so every scene change had to carry the demo flag, and I guessed a 'ring' prop that does not exist.",
+  "The game layer: enemy AI, the stress/gut/respect systems, shakedown and therapy scripts, the attract autopilot, AI Hub ghost sync, furniture boxes, and drawn PlayStation/Xbox glyphs (the engine font has no controller symbols).",
+  "Confirming exact method semantics without reading the engine source, such as what combo.hits expects, overlay coordinates, and how scene changes interact with game state.",
+  "I would overhaul how area changes work: re-entering the whole scene through game.go, which clears timers and particles, is awkward for rooms within one game.",
+  "Add first-class solid props and NPC colliders shared by Body and FlowField, and controller glyph shapes in the font."
+ ],
+ "promptFeedback": [
+  "The clear definition of done and fixed deliverables, the 10-foot controller-first philosophy, the inverted-stick toggle as a realistic constraint, and the instruction to pick the title with a real random generator.",
+  "Whether the single-file rule and 'dependencies need not be included' conflict, how the bracketed file name should be formatted, what 'root' means, and how a hub round with no title screen fits the standalone title and attract mode.",
+  "Scope: a complete vertical slice with attract mode, hub ghost play, controller glyphs, saves, a story in the source's tone and only code-written assets.",
+  "A deterministic full-episode bot test asserting chapter progression, which I approximated with the attract autopilot, plus a run on a real DualSense."
+ ],
+ "aiHub": {
+  "name": "The Soprano Diet",
+  "tagline": "Ducks. Doctors. Deli meat.",
+  "description": "A Jersey mob boss tries to survive a day of shakedowns, rival crews, therapy and a dream in the snow while his cardiologist watches his plate. Brawl, bargain and keep your stress down.",
+  "type": "Game",
+  "genre": "Action",
+  "source": "The Sopranos (1999-2007)",
+  "series": "The Sopranos",
+  "players": "1–4",
+  "controls": "Move: left stick/WASD. Punch: Square/J/click. Dodge: Circle/Space. Interact: Cross/E. The Look: Triangle/Q. Eat: L1/R. Camera: R3/V.",
+  "tags": [
+   "story",
+   "comedy",
+   "pixel art",
+   "retro",
+   "boss fights",
+   "top-down"
+  ]
+ }
+}

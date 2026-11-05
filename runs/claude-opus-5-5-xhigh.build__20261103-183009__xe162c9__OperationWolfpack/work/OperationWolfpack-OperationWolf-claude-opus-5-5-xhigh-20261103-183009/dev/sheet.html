@@ -1,0 +1,21 @@
+<!doctype html><html><head><meta charset="utf-8"><title>sheet</title><style>body{margin:0;background:#556}canvas{image-rendering:pixelated}</style></head><body>
+<canvas id="c" width="1440" height="1100"></canvas>
+<script src="../engine/my-3d2dge.js"></script>
+<script src="../src/00-core.js"></script>
+<script src="../src/50-art-shapes.js"></script>
+<script>
+const E = My3D2dge, g = E.ctx2d(document.getElementById('c'));
+g.fillStyle = '#7a8a6a'; g.fillRect(0, 0, 1440, 1100);
+const ids = (location.hash.slice(1) || WP.SHAPE_LIST.join(',')).split(',');
+const v = new E.View('mode7', 'Mode 7', 0, 6, 1, 1), errs = [];
+let x = 10, y = 10, rowH = 0;
+for (const id of ids) {
+  let sp = null; try { sp = E.shapeSprite(id, { view: v, facing: location.search.includes('side') ? 0 : Math.PI / 2 }); } catch (e) { errs.push(id + ': ' + e.message); }
+  if (!sp) { errs.push(id + ': null'); continue; }
+  if (x + sp.w + 10 > 1440) { x = 10; y += rowH + 18; rowH = 0; }
+  g.drawImage(sp.cv, x, y);
+  E.font.text(g, id, x, y + sp.h + 2, '#fff', { scale: 1 });
+  x += Math.max(sp.w, E.font.width(id)) + 12; rowH = Math.max(rowH, sp.h);
+}
+window.__errs = errs;
+</script></body></html>

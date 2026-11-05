@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "The Sopranos (1999-2007)",
+    "genre": "Beat-'em-up (brawler) with story / RPG-lite sit-downs: shops to shake down, therapy choices, a stress meter, upgrades",
+    "perspective": "Side-on 2.5D brawler camera (engine 'brawler' view); V / R3 switches to three-quarter, top-down and isometric",
+    "tech": "my-3D2dge v0.85.1 (single-file engine, canvas, HD Humanoid rigs, TileMap, Backdrop, Dialog, Menu, lighting, weather); plain JavaScript in one IIFE; AI Hub session client 1.3.0",
+    "artDirection": "Engine-native HD pixel style at 320x240 expanded to any screen: pixel-art volumetric characters, painted shopfronts, rim-lit fighters, rainy yard at night, dusk city street",
+    "animation": "Engine rig system: E.Humanoid skeletons driven by E.MOVES (jab, cross, hook, uppercut, roundhouse, haymaker, axekick...), E.Attack and E.Combo timing, poses, hit-stop, particles",
+    "audio": "All code-written: chip-synth music per scene (title, home, street, yard, boss, therapy), synthesized effects, and Animalese-style gibberish voices (a random syllable per letter, pitched per speaker)",
+    "online": "AI Hub Session Protocol v1, ghost mode, 1-4 players: each plays their own Tuesday Collections round from the same seed and sees the others as translucent ghosts; score reported as progress and result",
+    "testing": "Headless Node suites on the engine's fixed-step clock (49 system checks, 30 flow checks incl. attract mode, shop, save/load, game over, ending), the AI Hub harness (2 players, then 4 players with 150 ms latency, 50 ms jitter, 5% loss, and the host-leave scenario: all pass), and Playwright Chromium runs with real key events (full chapter playthroughs with screenshots; touch-emulated title). Not tested: a real DualSense, real iOS Safari, real humans.",
+    "research": "Read the my-3D2dge handoff (API card, brawler kit) and the AI Hub session protocol; drew on general knowledge of the show's tone and setting; no web browsing about the show",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 14. Seven were visual (cutscene actors drawn behind their backdrop, dialogue box over the actors' feet, title menu covering the cast, HUD text outside its panel, shop signs under awnings, touch banner overflow, kitchen header overlap) and seven were logic or flow (the stuck chapter-advance and exit locks, the attract bot cancelling itself, double envelope payouts, crates blocking the shopkeepers, shooters hiding behind the screen lock, Escape both backing out of the shop and pausing, rage unreachable at 99.x stress).",
+    "Three: (1) the chapter-advance and demo-exit guards were cleared by the scene change and stayed locked, so no chapter could end; (2) the attract bot's own confirm taps counted as player input and ended the demo after a few seconds; (3) a shooter could retreat behind the wave lock where the hero could not reach it, soft-locking the chapter. The double payout from the dialog callback order was serious but not game breaking.",
+    "The real-browser playthrough bot: real key events, a state readout every ten seconds and screenshots at milestones. It found the soft-lock, the shop pause bug, the double payouts and the blocked shopkeepers, none of which the headless suites could see because they skip drawing and real key timing.",
+    "The AI Hub harness runs: it passed on the first real attempt (after a port clash on my side) and told me nothing new, though it was necessary. Close second: the static syntax check of the bundle."
+  ],
+  "engineFeedback": [
+    "The HD Humanoid rigs with E.MOVES, E.Attack and E.Combo. A punch string, a roundhouse or a haymaker looks right with almost no animation work. The readable kits, the deterministic fixed-step clock (game.advance made headless tests easy), and the free pause menu, settings, rebinding and save slots were close behind.",
+    "Yes. In the side view, a larger y draws nearer, so a backdrop queued at +y covered the actors. The Dialog calls onDone after onChoice, so starting another say() inside onChoice fires the new dialog's onDone at once. game.go() silently clears game.after timers, which left my guard flags stuck. Escape is bound to both cancel and pause, so backing out of a menu also paused. The brawler kit's facades are painted for one view only.",
+    "Nearly everything above the rigs: the foe AI with wave locks, the stress and rage system, bosses with a second phase, the shop, save and chapter flow, painted shopfront facades that work in every view, the attract bot, the AI Hub glue (ghost sync), Animalese voices by turning Dialog.voice into a getter, and the stick-inversion fix by wrapping navigator.getGamepads.",
+    "Making a brawler that works in all four camera views. The kit is one view, and its facades, bounds and lane logic assume it. Also learning undocumented behaviours (draw depth sorting, callback order, timer clearing) by trial, because the card says what to call but not how things interleave.",
+    "The Dialog's single shared onDone slot. Callbacks that can be replaced from inside a callback are what caused the double payout and skipped story beats. Per-line callbacks, or a promise-style say(), would remove the trap.",
+    "A first-class AI input source: let a scene be driven by a bot through the same Input pipeline (move(), buffered(), pressed()) without the bot's presses counting as the player's. Attract modes are a standard ask in these prompts and every game rebuilds the same workaround."
+  ],
+  "promptFeedback": [
+    "The shape of the brief: a clear deliverable and 'done' list, the 10-foot controller-first stance with the axis-inversion twist, the attract mode and AI Hub requirements, and the exit-interview JSON that feeds tools. Freedom over genre, research and story gave room to make something with a point of view.",
+    "The title step: the random pick can land on a name that barely riffs on the source, and the reply format asks me to include the brainstorm only silently. 'This folder's root' versus the subfolder for the html. 'Testing: testing parameters allowed' reads like a blank to fill. 'As well as for the game on its own' for multiplayer is ambiguous (local co-op, or just that the game still runs outside the hub). Usage numbers are not available inside a session.",
+    "Breadth. One vertical slice has to carry a genre game, a story in a TV drama's voice, three input families, settings, an attract mode, code-written music and voices, a hub protocol, and thorough tests, with no human, real pad or real iOS to check feel against. Making a brawler read as a TV drama about a boss in therapy was the creative crux.",
+    "A human playing the finished slice with a real DualSense on a TV at 10 feet for 15 minutes, recording what they did not understand. Every other check I could run was an automated stand-in for exactly that."
+  ],
+  "aiHub": {
+    "name": "The Sopranos Oh, Come On",
+    "tagline": "Collect, brawl, breathe, feed the ducks",
+    "description": "A Jersey beat-'em-up with sit-downs: shake down the Tuesday envelopes, keep the stress meter from boiling over, see the therapist, and take on Johnny Salt in the rain. Spiritual successor to The Sopranos.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "The Sopranos (1999-2007)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Move WASD/stick, punch J/Square/click, kick K/Circle/right-click, jump Space/Cross, rage L/R1, talk E/Triangle, view V/R3",
+    "tags": [
+      "2d",
+      "story",
+      "comedy",
+      "boss fights",
+      "retro",
+      "pixel art"
+    ]
+  }
+}

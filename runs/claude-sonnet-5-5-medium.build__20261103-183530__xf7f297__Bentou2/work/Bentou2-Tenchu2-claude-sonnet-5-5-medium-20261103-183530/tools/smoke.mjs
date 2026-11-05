@@ -1,0 +1,11 @@
+import { chromium } from '../pw/node_modules/playwright/index.mjs';
+import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url';
+const file = resolve(process.argv[2]), hash = process.argv[3] || '';
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-gl=swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = []; page.on('pageerror', e => errs.push(String(e.stack || e))); page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+await page.goto(pathToFileURL(file).href + hash); await page.waitForTimeout(2500);
+console.log(JSON.stringify(await page.evaluate(() => { const b = window.__bentou; return b ? { scene: b.game.scene && b.game.scene.id, errors: b.game.errors.map(e => e.message || String(e)) } : 'no handle'; })));
+await page.screenshot({ path: 'shots/' + (process.argv[4] || 'title') + '.png' });
+console.log('errors:', errs.slice(0, 5).join('\n---\n') || 'none');
+await browser.close();

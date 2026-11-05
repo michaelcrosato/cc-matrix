@@ -1,0 +1,10 @@
+import { load } from '../test/lib/load.mjs';
+import { runMatch, startCfg } from '../test/lib/bots.mjs';
+const { game, G } = load({});
+game.advance(.3);
+const cfgL = G.quickMatchCfg({ seed: 31 }); cfgL.teams = [[{ cast: 'tess', skill: .5 }, { cast: 'lola', skill: .5 }], [{ cast: 'sonny', kit: 'final', skill: .9 }, { cast: 'pepper', kit: 'final', skill: .9 }]]; cfgL.specials = { luckySeven: true }; cfgL.pointsToWin = 11;
+for (const t of cfgL.teams) for (const p of t) p.ctl = { kind: 'ai' };
+const M = startCfg(G, game, cfgL); const log = [];
+G.bus.on('touch', e => { if (M.luckyArmed || M.luckyDone) log.push(M.now.toFixed(1) + ' ' + e.p.cast + ' ' + e.kind + ' armed=' + M.luckyArmed + ' done=' + M.luckyDone); });
+G.bus.on('point', e => log.push('POINT ' + e.side + ' ' + e.score + ' gp=' + M.rules.gamePoint() + ' house=' + M.houseSide() + ' armed=' + M.luckyArmed));
+runMatch(G, game, M); console.log(log.slice(-30).join('\n'));

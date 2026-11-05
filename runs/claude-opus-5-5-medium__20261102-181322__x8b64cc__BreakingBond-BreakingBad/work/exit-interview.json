@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "Breaking Bad (2008-2013), the AMC television series created by Vince Gilligan",
+    "genre": "Crime action-adventure with a chemistry (cook) precision minigame, stealth, arena combat and a boss fight",
+    "perspective": "Three-quarter top-down (the engine's native threequarter view); switchable in play to top-down and isometric (V / R3)",
+    "tech": "my-3D2dge v0.85.1 full edition (canvas 2D renderer, E.Humanoid rigs, TileMap, E.Shell HTML HUD, chip-synth audio), plain JavaScript, AI Hub session client 1.3.0 (protocol v1), bundled into one HTML file with a small Node build script; no other libraries",
+    "artDirection": "The engine's native PS1-era pixel look (320x240 expanded to fill the screen): HD-style humanoid rigs, textured TileMap walls and floors, data-defined 3D shapes (RV, cars, lab benches, crusher), canvas lighting at night, particles and screen effects",
+    "animation": "The engine's procedural rig system: E.Humanoid posed from motion every step, E.MOVES attacks with wind-up and follow-through, poses (kneel, hips, guard, die), rolls with afterimages, plus code-drawn overlays such as the Catalyst hat that follows the head joint",
+    "audio": "All music written as note strings for the engine's chip synth (title, school, layered stealth and town chase, cook, fight, boss, sad, win), code-defined sound effects, and Animalese-style gibberish voices synthesized per letter with a distinct voice per character",
+    "online": "AI Hub Session Protocol v1, ghost mode, 1-4 players: the Cook-Off round opens straight into play, each copy sends its cook's position and shows the others as ghosts, reports progress and a final score. Outside the hub: local drop-in 2-player co-op (Danny)",
+    "testing": "Headless Chromium via Playwright 1.63: smoke runs of every scene, an autoplay bot that completes all six chapters, scripted input and screenshots; a simulated standard-mapping DualSense verifying stick movement, both axis-inversion toggles and PlayStation/Xbox glyphs; a full attract cycle (start after 10 s idle, segment change, exit on a button); a touch-only iPhone profile in WebKit showing the notice and running the attract mode (damage, game over, stealth detection, heat, attract start and exit, PlayStation and Xbox glyphs); viewport-matrix across 24 phone, tablet and desktop viewports in Chromium, WebKit and Firefox; AI Hub harness automatic check (2 players; 4 players with latency, jitter and loss; host-leave), all passing",
+    "research": "None beyond the provided engine handoff docs and the AI Hub protocol README; the show's premise, tone and structure come from general knowledge",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "Session time about 1 h 40 min (18:13 to 19:52, from the clock); API cost and token counts unknown (not visible to the model)"
+  },
+  "testingFeedback": [
+    "About 15 issues: a crash that blocked chapter 1 (the student conversations), two layouts you could not finish (chapter 5's customers stood inside houses, chapter 2's storeroom aisles were blocked by props), guards able to catch you while a dialog was open, the camera not following during dialogs, unreadable keycap text, mouse players seeing INTERACT instead of E, symbols the pixel font can't draw (a middle dot, a degree sign), the touch-only gate appearing only after a tap, an AI partner strong enough to win fights alone, checkpoint restarts leaving extra NPCs or no partner, music-layer warnings, an unknown material warning, and the Cook-Off timer and crates being hard to see.",
+    "4 were critical or game-breaking: the chapter 1 script crash, the two chapters you could not finish, and guards catching the player during dialog.",
+    "The autoplay test: the attract-mode bot (invulnerable, no-clip when stuck) played every chapter start to finish in headless Chromium while I logged each beat and objective. It found the crash and both layouts you could not finish, which screenshots never would have shown.",
+    "Least helpful: the first full-scene screenshot pass taken before the camera fix. Most frames showed the wrong part of the map during dialog, so they mostly showed that one bug again and again."
+  ],
+  "engineFeedback": [
+    "Everything you'd normally have to build is already there: pause menu, settings, rebinding, glyph families, saves, the HTML HUD, dialog with portraits, sight cones and suspicion, flow fields, and procedural humanoids that look good right away. A character with a portrait and a typed, voiced line costs one call.",
+    "Yes, a few times. A shape material string with a pattern name that isn't a pattern ('rock'), the default text outline that smears dark text on light keycaps, label() returning the action name for mouse users when the action has no mouse button, and glyphs like a middle dot and a degree sign that the pixel font can't draw. Each one cost a screenshot to find.",
+    "The mission framework: chapters as data with beats run as generator scripts, each beat a checkpoint, plus the M toolkit (say, objective, act, waitAct, reach, cook, wave). The cook minigame and the attract bot came next.",
+    "Seeing the result. The engine is large, so knowing whether something looked right meant building and screenshooting in a browser. Also, nothing tells a level designer that a spot is unreachable (props placed in a one-cell aisle).",
+    "I would overhaul the default text rendering. Make outline off by default (or pick it from contrast) and support or warn about missing glyphs like the middle dot, en and em dashes, and the degree sign, instead of silently drawing a question mark.",
+    "A built-in reachability check: map.reachable(from, to) or a debug overlay showing which acts, spawns and objective markers the flow field can't reach. Two of the four critical bugs were exactly that."
+  ],
+  "promptFeedback": [
+    "It asks for a complete vertical slice with real infrastructure (attract mode, controller-first 10-foot UI, glyph switching, axis-inversion toggles, a touch-only gate, hub multiplayer) instead of just a game. That pushes toward something that could actually ship.",
+    "How multiplayer should work standalone versus in the hub ('for the game on its own') was open to interpretation, so I chose local drop-in co-op outside the hub and ghost mode inside it. Also, the title instruction to pick at random from 50 names gave a title (Breaking Bond) that fits a chemistry theme only by luck.",
+    "Fitting the whole scope into one coherent slice: six story chapters, a signature cook minigame, stealth, combat, a boss, upgrades, a Cook-Off mode, the attract mode and hub integration, all on an unfamiliar engine, while keeping the UI readable at 10 feet.",
+    "A real-controller test on a TV: a DualSense (and an Xbox pad) driving every menu, the HTML pause and settings screens, and a full chapter, to confirm glyphs, axis inversion and focus behavior with real hardware rather than a simulated lastDevice."
+  ],
+  "aiHub": {
+    "name": "Breaking Bond",
+    "tagline": "A chemistry teacher. A diagnosis. A change.",
+    "description": "A spiritual successor to Breaking Bad: a dying chemistry teacher cooks perfect product, sneaks past guards, outsmarts a junkyard kingpin and earns a name. Includes a 1-4 player Cook-Off score attack.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Breaking Bad",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick or WASD move, right stick or mouse aim, Cross or E interact, R2 or click throw, Circle or Space roll",
+    "tags": [
+      "pixel art",
+      "story",
+      "top-down",
+      "stealth",
+      "boss fights",
+      "comedy"
+    ]
+  }
+}

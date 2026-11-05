@@ -1,0 +1,58 @@
+export default {
+  "sourceInformation": {
+    "date": "2026-11-04 05:03:14",
+    "source": "TrackMania (2003, Nadeo)",
+    "plan": "PLAN.md",
+    "genre": "Arcade racing (time attack) with a track-building puzzle mode",
+    "perspective": "Third-person chase camera (far, close, bumper); top-down map in the editor",
+    "tech": "my-3D2dge 2D engine v0.85.2 plus its 3D engine on three.js r182 (WebGPU, WebGL 2 fallback) and Rapier 0.19.3; esbuild 0.25.12 to one inlined HTML file; Node 24 and Playwright 1.63 for tests",
+    "artDirection": "The engine's native low-resolution toon-shaded 3D with ink outlines; cars, gates, boost pads, ghosts and cacti drawn by code with the pen; pixel font UI; three lands (Dustbowl, Hedgerow, Frostpeak)",
+    "animation": "The engine's vehicle tilt and steering animation, tweens, particles and the pen; gates, pads, ghost hulls and finish orbit camera animated by code",
+    "audio": "All synthesized with Web Audio: chip-style songs per land, effects, a raw-oscillator engine hum and tyre hiss, Animalese-style gibberish voices for Coco and Gus; no audio files",
+    "online": "AI Hub session protocol v1, ghost mode: everyone time-attacks the same track for three minutes, own card, ghost cars of the other players, progress and one result",
+    "testing": "Headless Node checks behind one command (node tools/test.mjs: 223 checks, bots drive every track and puzzle, scripted playthrough through the real menus, editor, survival, hot seat, split screen, fake AI Hub), the AI Hub harness in Chromium (3 scenarios), and a few screenshots under SwiftShader",
+    "research": "Plan research on TrackMania (2003); engine manual, API card and AI Hub protocol read; engine and hub sources fetched with git and gh",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown (tested in Chromium via Playwright)",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Testing caught about 10 real defects: the countdown reversing the car, a story dialog freezing the race after a deep link, a negative-coordinate course falling outside the level, scenery on the road, survival results never appearing, split-screen players left behind after quitting, an unknown input action on the online card, the attract demo exiting on a mouse artifact, and baked medal times going stale after a clock fix.",
+    "Four were critical or game-breaking: the reversing countdown, the frozen race, the course outside the level, and the tree standing on the road.",
+    "The most helpful test was the bot driving every track and puzzle solution with zero respawns, together with the scripted playthrough that plays all nine races through the real menus and checks medals, coppers, unlocks and ghosts.",
+    "The least helpful were the screenshots under SwiftShader (slow, and they could not show physics or timing) and the AI Hub harness, which passed first time and so found nothing."
+  ],
+  "engineFeedback": [
+    "World3D's world.track and world.vehicle: a banked road with walls and boost pads, E.Car handling, Rapier jumps over pits, plus game.advance determinism, the pause shell with settings and glyphs, and the pen for code-drawn parts. A drivable game appeared very quickly.",
+    "Yes. Level tiles start at world 0, so a course with negative coordinates fell off the level; synthetic input taps mark the device as touch; a held brake at standstill drives the vehicle backwards; and vehicles ignore fade so ghosts cannot be translucent.",
+    "The course compiler (segments to road sections, gates, pits and a driving line), the run clock and gate logic, the pure-pursuit bot, the segment editor and puzzles, the 10-foot UI kit, survival rivals and the AI Hub ghost layer.",
+    "Getting loops, closed block grids and surface-following cars out of an engine whose vehicle is a rolling ball on a mesh, and bundling the 3D engine, three and Rapier into one file with an esbuild resolver.",
+    "Only the 2D engine's input glyph default, now PlayStation, and the glyph setting, now PlayStation or Xbox only, because TASK.md asks for exactly that.",
+    "Let world.track build several sections with real gaps and loops, make vehicles honour actor fade, and give input an analog accessor for triggers."
+  ],
+  "promptFeedback": [
+    "The concrete plan: units, validated numbers, a test list and the AI Hub flow written out, so there was always a next step.",
+    "The plan's scope (15 tracks, 6 puzzles, a block grid with loops, a custom Rapier car) does not fit a medium-effort single session, and its file name differs from TASK.md's, so I had to decide which to follow.",
+    "Choosing what to cut from the plan while keeping every TASK.md feature: I kept all modes, and replaced loops and the block grid with a segment-chain track language.",
+    "Mark which parts of the plan are essential and which are stretch, give a smaller tier for lower efforts, and use one file name in both documents."
+  ],
+  "aiHub": {
+    "name": "CRACKMANIA",
+    "tagline": "Crack the clock",
+    "description": "An arcade time-attack stunt racer in three lands with jumps, boost pads, ghosts, medals, a track builder, puzzles and a Ghost Guild survival mode. Race alone, take turns, split the screen or time-attack in an AI Hub session.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "TrackMania (2003)",
+    "series": "TrackMania",
+    "players": "1-4",
+    "controls": "R2/W gas, L2/S brake, stick/arrows steer, Circle/Backspace respawn, Triangle/R restart, Square/C camera",
+    "tags": [
+      "3d",
+      "racing",
+      "arcade",
+      "time-attack",
+      "low-poly",
+      "vehicles"
+    ]
+  }
+};

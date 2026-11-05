@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:33:03",
+    "source": "Time Crisis 3 (Namco/Nextech, 2003; PS2 2003)",
+    "plan": "PLAN.md (claude-opus-5-5, max effort), scoped down by the builder where it disagreed with the time budget",
+    "genre": "On-rails light-gun shooter with a cover system",
+    "tech": "my-3D2dge handoff v0.85.2 full engine (patched: PlayStation glyph default, mouse-wheel codes, audio bus), a custom painter's-order perspective renderer module (\"Rail3D\"), AI Hub session client 1.4.0 (protocol v1). No other libraries.",
+    "artDirection": "The engine's native PS1-era pixel style: banded, fogged, flat-shaded perspective boxes with line textures, and the engine's Humanoid rigs as billboards",
+    "animation": "The engine's procedural Humanoid rigs (crouch, point/aim, run, air, land, roll, climb, slash, die) driven by enemy state, plus code-posed boss machines (Stingray, Bulldog, Scylla, Seawolf)",
+    "audio": "All code: the engine chip synth and tracker for music and SFX, plus a Web Audio formant \"Animalese\" gibberish voice synth for every speaker",
+    "online": "AI Hub Session Protocol v1, shared-world co-op for 1–4 players (host-authoritative Sim, input and snapshot messages); local two-player split screen",
+    "testing": "One command (node tests/run.mjs --all) prints only failures and a count: 824 checks over headless Node suites (game.advance, game.debug, direct Sim stepping), Autopilot playthroughs of every stage and of the whole ARCADE to the credits, the Training range, a Playwright browser smoke test, and the four AI Hub harness scenarios",
+    "research": "The engine handoff docs, the AI Hub protocol docs, and the Wikipedia article on Time Crisis 3 (summarised in PLAN.md). Facts used: pedal-based cover, 4 weapons, crisis flash, time limit per area, link play. Unknown: exact arcade time and weapon-switch rules.",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown",
+    "perspective": "First-person rail camera (cutscenes use a letterboxed rail shot)"
+  },
+  "testingFeedback": [
+    "About 16 real defects were caught by scripted runs and validators (most before any screenshot): enemies shootable only through scenery (gallery floor, ice table, houses, deck crates), a boss whose defeat was never wired, a boss scene that never cleared, a lift whose cover prop stayed on the ground, a moving scene that let the camera pass living enemies, an endless cutscene loop after results, drones too fast to hit, and a Hammerhead fight that was unwinnable without shotgun shells.",
+    "7 of them were game-breaking soft-locks (a scene or boss that could never be finished): unreachable enemies, boss never defeated, boss scene never cleared, passing enemies in moving scenes, the lift with no cover, the endless cutscene loop, and Hammerhead with no ammo supply.",
+    "The most helpful tests were the scripted Autopilot playthrough of every stage (it finds soft-locks no assertion would) and the content validator that ray-casts every cover point from every player slot.",
+    "The least helpful were the screenshot checks for layout (slow for what they found) and the determinism hash test, which never failed; the net suite is covered by the real AI Hub harness instead of a fake hub."
+  ],
+  "engineFeedback": [
+    "The fixed-step headless loop (game.advance, game.debug) that made every system testable in Node, plus the Humanoid rigs that draw from any View, and the ready-made pause menu, settings, rebinding and boot screen.",
+    "Yes: I assumed boot steps ran synchronously in Node (they need a tick), assumed the pixel font had a dash and the PlayStation face-button glyphs (it did not), and expected r.overlay in a split screen to give viewport-relative coordinates (it gives the whole buffer).",
+    "The perspective renderer (\"Rail3D\": camera math, painter-order boxes, sky, sea, fog, banded light), the deterministic Sim (cover, threats, director, bosses), the Autopilot, and the AI Hub netcode.",
+    "The 2D engine has no perspective view: rigs only draw from orthographic Views, so every enemy is drawn to a scratch canvas per frame, scaled by distance and sorted by hand, with no z-buffer.",
+    "Four small patches (engine/PATCHES.md): PlayStation glyphs by default (Xbox as the option), mouse-wheel input codes, audio.bus() for the voice synth, and extra pixel-font glyphs (face buttons, dashes, ellipsis, check, arrows).",
+    "A first-class first-person/rail view: a perspective E.View with depth-sorted rigs, boxes and sprites, so light-gun and corridor games do not need their own renderer."
+  ],
+  "promptFeedback": [
+    "The plan's concrete numbers (timings, weapon tables, enemy roster, test suites) and the single-file, AI Hub and attract-mode requirements: they made every system verifiable.",
+    "The plan and TASK.md name different files and models, and the plan assumes the 3D engine and a very large scope (three stages, three bosses, online, split screen) that does not fit one medium-effort session without cuts.",
+    "Shipping everything at once: a feature-complete three-stage game with bosses, split screen, online co-op, a dev panel, an attract mode, and all audio and voices in code.",
+    "Add must/should/could tiers and say which plan items may be simplified, and supply the engine's perspective renderer or say plainly that none exists."
+  ],
+  "aiHub": {
+    "name": "Tide Crisis 3",
+    "tagline": "Duck. Pop. Shoot. Beat the tide.",
+    "description": "An original arcade light-gun rail shooter in PS1-style pixel 3D: duck behind cover, switch between four weapons and race each area's clock to retake an island's tidal barrier before the dawn king tide. Play solo, couch co-op or AI Hub co-op for up to four.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Time Crisis 3",
+    "series": "Time Crisis",
+    "players": "1–4",
+    "controls": "Mouse or stick aims · left click/R2 fires · hold right click/L2 for cover and reload · wheel/R1 switches weapons",
+    "tags": [
+      "first-person",
+      "arcade",
+      "co-op",
+      "boss fights",
+      "pixel art",
+      "retro"
+    ]
+  }
+}

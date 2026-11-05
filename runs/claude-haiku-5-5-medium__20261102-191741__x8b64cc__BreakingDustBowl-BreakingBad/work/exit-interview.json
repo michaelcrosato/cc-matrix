@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 19:35",
+    "source": "Breaking Bad (2008-2013)",
+    "genre": "Adventure",
+    "perspective": "Three-quarter top-down (default); top-down and isometric via V",
+    "tech": "my-3D2dge v0.85.1 (2D retro engine, single file, no libraries); HTML canvas; AI Hub session.js 1.3.0",
+    "artDirection": "Engine-native HD pixel look: 320x240 base, drawn characters, props, lights, desert and garage palettes",
+    "animation": "Engine rigs (Humanoid) with E.MOVES attacks and telegraphed wind-ups; procedural, no keyframes",
+    "audio": "Chip-synth music and sound effects from the engine; dialogue voice is a synthesized gibberish blip per letter, no recorded speech",
+    "online": "AI Hub session, parallel mode, 1-4 players, one desert round reporting a cash score",
+    "testing": "Headless Node tests (the game, a stubbed hub round) and Playwright screenshots of the built file in Chromium; WebKit phone check on iPhone SE and four more devices",
+    "research": "Read the my-3D2dge handoff (API card, adventure kit, template) and the AI Hub session protocol on GitHub",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Six game issues: the desert never spawned its batches (a map helper returned arrays where the code read x and y); the desert AI walked into rocks; the showdown crashed for lack of a flow field; the title menu covered the lineup; the lineup ran off-screen after that fix; the touch-only message never showed. Three test-harness mistakes (a stale progress state, a promise not flushed, back-to-back presses) were mine and are not counted.",
+    "Two were critical: the batches never spawning (the desert could not be played) and the showdown crash (it stopped the attract run). The stuck AI blocked the attract run too, but it did not break play.",
+    "Most helpful: the headless attract run, which plays the lab, desert and showdown with the error log open. It caught the spawn bug, the stuck AI and the showdown crash.",
+    "Least helpful: the hub stub test. It checks the calls I wrote against a stub of my own, not the real hub. Its one failure was my own timing, not a game bug."
+  ],
+  "engineFeedback": [
+    "I liked the rigs and the attack system most: the characters wind up, strike and settle on their own, and the title looked right on the first render.",
+    "I guessed wrong on return shapes: TileMap center() returns [x, y] while find() and findAll() return objects with x and y. I also assumed E.angleDiff exists (it doesn't), so I wrote my own. Input tap() also drops a second press that lands within two frames.",
+    "The most important things I built myself: the desert map generator, the cook minigame, the patrol and sight-cone AI, the boss telegraph and phases, and the hub round glue.",
+    "The hardest part was keeping the many small API shapes in mind at once; the API card is about 67 KB and I could only read it in pieces.",
+    "I would overhaul the spatial helpers' return types: one shape everywhere, {x, y}, instead of arrays for center() and objects for find().",
+    "I would change one thing: ship the engine as a smaller bundle for simple games. The 1.2 MB engine makes the single-file page about 1.3 MB."
+  ],
+  "promptFeedback": [
+    "I liked the explicit done-conditions, the list of screens that must exist, and the exit-interview shape: they made the finish line clear.",
+    "Confusing: 'create a subfolder here' and 'bundle into the root' used 'here' and 'root' for different places, and 'usage only if estimates are available' sat next to 'answer every field'. Silently brainstorming 50 titles while also needing a real RNG pick was hard to square.",
+    "The hardest thing was fitting every listed feature (attract mode, hub round, gamepad inversion, Xbox symbols, touch-only, about and credits) into one session on a large engine.",
+    "The test I would most want run: the real hub harness with two browser tabs in parallel mode, plus a simulated Gamepad API to check the inversion settings."
+  ],
+  "aiHub": {
+    "name": "BREAKING DUST BOWL",
+    "tagline": "A bad batch in a dry town",
+    "description": "A top-down desert crime story with a timed cook, a sneak-and-deliver run past Vail's men, and a telegraphed showdown in a chapel ruin.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Breaking Bad (2008-2013)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD move; J, X or click swings; Space dashes; Enter or Space confirms",
+    "tags": [
+      "top-down",
+      "comedy",
+      "boss fights",
+      "exploration",
+      "retro",
+      "desert"
+    ]
+  }
+}

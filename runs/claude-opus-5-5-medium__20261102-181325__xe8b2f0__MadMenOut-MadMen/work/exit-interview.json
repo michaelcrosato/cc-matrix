@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "Mad Men (2007-2015), the AMC television drama created by Matthew Weiner",
+    "genre": "Narrative adventure with a persuasion (pitch) minigame and light time and composure management",
+    "perspective": "Three-quarter top-down in the office (switchable to isometric or top-down); side view for evenings and the title",
+    "tech": "my-3D2dge v0.85.1 (full edition, single file, no dependencies), plain JavaScript, Canvas 2D and Web Audio through the engine; AI Hub session client 1.3.0; Node 24 and Playwright 1.63 (Python) for tests",
+    "artDirection": "Engine-native code-drawn pixel art at 320x240 expanded to the screen; HD Humanoid rigs in 1962 suits and dresses; mid-century furniture written as engine shape data; canvas lighting",
+    "animation": "Engine-native procedural rigs (walk, poses, expressions), live dialog portraits with moving mouths, scene transitions",
+    "audio": "Code-written cool-jazz music in the engine's step notation, chip sound effects (typewriter, ice, telephone, applause), Simlish-style gibberish voices synthesized per speaker",
+    "online": "AI Hub Session Protocol v1, parallel mode, 1-4 players (seeded deal, progress, result, time-up, end); local 2-player Pitch-Off; no other network use",
+    "testing": "Headless Node test suite (94 checks, full three-day playthrough, every mode, mock hub, gamepad axis fix); Playwright runs in Chromium, Firefox and WebKit; mocked DualSense run; AI Hub harness (2 and 4 players with latency, loss and host-leave); viewport matrix of 24 phone, tablet and desktop sizes",
+    "research": "None beyond the engine and AI Hub documentation; the source is drawn from general knowledge",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "13: four unknown material patterns; the brainstorm reading its layout only from draw (dead input headless); the attract autopilot stuck on furniture; a window hotspot overlapping the typewriter; the pixel font missing the PlayStation symbols (prompts showed '?'); a missing middle dot; card text overflowing; suits drawn as white shirts; the pitch camera hiding the clients behind the HUD and chairs; no AI Hub progress reports during play (harness fail); garbled icons in the tiny font; the wrong hint on touch-only screens; the logo crowding the corner button on portrait phones.",
+    "3: the missing PlayStation glyphs (every controller prompt unreadable), the missing hub progress reports (the hub would keep the game out of sessions), and the pitch camera hiding the client you are pitching to.",
+    "The headless three-day playthrough in Node (94 checks): it drives every conversation, card, event, pitch, ending and mode in seconds and caught the input and hotspot bugs; a close second is the AI Hub harness, which caught the missing progress reports.",
+    "The viewport matrix on the title screen: all 24 sizes came back clean, so it mostly confirmed the engine's expand layout, though its phone shots did show the logo crowding the corner button."
+  ],
+  "engineFeedback": [
+    "How much comes for free and works the same everywhere: the pause menu, settings, rebinding, glyph families, saves, dialog with live portraits, lighting, and an exact fixed-step clock that makes a whole game testable headless in Node.",
+    "A few times: material shorthand patterns (leather, velvet, leaves and marble are not patterns), the 'coat' outfit using cloth for the torso, the font lacking the PlayStation symbols its own input labels return, and the side view's depth for props.",
+    "The pitch system (cards with angles, client wants that change mid-pitch, the timing meter, pivots and the beat-timed close), plus Simlish voices driven from the dialog's typing, the clock-and-events office day, and the gamepad axis-inversion fix.",
+    "Finding the right names in a very large API: the index helps, but details like which views a prop faces in, how mouseGround returns, or that FlowField ignores placed furniture needed reading the source or trial and error.",
+    "The material shorthand's silent fallback: an unknown pattern only warns once in the console, so a typo quietly changes how furniture looks; it should fail loudly or list the patterns at the call site.",
+    "Ship the PlayStation and Xbox button symbols in the pixel fonts, since input.label() returns them, and add a public font.define() for game glyphs; also make FlowField avoid map.solid furniture."
+  ],
+  "promptFeedback": [
+    "It is concrete about what done means: attract mode timing, controller-first UI with glyph and inversion settings, touch-only behaviour, hub integration, and a full feedback loop.",
+    "The deliverable name pattern (how to write GameTitle and SOURCE in a file name with spaces and a year), and whether 'multiplayer for the game on its own' meant local multiplayer as well as the hub; I did both.",
+    "Turning a slow, talky drama into a game loop with real decisions: the insight cards, the clock and composure trade-offs and the timed pitch had to make persuasion feel like play.",
+    "A real DualSense on a TV at ten feet with a person playing all three days, to judge readability, pacing and whether the pitch meter feels fair; I could only mock the gamepad in the browser."
+  ],
+  "aiHub": {
+    "name": "Mad Men Out",
+    "tagline": "Everybody is selling something.",
+    "description": "A 1962 Madison Avenue adventure: gather insights around the agency, write the campaign and win the pitch on timing and nerve. Online, race friends through the Pitch Gauntlet for the most billings.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Mad Men",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD walk, ✕ / E talk and confirm, △ / Tab the deck, arrows on the beat in the close",
+    "tags": [
+      "2d",
+      "story",
+      "comedy",
+      "retro",
+      "pixel art",
+      "top-down"
+    ]
+  }
+}

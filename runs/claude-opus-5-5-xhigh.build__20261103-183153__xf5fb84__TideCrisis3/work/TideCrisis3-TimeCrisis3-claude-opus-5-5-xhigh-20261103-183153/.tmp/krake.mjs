@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+process.env.TMPDIR = resolve('.tmp');
+const b = await chromium.launch();
+const file = 'file://' + resolve('../TideCrisis3-TimeCrisis3-claude-opus-5-5-xhigh-20261103-183153.html');
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto(file); await p.waitForFunction(() => window.TC && TC.game && TC.game.sceneName === 'title', null, { timeout: 30000 });
+await p.evaluate(() => { TC.debug.start({ stage: 3, scene: '3-B', cheats: { god: true } }); });
+await p.waitForTimeout(6000); await p.screenshot({ path: 'shots/kb_scylla.png' });
+await p.keyboard.down('Space'); await p.waitForTimeout(700); await p.screenshot({ path: 'shots/kb_scylla_cover.png' }); await p.keyboard.up('Space');
+await p.evaluate(() => { const S = TC.play.sim; S.boss.cockBreak(S); });
+await p.waitForTimeout(3500); await p.screenshot({ path: 'shots/kb_krake.png' });
+await p.keyboard.down('Space'); await p.waitForTimeout(700); await p.screenshot({ path: 'shots/kb_krake_cover.png' }); await p.keyboard.up('Space');
+await p.evaluate(() => { const B = TC.play.sim.boss; B.kr.hp = B.kr.max * .14; });
+await p.waitForTimeout(900); await p.screenshot({ path: 'shots/kb_final.png' });
+console.log(await p.evaluate(() => { const S = TC.play.sim, B = S.boss; return { kstate: B.kstate, finalT: B.finalT, cam: [S.cameraFor(0).x, S.cameraFor(0).y].map(v => v.toFixed(0)) }; }));
+console.log(errs); await b.close();

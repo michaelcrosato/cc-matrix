@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url';
+const [file, out, wait = '1500', w = '960', h = '540'] = process.argv.slice(2);
+const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-gl=swiftshader'] });
+const p = await b.newPage({ viewport: { width: +w, height: +h } });
+const errs = []; p.on('pageerror', e => errs.push(String(e.stack || e))); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+const [fp, hash] = file.split('#');
+await p.goto(pathToFileURL(resolve(fp)).href + (hash ? '#' + hash : ''));
+await p.waitForTimeout(+wait);
+await p.screenshot({ path: out });
+console.log(errs.length ? 'ERRORS:\n' + errs.join('\n') : 'no errors');
+await b.close();

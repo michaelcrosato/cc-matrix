@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:56:19",
+    "source": "Rugby (over-the-top arcade style): rugby sevens played for laughs",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports (rugby sevens) with a short story campaign, training drills and couch/online party multiplayer",
+    "perspective": "TV broadcast camera: the pitch left to right seen from the stand at a 40 degree pitch (custom 'broadcast' view), with High (55 degrees) and Overhead options; conversions and penalty goals cut to a behind-the-kicker camera (custom views turned 90 or 270 degrees so the posts are straight up the screen) with an inset aim and power gauge",
+    "tech": "my-3D2dge engine v0.85.2 (full engine, canvas 2D and Web Audio, 3 small patches); AI Hub Session Protocol v1 client 1.4.0 (unmodified); plain JavaScript in one IIFE bundled by a Node build script into one self-contained HTML file; Node 24 and Playwright 1.63 (Chromium) for tests only; no other libraries",
+    "artDirection": "The engine's native PS1-era pixel style (ps1 320x240, expand to fill the screen): procedural HD Humanoids dressed per player in team kits, textured striped pitch and stands, a bobbing crowd in team colours, code-drawn oval ball, goalposts, crests, power-up sprites, sin bin, sponsor boards, venue skylines, floodlights, weather and venue hazards",
+    "animation": "The engine's native procedural Humanoid rig driven from match state (velocity gait, poses, E.MOVES attack specs for pass, kick, fend, tackle, spin), plus game-made states: superman dives, launched flips for monster hits, ruck and scrum crouches, lineout lifts, celebrations, stunned stars, skeleton flash when zapped",
+    "audio": "All in code with the engine's chip synth: seven songs (title glam stomp, four venue themes with drum and hype layers that follow play, pub piano, the club song), eight stings, about 30 sound effects (whistle, hooter, thuds, crunches, doink, crowd bed, claps, squawk, thunder), Animalese-style per-letter babble voices for commentators, coach, referee, cast and players",
+    "online": "AI Hub shared-world sessions for 2-4 players (the host runs the match; each client runs its own player at once from its own stick while he is free-running and reports his position, the host takes it within limits and decides everything else; clients draw 12 Hz snapshots and reliable event bundles drive local commentary and effects; the game's own card; finish, time-up, leave, end, server host); local 1-4 players on one machine (pads and two keyboard halves)",
+    "testing": "Headless Node tests behind one command (node test/run.mjs: 15 suites, 174 checks, about 25 s, including a scripted playthrough of the whole Mega Cup, a proof that each of the nine drills can be completed, the attract director, dev mode, and an in-process two-copy AI Hub loopback); Playwright screenshots of every key screen (test/browser.mjs); the real AI Hub harness in all four configurations (test/hub.mjs: all pass); a TASK.md requirement checker run against the shipped HTML (test/taskcheck.mjs: 59 of 59 pass; each TASK.md line quoted beside its evidence, every gameplay feature, power-up, hazard, mode screen and animation state on its own line, golden point included); key-press playthroughs of every mode on the shipped HTML (test/modes.mjs: Exhibition join, setup, full match, results and rematch; Training Ground to a completed drill; Records; About; Settings; Credits; Mega Cup); the engine's own tools/check.mjs on 14 screens (no errors)",
+    "research": "Read the handoff package (README, API.md, parts of AI_GUIDE.md, the sports kit, engine source around fonts, input half keyboards, dialogs, menus, settings, the arcade module, the store) and the AI Hub lib/hub README, retrofit notes and harness; no web research beyond those two repositories",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown cost and token count (no token or cost meter is available in this session); session time about 1 hour 30 minutes (06:56 to about 08:25)"
+  },
+  "testingFeedback": [
+    "About 19 issues: AI carriers almost never passed, then over-passed into 0-0 draws; three load-order crashes at boot (a duplicated identifier, the scene registry and key preset used before definition); a renderer field that shadowed a function and crashed the camera; kicks launching from a stale ball position after a teleport; defenders catching drop goals straight off the boot; penalty tries looking at the wrong player; the boss being launched instead of gang-tackled; a collapsed-scrum win not counting in the set-piece drill; an online human kicker stalling a kick-off; a key not bound to any action failing to end the attract demo; and five layout bugs seen in screenshots (kick widget, prompt and commentary overlap, menu overflow, dev panel footer, title prompt).",
+    "Four were game breaking: the three boot crashes and the camera-bounds crash; all were fixed before shipping.",
+    "The scripted playthrough of the whole Mega Cup (menus, story, training, four autopiloted matches, initials, victory, credits), together with the per-drill auto scripts that prove each of the nine drills can be completed.",
+    "The single-seed proof hash: it never failed, because the simulation was built deterministic from the start."
+  ],
+  "engineFeedback": [
+    "game.advance with exact fixed steps and a headless Game: whole matches, the full cup and a two-copy network loopback run in seconds, and the same code draws in the browser.",
+    "Yes, a few times: E.store prefixes keys (my3d2dge:) which a test assumed it did not; groundDisc draws immediately rather than as a decal; r.tgt is the buffer for drawing a skyline before the floor; and I named a field PR.map that clobbered my own function. Pad glyphs drawing as ? was flagged by the plan and fixed.",
+    "The match simulation itself: rugby rules and set pieces (rucks, scrums, lineouts, penalties, conversions, drop goals, advantage, cards), the team AI, and the intent layer that lets humans, the AI, tests, the attract director and network clients drive the same players.",
+    "Fitting a 10-foot interface into a 320x240 buffer: the 5x7 font at scale 1 is the readable minimum, so screens needed careful layout, and there is no built-in big-menu or button-badge widget.",
+    "Three small patches: PlayStation symbols added to the 5x7 font (labels drew as ?), Input.halfKeys honouring a per-action layout for two keyboard players, and an E.Dialog onLetter hook so every speaker can babble letter by letter.",
+    "Controller-glyph badges and a scalable menu as standard widgets: prompts built from actions that draw a PlayStation, Xbox, keycap or mouse badge for the last device."
+  ],
+  "promptFeedback": [
+    "It is concrete about what done means (attract mode, dev sliders, glyphs following the device, touch-only message, AI Hub) and it came with a detailed plan, so the work was building rather than guessing.",
+    "The plan's file names (max effort, an earlier date) differ from TASK.md's; TASK.md wins, as STAGE.md says, but it needed a moment. Feature-complete demo and the plan's very large scope (every animation polished, many patches) pull against each other at medium effort.",
+    "Making a sport's AI look like rugby (shape, passing at the right moment) while keeping every set piece and arcade system reachable in play, the drills and the attract mode, plus an online shared world.",
+    "Generate the plan's names from TASK.md's values, and say plainly which plan items are optional polish versus required features."
+  ],
+  "aiHub": {
+    "name": "THUGBY TURBO",
+    "tagline": "Big hits, bigger hair, seven a side",
+    "description": "Over-the-top arcade rugby sevens: turbo runs, monster hits, a referee who only sees half of it, and a pub team's run at the Mega Cup.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Rugby",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD run, L1/R1 or Q/E pass, ✕ or Space tackle and sidestep, □ or F fend and dive, ○ or C kick, R2 or Shift turbo, △ or R super",
+    "tags": [
+      "sports",
+      "arcade",
+      "comedy",
+      "pixel art",
+      "versus",
+      "co-op"
+    ]
+  }
+}

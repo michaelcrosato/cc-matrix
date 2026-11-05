@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:40:16",
+    "source": "Karate Champ (1984 arcade, Data East; known in Japan as Karate Do)",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort)",
+    "genre": "1-on-1 tournament karate fighting (point sparring) with arcade bonus stages and a mimic-the-master drill",
+    "perspective": "2D side view on a single-screen arena (the engine's side view, a locked camera that follows the fighters)",
+    "tech": "my-3D2dge v0.85.2 handoff engine, modified (PlayStation glyph default, live pause for sessions); AI Hub session client 1.4.0 unmodified; Web Audio; game in plain JavaScript; tests on Node 24 with Playwright 1.63.0",
+    "artDirection": "the engine's native HD humanoid rigs drawn as PS1-era pixel art at 320x240 (expanded to any screen): white gi against red gi on eight painted Japanese stages, code-drawn props, lanterns, crowds and a bull",
+    "animation": "the engine's procedural Humanoid rig driven by karate move specs built on E.MOVES (kicks, punches, sweeps), spins by turning the rig, somersaults and rolls with flip, plus referee signals, flags and a hand-posed bull",
+    "audio": "music, sound effects and voices are all written in code: chip songs on the engine sequencer in Japanese pentatonic scales, noise and sine effects, and an Animalese-style gibberish voice synth (formant filters, per-line deterministic syllables) for the referee, fighters and kiai",
+    "online": "AI Hub session protocol v1, shared-world: Kachinuki (winner stays on) for 2-4 players with the game's own card; plus local versus for 2 players and local Kachinuki for 3-4",
+    "testing": "headless game.advance suites behind one command (data, input, technique, bout, ai, bonus, drill, a scripted full playthrough, versus, an in-process fake hub, attract, dev, ui, audio, smoke), plus Playwright page checks and the real AI Hub harness (2 players; 4 players with latency 150, jitter 50, loss 5; host leaves; server host)",
+    "research": "the plan's research on Karate Champ (Wikipedia, TASVideos, Shacknews, arcade-history) for scoring, ranks, bonus stages and the referee; no further research in the build",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 16 real issues were caught by scripts: a stuck slow-motion time scale after a full point, scene singletons keeping a 'finished' flag so every cutscene after the first never ended, a scene hook name (exit) clashing with the engine's, the round clock resetting after every exchange, the lesson II reverse punch drill being unreachable, CONTINUE replaying the same seeded match forever, a tuning override that also weakened the autopilot, AI personalities dominated by one lunge or jump kick, getters run by Object.assign, two file-order initialization errors, a mouse hover and touch-gate lifting that only worked from DOM events, and several test-only mistakes.",
+    "Five were game-breaking: the stuck time scale, the cutscene finished flag (a soft lock in the story), the exit hook that threw the player into the dojo menu, the unreachable reverse punch drill (the story could not be finished) and the endless same-seed CONTINUE retry.",
+    "The scripted full playthrough of all 19 ladder nodes with real menu inputs, the autopilot and the dev toggles: it found most of the soft locks above, and the same run then served as the continue, game over, initials and unlock check. The real AI Hub harness run was a close second because it proved the protocol end to end.",
+    "The matrix and technique-table checks: they read the same data the game does, so they mostly confirmed the data against itself. The screenshots were also slow for what they gave, apart from the first look at each screen."
+  ],
+  "engineFeedback": [
+    "The rig. A fully dressed, shaded, animated fighter from one constructor call, with E.MOVES giving credible kicks and punches, flip for somersaults and rolls, and portraits for free. Fixed-step update plus game.advance made every test deterministic, and the headless tools were excellent.",
+    "Yes. Guessed wrong that a scene's exit() is just my own helper (it is the engine's leave hook), that Object.assign on a scene copies getters by calling them, that game.go() takes effect on the next step (and through a fade, so tests must wait), that hit-stop timers die with a scene change and leave game.timeScale altered, and that input.pointer() moves only from DOM events (feed() does not touch mouse.t).",
+    "The whole fighting rule set: a karate Bout with the referee's phase machine, half and full points, counters, aiuchi, the clock and hantei; the twin-stick control reader; the CPU with reaction delay and personalities; the three bonus games; the gibberish voice synth; the glyph icons; 10-foot menus and the attract director.",
+    "Knowing which engine pieces to avoid. E.Fighter and E.Match assume life bars, game.freeze stalls update (which would stall networking), and the 5x7 font has no cross, circle, square or triangle, so none of the stock fighting helpers fit. Also hand-balancing the AI so levels and personalities ordered sensibly.",
+    "Two small edits, listed in engine/CHANGES.md: the button symbols default to PlayStation (setting and Input.glyphs) because TASK.md asks for it, and game.live keeps the scene update running while the pause menu is open so a shared-world host never stalls its network traffic. Everything else (right stick as the technique stick through input.padAim, glyph icons, voices) was done game-side.",
+    "A 'next step' hook-free way to change scenes: let game.go take effect at once in headless runs (or expose a flush), and make scene objects instances instead of shared singletons so state left on the object cannot leak into the next visit."
+  ],
+  "promptFeedback": [
+    "The plan was a complete, ordered build document: exact technique tables, scoring formulas, phase timings, message formats and a traceability table. Having the numbers decided made the combat code straightforward, and the hub protocol section meant the harness passed at the first run.",
+    "The plan and TASK.md disagree on small things (file names in the plan carry the planner's model and time, the plan asks for edits like EC1 and EC7 that the engine did not need), and the plan's scale (all 11 locations, a Technique Lab, a 2.5D camera, the bull as a custom creature, 4 online roles, all tests) is bigger than one medium-effort pass, so every item needed a decision on how much to cut.",
+    "Making the CPU and the balance work: the plan's targets (a level curve, win rates, every technique landing, no technique over 35 percent) conflict with a roster where a single lunge or jump kick scores a full point from long range, so the data and the AI both needed tuning passes.",
+    "Say which parts of a long plan are mandatory and which are stretch, tell the builder that a plan's tables may be tuned for balance when a test says so, and give a total size budget. A line on the expected size of the final single file would also help."
+  ],
+  "aiHub": {
+    "name": "Karate Champon",
+    "tagline": "Two sticks. One clean strike.",
+    "description": "A point-sparring karate tournament inspired by Karate Champ: land one clean technique and let the referee call it. Climb from white belt to Champ, break boards, smash flying pots and stop a charging bull, then play winner-stays-on Kachinuki with friends.",
+    "type": "Game",
+    "genre": "Fighting",
+    "source": "Karate Champ (1984)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick/WASD: move, jump, crouch · Right stick, face buttons or IJKL: techniques · Options/Esc: pause",
+    "tags": [
+      "2d",
+      "arcade",
+      "versus",
+      "retro",
+      "pixel art",
+      "comedy"
+    ]
+  }
+}

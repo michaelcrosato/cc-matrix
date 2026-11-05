@@ -1,0 +1,8 @@
+/* 23-timetable: calibrated timetables (node tools/calibrate.mjs writes this file): the autopilot at minimum time
+ * arrives 6-12 s early on Normal, so a good driver can be on the second. Data; applied over 22-stages. */
+(() => {
+'use strict';
+const DH = window.DH;
+DH.TIMETABLE = { "S1": { "stops": [ { "id": "akari", "dep": "06:40:00" }, { "id": "hanabatake", "arr": "06:42:25", "dep": "06:42:50" }, { "id": "kujira", "arr": "06:45:15" } ], "passes": [] }, "S2": { "stops": [ { "id": "kujira", "dep": "10:15:00" }, { "id": "minato", "arr": "10:17:15", "dep": "10:17:40" }, { "id": "okiku", "arr": "10:23:05" } ], "passes": [ { "id": "todai", "at": "10:21:15" } ] }, "S3": { "stops": [ { "id": "okiku", "dep": "14:00:00" }, { "id": "yuhi", "arr": "14:03:45", "dep": "14:04:05" }, { "id": "shotengai", "arr": "14:08:00" } ], "passes": [] }, "S4": { "stops": [ { "id": "shotengai", "dep": "17:30:00" }, { "id": "daigaku", "arr": "17:32:10", "dep": "17:32:30" }, { "id": "koen", "arr": "17:34:50" } ], "passes": [] }, "S5": { "stops": [ { "id": "koen", "dep": "23:10:00" }, { "id": "hoshimi", "arr": "23:12:25", "dep": "23:12:45" }, { "id": "kawasemi", "arr": "23:15:00", "dep": "23:15:20" }, { "id": "akari", "arr": "23:18:00" } ], "passes": [] }, "PR": { "stops": [ { "id": "shotengai", "dep": "12:00:00" }, { "id": "daigaku", "arr": "12:02:25", "dep": "12:02:45" }, { "id": "koen", "arr": "12:04:55" } ], "passes": [] } };
+for (const id in DH.TIMETABLE) { const S = DH.STAGES[id], T = DH.TIMETABLE[id]; if (!S) continue; S.stops = T.stops.map(p => Object.assign({}, p)); S.passes = T.passes.map(p => Object.assign({}, p)); }
+})();

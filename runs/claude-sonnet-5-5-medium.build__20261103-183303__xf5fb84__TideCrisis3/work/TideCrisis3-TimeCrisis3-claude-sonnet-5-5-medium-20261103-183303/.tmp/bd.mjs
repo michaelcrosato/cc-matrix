@@ -1,0 +1,3 @@
+import { load, mkSim, run, STEP } from '../tests/harness.mjs';
+const { dbg } = await load(); const pl = sim => sim.players[0];
+{ const sim = mkSim(dbg, '1-B'); run(sim, 3.2, [{ coverDown: true }]); const b = sim.boss; const kill = k => sim.hitBoss(pl(sim), { key: k, mult: 1 }, b.parts[k].hp * 4, 3, [0, 0, 0]); kill('turretL'); kill('turretR'); run(sim, 4, [{ coverDown: true }]); const bar = b.parts.barracuda; bar.vulnerable = true; sim.hitBoss(pl(sim), { key: 'barracuda', mult: 1 }, 99, 3, [0, 0, 0]); run(sim, 1, [{ coverDown: true }]); console.log('stingray', b.dead, sim.phase, bar.dead, bar.hp, b.done(sim, b), sim.boss === b, 'enemies', sim.enemies.filter(e => !e.dead && !e.civ).map(e => e.type), sim.waves.map(w => w.done)); }

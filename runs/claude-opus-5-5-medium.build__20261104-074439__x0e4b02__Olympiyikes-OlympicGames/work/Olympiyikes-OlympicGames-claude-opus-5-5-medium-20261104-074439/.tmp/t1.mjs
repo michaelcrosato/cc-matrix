@@ -1,0 +1,12 @@
+import { boot } from '../tests/harness.mjs';
+const c = boot({ quiet: false });
+const O = c.OLY, game = O.game;
+O.flow = { quickMeet: id => ({ mode: 'single', seed: 1, players: [], difficulty: 'Normal' }), eventDone() {} };
+O.meet = { mode: 'single', seed: 5, players: [], difficulty: 'Normal' };
+const def = O.EVENTS.sprint;
+const ctx = O.makeCtx(def, O.meet, { sandbox: true });
+for (const a of ctx.athletes) a.mash = new O.Mash();
+def.build(ctx);
+ctx.active = ctx.athletes.slice(); def.start(ctx); O.runToEnd(ctx, 40);
+for (const a of ctx.athletes) console.log(a.id, a.pilot.skill.toFixed(2), a.cur, a.S.react && a.S.react.toFixed(3), a.notes.join(','));
+console.log('errors', game.errors.length, game.errors.map(e => e.message));

@@ -1,0 +1,3 @@
+import { chromium } from 'playwright'; import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url';
+const html = pathToFileURL(resolve(new URL('../../IceHoc-Kaboom-IceHockey-claude-sonnet-5-5-medium-20261104-055058.html', import.meta.url).pathname)).href;
+const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] }); const c = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true }); const p = await c.newPage(); await p.goto(html); await p.waitForTimeout(3500); await p.screenshot({ path: 'shots/touch.png' }); await b.close();

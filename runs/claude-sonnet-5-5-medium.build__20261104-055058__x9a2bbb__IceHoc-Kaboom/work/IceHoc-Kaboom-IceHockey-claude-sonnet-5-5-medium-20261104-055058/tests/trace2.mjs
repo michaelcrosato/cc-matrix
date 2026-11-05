@@ -1,0 +1,3 @@
+import { load } from './lib.mjs'; const { game, G } = load(); const { Match, Flow, Bus } = G; game.advance(.1);
+const m = Match.create({ home: 'muskrats', away: 'drillers', arena: 'icebox', periods: 1, periodLen: 60, diff: 1, shootout: false, ot: false, seed: 3, noReplay: true });
+for (let i = 0; i < 120 * 14; i++) { Flow.step(m, 1 / 120); if (i > 120 * 5 && i % 120 === 0) { const o = m.puck.owner; const ds = m.sk.filter(s => s.side === 0).map(s => `${s.nick}:${Math.hypot(s.x - m.puck.x, s.y - m.puck.y) | 0}d ${s.state} t${s.turbo.toFixed(2)} v${Math.hypot(s.vx, s.vy) | 0} in(${s.intent.mx.toFixed(1)},${s.intent.my.toFixed(1)})`); console.log(`t=${m.t.toFixed(1)} owner=${o ? o.nick : '-'} v=${o ? Math.hypot(o.vx, o.vy) | 0 : 0} | ` + ds.join(' | ')); } }

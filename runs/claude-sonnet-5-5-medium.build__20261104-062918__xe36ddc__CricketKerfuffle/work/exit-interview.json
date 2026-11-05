@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:29:18",
+    "source": "cricket (over the top arcade style)",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort); built in a reduced scope, TASK.md winning where they differ",
+    "genre": "Arcade sports (cricket) with a comedy story campaign",
+    "perspective": "2.5D three-quarter broadcast camera behind the bowler, with a wide follow cut once the ball is hit",
+    "tech": "my-3D2dge v0.85.2 (modified, 5 engine changes); plain JavaScript in one IIFE bundled into a single HTML file; AI Hub session client 1.4.0 (unmodified); Node 24 and Playwright 1.63.0 for the tests",
+    "artDirection": "The engine's native pixel-art-from-3D-rigs look: Humanoid rigs (with a new cricket bat), a procedural ground texture, and buildings, cow, crowd and stumps drawn in code",
+    "animation": "The engine's Humanoid rig with E.MOVES (backslash, rising, twohand, throw), poses (cheer, kneel, crouch, hips) and run cycles, driven by the match simulation",
+    "audio": "All in code: chip-synth effects and five songs, plus a Web Audio formant synth for Animalese-style gibberish commentary and cutscene voices; no audio files",
+    "online": "AI Hub Session Protocol v1, parallel mode: a seeded one-over Super Over, same balls on every copy, scores reported to the hub; also passes the hub harness",
+    "testing": "Headless only: vm-driven simulation checks, a scripted human playthrough of every mode through the real scenes, a Playwright browser smoke run, and the AI Hub harness",
+    "research": "None beyond the engine docs, the AI Hub README and the plan",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About ten real issues: a rolling ball re-bouncing every step (41,000 bounce events), a falsy batter id (0) that meant a ball hit by the first batter was never judged a boundary and the match stalled for 28 s a ball, CPU batters running into certain run-outs, far too many wides, sixes and over-the-stumps deliveries, a bat weapon the engine rejected, a missing in-memory save fallback, a camera zoom that cropped the striker, and font glyphs that drew as question marks.",
+    "Three: the falsy hitBy id (play froze), the engine whitelist that silently replaced the bat with a sword, and the camera framing that hid the batter behind the HUD.",
+    "Running 30 complete AI-versus-AI matches headless and printing the distribution of outcomes (extras, dismissals, boundaries, runs per ball). It found the stalled balls and every balance problem within seconds.",
+    "A Playwright autopilot that pressed keys through polling: browser latency meant it could not hit the timing window, so it only proved the page did not crash. The scripted headless input taps were far more useful for the same job."
+  ],
+  "engineFeedback": [
+    "Humanoid rigs with ready-made moves and poses (a bowler's throw, a batter's backslash, cheers and crouches) gave the game animated characters for free, and the Game shell (pause menu, settings, glyphs, corner buttons) plus game.advance and game.debug made headless testing of whole scenes easy.",
+    "Yes. I assumed game.setZoom(1) meant the view scale; the three-quarter view's base scale is 1.5 and zoom cannot go below 0.5, so my first framing was far too tight. I also assumed a bat weapon would just work (a whitelist swapped it for a sword) and that E.store works in Node (it needs localStorage).",
+    "The entire cricket simulation: ball physics with a predictor that uses the same step, the laws (wides, no balls, LBW, catches, run-outs), running between the wickets, fielder AI, hype and ON FIRE, chaos events, plus the HUD, the 10-foot menus, the formant voice synth and the hub round.",
+    "Working out the camera: the relationship between view scale, zoom, the camera focus and the buffer size on an expanded 427x240 screen, and fitting a 10-foot UI in the engine's pixel font at that size.",
+    "Five changes: a cricket bat weapon in the Humanoid draw (plus its whitelist entry and swing smear), an audio voice bus with a Voices volume setting and audio.bus(name), PlayStation as the default button-symbol set with an Xbox (A B X Y) option, and a TileMap floor cache of ten baked floors instead of six. Logged in engine/CHANGES-KERFUFFLE.md.",
+    "A wider documented camera zoom range, with the base view scale stated beside the presets (zoom below 0.5 and the true pixels-per-unit of each view would have saved me an hour)."
+  ],
+  "promptFeedback": [
+    "The concrete deliverables and the testing guidance (one command, only failures printed, no subagent audits), and the exit interview, which makes the run record useful. The plan was rich with ideas to steal.",
+    "The plan is about 148 KB and asks for far more than one session can build; it was unclear how much of it I was expected to honour. The plan's file and folder names (claude-opus-5-5-max-20261103-174825) differ from TASK.md's, and I had to resolve that myself.",
+    "Scoping: a feature-complete vertical slice with story, four modes, attract mode, dev mode, local and online multiplayer, Animalese voices and a 10-foot controller UI, verified without a human eye on the screen.",
+    "Tier the plan into must, should and could, state a rough size for a good slice, and say plainly which of the plan's names and numbers TASK.md overrides. A short reference game on the engine would also help calibrate scope."
+  ],
+  "aiHub": {
+    "name": "Cricket Kerfuffle",
+    "tagline": "Mind the cow. Mind the vicar. Mind the window.",
+    "description": "An over-the-top arcade cricket game: time your swing, aim past the cow, go ON FIRE and put one through the pub window. Story, quick match, a seeded Super Over for AI Hub sessions, and two-player versus.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "cricket",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or mouse aims; Cross or J drives, Square or K lofts, Circle or L blocks, Triangle or E goes ON FIRE, R1 or Space runs, L1 or Q changes the field",
+    "tags": [
+      "arcade",
+      "comedy",
+      "sports",
+      "retro",
+      "versus",
+      "story"
+    ]
+  }
+}

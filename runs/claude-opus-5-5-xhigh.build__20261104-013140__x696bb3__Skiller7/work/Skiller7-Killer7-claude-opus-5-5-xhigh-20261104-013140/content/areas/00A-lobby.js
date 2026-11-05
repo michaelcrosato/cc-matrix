@@ -1,0 +1,93 @@
+/* TARGET 00 · 00A GRAND HOTEL NADA, THE LOBBY (§11.7): marble checkerboard, a red runner, chandeliers, the bar behind
+ * a velvet rope, a mezzanine up the stairs to the staff stairwell. The first Whiteout, Murmel, Pim, the bar phone. */
+S7.area('00A', {
+  title: 'GRAND HOTEL NADA', sub: 'LOBBY', target: 0, music: 'hotel', ambience: 'roomtone', pinNo: 1,
+  world: { kind: 'level', w: 36, h: 27, wallH: 7,
+    rooms: [[2, 2, 34, 25]], walls: [[13, 2, 14, 9, 7], [13, 14, 14, 25, 7]],
+    raised: [[14, 2, 30, 6, 4]], stairs: [[20, 6, 23, 11, 'n', 0, 4]],
+    pillars: [[17, 14], [17, 19], [30, 14], [30, 19]],
+    ground: 'tiles', colors: { base: '#e8e4dc', dark: '#2a2226', light: '#f4f0ea' }, side: 'block', wallColor: '#5a1e24', raisedSide: 'block',
+    sky: '#05040a', fog: { color: '#0a0608', near: 260, far: 900 }, ambient: ['#5a4048', '#140a0e', 1.25], lights: 6, palette: 'hotel' },
+  nodes: {
+    r7: { t: [31.5, 21.5], kind: 'door', label: 'ROOM 7' },
+    j1: { t: [24.5, 21.5], kind: 'junction', label: 'RECEPTION' },
+    s1: { t: [15.5, 21.5], kind: 'npc', label: 'LUGGAGE RACK' },
+    d0: { t: [24.5, 24.0], kind: 'stop', label: 'REVOLVING DOOR' },
+    j2: { t: [24.5, 14.5], kind: 'junction', label: 'LOBBY' },
+    j4: { t: [31.5, 11.5], kind: 'stop', label: 'ELEVATORS' },
+    j3: { t: [21.5, 11.5], kind: 'junction', label: 'STAIRS' },
+    g1: { t: [16.5, 11.5], kind: 'stop', label: 'BAR' },
+    b1: { t: [8.5, 11.5], kind: 'stop', label: 'BAR' },
+    b2: { t: [4.5, 11.5], kind: 'stop', label: 'BEHIND THE BAR' },
+    m1: { t: [21.5, 4.5], kind: 'stop', label: 'MEZZANINE' },
+    x1: { t: [21.5, 2.7], kind: 'exit', label: 'STAIRWELL', to: ['00B', 'x1'], needs: { item: 'servicekey' }, line: 'Locked. STAFF ONLY.' }
+  },
+  edges: [
+    { a: 'r7', b: 'j1' }, { a: 'j1', b: 's1' }, { a: 'j1', b: 'd0' }, { a: 'j1', b: 'j2' },
+    { a: 'j2', b: 'j4' }, { a: 'j2', b: 'j3' }, { a: 'j3', b: 'g1', gate: 'rope' }, { a: 'g1', b: 'b1' }, { a: 'b1', b: 'b2' },
+    { a: 'j3', b: 'm1', kind: 'stairs', via: [[21.5, 8.5]] }, { a: 'm1', b: 'x1' }
+  ],
+  gates: { rope: { kind: 'buyout', price: 20, who: 'rurik', solver: 'rurik', label: 'MEMBERS ONLY', icon: 'rope' } },
+  spots: [
+    { id: 'door7', kind: 'door7', node: 'r7', label: 'Room 7' },
+    { id: 'murmel', kind: 'murmel', node: 's1', label: 'Murmel' },
+    { id: 'pim', kind: 'pim', at: [32.5, 11.5], talk: 'pim_00A', label: 'Pim', reach: 3 },
+    { id: 'pin1', kind: 'pin', pin: 1, node: 'j4' },
+    { id: 'phone', kind: 'phone', at: [9.5, 12.6], talk: 'concierge_bar', label: 'House phone', reach: 2.6 },
+    { id: 'rime1', kind: 'rime', n: 4, edge: 'b1-b2', s: .5 },
+    { id: 'rime2', kind: 'rime', n: 3, edge: 'j2-j4', s: .7 },
+    { id: 'red1', kind: 'red', n: 10, edge: 'j1-d0', s: .6 },
+    { id: 'red2', kind: 'red', n: 8, edge: 'r7-j1', s: .5 },
+    { id: 'file', kind: 'dossier', dossier: 'graufile', edge: 'j1-s1', s: .2 },
+    { id: 'key', kind: 'item', item: 'servicekey', node: 'b2' },
+    { id: 'revolve', kind: 'sign', node: 'd0', line: 'The revolving door won\'t turn. Outside, the storm leans on it.' },
+    { id: 'stairwell', kind: 'exit', node: 'x1', label: 'Stairwell' }
+  ],
+  spawns: { first: [33.2, 13.2], elev1: [33.2, 10], elev2: [33.2, 12.6], elev3: [32.6, 8.4], bar1: [3.5, 7], bar2: [3.5, 16], bar3: [10.5, 16.5], mezz1: [28.5, 3.5], mezz2: [15.5, 3.5], hall1: [8, 22], hall2: [29, 23.5] },
+  waves: {
+    first: { spawn: [['giggler', 'first', 0, { warm: 'chest', speedK: .8 }]], set: 'firstClear' },
+    elev: { spawn: [['giggler', 'elev1', 0], ['giggler', 'elev2', 1.2], ['giggler', 'elev3', 2.4]] },
+    bar: { spawn: [['giggler', 'bar1', 0], ['giggler', 'bar2', .8], ['bellboy', 'bar3', 2]] },
+    mezz: { spawn: [['bellboy', 'mezz1', 0], ['bellboy', 'mezz2', 1.5]] },
+    hall: { spawn: [['giggler', 'hall1', 0], ['bellboy', 'hall2', 1.5]] }
+  },
+  triggers: [
+    { id: 'first', edge: 'j1-j2', s: .35, beat: 't00_first_whiteout' },
+    { id: 'elev', node: 'j4', wave: 'elev', flag: 'firstClear' },
+    { id: 'bar', node: 'b1', wave: 'bar' },
+    { id: 'mezz', edge: 'j3-m1', s: .3, wave: 'mezz' },
+    { id: 'hall', node: 's1', wave: 'hall', flag: 'murmelMet' },
+    { id: 'ropetip', node: 'j3', beat: 't00_rope_tip' },
+    { id: 'walktip', onEnter: true, tut: 'walk', notFlag: 'walkTipDone' }
+  ],
+  props: [
+    ['shape', 'S7:reception-desk', 24.5, 23.2, 0, { facing: -Math.PI / 2 }],
+    ['shape', 'S7:service-bell-small', 25.2, 23.2, 1.1, {}],
+    ['shape', 'S7:luggage-rack', 14.6, 22.8, 0, { facing: -Math.PI / 2 }],
+    ['shape', 'S7:bar-counter', 6.5, 9, 0, { facing: Math.PI / 2 }],
+    ['shape', 'S7:bar-counter', 6.5, 14, 0, { facing: -Math.PI / 2 }],
+    ['shape', 'S7:bottle-shelf', 2.6, 11.5, 0, { facing: 0 }],
+    ['shape', 'S7:fireplace', 2.5, 18, 0, { facing: 0 }],
+    ['shape', 'kenney-furniture:lounge-sofa', 7, 20, 0, { facing: 0, scale: 1.3 }],
+    ['shape', 'kenney-furniture:lounge-chair', 9.6, 22.4, 0, { facing: -Math.PI * .6, scale: 1.3 }],
+    ['shape', 'kenney-furniture:lounge-design-sofa', 27.5, 17.2, 0, { facing: Math.PI / 2, scale: 1.3 }],
+    ['shape', 'kenney-furniture:side-table', 21.5, 17.2, 0, { scale: 1.3 }],
+    ['shape', 'S7:elevator-doors', 33.6, 10, 0, { facing: Math.PI }],
+    ['shape', 'S7:elevator-doors', 33.6, 13, 0, { facing: Math.PI, params: { open: .4 } }],
+    ['shape', 'S7:revolving-door', 24.5, 24.9, 0, { facing: -Math.PI / 2 }],
+    ['shape', 'S7:velvet-stanchion', 17.6, 10.6, 0, {}], ['shape', 'S7:velvet-stanchion', 17.6, 12.4, 0, {}],
+    ['shape', 'S7:potted-palm', 19, 23.6, 0, {}], ['shape', 'S7:potted-palm', 29.6, 23.6, 0, {}], ['shape', 'S7:potted-palm', 14.6, 15, 0, {}],
+    ['shape', 'S7:luggage-cart', 28.5, 23.4, 0, { facing: .4 }],
+    ['shape', 'S7:suitcase', 15.4, 23, 0, { facing: .2 }], ['shape', 'S7:suitcase', 13.8, 22.6, 0, { facing: -.4 }],
+    ['thing', 'chandelier', 20, 14.5, 6.2], ['thing', 'chandelier', 27.5, 19, 6.2], ['thing', 'chandelier', 7, 11.5, 5.4],
+    ['thing', 'runner', 24.5, 18, 0, { w: 2, d: 13, color: '#8a1420' }], ['thing', 'runner', 21.5, 8.5, 0, { w: 2.2, d: 6, color: '#8a1420', stairs: true }],
+    ['light', 20, 14.5, 5.6, { color: '#ffd8a0', reach: 230, power: 4.5, flicker: .03 }],
+    ['light', 27.5, 19, 5.6, { color: '#ffd8a0', reach: 230, power: 4.5, flicker: .03 }],
+    ['light', 7, 11.5, 4.8, { color: '#ffb070', reach: 170, power: 3.4, flicker: .05 }],
+    ['light', 24.5, 25.5, 3, { color: '#7a90ff', reach: 160, power: 2.2 }],
+    ['light', 32.5, 11.5, 2.6, { color: '#c0ffd0', reach: 110, power: 1.6, flicker: .3 }],
+    ['light', 21.5, 3.5, 6.5, { color: '#ffd0a0', reach: 160, power: 2 }]
+  ],
+  people: [{ who: 'murmel', at: [14.4, 22.6], z: .4 }, { who: 'pim', at: [33, 11.5], z: .8, lift: true }],
+  blocks: [[23, 22.8, 0, 26, 23.6, 1.1]]
+});

@@ -1,0 +1,58 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-04 05:45:28",
+  "source": "Big Buck Hunter Pro",
+  "plan": "PLAN.md",
+  "genre": "Arcade light-gun hunting shooter (a shooting gallery in a living landscape), with a trophy encounter and bonus games",
+  "perspective": "First person, on rails: a fixed vantage per site over a pseudo-3D landscape, with an x-ray Shot Chart in the tallies and 2D menus",
+  "tech": "my-3D2dge v0.85.2 handoff engine (unmodified; canvas 2D with its pixel primitives, scenes, input, standard menus and synth audio), AI Hub client lib/hub session.js 1.4.0 (verbatim, ghost mode), vanilla JavaScript, Node 24 for build and tests, Playwright (Chromium) for the browser pass",
+  "artDirection": "The engine's retro-modern pixel style: procedural landscapes per hunt (autumn creek, alpine ridge, snowy muskeg), animals and critters painted from primitives, a 5x7 pixel font",
+  "animation": "Built on the engine's tween system: falls (outBounce), the head going down to graze (outCubic) and the bonus snowman's pop (outBack) are engine tweens on game time. The animals share one four-legged rig written to the engine's rig convention (update(dt, state) poses it, draw paints it), since the engine ships only a Humanoid and a Blob. The rig is not part of the engine.",
+  "audio": "Bluegrass chiptune songs, gunshots, bugle call and bird chirps, and gibberish Animalese voices for the cast, all synthesized in code (engine chip synth); no audio files",
+  "online": "AI Hub Session Protocol v1, ghost mode: reticles sent between up to four copies; progress and a single result reported to the hub",
+  "testing": "node tests/run.mjs (206 checks): game logic through game.advance, game.input and game.debug, including a scripted campaign, the range, party turns, the labs, tweens, and the gamepad through the engine's input map; a Chromium pass over every screen; a simulated standard-mapped gamepad and a forced touch-only media query in Chromium; the AI Hub harness at 2 and 4 players under latency, jitter and loss. No physical gamepad or touch device was available.",
+  "research": "Read the Big Buck Hunter and Big Buck Hunter Pro pages during planning (PLAN.md section 1.1); nothing new searched while building",
+  "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium for the browser checks; browser for the player unknown",
+  "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+  "usage": "unknown"
+ },
+ "testingFeedback": [
+  "About 9 game issues: 1 critical (the results screen threw after the last segment, so a finished Hunt-Off showed the engine's error panel and could not be saved); 8 smaller (prompt glyphs showing as '?', a caption over the rifle panel, Dev mode rows running into the hint line, antlers above the Shot Chart frame, an empty bar on the doe-rule choice, a shot-into-a-doe bug that benched the attract bot's gun, a crash when firing outside a site, and menu idle not starting attract). Most were found in the browser pass and screenshots.",
+  "Critical: the results-screen crash, found by a screenshot after the campaign ended, not by the Node tests, which had passed. Game-breaking for the campaign ending; fixed and covered by the browser pass.",
+  "Most helpful: the browser pass that opens every screen and takes screenshots. It caught the crash and the visual faults the Node checks could not see.",
+  "Least helpful: the same-seed determinism check. It only confirms the seeded streams repeat, and passed on the first run. The AI Hub harness was more useful: it checked the real protocol with a real client.",
+  "Added after the first review: the practice range, the party hunt and the labs were checked by the Node tests and the browser pass, not by hardware. Gamepad and touch devices were never exercised.",
+  "Physical gamepad and touch devices were not available. The gamepad path is tested through the engine's input map only; the touch-only screen is tested with a stubbed device query."
+ ],
+ "engineFeedback": [
+  "Liked most: the overlay and pixel primitives (r.overlay with px.rect, poly, ell and font.text) made a custom pseudo-3D scene easy; and the standard pause, settings, controls and full screen menus came free.",
+  "Stuck or guessed wrong: scene changes fade, so a key sent right after one lands on the old scene (tests need about 0.6 s of settling); a scripted tap sets the last device to touch, so input.label() shows action names; the font has no middle dot or en dash, so they print as '?'. I guessed E.mix and E.font.wrap from the index and confirmed both by running them.",
+  "Most important thing built myself: the hunt itself. The landscape painter, the animal rigs, the hit zones and shot resolution, the pump and chamber model, the bot, the x-ray Shot Chart and the bonus games. The engine's depth, lighting and camera were bypassed for an overlay-drawn scene.",
+  "Hardest part: fitting an on-rails, screen-space shooter into an engine built around its camera views and lit scenes; the overlay gets no depth sort, lighting or shadows for free.",
+  "Engine changes: none. The engine file is the handoff copy, unmodified. A quadruped rig was written in the game's own source (src/12-rig.js), not in the engine.",
+  "One change I'd make: label() should fall back to the keyboard's names when the last device is a scripted tap, and the font should cover the middle dot and en dash."
+ ],
+ "promptFeedback": [
+  "Liked most: the explicit core loop, the one-line deliverable names, and the testing rules (game.advance, game.debug, one command that prints only failures). They made the work concrete.",
+  "Confusing: PLAN.md names a different title and dev folder from TASK.md, and describes about 30 source files and a 17-minute, three-hunt game with a voxel renderer. TASK.md wins on conflicts, but the scale was hard to reconcile with one session, so I built the plan's systems in a smaller form.",
+  "Hardest: keeping to the plan's scope while finishing a complete, playable slice in one session, and writing the usage and feedback answers accurately without measurements.",
+  "Change: say up front how much of the plan is required versus illustrative, give a scope budget for one session, and say whether the title should come from the plan or be drawn fresh."
+ ],
+ "aiHub": {
+  "name": "Big Buck Hunter Hoedown",
+  "tagline": "A hoedown in the hunting grounds",
+  "description": "Shoot the bucks, never the does: a light-gun hunt through three landscapes, with a trophy and bonus games.",
+  "type": "Game",
+  "genre": "Shooter",
+  "source": "Big Buck Hunter Pro",
+  "series": "Big Buck Hunter",
+  "players": "1-4",
+  "controls": "Aim: mouse or left stick. Shoot: click, Space or R2. Pump: R or Square. Scope: hold Shift or right click. Call: C or Triangle.",
+  "tags": [
+   "3d",
+   "arcade",
+   "pixel art",
+   "comedy"
+  ]
+ }
+}

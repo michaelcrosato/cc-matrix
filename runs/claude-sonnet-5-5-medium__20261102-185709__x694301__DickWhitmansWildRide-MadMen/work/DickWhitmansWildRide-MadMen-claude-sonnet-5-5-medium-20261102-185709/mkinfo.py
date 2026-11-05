@@ -1,0 +1,48 @@
+import json
+src = {
+ "date": "2026-11-02 18:57",
+ "source": "Mad Men (2007-2015)",
+ "genre": "Narrative adventure / office life sim with card-pitch and typing mini-games",
+ "perspective": "Three-quarter top-down (engine 'threequarter' view); the player can cycle to top-down and isometric with the camera button",
+ "tech": "my-3D2dge 0.85.1 (single-file 2D engine, canvas), plain JavaScript modules bundled into one HTML file; AI Hub session client 1.3.0 (Protocol v1) pasted in unmodified; no other libraries or CDN dependencies",
+ "artDirection": "Engine-native HD pixel style: 1963 Madison Avenue as a 320x240-class pixel scene with HD-shaded Humanoid rigs, custom furniture shapes (desks, sofas, bar, elevator), marble checker lobby, green linoleum bullpen, canvas lighting and a warm haze overlay for the drink meter",
+ "animation": "Engine-native: procedural Humanoid rigs (walk, idle, pose and expression states, live dialogue portraits), tweened UI and screen transitions",
+ "audio": "All made in code at run time: a small jazz-lounge composer (walking bass, comping, melody, brushes) for title, office, bar, pitch, typing sprint and ending; synthesized effects (lighter, ice clink, typewriter, elevator bell, telephone); Animalese-style gibberish voices where every letter blips at a pitch taken from the letter, in a register per character",
+ "online": "AI Hub Session Protocol v1, ghost mode, 1-4 players: each copy plays its own seeded Thursday, the other players show as translucent ghosts in the same room, progress and the final score go to the hub. Standalone it runs as a one-player game",
+ "testing": "Headless Chromium through Playwright with my own scripts (title, a full attract-mode playthrough with state logging, pitch/typing/notebook/ending screens, view switching, save and load, meltdown and blackout events, touch-only emulation); the AI Hub conformance harness at 2 players, 4 players with latency/jitter/loss, and host-leave (all pass); WebKit desktop sizes through viewport-matrix (title only). Not tested: a real gamepad (stick inversion and glyphs are written to the spec but unproven on a DualSense), real iOS Safari, Firefox, a live hub with real players",
+ "research": "None beyond what I already know about the show; the engine handoff docs and the AI Hub protocol README were read in full. Tone and details (the shoes, the lighter, the three-martini lunch) are from memory and invented",
+ "environment": "Claude Code CLI (headless); Linux; browser unknown",
+ "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+ "usage": "unknown (no usage meter is visible inside the session); session time about 40 minutes of wall clock, started 2026-11-02 18:57"
+}
+testing = [
+ ("How many issues did testing catch?", "Eleven: the boot crash from NPC rig options overwriting the rig, the attract mode quitting itself because the AI's own button taps counted as player input, the attract AI looping on the elevator before the room change was processed, the scene's input preset silently replacing my key layout (wrong prompts), prompts falling back to action names for a touch device, two glyphs the pixel font cannot draw, blotchy lighting, a gothic rainbow window prop that did not belong in 1963, and three overlapping UI bits (demo banner, version label, notebook footer)."),
+ ("How many would be considered critical issues / game breaking?", "Two: the boot crash (nothing started) and the elevator loop that stalled the attract-mode demo forever."),
+ ("What was the most helpful test you ran?", "Letting the attract-mode AI play the whole day end to end at triple speed while logging the story flags, mode, room and clock every few seconds. It walked every route, drove every dialogue, both pitches and the ending, and it found both critical bugs."),
+ ("What was the least helpful test you ran?", "The first AI Hub harness run: it was served from a port another agent was already using, so it checked someone else's game and passed it as mine. Single title-screen screenshots in WebKit were also low value on their own.")
+]
+engine = [
+ ("What did you like most about the engine?", "The view system: one world, three camera angles for free, and the same lit scene looks right in each. Close behind: Humanoid rigs with live dialogue portraits, the standard pause/settings/save slots, E.Menu's mouse hover, and a deterministic fixed step that made headless testing meaningful."),
+ ("Did you get stuck or guess wrong?", "Yes, three times. A scene's input option re-applies a named preset on entry, which undid my custom layout until I passed the object itself. input.label() answers with the action name for a touch device. And I guessed the Dialog voice could take a function; it takes one sound name, so Animalese needed my own per-letter hook."),
+ ("What was the most important thing you had to build yourself?", "The game layer: a script runner for branching dialogue with effects, the day's clock and its stress/haze/heat stats, the slide-card pitch, the typing sprint, the attract-mode AI that plays through the same objective logic, the AI Hub ghost layer, and a getGamepads shim for the invert-stick settings."),
+ ("What was the hardest part about using the engine?", "Making a 1963 office with a library that leans medieval: the window prop is a gothic rose window, the shape library is small, so I wrote a dozen furniture shapes as part data. Tuning canvas lighting so rooms were moody without being blotchy took a few passes."),
+ ("If you had to remove or overhaul one thing from engine, what woudl that be?", "The scene-level options that are applied silently on entry (input, view, res): they overwrite things the game set up, and nothing says so. I would make them opt-in or log what they replace."),
+ ("If you could change one thing about the engine, what would it be?", "Give Dialog a per-letter voice callback (letter, speaker) and give Input axis-invert settings with a Settings toggle, so Animalese and the 'sometimes inverted stick' fix are one line each instead of a workaround.")
+]
+prompt = [
+ ("What did you like most about this prompt?", "The done-criteria are concrete and checkable, and the 10-foot controller-first rules are specific enough to design against: glyphs that follow the last device, a mouse that works in menus and the world, touch handled with a clear message, and the real-world stick-inversion toggle. The attract mode and AI Hub requirements push the game toward being finished rather than a toy."),
+ ("What was confusing?", "Little. The shared directory and shared machine are a hazard (another agent's server on a common port answered my first hub test), and the prompt does not say how to handle that. Usage figures 'if estimates are available' leave a model with no meter guessing. The file name pattern with a title containing an apostrophe needed a judgement call."),
+ ("What was the hardest thing to do?", "Scope. A complete vertical slice with narrative, two mini-games, endings, save/load, settings, attract mode, ghost multiplayer and a 10-foot UI in one sitting, while keeping the writing in the voice of the show."),
+ ("If there was one test you could of run, what would that test be?", "A real DualSense on a real TV: stick inversion, PlayStation and Xbox glyphs, rumble, pad-only menu navigation through a whole day. Second choice, a live four-player AI Hub session on real networks.")
+]
+about = {"source": [["Date", src["date"]], ["Source", src["source"]], ["Genre and Perspective", src["genre"] + ". Perspective: " + src["perspective"]], ["Tech", src["tech"]], ["Art Direction", src["artDirection"]], ["Animation", src["animation"]], ["Audio", src["audio"]], ["Online", src["online"]], ["Testing", src["testing"]], ["Research", src["research"]], ["Environment", src["environment"]], ["Model", src["model"]], ["Usage", src["usage"]]],
+         "testing": testing, "engine": engine, "prompt": prompt}
+ascii_fix = lambda s: s.replace("’","'")
+json.dump(about, open('about.json','w'), ensure_ascii=True)
+ei = {
+ "sourceInformation": {"date": src["date"], "source": src["source"], "genre": src["genre"], "perspective": src["perspective"], "tech": src["tech"], "artDirection": src["artDirection"], "animation": src["animation"], "audio": src["audio"], "online": src["online"], "testing": src["testing"], "research": src["research"], "environment": src["environment"], "model": src["model"], "usage": src["usage"]},
+ "testingFeedback": [a for q,a in testing], "engineFeedback": [a for q,a in engine], "promptFeedback": [a for q,a in prompt],
+ "aiHub": {"name": "Dick Whitman's Wild Ride", "tagline": "One Thursday on Madison Avenue", "description": "A 1963 ad-agency day in pixel art: talk your way through the office, build a pitch from slides, and keep your composure, your haze and your secrets in check. A spiritual successor to Mad Men.", "type": "Game", "genre": "Life Sim", "source": "Mad Men (2007-2015)", "series": "", "players": "1–4", "controls": "Move: left stick / WASD. Talk or use: Cross / Space / E. Smoke: Square / F. Notebook: Triangle / Tab. Camera: R3 / V. Mouse: click people and things.", "tags": ["story", "comedy", "retro", "pixel art", "exploration", "top-down"]}
+}
+json.dump(ei, open('../exit-interview.json','w'), indent=2, ensure_ascii=False)
+print('ok')

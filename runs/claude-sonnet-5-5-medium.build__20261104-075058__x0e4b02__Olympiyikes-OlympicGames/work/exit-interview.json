@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:50:58",
+    "source": "The complete Summer and Winter Olympic Games (over the top arcade style)",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort)",
+    "genre": "Arcade multi-event sports (Track & Field / Winter Games lineage): 12 compact mini-games, a 12-day campaign, quick games, single events, 1-4 local players, AI Hub ghost rounds",
+    "perspective": "Per event, all 2D on the engine views: brawler 2.5D lanes (100m, javelin, 50m freestyle), pure side view (diving, ski jump, weightlifting, figure skating), pseudo-3D behind the athlete (downhill, bobsled), and screen-space overlays (archery target, curling sheet seen from above, hockey goal seen from the shooter)",
+    "tech": "my-3D2dge v0.85.2 handoff engine (plain JavaScript, canvas 2D, no libraries, no CDN), our edited copy; AI Hub Session Protocol v1 client 1.4.0 (session.js, unmodified); Node vm + Playwright 1.63.0 for tests; one self-contained html file",
+    "artDirection": "The engine's native HD pixel-puppet style at ps1 resolution (expand: true) with new code-drawn art: eight national flags, event pictograms, five-ring emblem, crowd stands, podium, cauldron, goal and curling sheet, swimmer/diver/skier figure puppets, a scanline pseudo-3D road renderer, ten-foot panels and big stamped words",
+    "animation": "The engine's Humanoid procedural rig and pose system (run gait, crouch, hips, wave, cheer, down, throw move) plus our own stick-puppet figure with limb angles for dives, swims, ski flight and tumbles, and tweened ceremony timelines",
+    "audio": "All code, no audio files: a chiptune synth for every sound effect (gun, whistle, splash, puck, clang, fireworks, cheers), original songs per venue, procedural national anthems generated from each nation's seed, and Animalese-style gibberish voices for the two commentators",
+    "online": "AI Hub Session Protocol v1, ghost mode: when the hub opens the page the game skips the menus, plays the round's event (picked from the shared seed), sends its progress to the other copies, reports progress and a time or score result through the hub client",
+    "testing": "Headless scripted tests only (one command, node tests/run.mjs): every event played by a bot, a scripted playthrough of the whole 12-day campaign through the real menus, attract mode, two-player turns, dev mode, settings, determinism; Playwright screenshots for what scripts cannot check; AI Hub harness run. No subagents or workflows were used to review or audit",
+    "research": "None beyond reading the supplied PLAN.md, TASK.md, the engine API card and the AI Hub README",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown (checked in headless Chromium via Playwright)",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Testing caught ten issues: an unreachable spin target in diving, curling stones that curled off the sheet and never settled, bot results that beat the world record in several events, a draw-time crash in the commentary bar, stands and track drawn at the wrong edge because y runs down the screen, font glyphs missing from the pixel font, a prompt strip that showed the wrong key for paired actions, commentary covering the HUD and results rows, a menu that overflowed, and a nation panel clipped by the flag grid.",
+    "Two were critical: the commentary draw crash (it threw every frame in every event, caught only by the first browser run) and the diving spin target that made the event impossible to score.",
+    "The most helpful test was the headless bot that plays every event with the real input path plus the scripted 12-day playthrough through the real menus: it proved every scene hands over to the next and every event can finish and beat its qualifying mark.",
+    "The least helpful test was checking that bot scores sit near the world records: it only measures bot skill, not how a human plays, so it gave calibration hints rather than defects."
+  ],
+  "engineFeedback": [
+    "The Humanoid rig and its poses (cheer, crouch, hips, wave, run, throw) dress an athlete in nation colors in one call, and the scene/boot/pause/settings machinery meant none of it had to be built.",
+    "Yes: I guessed y was away from the camera in ground views, but y runs down the screen, which put stands and rivals on the wrong side until a screenshot showed it. The font has no dot, degree, triangle or check glyphs, and decals draw in screen space.",
+    "The shared event framework (Run, mash meter, hype and turbo, results and medals, records), the button glyph renderer, the pseudo-3D road, the figure puppet used for rotated bodies, and the whole flow of ceremonies and cards.",
+    "Knowing which draw layer to use: decals for world ground, actors for depth-sorted bodies, overlays for the HUD, and that overlays always cover actors, so mixed scenes needed care.",
+    "Two small changes: PlayStation button glyphs are the default (glyphs setting default changed from auto), and E.HOOKS is exported so the game can run code every step even while paused (used for the hub Create+Options guard).",
+    "A body rotation hook on the Humanoid (pitch and roll about a pivot) so dives, flips and ski flight could use the full HD rig instead of a separate stick figure."
+  ],
+  "promptFeedback": [
+    "The brief was clear about what must ship (ten-foot controller-first UI, attract mode, dev mode with live sliders, hub integration) and the plan gave a precise structure to build from.",
+    "The size: twelve full events, ceremonies, online play and polish in one run is a lot, and the plan's per-event detail (hockey match, curling physics, split screen) outran what one session could build, so I had to decide what a faithful vertical slice looks like.",
+    "Making twelve different events each feel good and look good, with balance numbers tuned only by bots rather than by playtesting with human hands.",
+    "I would ask for a smaller first cut (six events) with the full infrastructure, and say plainly which plan items are optional when they disagree with the time available."
+  ],
+  "aiHub": {
+    "name": "OLYMPIYIKES!",
+    "tagline": "Faster. Higher. Yikes.",
+    "description": "The complete Summer and Winter Games in one twin-city fortnight: 12 arcade events, 8 nations, ceremonies, a rival and two hyperventilating commentators. Couch play for 1-4, and AI Hub ghost rounds online.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "The Olympic Games (summer and winter)",
+    "series": "",
+    "players": "1-4",
+    "controls": "Pad: square/circle or L1/R1 mash, X action, triangle turbo, stick to steer. Keys: J/K mash, Space action, Shift turbo, WASD or arrows. Mouse aims archery, curling and hockey.",
+    "tags": [
+      "2d",
+      "arcade",
+      "retro",
+      "comedy",
+      "versus",
+      "pixel art"
+    ]
+  }
+}

@@ -1,0 +1,664 @@
+# my-3D2dge guide for AI models
+
+This guide is for an AI (or a person) asked to build, port, remaster or remix a game with my-3D2dge. `API.md` is the compact reference, read whole: every single file carries it (a genre kit, `dist/my-3d2dge.html`, the compact one), and so does the handoff package. This guide explains the ideas, the workflow for remaking a classic, recipes for each genre, and the checks to run before handing a game back: search it for what you need. Its paths are the repository's (github.com/michaelcrosato/my-3d2dge); the handoff package's `README.md` says which of them it holds. Everything here matches `engine/my-3d2dge.js` v0.85.1.
+
+A coding agent that reads files gets the handoff package (`dist/handoff/`: the full engine readable, the cards, the tools, every 2D kit's game and a template game) or the agent edition alone (`dist/my-3d2dge-agent.js`: the essential engine in one readable file, its header, about 8k tokens, a complete manual with three example games). Games written for the agent edition run unchanged on the full engine, which adds the lighting, props, backdrops, touch controls and camera tools this guide also covers.
+
+## North star
+
+my-3D2dge is a general-purpose retro-modern 2D engine built for AI models. It exists so that any model can:
+
+- port, remaster, reimagine and remix games from the 8-bit to 64-bit eras;
+- make spiritual successors that feel like modern remasters, with better visuals, physics and controls;
+- mash up mechanics across titles and genres.
+
+It aims for **consistent quality**: the engine carries the hard parts (feel, physics, rendering, sound, UI), so each game only has to describe its rules and content.
+
+## The mental model
+
+1. **The world is 3D, the camera is 2D.** Game logic works in world units: x east, y south, z up, one tile = 16 units. A `View` projects world points to screen pixels. Switch the view and the same game renders as isometric, three-quarter, top-down, brawler, side-on or any custom angle.
+2. **Characters are puppets, not sprite sheets.** A `Humanoid` is a 3D skeleton posed by math every step (IK legs and arms, gait from velocity, jumps, attacks, cape cloth). A `Blob` is a squashy sphere. Both project through the current view. Small objects can be string sprites (`E.sprite`).
+3. **Genre kits.** Each kit handles one hard problem and knows nothing about genres, so they combine freely:
+   - `TileMap` + `Body`: ground-plane levels and physics.
+   - `PlatformMap` + `Platformer`: side-scrolling levels and a platformer controller.
+   - `Bullets` + `E.pattern`: projectiles.
+   - `Dialog` + `Menu`: text boxes and menus.
+   - scenes: title, play, game over.
+   - `game.audio`: chip sound.
+
+## Remake workflow (port, remaster, reimagine, remix)
+
+1. **Name the core loop.** Mega Man: run, jump, shoot, reach the boss. Zelda: explore rooms, fight, find keys, open doors. 1942: dodge, shoot, survive waves, beat the boss. Write it as one sentence at the top of the game.
+2. **Pick the view and the kit.** Use the genre playbook in `API.md`. A side-scroller is `PlatformMap` + `Platformer` in `'side'`; a top-down game is `TileMap` + `Body`. Pick a console resolution (`res: 'ps1'`, 320 x 240, or `'snes'`) so pixels are whole and the HUD's are known, and `expand: true` so the game fills any screen: the resolution is then the least it shows, and the HUD anchors to `r.W` and `r.H`.
+3. **Start from the closest kit.** Each genre has one, a complete small game with gameplay, HUD, win and lose, sound and touch controls: the playbook in `API.md` names it (in a single file its slice sits between `GAME START` and `GAME END`; in the handoff package it is `kits/<id>.js`). Change it into your game, with its own title and game-over scenes, and ship only that. Do not start from an empty file.
+4. **Rebuild the content.** Levels are ASCII rows with a legend, enemies are small factories, items are sprites. Keep the original's layout ideas but make your own maps; for a remix, change the rules on purpose.
+5. **Modernize.** The engine gives you most of it for free:
+   - forgiving controls: coyote time, jump buffering, variable jump height, input buffering;
+   - hit feedback: hit-stop, shake, sparks, damage numbers;
+   - smooth animation, lighting and glow;
+   - a 2.5D view (`views: ['side', 'brawler']`);
+   - pause, save data, touch controls.
+6. **Tune the feel** with the feel numbers in `API.md`, then check the game with the skeleton overlay (`rig.debug(r)`) and in slow motion (`game.timeScale = .25`).
+7. **Verify** with the checker and look at the screenshots (see the checklist at the end).
+
+## Visual craft: aim for PS1 / N64 era 2D, not NES
+Players judge a remake in the first screenshot. The engine's defaults reach SNES quality by themselves; games reach the PS1/N64 bar (Symphony of the Night, Metal Slug, Legend of Mana, Klonoa) when they use every layer of the look kit.
+
+**Why games look cheap, and the fix for each:**
+- *Tiny stick characters.* Use the HD Humanoid (the default) at `size: 1.2-1.4` on a 320x240 `res`, pick a `build` (`'heroic'` for tall heroes, `'bulky'` for brawlers and bosses, `'chibi'` for Mana-style RPGs), and dress every character: outfit, hair, hat, armor, sleeves, cape, and a palette of 4-6 colors per character (skin, hair, cloth, pants, boot, trim). Give enemies different silhouettes (hunch, bulky, blobs with `ears`, `horns`, `wings`, `feet`, `tail`, `mouth: 'fangs'`). Use poses (`pose: 'cheer'` on victory, `'cast'` for spells, `'guard'`, `'kneel'`, `'down'` for the defeated) instead of leaving everyone in the idle stance.
+- *Empty backgrounds.* Side views get an `E.Backdrop` (a preset or custom layers of mountains, castle, forest, city, clouds, fog) with parallax. Ground views get textured floors from `E.tex.*` with floor tags (water, lava shimmer), and walls with a material: `face: 'stone' | 'rock' | 'plank' | 'timber' | 'plaster' | 'hedge'` and `roof: 'tiles' | 'slab' | 'leaves' | 'grass'`. Never leave every wall the same brick.
+- *Flat colors.* Shade everything with `E.tones(hex)`: `deep` and `sh` on the shadow side, `base`, `lt` on lit edges, a `hi` sparkle. Shadows lean cool, highlights warm; never shade by only darkening.
+- *Bare rooms.* Put 3-8 props on every screen with `r.prop`: candles, chandeliers and stained-glass windows in castles; crates, barrels, signs and lamps in towns; trees, bushes, flowers, rocks and grass outdoors; crystals, bones, skulls, cobwebs and vines in caves; awnings, lanterns, streetlamps, hydrants, trash cans and fire drums on streets; sandbags, cactus and palms in deserts; mushrooms in forests. Tint props with `color` so they match the palette, and set `E.style.propSize = 1.4` when heroes are size 1.2+ so a door is taller than the hero.
+- *Weak hits.* Every hit gets hit-stop (`game.freeze(.04-.08)`), shake, sparks and a sound. Every death and explosion gets `particles.explosion(x, y, z, size)` and, for big ones, `game.flash`. Pickups get `particles.glints`.
+- *NES typography.* Use the default 5x7 font with a drop shadow for HUD text, `E.ui.box` gradient panels and bars, and `E.font.title` with a 3-4 color gradient and extrusion for logos. A modern adaptation (Assassin's Creed, Breath of the Wild, Arkham) wants an HTML HUD instead: `E.Shell` (below), as the STEALTH slice and the template game do; its dialogue stays `E.Dialog` with portraits.
+- *Faceless dialog.* Every talking character gets a portrait: `talk.say(lines, { name, portrait: rig })`, and `rig.drawPortrait(g, x, y, 40)` on HUDs and RPG party and status screens.
+- *Muddy lighting.* Use lights for mood, not darkness: a few warm lights (`r.prop(..., { light: true })`) over an ambient of .4-.6; GPU lighting in top-down dungeons.
+
+**Art recipes by classic** (combine with the genre recipes below):
+- *Symphony of the Night:* `res: 'ps1'`, the `'castle-night'` backdrop, PlatformMap `stone` tiles with `moss` and `brick` walls, `'back'` tiles for the rear wall, candles and candelabras every few tiles, chandeliers, stained-glass `window` props, banners and statues. The hero is `build: 'heroic'`, `outfit: 'coat'`, `hair: 'long'`, `cape`, pale skin and silver hair, and the sword chops in the screen plane by itself in the side view; enemies are skeletons (`build: 'skeleton'`, add `outfit: 'robe'` and a staff for a lich), bats (`Blob` with `wings: true, mouth: 'fangs'`), cobwebs and vines on the walls.
+- *Metal Slug:* the `'desert'` backdrop, `ground` and `metal` tiles, crates, barrels, sandbags, palms and cactus, `broken` pillars, `particles.explosion` everywhere (with `particles.ground` set so debris bounces on platforms), `bulky` soldiers with `weapon: 'gun'`, `point: true` while firing, and screen shake on every blast.
+- *Legend of Mana / Secret of Mana:* the `threequarter` view, `E.tex.grass` / `dirt` / `water` floors by floor tag (a river with `block: true` and a plank bridge), houses of `timber` or `plaster` walls under `tiles` roofs, `hedge` walls with `leaves` tops and `rock` cliffs with `grass` tops, trees, bushes, flowers, fences and mushrooms as props, `chibi` characters with `face: { eyes: 'big' }` and bright palettes, rabbites (`Blob` with `ears: 'rabbit', feet: true`), and dialog boxes with portraits.
+- *Klonoa and 2.5D platformers:* PlatformMap in the `brawler` view (tiles show their top faces), a bright `'day'` or `'forest'` backdrop, props in front of and behind the play plane (`y` of -12 and +12), and a soft camera `lead`.
+- *Final Fight / Streets of Rage:* the `brawler` view, a long street TileMap with brick and `plaster` building walls, awnings, streetlamps, hydrants, trash cans and burning fire drums along the sidewalk, `bulky` heroes and thugs with varied palettes, and big impacts.
+
+## Animation: fluid, varied, readable
+Broken animation ruins a good-looking game faster than flat art. The Humanoid rig animates procedurally, so use its vocabulary instead of moving joints by hand:
+- **Moves, not raw specs.** `new E.Attack('overhead')`, `new E.Combo(['jab', 'cross', 'hook', 'uppercut'])`. Every move in `E.MOVES` winds up, strikes with a lunge, step, lean and twist, follows through, holds, and eases back to the stance. It never sweeps backwards through its own arc.
+- **A move set per character.** A knight gets `overhead`, `thrust` and `spin`; a mage `cast`; a rogue `jab`, `thrust` and `backslash`; a monk `jab`, `cross`, `roundhouse` and `flyingkick`; a brute `haymaker`, `bash` and `sweep`; a beast `claw`. Two heroes must never share one swing.
+- **Stances and poses between attacks.** Brawlers walk with `stance: 'guard'`, knights with `stance: 'ready'`. Win with `pose: 'cheer'`, cast with `'cast'`, block with `'block'` (weapons) or `'guard'` (fists), duck with `'crouch'`, taunt with `'hips'` or `'wave'`, fall with `down`, die with `'die'` (stagger, knees, topple), and climb ladders with `climb: true`. Faces act too: `expr: 'smile' | 'shout' | 'angry' | 'wince'`, and a Dialog portrait's mouth moves while its line types.
+- **Enemies telegraph.** Give enemy attacks a longer `wind` (.2-.35 s) than the hero's, so players can read and dodge them. Flash and knock back on hit, lie `down` on death.
+- **Check the motion.** `node tools/filmstrip.mjs game.html#scene --steps "... rec:16:2 press:KeyJ" --crop x,y,w,h` records the swing frame by frame. Look for the wind-up, the strike and a clean settle. Add `--seed 1` for a repeatable strip, and `--compare before.html` (a copy of the page from before your change) to see exactly which pixels your change moved.
+
+## Hard rules
+
+1. **Game logic in world units, `dt` everywhere.** Never store screen pixels. Convert only when drawing (`r.w(x, y, z)`) or reading the mouse (`game.mouseGround()`). `update(dt)` runs in exact fixed steps: every 1/120 s of real time is one step of `dt = 1/120 * game.timeScale`, so the same inputs play the same at 60, 90, 120 or 144 Hz.
+2. **Draw only with engine primitives** (`E.px.*`, `E.font`, `E.ui`, sprites, props, `r.*` helpers). `ctx.arc`, `ctx.stroke`, `ctx.fillText`, canvas gradients and scaled `drawImage` anti-alias and break the pixel look. Translucency goes through the engine helpers (`px.blend`, `px.polyDither`, `px.ddisc`, `r.glowDisc`, `r.shadow`): stepped alpha with blend modes by default (PS1 / N64 / SNES color math), or ordered dithering with `E.style.trans = 'dither'` for NES, Game Boy and Genesis looks.
+3. **Anything that overlaps goes through the queue**: `r.actor`, `r.sprite` or `r.queue`. Only backgrounds are drawn directly (`r.sky`, `map.drawFloor`, `level.draw`, parallax shapes).
+4. **Animate with continuous values** (phases, velocities, eased timers), never frame lists.
+5. **Read input in `update`**: `pressed` for one-shot actions, `down` for held, `buffered` + `consume` for combat.
+6. **Never edit the engine.** A game is one script on it: in a single file, the code between `GAME START` and `GAME END`; with files, `game.js` beside the `index.html` that loads the engine (inline both into the page to hand a person one file).
+7. **Don't rebuild the standard features** (below): the pause menu, settings, key rebinding, full screen and pausing on focus loss come with every game. Adjust them with `new E.Game({ menu: {...} })`.
+
+## Standard features (built in: adjust them, don't rebuild them)
+Every `new E.Game(...)` comes with what players expect of a modern release, so your code goes to the game itself. They're tested on both editions, they work with keys, mouse, gamepad and touch, and the player's choices are saved per game.
+- **Pause menu** (full engine): a pausable scene pauses on Escape, P, Start, the touch START button or the corner's menu button, and shows Resume, your items, Settings, Controls, Full screen, Help (when your `E.Shell` has one) and Quit to title (it asks first; Keep playing has the focus). Arrows, d-pad and stick move, Enter or A chooses, Escape or B goes back one screen, P or Start closes the menu. The game sees none of those presses.
+- **Settings** (`game.settings`): Display (full screen; pixel scaling for a fixed `res`: Auto, Sharp, Fill; a screen filter: Clean, Scanlines or CRT, drawn as the picture reaches the canvas, never on the game's buffer, and off under a test harness, so screenshots and filmstrips stay clean), Sound (sound, volume, music, effects, the audio offset with its calibration), Comfort (reduce motion, screen shake, screen flashes), and yours. Saved per game with a version (`E.store` key `settings:` + the page's path, or `id`); a bad saved value falls back to its default, and where storage is blocked the game plays on (`game.settings.saved` is false).
+- **Controls**: every action of the current preset, rebound by pressing the new key, mouse button or gamepad button (a conflict is said and nothing changes; Escape, Enter, the F keys, Start, the arrow keys and the d-pad stay with the menus, so a player can't lock themselves out), the controller (dead zone, invert aim, button symbols: Xbox, PlayStation, Nintendo or positions, vibration) and the touch buttons (always, automatic or hidden; right or left side; size; opacity). Restore defaults resets the controls and never touches a save.
+- **Full screen** (`game.fullscreen`): a phone's first tap goes full screen, the top-right button and the menu toggle it, and once the player leaves it the game never forces it back. Where a browser can't (an iPhone), the settings say to use Share, then Add to Home Screen; the page carries the home-screen app tags.
+- **Pausing by itself**: a pausable scene pauses when the page is hidden, the window loses focus or the controller in use is unplugged (`game.pauseReason` says which), and only the player resumes.
+- **The corner**: a menu button and a full-screen button at the top right, inside the safe area. They show on titles, game overs and pauses, for a moment when the mouse nears the top, and the menu stays on a touch screen with no touch buttons; in play they're gone. Keep a title's art clear of the top-right 110 x 60 CSS pixels, or pass `corner: false`.
+- **Phones**: a viewport that reaches the safe areas (pinch zoom left alone), no page scrolling, zooming, selection or callouts on the canvas, touch buttons inside the safe areas, a touch stick with a dead zone that also presses the directions past halfway (menus, dialog choices, ladders), a bottom dialog that keeps clear of the touch buttons, menus picked by a tap or click on an entry and dialogs turned by a tap on the box (a title needs no touch buttons), and a fixed `res` filling a high-density screen (`expand: true` fills every screen).
+- **Boot** (a loading screen and a crash report): heavy setup (a procedural level, a big table, baked caches, data from a promise) goes in boot steps, run one a frame behind a boot screen that shows the system's checks (engine, browser, screen, canvas, GPU, sound, storage, input), each step, a progress bar and lines of the game's own, like the Sims' "Reticulating splines"; then the game draws a warm-up frame under it, so play starts without a hitch. `game.start({ scenes, scene: 'title', boot: { title: 'VESPER', version: '1.0', steps: [['Raising the harbour', () => { map = buildHarbour(); }], ['Waking the guards', () => loadGuards()]], messages: ['Counting the bells', 'Oiling the hinges'], min: 0 } })`. A step may return a promise; headless (and with `loop: false`) the steps run at once and `await game.booted` waits for any promise. If a step throws, or anything fails before play, the screen becomes a report a player can screenshot: what failed, the error, a short code, the engine and game versions, browser, screen, canvas, GPU, sound, storage and input, with Try again, Copy report and Continue. `E.diagnose()` gives the same report any time (`.text`, `.short`); after play, errors go to the red box with its short line. `E.bootSplash(title)` is the screen's markup for the very start of `<body>`, so it shows while the page's scripts load (the starter files and the handoff template have it). Keep a boot short: no step should wait on purpose (`min` is for a splash you want seen).
+- **Juice that respects the player**: `game.shake` and `game.flash` follow the comfort settings, `game.hitFx` rumbles a gamepad (the vibration setting; `rumble: false` skips it), and `game.input.rumble(strength, seconds)` does it for your own moments.
+
+Adjust them:
+```js
+const game = new E.Game({ canvas: 'screen', res: 'ps1', view: 'side', input: 'PLATFORMER',
+  menu: {
+    items: [['Restart level', () => game.go('play', { level })]],                 // pause-menu buttons after Resume
+    settings: [{ key: 'hints', label: 'Hints', value: true },                      // yours, beside the standard ones
+      { key: 'difficulty', options: ['Easy', 'Normal', 'Hard'], value: 'Normal', help: 'How hard enemies hit' }],
+    controls: { attack: 'Sword', skill: 'Magic', debug: false },                  // names on the Controls screen; false hides one
+    quit: 'title'                                                                  // the scene Quit goes to (false: no Quit)
+  } });
+const hurt = { Easy: .5, Normal: 1, Hard: 1.5 }[game.settings.difficulty];       // read them anywhere, any time
+r.text('PRESS ' + game.input.label('jump') + ' TO JUMP', 8, 8, '#fff');           // 'SPACE', 'A' or '✕', after the player's rebinding
+```
+- Leave parts out: `menu: false` (you draw your own pause: the canvas PAUSED overlay comes back), `fullscreen: 'button'` (no tap) or `false`, `corner: false`, `autoPause: false`, `id: 'mygame'` (the name the settings are saved under).
+- A canvas title menu can offer OPTIONS: `game.menu('settings')` opens the settings over the title, which waits; `game.menu('controls')` the controls.
+- From code: `game.settings.set('volume', .5)` (checked, saved, applied), `game.settings.reset('Sound')`, `game.fullscreen.toggle()` (browsers allow it only from a key, click or tap), `game.pause(reason)`, `game.resume()`.
+- Your own `E.Shell` takes over from the engine's and keeps the standard menu (`standard: false` leaves it out).
+- The agent edition has `game.settings`, `game.fullscreen`, the corner, the pausing and `input.label`, but not the menu screens: its corner's menu button pauses and resumes.
+
+What stays your game's job, because only the game knows it:
+- Every gameplay scene `pausable: true`, so the menu and the pausing reach it; titles and game overs not.
+- Prompts from `game.input.label(action)` (or `ui.hud({ prompt: { act: 'interact' } })`), never hard-coded keys; touch buttons (`touch: [...]`) for every action a level needs (the stick moves).
+- The assists your mechanics call for, as settings: difficulty, aim assist, auto-fire, hold or toggle for a sustained action, hints after repeated failure.
+- Saves: `game.saves` (three slots and an autosave with their place, level and time played; versioned; `menu: { saves: true }` for the pause menu's Save and Load and the standard screen, which asks before a save is lost), written at checkpoints and save points (not on page close).
+- Information never in color alone; flashes short (`game.flash` already follows the settings).
+
+## Frame order
+
+`game.start(...)` runs this every animation frame:
+
+1. The clock adds the frame's real time (at most 50 ms) to what is left from the last frame, and runs one step for each whole 1/120 s of it: 2 steps a frame at 60 Hz, 1 at 120 Hz, 1 or 0 at 144 Hz. Each step ticks input, then (except during hit-stop and pause) runs the timers, the current scene's `update(dt)`, particles and the camera. The rest waits for the next frame: `game.alpha` (0..1) is how much of a step it holds, for interpolating drawing.
+   - Slow motion (`game.timeScale = .3`) makes each step shorter (`dt = 1/120 * .3`), never fewer, so it stays smooth. Above 1 a step is split so none is longer than 1/120 s.
+   - Paused, or at `timeScale` 0, the steps still run with `dt` 0, so input keeps ticking.
+2. The renderer clears the buffer and positions the camera.
+3. The scene's `draw(r)`. Draw backgrounds first, then register decals, queue items, actors, sprites, overlays and lights.
+4. The renderer finishes the frame, in this order:
+   1. particles and afterimages are queued;
+   2. decals draw (ground marks, shadows, telegraphs);
+   3. the queue sorts and draws by depth;
+   4. lighting darkens the frame;
+   5. overlays draw on top (HUD, dialog, menus, damage numbers);
+   6. the frame is presented with a sub-pixel camera offset.
+5. With GPU lighting active, every queue item is also drawn into a hidden info image, and WebGPU does the lighting and presentation.
+
+An error in `update` or `draw` does not stop the loop. It is shown in a red box on screen and logged once to the console (`game.errors` keeps the list).
+
+## Systems in more depth
+
+### Views and resolution
+- Presets: `iso` (yaw 45, pitch 30), `threequarter` (pitch 55), `topdown` (pitch 80), `brawler` (pitch 25), `side` (pitch 0).
+- `overhead` (pitch 90, scale 1) makes world x/y equal screen pixels, for shooters, puzzle and arcade games. It is not in the default view cycle.
+- Make your own with `new E.View(id, label, yaw, pitch, scale, zBoost)`.
+- `res` fixes the internal resolution with whole-number scaling. Without it, the size adapts to the window between `minH` and `maxW` × `maxH`; `portrait: { maxH }` lets the view grow on a screen held upright (a phone), so it fills the screen.
+- `res` with `expand: true` (what the starter kits use) fills any window with no bars: `res` is the least the screen shows, and `r.W` × `r.H` grows on the long side (a 16:9 monitor shows about 427×240 of `'ps1'`, an ultrawide 640×270, a phone held upright 320×690). The game's job is what fills the extra space, edge to edge, with the HUD over the world's corners (never a band of nothing). The kits show the ways. A wider screen shows more level (the adventure's neighbouring rooms, dimmed a little: they wait) or widens the play area itself (the shooter's waves spread across the whole screen). A taller one shows more world (the forest round the adventure's rooms, the RPG's sky darkening to stars), zooms a side view in (the platformer, the brawler and the RPG's battle at 1.5x, a scene's `camera.tall`, the battle's two sides closing up to fit) and lifts the level onto a band below it (the platformer's soil, the brawler's foreground wall). A painted backdrop is painted at the screen's size and zoom, its ground meeting the floor's edge. Keep prompts clear of `game.input.touchArea()` and HUDs clear of `game.cornerArea()` (the menu button stays at the top right on a phone). On a phone, make the controls smart: a button there only when it has something to do (`input.touchSet`: TALK beside someone), taps on what you see (the RPG's commands and foes), a thumb that steers from anywhere on the screen (`input.steer = 'drag'`, `input.drag()`: the shooter's ship goes 1.5x as far, so one swipe crosses it), what a phone player shouldn't have to hold done for them (the shooter fires by itself), buttons a thumb hits (44 CSS px and more: the RPG's battle pads, with AUTO), and a camera that never shows ground a fighter can't walk to (the brawler stops at a fight's lock). And keep the frame a phone's: a 120 Hz screen gives 8.3 ms, and frames that miss it (their cost, or the GPU behind them) are drawn every other refresh (`game.drawEvery`), so draw background characters at half rate (`r.actor(..., { every: 2, key })`: the adventure's townsfolk) and leave GPU lighting to a computer (its main pointer fine). Settings, Display, Show frame rate reads it on the device, and Frame rate lets the player fix it (60: every other refresh of a 120 Hz screen; Full: every refresh). `npm run test:phone` checks the kits on an emulated phone.
+- `game.views` limits view cycling (`game.nextView()`) and tells the checker which views to test.
+
+### Scenes
+A scene is `{ enter(data), exit(), update(dt), draw(r), pausable, view, views, input, res, expand, touch, camera }`.
+- `game.go('play', data)` switches before the next step; timers, tweens, scripts and particles are cleared (weather too) and the camera snaps. `{ fade: 'iris', at: hero }` (or `'wipe'`, `'mosaic'`, `'swirl'`, `'dissolve'`, `'white'`; `seconds` each way) picks the transition: an iris closing on the hero for a door, a swirl into a battle, a mosaic into a dream. A world point `at` is placed by each scene's camera; `[x, y]` is a point on the screen. Reduce motion turns each into a plain fade.
+- `pausable: true` lets `pause` (Escape, P, Start, the touch START) toggle `game.paused`: the pause menu opens (the canvas PAUSED overlay with `menu: false`) and the music is ducked. It also lets the page pause the scene by itself when it is hidden or loses focus.
+
+### Camera
+- `game.follow(hero, { z, lead })` once, or `game.focus(x, y, z)` every update.
+- `cam.bounds = v => map.bounds(v)` (or `level.bounds`) keeps it inside the level.
+- `cam.room = [w, h]` snaps the target to the center of the current room; the camera then slides, so Zelda- and Metroid-style room transitions come for free. Freeze gameplay while `cam.moving` is true.
+- The player's zoom: a scene's `camera: { zoom: [.75, 2], start: 1, tall: 1.5 }` sets how close the camera starts (`start`; `tall` on a phone held upright) and how far the player may take it (`zoom`): the mouse wheel, `-` and `=`, a two-finger pinch (both fingers moving, so a thumb on the stick isn't one) and Settings, Camera zoom. Their zoom is kept, a factor on top of the scene's, so it carries across scenes and screen shapes; each change shows `ZOOM 1.65x` at the top, the number to make `start` when tuning by feel. `zoom` may be a function of the game, a range per screen shape (the adventure's: out to .85x on a wide screen, none upright, where its forest is sized for 1x); `zoom: false` where zooming would break the game (the shooter's playfield is the screen), `wheel: false` where the wheel is the game's.
+- **The window and framing:** `cam.window = [48, 24]` is a dead zone (Super Mario World's): the camera stays still while the focus moves inside it and follows from its edge, so small steps don't jiggle the screen. `cam.snapY = true` follows a followed body's height only when it lands (its `onGround`) or nears the screen's edge, so a jump doesn't drag the camera up and down. `cam.frame([p1, p2], { margin: 24, zoom: [.5, 1] })` keeps several things in view, centred between them, zooming out (to at least `zoom[0]`) as they part and back in as they meet: two players, a boss and the hero, a race's leaders. `zoom: false` only centres.
+- Screen shake respects the player's reduced-motion setting.
+
+### Players (two to four on one machine)
+- `game.players` is `[game.input, ...the ones who joined]`. `game.input` stays player 1, so a game of one is written as before. Each other player is an input of its own with the same API (`move()`, `pressed()`, `label()`), plus `player` (2 to 4), `name` (`'P2'`), `color` (`E.PLAYER_COLORS`: blue, red, green, yellow) and `device`.
+- `game.allowJoin({ max: 2, onJoin: (input, n) => dropIn(input) })` in a scene's `enter` lets them in: Start on a gamepad no one holds, or 2 on the keyboard. Two on one keyboard each get half: player 1 WASD with F G H R T Y (`Input.halfKeys(preset, 'left')`), player 2 the arrows with `.` `/` `,` L `;` `'` and the numpad (`'right'`), each half taking the preset's actions in turn. `game.addPlayer({ pad: 1 })` or `({ keys: 'right' })` adds one directly (tests, a versus menu); `game.removePlayer(p)`.
+- The standard features follow: each player's prompts name its own keys (`input.label`), a pause says who paused (P2 PAUSED), a lost controller names its player, the Controls screen has a page each. Recorded sessions replay every pad and both halves of the keyboard.
+- One shared screen: `cam.frame(heroes, { margin: 90 })` keeps everyone in view. A split screen: `game.splitScreen(2, { follow: [hero, hero2] })`, `layout: 'auto'` (side by side on a wide screen, stacked on a tall one, a grid for 3 or 4), `'columns'`, `'rows'` or `'grid'`. The scene's `draw(r)` runs once per viewport, its camera its own (`game.viewports[i].follow(t)`, `.focus(x, y)`), with `r.viewport` saying which (`{ i, x, y, w, h }`: draw that player's HUD there); `scene.hud(r)` then runs once over the whole screen. GPU lighting is off while split; a scene's start ends the split.
+
+### Motion and timing (tweens, scripts, paths)
+The code every game writes by hand, in the engine and on game time: each pauses with the game, stands still in hit-stop, slows with `timeScale` and ends with the scene (unless `keep: true`), and runs the same at every refresh rate.
+- **Tweens** (Phaser's tweens, Unity's DOTween): `game.tween(target, { x: 10, y: 4 }, seconds, { ease, delay, repeat, yoyo, onDone, keep })` eases a target's numbers to new values, from where they are when its delay ends; a door sliding, a title dropping in, a coin flying to the HUD, a camera move. `ease` is a name in `E.ease` (Penner's: `linear`, `inSine`, `outBack`, `outElastic`, `outBounce`, ...; `outQuad` by default) or a function of 0..1. It replaces a timer, a start value and a lerp in every update.
+- **Scripts** (Unity's coroutines): `game.script(function* (game) { ... })` runs a generator in the update step and waits at each `yield`: a number of seconds, a condition (`E.until(fn)` or a function), a tween, another script or a generator (run and waited for), `E.all([...])`, `E.any([...])`, or nothing (one step). A wave timeline is a loop (`for (const w of WAVES) { spawn(w); yield E.any([w.time, () => !enemies.length]); }`); a cutscene is its lines in order (`talk.say(...)`, `yield E.until(() => !talk.open)`, `yield game.tween(cam, ...)`), instead of a state machine with a timer per state. It runs at once to its first `yield`; `.cancel()` stops it and runs its `finally`.
+- **Paths:** `new E.Path(points, { closed, smooth: 'catmull' })` measures a line by distance along it: `at(d)` is a point with its heading (a moving platform's place, an enemy's dive, a rail, a camera track: `d = speed * time`), `nearest(x, y)` the distance along of the nearest point (a racer's progress round the lap, for places), `draw(r)` shows it while you build.
+- **Weather:** `game.weather = { kind, amount, wind, lightning }` (rain, snow, ash, leaves, sand): drops fall through the world's height in ground views and in three layers of parallax in side and overhead views, splash or settle on the floor (`particles.ground`, the platforms' height in a side view), and lightning flashes (the player's Screen flashes setting) and thunders. It is cosmetic: its own seeded random stream, never `Math.random`, so replays and gameplay are untouched. `E.WEATHER` holds the kinds; add your own.
+- **Sprites** (frames, turns, swaps): `E.anim([...frames], fps, { loop, pingpong })` (or one sheet cut into `frames`) is played by `r.sprite(x, y, z, anim, { t })`; `rot` turns a sprite in whole pixels, cached in 16 or 32 steps as the era's games pre-rotated theirs (a ship facing its heading, a spinning blade); `scale` grows it nearest-neighbour; `E.recolor(spr, map)` is a palette swap (the second player, a stronger enemy).
+- **Wrap-around:** `E.wrap(v, lo, hi)` keeps a position on a world whose edges meet (Asteroids, Pac-Man's tunnel, a looping stage), `E.wrapDiff(a, b, size)` the short way across the seam (aim and chase across it), and `wrap: [w, h]` on `r.sprite` and `r.actor` draws a copy across each edge a thing straddles.
+
+### TileMap (ground-plane levels)
+- ASCII `rows` and a `legend`: a number is a wall type, a string is a spawn tag, `{ tile, floor, spawn }` combines them.
+- Wall `types[id] = { h, top, side, line, course, cut, cutH }`. `cut` lowers a wall when it stands between the camera and the floor.
+- `floorTex(x, y, floorTag)` colors the floor per pixel; it is baked once per view. Ready-made: `E.tex.flagstone`, `grass`, `dirt`, `water`, `planks`, `checker`, `plain`.
+- `map.set(cx, cy, 0)` opens doors or breaks walls; the floor and wall caches rebuild themselves.
+- Collision is height-aware: `collide(body)` ignores walls lower than `body.z + step`, and `groundAt(x, y, r, z)` returns the surface to stand on.
+- Things standing on a block sort after it, and `r.shadow(..., surfaceZ)` draws on top of blocks.
+- `map.block(cx, cy, on)` and `map.set(...)` bump `map.version`; a `FlowField` rebuilds at its next `update` when it changes.
+- Maps built in code: `new E.TileMap({ w, h, types })` starts as open floor; `map.fill(cx, cy, w, h, id)` puts a block of wall type `id` in (0 clears it), and `map.setFloor(cx, cy, tag, block)` tags a floor cell (`'grass'`, `'water'`) and blocks it or not.
+- Facades come from wall-type options: `windows: { w, h, step, from, lit }` (or `true`), `door: { chance, color }`, `shutters: color`, `balcony: { z, color }`, `arch: { chance }`. For anything else, `types[id].decorate(face)` paints each wall face as it is baked (so it costs nothing per frame): `face.side`, `face.u0..u1` along the wall in world units (patterns line up across cells), `face.z0..z1`, `face.at(u, z)`, `face.quad(u0, z0, u1, z1, color)`, `face.line`, `face.dot`, `face.tones`, `face.view`.
+- A big thing over several blocks (a canopy over a tower, a cart across two cells) sorts by its whole base: `r.queue(x, y, z, fn, { footprint: [x0, y0, x1, y1] })` lifts it over every block under it. `r.prop` and `r.sprite` take `footprint` too.
+
+### Heights: roofs, ledges, sight and reach
+One rule for collision, standing, sight, reach, navigation and drawing, so a game with roofs never writes its own:
+- World units, one tile = 16, z up. A body's `z` is its feet. A cell's top is `map.height(cx, cy)`: 0 on the floor, and a wall is solid from 0 up to its `h` (one column per cell: no passages under things yet).
+- A body stands on the highest top within `z + step` under its footprint (`step` 2, `Body.step`), so a kerb of 2 is walked over and a block of 14 is jumped onto.
+- Eyes are at `z + E.HEIGHTS.eye` (30) and a target is seen at `z + E.HEIGHTS.chest` (22), the heights of a size-1.3 Humanoid. A body's own `eye` and `chest` override them: a crouching hero sets `hero.chest = 8`.
+- "The same level" is `|dz| <= E.HEIGHTS.level` (8) unless a call says otherwise. `E.dist` is 3D; `E.inArc` is flat unless you pass `dz`, and `E.overlap` is always flat (pair it with `E.sameLevel`).
+
+The queries on a `TileMap` (`dir` is an angle in radians or a ground vector `[dx, dy]`; `from` is a body or any `{ x, y, z, r }`):
+- `map.ray(a, b, { eye, target })` walks every cell between two points and returns `{ clear, t, x, y, z }`, where it stops. `map.sight(a, b)` is eyes to chest; `los()` only looks across the ground (a 12-unit planter blocks it, not `sight`).
+- `map.standable(x, y, z, r)`: room to stand, held up, not in deep water.
+- `map.ledge(from, dir, { reach: 18, min: 4, rise: 82, spread: .28 })` → `{ x, y, z, rise, facing, edge: [x, y] }`: the nearest top to pull up onto, and where the hands grip.
+- `map.landing(from, dir, { min: 35, max: 83, rise: 11, drop: 18, apex: 20 })` → `{ x, y, z, d }`: a spot across a gap that a jump arc clears.
+- `map.drop(from, dir)` → `{ x, y, z, fall }`: what lies past the edge ahead (hop-downs, fall warnings, guards that won't walk off roofs).
+- `map.arcClear(a, b, apex, r)`: a parabola from feet to feet, peaking `apex` above the higher end, clears every top (jumps, throws, aerial takedowns).
+
+Reach and perception:
+- `E.targets(from, list, { range, arc, facing, dz, sight: map, filter })` → `[{ target, d, dz, angle }]`, nearest first. `dz` defaults to the same level; `arc` is a half angle around `facing`. Melee auto-aim, lock-on, takedowns and interaction prompts use it.
+- `E.inArc(a, facing, b, range, halfAngle, dz)` and `E.sameLevel(a, b, tol)`.
+
+Navigation: `new E.FlowField(map, { step: 2, climb: 0, drop: 0, jump: 0 })` walks the tops a body can stand on. Next-door cells connect when their tops differ by at most `step`, or by up to `climb` going up and `drop` going down. A guard on a roof gets a field across the roofs; with `climb` and `drop` set, it chases between levels. With `jump` (the widest gap, world units) it also links roofs across a gap a jump clears, and a climb costs more than a leap, so a chase leaps rather than drop to the street and climb back. `flow.next(x, y)` → `{ x, y, z, kind: 'walk' | 'climb' | 'drop' | 'jump', edge }` says where to head: an AI on the ground presses jump for a `climb` or a `jump` once `edge` (the distance to the side of its cell it leaves by) is under its radius plus a little, and `E.Mover` does the climb or the leap.
+
+```js
+const seen = map.sight(guard, hero) && E.inArc(guard, guard.facing, hero, 120, .7);   // eyes over planters, not through roofs
+if (input.pressed('jump')) {
+  const up = map.ledge(hero, hero.facing);   // a wall to climb in front?
+  const across = !up && map.landing(hero, hero.facing);   // or a gap to clear?
+  if (up) climbTo(up); else if (across) leapTo(across); else hero.jump(210);
+}
+const prey = E.targets(hero, guards, { range: 22, arc: 1.2, facing: hero.facing, sight: map })[0];   // the same level by default
+if (prey && input.pressed('attack')) takedown(prey.target);
+```
+
+### PlatformMap (side-scrolling levels)
+- Tiles live on the x/z plane; the ASCII top row is the highest.
+- Kinds:
+  - `solid`;
+  - `slope`: `dir: 1` rises to the right, `-1` to the left, `from` / `to` (0..1) for gentle slopes; bodies walk up and down them and step up onto low ledges;
+  - `oneway`: you stand on it and jump up through it, and down + jump drops through;
+  - `ladder`: climbable, and you can stand on its top;
+  - `hazard`: not solid; test it with `touching(body, 'hazard')`;
+  - `deco`: drawn in the play plane;
+  - `back`: a darker background wall.
+- Styles give each tile its look: `stone` (with `moss`), `brick`, `wood`, `metal`, `ground` (grass top when open to the sky, with `flower`), `block` (bevelled), `bonus` (`?` block, `glyph` option), `pipe`, `plank`, `spikes`, `ladder`, `liquid`, `plain`; `mat` gives a solid tile's face any material (`E.MATERIALS`).
+- In `side` the level is flat like an NES or SNES game. In a tilted view with yaw 0 (`brawler` or custom), tiles show top faces and the level becomes a 2.5D diorama.
+- `move(body, dt, solids)` moves any box `{ x, z, vx, vz, w, h }` with sub-steps. It reports:
+  - `onGround` and `onOneWay`;
+  - `hitWall`: -1 left, 1 right, 0 none;
+  - `hitCeiling`;
+  - `bumped`: the tile hit from below;
+  - `ground`: the moving solid it stands on.
+- `solids` are extra boxes (moving platforms, elevators, crates); a body standing on one is carried by its `vx` / `vz`.
+
+### Platformer (side-scroller controller)
+- Defaults feel like a modern NES remaster: run 95, jump 285 (about 3 tiles), gravity 800 rising and 1150 falling, fall cap 330.
+- Forgiving controls: coyote time 0.09 s, jump buffer 0.13 s, jump cut 0.45 when jump is released early.
+- Optional moves: `airJumps` (double jump), `wallJump` (with wall slide), `dash`, `climb` speed.
+- `update(dt, level, input | intent, solids)`. The same controller runs enemies: pass `{ x, jump, jumpPressed }` from your AI.
+- `rigState(extra)` returns the object `Humanoid.update` wants, including the airborne pose.
+
+### Body (ground-plane physics)
+- Velocity with optional `friction` (per second) and `bounce` (off walls and the floor).
+- `push(ix, iy, iz)` adds knockback; `jump(v)` jumps with `gravity`.
+- It lands on the highest walkable surface: the floor, or the top of a block low enough to step onto.
+- Use it for heroes, enemies, bombs, crates, pickups and balls.
+
+### Mover and actions (third-person ground controller)
+`E.Mover` is the ground views' answer to `Platformer`: a `Body` with a third-person game's movement.
+- `const mover = new E.Mover({ x, y, z })` (the index files its members as `mover.`); each step `mover.update(dt, map, game.input)` with `input: 'THIRDPERSON'` (move, Shift sprint, Space jump and parkour, C crouch, J attack, K block, L dodge; touch buttons), or an AI's intent `{ move: [dx, dy], sprint, crouch, jumpPressed }`. Screen directions turn into ground ones through the view.
+- Walk 50, run 85, sprint 125 and sneak 32 with acceleration; a jump with coyote time and a buffer, once a press.
+- A jump press is parkour first: a ledge up to `climbMax` (82) is climbed (`climbUp`; crouch while hanging lets go), a wall up to `vault` (14) is vaulted at a run, a gap ahead is leapt (it aims for the far side's landing), a drop up to `hopMax` (48) is hopped down; otherwise it jumps.
+- Climbing any wall (`climbAny: true`, Assassin's Creed, Breath of the Wild): a jump press at a wall too tall for a ledge latches on, on the ground or in the air (`mover.wall` is the face, `map.wall(from, dir)`'s: its point, normal, top and facing). The stick climbs as the screen shows it (up the screen is up the wall; an AI's intent: `move: [along, -up]`), it turns outer and inner corners, a jump press leaps up (`climbJump`, which ends on the wall) or, pulled away, pushes off; near the top it pulls up (`climbUp`), at the floor it stands, crouch lets go. Lower `climbMax` (30) so roofs are climbed, not jumped onto. The STEALTH slice and the template do this.
+- Gliding (`glide: true`, Breath of the Wild, Arkham): a jump press in the air, `glideMin` (24) over the ground, opens a sail: it sinks at `glideSink`, flies at `glideSpeed`, takes no fall damage, rises over an updraft (`lift`: a speed, or `m => inUpdraft(m) ? 40 : 0`), and closes on a press, on landing, or at a wall (a climber takes hold). `mover.gliding` says so; the rig hangs under it with its hands up, so draw the sail over them (the template does).
+- Stamina (off until you set `staminaMax`; the template's is 100): climbing, climb jumps, gliding and sprinting spend `mover.stamina` (`tire`), standing refills it (`staminaRegen`); at 0 it lets go of the wall, the glide closes and it can't sprint (`mover.exhausted`) until a third is back. Show it with `ui.hud({ bars: [{ label: 'Stamina', value: mover.stamina, max: mover.staminaMax }] })`.
+- Falls: past `rollAt` (26) at speed it rolls, past `hurtAt` (72) it sets `hurt`. `lastSafe` and `respawn()` bring it back from water and pits (`inHazard`).
+- `mover.rigState(extra)` feeds `rig.update`: its crouch (a sneaking gait), sprint lean, air, landing, or the playing action's pose.
+- Actions (`E.ACTIONS`): `climbUp` (played backwards to climb down), `vault`, `hopDown`, `roll` (invulnerable in its middle), `getUp`, and `takedown`, a paired action that moves two bodies: `mover.play('takedown', { other: guard, aerial, map })`. While `mover.action` plays it moves the body instead of physics; `act.beat`, `act.u`, `act.canCancel`, `act.invulnerable`, `act.otherState()` for the victim's rig. Your own: `E.ACTIONS.slide = { beats: [['go', .4]], setup(A) {}, at(A, beat, u) { return { x, y, z, state } } }`.
+
+### Perception (sight, hearing, suspicion)
+- `E.sees(guard, hero, { map, range: 120, fov: 1.6, eye })` → `{ seen, d, angle, exposure }`: inside the cone, and three points on the hero (feet, chest, head) checked against every top with `map.ray`. Crouching shows less and lower; `hero.exposure` (0..1) is cover you set: tall grass, shadow.
+- `E.hears(guard, { x, y, z, loud: 80 }, map)`: 1 at the noise, 0 at its radius, halved through a wall.
+- `const mind = new E.Suspicion({ rise, decay, notice, search, alert, forget })`; each step `mind.update(dt, E.sees(...), hero)` → `'calm' | 'notice' | 'search' | 'alert'` (it rises faster the nearer and more exposed the hero is), `mind.last` (where it last saw or heard), `mind.changed`. An alert guard that loses the hero searches for `forget` seconds; `mind.hear(strength, at)` notices a noise.
+- Drawing: `r.sightCone(guard, { map, range, fov, color, alpha })` (cut short by walls) and `r.marker(x, y, z, { label, color })`, an objective marker that becomes an arrow at the screen's edge.
+
+### Attack (melee timing)
+- `new E.Attack(spec)` owns the wind-up, active and recover timers of one move; the spec is also the Humanoid attack spec.
+- `start()` begins a swing (pass `true` to chain from recover into a combo); `update(dt)` returns the phase that just began, which is where swing sounds go.
+- `hits(targets, test, fn)` calls `fn` once per target per swing while active. `state` feeds `rig.update({ attack })`.
+- `E.Combo([spec1, spec2, spec3], { window })` chains attacks: `press()` flows into the next hit during recover (or shortly after), otherwise restarts. `E.knockback(from, target, speed, up)` pushes the target away.
+- **Special moves** (input sequences): `game.input.motion('236', 'attack', { facing: hero.facing })` is true on the step a fireball's motion ends: down, down-forward, forward, then the button (numpad notation, as fighting games write moves: `'623'` a dragon punch, `'41236'` a half circle, `'66'` a dash), mirrored when the fighter faces left; the button may land with the last direction, and the whole move must come within `window` seconds (.45). `input.sequence(['up', 'up', 'down', 'down', 'left', 'right', 'left', 'right', 'kick', 'attack'], { window: 3 })` reads any run of inputs (a cheat code, a rhythm pattern); a step joins actions with `+`. Both read `input.history`, the last second of directions (numpad digits) and presses, which an input display can draw.
+
+### Bullets and patterns
+- A pool on the `'ground'` plane (top-down) or the `'side'` plane.
+- Bullets die on walls with a small spark; `hit(targets, fn, team)` tests circles (side targets use their box center).
+- `burst(base, E.pattern.spread(...))` fires a pattern: `dir`, `aim`, `aimSide`, `spread`, `ring`.
+- Bullets glow under GPU lighting. Set `sprite` for custom art and `pierce` to pass through targets.
+
+### Humanoid
+- Proportions: `legUpper legLower hipZ torso shoulderHalf headR armUpper armLower limbW torsoW`.
+- Style: `lean hunch stride swing speedRef`.
+- Gear: `weapon` (`'sword'`, `'gun'`, `'staff'`), `hat` (`'cap'`, `'pointed'`, `'helmet'`, `'band'`, `'crown'`), `hood`, `cape`, `eyeGlow`, `colors`.
+- `update(dt, { x, y, z, vx, vy, facing, dash, hurt, air, point, attack })`.
+- Attacks:
+  - You own the timing: move `phase` from `'wind'` to `'active'` to `'recover'` with your own timers, and pass `u` (0 to 1) within the phase.
+  - `spec.a0` / `a1` are hand angles relative to facing; `z0` / `z1` are heights.
+  - `spin: true` swings a full circle, `kick: true` swings the right foot, `blade: 0` hides the smear.
+- `hand()` and `tip()` give world points for spawning bullets or sparks; `worldOffset(p)` gives where any point in the rig's own frame (a joint in `J`) sits from its feet. `debug(r)` draws the skeleton.
+
+### Audio
+- Browsers start sound only after the first key press or click; the engine waits for it.
+- `sfx(name)` ignores the same sound fired twice in 35 ms, and varies the pitch slightly so repeats don't sound robotic.
+- `music(song)` loops tracks of its own step notation. Every track loops on its own length, so short drum or bass loops can run under long melodies.
+- Built-in songs: `title`, `adventure`, `dungeon`, `boss`, `victory` (plays once). The songs module's songbook has more by mood (`E.Songbook.find('town')`) and jingles.
+- The music clock (the full engine): a song's place is game time (`audio.pos`), not the sound's, so beats land on the same update step headless and on any device, and the sound is held to that clock (it moves its notes to meet it). Time gameplay to `audio.pos`, `audio.at(step, fn)` and `audio.onBeat(fn)`, never to the sound. A song with `sync: true` pauses with the game.
+- Dynamic music: one song in layers rather than cuts. Name the tracks, start the extra ones with `on: false`, and bring them in with `audio.layer('drums', 1, .5)` (the stealth slice's chase); `audio.tempo(bpm)` for a hurry-up; `audio.sting(song, { at: 'bar' })` for a jingle on the next bar; `music(song, { fade: 1 })` to crossfade.
+
+### Text and UI
+- `E.font` is a 5x7 proportional pixel font with lower case (the old 3x5 font is `font: 'tiny'`), with `scale`, `align`, `wrap`, outline, drop `shadow` and `gradient`; `E.font.title` draws extruded gradient logos.
+- `E.ui.box/bar/hearts` draw classic windows and meters inside `r.overlay`.
+- `Dialog` does typewriter text with blips, pages, speaker names and choices; `update` returns true while it is open, so the world waits. Its markup gives a word its color (`{c=#ffd36a}gold{/c}`), a beat before the next line (`{w=.5}`), a slow dread (`{s=12}...{/s}`), a scream that shakes (`{shake}`) or a song that bobs (`{wave}`), and the hero's name (`{$name}` from `vars`).
+- `Menu` handles up and down with key repeat, confirm, cancel and disabled items.
+
+### Shell (an HTML interface: screens and HUD)
+A modern adaptation (Assassin's Creed, Breath of the Wild) wants readable HTML screens over the pixel world, not pixel windows. `E.Shell` builds them from data, so you write none of the HTML, CSS or focus handling. It shows the game's state and holds none of it: you pass values in each step and callbacks for the buttons. The STEALTH slice (`src/starter/70-stealth.js`: the objective, health, status, the takedown prompt, toasts, the results) and the template game use it; copy from them.
+- `const ui = new E.Shell(game, { theme: { ink, paper, accent, muted, danger, line, font, titleFont }, settings: { items: [{ key: 'cones', label: 'Sight cones', value: true }], onChange(s, key) {} }, screens: { pause: {...}, help: {...} } })`. It takes over from the engine's own and keeps the standard menu (see Standard features). Your items join `game.settings` (`ui.settings` is the same object), saved and checked with the rest; `onChange` hears every change.
+- Screens: `ui.show(name, spec)`, `ui.back()`, `ui.hide()`, `ui.screen` (the open one's name, or null). Every spec takes `kicker`, `title`, `text` (strings or functions), `actions: [[label, fn], { label, act, primary, disabled }]` (falsy entries are skipped, so `cond && [...]` works; `act` taps an input action) and `back`. Then: `'title'` (`name`, `subtitle`, `meta`, `footer`), `'pause'` (Resume first, then your actions, then Settings, Controls, Full screen, Help and Quit to title; it opens while `game.paused` and Resume unpauses; `screens: { pause: false }` leaves it out), `'settings'`, `'controls'`, `'help'` (`keys: [[key, what]]`, `sections: [[heading, text]]`), `'results'` (`emblem`, `stats: [[value, label]]`, `medals: [[label, earned]]`) and `'map'` (`map`, `at`, `markers`, `labels`, `onPick(x, y)` for a waypoint). A screen opened from another stacks; cancel goes back.
+- The HUD, each step: `ui.hud({ objective: { step, title, text, at, from }, status, bars: [{ label, value, max, kind: 'pips' | 'bar', color }], counts: [[label, value]], prompt: { key, label, hint, progress }, tip, place, keys, buttons: [[label, fn]], minimap: { map, at, markers, onClick } })`. A piece left out is hidden, only what changed is redrawn, and the HUD hides while a screen is open. `objective` shows the distance in meters (`meters: .125` a world unit) and whether the target is above or below. `ui.toast(title, text, seconds)` and `ui.tutorial(title, text, seconds)` come and go on their own.
+- Input: the game's own input moves the focus (keys, d-pad, stick: up / down / left / right, a slider or a choice turns left and right), confirm presses, cancel goes back, pause closes the menu; touch taps. While a screen is open the game's actions are held back, so a menu press doesn't also attack. Touch players reach the menu with the touch START or the corner's button; `buttons: [['Map', openMap]]` adds your own.
+- It honors reduced motion and the safe-area insets, is headless-safe (it keeps its screens' names and draws nothing), and `game.dispose()` takes it away.
+
+### Lighting
+- Light every scene (the Look target's step 9): a dark game with no lights reads flat, and a judge says so. Canvas lighting leads because it draws the same in every browser and every headless check: set `lights.enabled` and `ambient` (.4-.6 for dusk and interiors) in the scene's `enter`, then call `lights.add(x, y, z, radius, intensity, { color })` every frame where light would come from (lamps, torches, windows, the objective's glow). Light is measured on the ground in ground views, and on screen in side views and for PlatformMaps. The template game and the STEALTH slice show it. Its pass costs a few milliseconds a frame at 320x240 (more on a phone): a heavy scene can keep it for a computer, `matchMedia('(pointer: fine)').matches`, as the STEALTH slice does.
+- GPU lighting (`game.enableGPU({ map })`) needs WebGPU and a TileMap. It adds:
+  - colored lights, and soft shadows cast by walls and `lights.caster(...)`;
+  - light that wraps around characters;
+  - glow from `px.glow`, emissive decals and actors, and `[r, g, b, glow]` floor texels;
+  - bloom and heat shimmer (`lights.heat`).
+- Where GPU lighting can't draw (no WebGPU, still loading, a side view) the canvas lighting stands in, with `lights.ambient` and the same lights: set both ambients (`gpu.ambient = [r, g, b]`, `lights.ambient`) so the two look alike (the ADVENTURE slice does); `gpu.fallback = false` leaves such frames unlit. Tune the settings, not the shaders.
+
+### Errors and warnings
+- Runtime errors appear in a red box (click to hide) and in the console, labeled with `update` or `draw` and the scene.
+- Setup errors (before `game.start`) are shown too.
+- One-time `my-3D2dge:` warnings flag:
+  - unknown views, actions, sounds, songs, resolutions and input presets;
+  - legend characters, wall or tile types missing from `types`;
+  - uneven level rows and non-hex colors;
+  - lights with bad numbers, and PlatformMaps drawn in the wrong view.
+- The checker prints them all.
+
+### Testing without a browser
+A game runs in Node with no screen, so its rules can be tested in a second, exactly:
+- `new E.Game()` is headless where there is no DOM (or with `{ headless: true }`): no screen, renderer, sound or DOM input; scenes update and `draw` is skipped. Sprites made while the game loads get a stand-in canvas.
+- `game.advance(seconds)` runs exact fixed steps at once: `advance(1)` is 120 updates. In a page, `new E.Game({ loop: false })` waits for `advance` too, and `advance(s, { draw: true })` draws a frame after.
+- Input: `game.input.tap('jump')` presses an action for one step (`pressed` and `down` in the next step, `released` in the one after); `hold('right')` holds it until `hold('right', false)`; `press(code)` and `release(code)` press keys.
+- `game.debug = { snapshot() { return { scene, hero, score } }, teleport(x, y, z) {...} }`: your game's handle. Tests read it; `tools/check.mjs` prints it after play; `tools/replay.mjs` logs it at the end of a replay.
+- `game.stop()` stops the loop, `game.start()` resumes it, `game.dispose()` ends the game and removes every listener the engine added to the page.
+
+```js
+// game/test.mjs in the handoff package: load the engine and the game into one context, then drive it
+const ctx = { console }; vm.createContext(ctx);
+for (const f of ['../my-3d2dge.js', './game.js']) vm.runInContext(readFileSync(new URL(f, import.meta.url), 'utf8'), ctx);
+const game = ctx.My3D2dge.current;
+const I = game.input; I.tap('start'); game.advance(.5);
+game.debug.teleport(100, 88, 0, 0); I.tap('jump'); game.advance(.1);   // facing the roof's wall: jump takes hold of it
+I.hold('up'); game.advance(.6); I.hold('up', false); game.advance(1);   // up the screen is up the wall: it pulls up at the top
+if (game.debug.snapshot().hero[2] !== 32) throw new Error('the hero should have climbed onto the roof');
+```
+
+### The handoff package
+`dist/handoff/` (on the site: `/handoff/`; `node tools/handoff.mjs --zip <file>` zips it for a chat) holds what a coding agent needs to build on the full engine without the repository: both editions, each module on its own (`modules/`), `API.md`, `API-INDEX.md`, this guide, the tools that check, film and replay a game, the asset card with its tools and the store, a `package.json` pinning Playwright, `game/` (a template game with a headless test) and `kits/` (each 2D genre kit's game, readable, with the page that plays it and a headless test). Its `README.md` says where to start; `tools/build.mjs` writes it from `src/handoff/`. It leaves out the 3D engine and its kits (on the site and in the repository).
+
+### Modules (general systems in files of their own)
+A module (`engine/modules/<name>.js`) holds one general system that several genres share, outside the core, so that only the games that use it carry it. It loads after the engine, in a `<script>` of its own, and attaches its names to `My3D2dge`; its header is its manual (what it holds, its API, a complete example, its rules), and the index has a section for it. Its manual's third line says whether it also loads after the agent edition, and which modules it needs first.
+- **In a single file:** the reference editions (`dist/my-3d2dge.html`, the compact one) carry every module; a kit carries the modules its slice names in its header (`@modules grid gen`). To use one a kit hasn't got, paste the module's file in a `<script>` after the engine's (if the console then names a section the kit's engine left out, start from the reference edition).
+- **With files:** `dist/my-3d2dge.js` (`my-3d2dge.js` in the handoff package) is the core and every module in one file; the handoff package also has each module on its own (`modules/<name>.js`), to load after the agent edition (the twelve that can).
+- **The modules:** `grid` (square and hex grids: A* paths, move ranges with climb and drop past allies, lines, symmetric fields of view, `E.Fog`, flood fills and groups, tactics' shapes of effect, facing and threat maps, `E.GridMover` for Pac-Man's and Sokoban's moves, `E.Turns` by speed, charge time, phase or ATB), `gen` (floors from a seed: rooms and corridors, BSP, caves, mazes, Poisson scatter, as ASCII rows a `TileMap` reads, with `E.gen.mark` for spawns), `rooms` (a world of rooms on a grid of screens: doors at open edges, a slide or a fade between them, the explored map, gates and saves: `E.World`), `arcade` (the coin-op's frame: a score that floats up where it was won, extra lives at thresholds, two players taking turns, credits and a continue, high-score tables with initials on a letter wheel, stage cards, the attract mode), `mode7` (Super Mario Kart's and F-Zero's view: a camera over a flat floor drawn a row at a time, the sky turning with it, billboards scaled by distance, `E.Mode7`) and `road` (OutRun's road: segments with curves, hills and tunnels, scenery and cars scaled by distance, `E.Road`) and `drive` (cars with grip, drift and the ground's tag, races with laps, checkpoints, drivers and items: `E.Car`, `E.Race`), `story` (dialogue as data: lines, choices with conditions, flags, quests, events, emote balloons: `E.Story`), `rpg` (items, bags, members with levels and gear, status, a party, shops, damage, encounters, windows: `E.RPG`), `physics` (2D rigid bodies: circles, boxes, polygons, chains; flippers, bumpers, kickers: `E.Physics`), `terrain` (destructible ground in the side plane: carve, walk, ray: `E.Terrain`) and `songs` (the songbook: `E.Songbook`): these twelve load after the agent edition too (a race's `E.Path` is the full engine's). Four load after the full engine only: `fight` (one-on-one fighting: `E.Fighter`, `E.Match`, `E.FightAI`, `E.FightSelect`, training), `click` (point-and-click: `E.Click`, `E.Walkbox`), `rhythm` (`E.Rhythm`: charts, judgments, holds, calls) and `strategy` (`E.Strategy`, `E.Clock`, `E.needs`; it needs `grid`).
+- **Writing one:** `engine/modules/README.md` (the header's form, the rules, its budget of 1,500 tokens; `tools/modules-test.mjs` proves the path with a fixture). `docs/KITS.md` says which systems become modules, and what every kit has.
+
+### Kits and the diet (which file for which game)
+A genre kit (`dist/kits/my-3d2dge-<genre>.html`) is the engine, the API card and one slice, sized for a chat model's context: a 2D kit is at most 200,000 tokens, six of them up to about 241,000 (`doctrine-check` counts them). The handoff package's `kits/` holds each 2D kit's game readable, on the full engine. Its engine is on the **kit diet**: the core less the sections its game never calls (the tile map in the platformer's kit, the third-person kit and GPU lighting in most), as the kit's header lists. Calling a left-out name warns once in the console, naming its section (a constructor throws). So:
+- **A game in the kit's genre:** start from the kit; anything its slice uses is there.
+- **A game of several genres** (a platformer with a top-down overworld, an RPG with a shoot-'em-up stage), or one that needs a section a kit left out: start from `dist/my-3d2dge.html` (every slice and section, readable) or `dist/my-3d2dge-compact.html` (the same, minified), or `dist/my-3d2dge.js` with your own page.
+- **The presentation sections** (Penner's easings beyond the core's, sprite frames and turns, tweens and scripts, paths, transitions, weather, input sequences, the camera's window and framing) are each a part of the diet: a kit carries the ones its slice uses, and a kit whose slice uses none carries about 1,600 tokens of them in its engine (the screen filter, a standard setting, and the small ways in) and 1,000 in its card.
+- **Its proof:** each slice has `run(n)` (`__game.scenes.<id>.run(600)`): n fixed steps of scripted play from a seed, returning a hash that is the same every time; `node kits/test.mjs` in the handoff package runs each kit's twice, headless (the repository's `tools/kits-test.mjs`, in a browser). A game copied from a slice can keep one: the shell's `proof()` is how.
+
+### Recorded sessions (a bug from a phone, replayed exactly)
+- `E.session.record(true)` turns recording on for every later page load (`?record=1` does it for one load). It starts before the game's code and keeps everything a game's next frame depends on:
+  - a seed for `Math.random`;
+  - each display frame's time (`performance.now` and `Date.now` read it during that frame);
+  - every input and the frame it arrived before: keys, pointer and touch, wheel, clicks and form edits, focus, visibility, resize, full screen;
+  - gamepad readings, the media queries the game asked, the safe-area insets, the screen, and the save (`localStorage`) at the start;
+  - a checksum every 60 frames.
+- `E.session.share()` saves the session: the share sheet on a phone, a download elsewhere. In Emberdeep it is Settings → Tools → Record a session; on any recorded page the standard pause menu has Save session (a phone has no console). `node tools/replay.mjs <file> --pacing` reads the device's refreshes from it without replaying: the refresh, the ones missed second by second, how unevenly (a report of choppy play).
+- `node tools/replay.mjs session.json` replays it in headless Chromium at the recorded screen size, frame by frame, and reports the first checksum that differs. Useful options:
+  - `--to 1800` stops at a frame; `--shots 600,1200` saves screenshots;
+  - `--log "My3D2dge.current.sceneName"` prints any state at the end (a game's `game.debug.snapshot()` prints by itself);
+  - `--page` replays on another page. Fix the bug, rebuild, and replay the same session to see it gone.
+- `game.stateHash = () => [hero.x, hero.y, hero.hp, foes.length]` adds a game's own state to the checksum, so a replay stops at the first frame where that state differs.
+- Why it works: the clock turns the same frame times into the same fixed steps, so the same frame times, inputs and seed give the same game.
+- Any browser: while recording and replaying, `Math.sin`, `cos`, `tan`, `atan`, `atan2`, `asin`, `acos`, `exp`, `log`, `log2`, `log10`, `pow`, `hypot` and `cbrt` are the engine's portable versions (`E.session.math`).
+  - Browsers may round these differently in the last bit: an iPhone's Safari and Chromium use different libraries.
+  - The portable versions are built only from `+ - * /` and `sqrt`, which are exact everywhere.
+  - So a session recorded in one browser replays in another bit for bit.
+  - `sin`, `cos`, `atan`, `atan2`, `exp` and `log` are fdlibm's algorithms, the same bits as Chromium's own.
+  - The others are within a few units in the last place.
+  - `node tools/cross-engine-math.cjs` checks this in Safari's own engine. It runs the same code in V8 and in JavaScriptCore, through Bun (`BUN=/path/to/bun`).
+  - Native math gives different bits in the two engines, and so does a Humanoid animated with it.
+  - The portable math, and the same Humanoid with it, give the same bits in both.
+- Limits:
+  - the GPU lighting is off while recording, because it starts up on real time;
+  - a session is one page load;
+  - replay on the build it was recorded on: its version and build are in the file.
+
+## Genre recipes
+Each recipe names the kit to start from (`kits/<id>.js` in the handoff package). The 3D ones build on the 3D engine, whose kits are on the site and in the repository, not in the handoff package.
+
+**Side-scroller (Mario, Mega Man, Castlevania).**
+```js
+const level = new E.PlatformMap({ rows: LEVEL, legend: { '#': 1, '=': 2, '?': 3, '@': 'hero', 'g': 'walker' },
+  types: { 1: { style: 'ground', side: '#8a5a32' }, 2: { kind: 'oneway' }, 3: { style: 'bonus', side: '#e8a830' } } });
+const s = level.find('hero'), hero = new E.Platformer({ x: s.x, z: s.z }), rig = new E.Humanoid({ weapon: 'gun', hat: 'cap' });
+// scene: { view: 'side', views: ['side', 'brawler'], input: 'PLATFORMER', res: 'snes', pausable: true, ... }
+// update: hero.update(dt, level, game.input, lifts); if (hero.jumped) game.audio.sfx('jump');
+//         if (hero.bumped) { ...change level.set(cx, cz, id)... }
+//         rig.update(dt, hero.rigState({ point: game.input.down('attack') })); game.focus(hero.x, 0, hero.z + 24);
+// draw:   r.sky([...]); level.draw(r); r.actor(hero.x, 0, hero.z, (g, ox, oy) => rig.draw(g, ox, oy, r.view));
+```
+- Enemies are boxes moved by `level.move(e, dt)` with your own gravity: turn at `hitWall`, and at ledges using `groundBelow`.
+- Stomp when `hero.vz < 0` and the hero's feet are above the enemy's middle.
+- Pits: `hero.z < -40`. Spikes: `level.touching(hero, 'hazard')`.
+- Further moves, on request: `new E.Platformer({ crouch: true, ledge: true, wallCling: true, momentum: true })`; tiles of `kind: 'water' | 'rope' | 'bars'`, and grip on any tile type: `friction` (ice: .15), `carry` (a conveyor's speed), `bounce` (a spring), `crumble` with `respawn` (call `level.update(dt)` each step); `hero.swingFrom(x, z)` hangs it from a grapple point. Draw `level.drawWater(r)` after the actors; `rigState()` poses every move (hang, climb, crawl, swim, swing).
+
+**Metroidvania (Metroid, Super Metroid, Symphony of the Night).** Start from the METROIDVANIA slice (the rooms module).
+- The world is an `E.World` of PlatformMaps: each room its rows and `at: [gx, gy]` on a grid of screens; rooms meet where they touch, and an open edge is a door (leave walls elsewhere). After the hero moves, `world.update(dt, hero)` returns `'enter'` on the step it crosses into the next room: spawn that room's creatures then (from `world.map.spawns`); hold the game while `world.moving` (the slide).
+- Abilities open the way: `world.give('boots')` then `hero.airJumps = world.has('boots') ? 1 : 0` (and `dash`); a gate is a tile type with `gate: 'dash'`, solid until given. The map: `world.drawMap(g, x, y, cell)` on a map screen and, clipped round `world.here`, in a corner. Saves: `world.save(hero)` at a station, `world.load()` on the next visit.
+- An arm cannon aimed eight ways (the run-and-gun recipe): from `game.input.move()`, up aims up, up and forward the diagonal, down in the air (and forward) down or its diagonal, else forward; `rig.update(dt, hero.rigState({ point: true, aim }))` with `aim` the angle above level (`Math.PI / 2` straight up); shots leave `rig.tip()` on `new E.Bullets(game, { plane: 'side' })`. Holding fire charges a bigger shot; a held button stands still to aim.
+- Bosses are state machines: a telegraph (a glow, a warning line) before each attack, an opening when they can be hurt (armor turns shots otherwise); seal the room's doors while one lives and keep both in view with `game.cam.frame([hero, boss])`.
+
+**Zelda-like adventure.**
+- Build rooms with `TileMap` rows and set `game.cam.room = [roomW, roomH]`.
+- The hero is a `Body` moved by `game.view.screenDirToGround(...game.input.move())`. A sword swing is an `E.Attack` with `hits(foes, f => E.inArc(...), ...)`.
+- Talk with `Dialog`, and open a locked door with `map.set(cx, cy, 0)` after checking a key count. Only run enemies in the hero's room, and freeze everything while `cam.moving`.
+
+**Beat-'em-up (Final Fight, Streets of Rage).** Start from the BRAWLER slice.
+- Use the `brawler` view with a long `TileMap` floor strip (walls along the top edge only) and `cam.bounds` that scroll right.
+- Heroes and thugs are `Body` + `Humanoid` with `weapon: null`. Punches are attack specs with `blade: 0`; kicks use `kick: true, z0: 6, z1: 9`.
+- Hits need `E.inArc` plus a small y difference (same lane). Knock down with `body.push(dx, dy, 120)` and let gravity drop them.
+- A second player drops in (`game.allowJoin({ max: 2, onJoin })`): a hero of its own driven by its input, foes going for the nearer hero, `cam.frame(heroes)` instead of `follow`, game over when both are out.
+
+**Fighting game (Street Fighter II, Darkstalkers).** Start from the FIGHTING slice (the fight module).
+- Each fighter is an `E.Fighter`: a roster entry's rig (a Humanoid sized about 2.2 to 2.7 at 320x240) and its moves, each an `E.MOVES` name with frame data in frames at 60 (`f: [startup, active, recovery]`), damage, hit- and block-stun, a guard (`'low'` sweeps, `'overhead'` jump-ins and axe kicks), `cancel: true` on normals a special may cut short, and specials by motion (`motion: '236'`, `'623'`, `'41236'`, `'236236'` for a super with `meter: 100`) or charge (`charge: '46'`). `shot` makes a projectile, `throw` a command grab, `teleport` a teleport, `vx` and `vz` a move that travels, `inv` invulnerable frames, `aa: true` an anti-air the CPU reaches for.
+- `E.Match` runs the rounds, the clock, KO and time over, the calls and the HUD; `E.FightAI({ level, seed })` is a CPU whose matches repeat with its seed; `E.FightSelect` is the character select; `training: { dummy }` draws the boxes, the frame data and the inputs. Update the match once a step (motions are read at 120 Hz) and draw the stage before `match.draw(r)`.
+- Two players: `game.allowJoin({ max: 2 })` and `inputs: [game.input, game.players[1]]` (a pad each, or half a keyboard each); the select and the menus read every player.
+
+**Shoot-'em-up (1942, Gradius).** Start from the SHOOTER slice: its first stage is vertical, its second horizontal.
+- Use `view: 'overhead'` so world x/y equal screen pixels; `res: [240, 320]` for a vertical stage, `[320, 240]` for a horizontal one, with `expand`.
+- Ships are sprites or vector parts drawn by code; a timeline array spawns waves by time or by how far the camera has come; enemies move on formulas (sine lines, dives aimed with `E.pattern.aim`) or along `E.Path`s.
+- Flyers keep up with the camera: each step add the scroll to their position (and to the bullets'), while the ground and the rock stay put.
+- Horizontal stages (Gradius, R-Type): the rock above and below is two functions of x (`highY(x)`, `lowY(x)`) drawn in columns and tested for crashes; a power bar is a cursor that capsules move along, a button taking the lit slot; options follow the ship's past path (a ring of its positions, an option every 12 behind); a mid-boss loops a closed `E.Path` while the scroll waits.
+- Bosses fire `E.pattern.ring` and `spread`, each attack telegraphed. A bomb clears `shots.clear('foe')`. The end: `E.Arcade`'s continue, then initials and the table (the arcade module).
+
+**Golden-age arcade (Pac-Man, Galaga, Asteroids).** Start from the ARCADE slice: a cabinet of three.
+- One fixed screen (`res: [232, 270]` or `[320, 240]` with `expand`): centre the playfield and fill the rest with cabinet art drawn by code, or let the field be the whole screen (the rocks wrap at its edges).
+- `new E.Arcade(game, { id, lives: 3, extra: [10000] })` keeps the score, lives, two players' turns (each one's stage in `p.save`), the continue, the tables with initials and the attract mode; `cab.update(dt)` each step and `cab.draw(r, box)` after the game.
+- A maze is an `E.Grid` with `E.GridMover`s: the player's turn asked early is kept (`{ keep: true }`); a chaser picks, at each cell, the open way nearest its own target (never straight back). Moths fly in on `E.Path`s and turn with `r.sprite`'s `rot`; rocks drift with `E.wrap` and draw at every edge they cross.
+- Each game's demo is its own bot, playing the real rules; a remaster (light, rigs, glow) with the classic look one key and one setting away.
+
+**Kart racing (Super Mario Kart, F-Zero).** Start from the KART slice (the mode7 and drive modules).
+- The track is a TileMap: its walls bounce the karts, its floor tags (`grass`, `sand`, `boost`, ...) slow or boost them (`E.Car`'s `surfaces`), and `E.Mode7({ floor: (x, y) => [r, g, b] })` draws it from the same cells. The racing line is a closed `E.Path` through the track's middle: `E.Race({ path, laps: 3 })` counts laps through its checkpoints in order (a shortcut counts nothing), gives places, and drives every car not a player's (`race.add(car, { input })` for a player, `{ ai: { skill } }` for the rest).
+- Each step `race.update(dt, map)` (it moves every car), then the camera behind yours, turning after it more slowly than the kart turns (a drift shows): `m7.cam = cam; m7.chase({ x, y, angle: camAngle }, { back: 42, h: 24 })`. Draw the karts with `m7.add(x, y, z, (g, sx, sy, k) => ...)`: a few boxes through `m7.view(k)`'s projection and the rig seated (`down: .4`) in the middle, sorted far to near from the camera's side.
+- Two players: `game.allowJoin({ max: 2 })`, `game.splitScreen(2, { layout: 'rows' })`, and in `draw` each viewport its own camera: `m7.draw(r, cams[r.viewport.i])`, `race.hud(r, players[r.viewport.i])`. On a phone the gas goes on by itself (`car.o.auto`), the stick steers, DRIFT and ITEM are buttons; held upright, draw from further back with a wider field of view.
+
+**Road racing (OutRun, Pole Position, Hang-On).** Start from the ROAD slice (the road module).
+- `E.Road` is the course: `road.add(n, { curve, hill, tunnel, colors })` stretch by stretch; scenery with `road.place(z, offset, sprite, scale)` (`E.prop('palm').frames[0]` works), traffic as `cars: [{ z, x, w, draw }]` passed to `road.draw`. The player is a position (`z` along, `x` across in half roads) and a speed, not a body.
+- Each step: `x -= road.curveAt(z) * speed² * k` throws the car outward on a bend (make the hardest faster than the player can steer: they slow down), off the road (`|x| > 1`) it slows, `road.hits(z, x, w)` crashes it into the scenery (put it back on the road), and a car close in `z` and `x` bumps it. A clock that counts down and checkpoints that add time make the race.
+
+**Top-down racing and driving (Micro Machines, RC Pro-Am, GTA).** `E.Car` on a TileMap in the `topdown` view: the same cars, laps and drivers as the kart (`E.Race`), drawn from above (a box of `px.poly` on `r.w()` corner points, turned by `car.angle`); GTA's car is a `E.Car` the hero gets into (`kart: false`: drift is a handbrake).
+
+**JRPG (Dragon Quest, Final Fantasy).** Start from the RPG slice (the story and rpg modules).
+- The field is a scene of `TileMap`s: a town, a world map (past 128 x 128 cells its floor bakes in chunks: paint woods and peaks into `floorTex`, block them), dungeons; a map's floor tag leads to another (an exit, a cave's mouth). Walk a `Body` with the stick; the other members follow the leader's trail.
+- People talk through an `E.Story`: their lines as data, with choices, flags, quests, emote balloons and events for the game's scripts (a shop's window, the inn's night, a boss's fight; `wait: true` holds the talk until `story.resume()`).
+- The party is an `E.RPG` party: members with stats, levels and gear, a bag, gold; shops, items and `reward(troop)` after a fight. Encounters by zone (`rpg.encounters`) as the party walks: a swirl (`game.go(battle, data, { fade: 'swirl', at })`) into the battle scene, which reads the members' `stat()` and writes their hp back.
+- Battles are a scene in the `brawler` view with rigs lined up, a `Menu` of commands and a queue of actions (the RPG slice's ATB battle). Each action steps forward, swings, applies damage and steps back.
+- Saves: `game.saves` (the party's `state()`, the story's `state()`, the map and the place); a crystal to save at, the inn's autosave, Continue and Load on the title. The menu's windows are `rpg.list` and `rpg.card`, rows a thumb's height on a phone.
+
+**Puzzle (Tetris, Dr. Mario, Puyo Puyo).** Start from the PUZZLE slice.
+- The field is an array of cells drawn in screen pixels (`r.overlay`) over a painted stage; every rule is a small function: spawn, fits, kicks (SRS), lock (half a second, reset by a move up to 15 times), clear, gravity (the guideline's curve by level). A bag of seven from `E.rng`, a next queue, hold, a ghost.
+- `input.repeat('left', .17, .05)` gives the delayed auto-shift. Touch: `input.steer = 'drag'` and `input.drag()` move a cell a step of the thumb, `input.clicked()` (a tap) turns, a quick flick drops or holds.
+- Versus: one field's state swapped in and out (save and load its variables) to step and draw two side by side from one seed, each read through its own player's input; two lines or more cleared send rows to the other, rising at its next piece.
+- Matching games (Puyo, Columns, match-3): `new E.Grid(w, h).groups((x, y) => field[y * w + x] || null)` gives the groups of one colour; pop those of four or more, let what is above fall, and count each round that pops as a chain.
+
+**Roguelike (Rogue, Mystery Dungeon, Shiren).** Start from the ROGUELIKE slice.
+- A floor is `E.gen.rooms(46, 30, { seed })` (or `bsp`, `cave`), its spawns put in with `E.gen.mark(level, 'g', 5)` and read by a `TileMap` legend; `E.Grid.from(map, { diagonal: true })` gives `path`, `reach` and `fov`, and `E.Fog` covers what isn't in sight (`fog.draw(r, 16, { height })` over the walls too).
+- `E.Turns([hero, ...foes], { mode: 'speed' })`: the hero acts on a key, then `next()` runs every monster's turn until the hero's comes round again (speed 200 acts twice); a monster walks its next step of `grid.path` toward the hero, or strikes when it is next to it.
+- The game is turn-based but its pictures are not: each step is `game.tween(actor, { x, y }, .13)` and the rigs walk through it. The stairs are `game.go(scene, { depth }, { fade: 'iris', at: hero })`. A bot (`bot()` in the slice) that plays to the end is the best test: pathing, fighting and items all exercised.
+
+**Tactics (Final Fantasy Tactics, Tactics Ogre, Fire Emblem).** Start from the TACTICS slice (the grid and story modules).
+- The map is a `TileMap` whose cells are all blocks at their heights (a base of 16 so the earth shows at its edges; a level is `E.HEIGHTS.level`, 8), in the `iso` view turned a quarter at a time (`game.rotateView(90)`) and zoomed (`camera: { zoom }`). `E.Grid.from(map, { tops: true, cost })` stands units on the tops (shallows `cost` 2).
+- The cursor: keys step it on the grid (turn the screen's direction into the grid's with `view.screenDirToGround`), and `map.pick(sx, sy)` finds the cell under the pointer or a tap in any view, turn and zoom (the top or wall face the line of sight meets first). The camera looks at the cursor's top.
+- A move range is `grid.reach(cell, move, { climb: jump * 8, drop, blocked: foes, pass: allies })` and `reach.path(cell)` the walk (hop a level with a little arc); tints go on the tops with `E.tint(r, cells, color, alpha, 16, (x, y) => map.height(x, y))`, under the units.
+- Blows: `grid.side(target, facing, from)` gives front, side or back (x1, x1.25, x1.5), the height between them a bonus; areas are `grid.shape(cell, 'diamond' | 'cross' | 'cone' | 'line', n, dir)`; a bow's arc is `map.arcClear(from, to, apex)`, reaching further from higher up.
+- Turns: `E.Turns(units, { mode: 'ct' })` (next(), then done(unit, 100 for a move and an act, 80 one, 60 neither); `order(n)` is the queue to show), or phases (each side in turn, the player's units in any order).
+- The AI scores every cell it can reach and every blow from there (damage, kills, heals, friendly fire against it) less the danger of the place (`grid.threat(foes)`), and takes the best; the same state gives the same turn, so a bot that plays the battle with it is the test.
+
+**Point-and-click adventure (Monkey Island, Day of the Tentacle, Broken Sword).** Start from the POINT-AND-CLICK slice (the click and story modules). The click module (the full engine) keeps the rooms, the walking, the verbs, the inventory and the rules; the game paints the rooms and writes the puzzles.
+- Each room is a picture painted once in room pixels (`paint(g)` with `px` helpers: dithered skies, planks, stones; `pad: [120, 160]` paints margins a wide or tall screen shows), a walk area (`walk: [outline, ...holes]`, an `E.Walkbox`: the hero takes the shortest way round a table or a lamp), `depth: [yFar, kFar, yNear, kNear]` (smaller far away), and `things` drawn by depth (a bar counter in front of the barkeep).
+- Hotspots name what can be clicked: a rectangle, a polygon or an actor (a rig), where the hero stands and faces, its verbs (a line, a function, or actions: `{ give, take, set, say, talk, go }`), `if: '!rope'` to hide it once taken, `exit: 'tavern'` for a door. Puzzles are rules as data: `{ item: 'rope', on: 'hook', take: ['rope', 'hook'], give: 'grapple' }` (an item on an item works either way round); the first that matches runs, else the hotspot's own verb, else a stock line.
+- Talk goes through `E.Story` (`talk: { talk: 'morwen' }`): nodes, choices, flags; a conversation to win is a node whose right answers goto the next and wrong ones end it, and an event gives the prize. The interface is a setting: `ui: 'verbs'` (SCUMM's nine), `'icons'` (Sierra's: a right click turns the cursor; bind `look: ['Mouse2']`), `'coin'`, `'two'`. A phone taps: a tap walks, a tap on a hotspot opens its verbs, a long press looks. `pc.panel = false` hides the verbs for a cutscene. A bot clicks through the whole chain with `input.feed` on `pc.where(id)` and `pc.boxes`: the slice's test.
+
+**Visual novel (Phoenix Wright, Snatcher, Clannad).** A painted backdrop per scene (`r.overlay`), the speaker's rig large (`rig.drawPortrait(g, x, y, 120, { zoom: 2 })`, its expression by `rig.update(dt, { expr: 'smile' })`), and the story module's nodes and choices for the script, its flags for the routes. `story.log` is the backlog (`{ who, name, text }`: draw the last lines when the player asks), `story.auto = 2` turns pages by themselves after two seconds, `story.skip = true` types and turns them at once (choices still wait). Save with `game.saves` (`story.state()` in its data).
+
+**Real-time strategy (Dune II, Warcraft II, Command & Conquer, StarCraft).** Start from the RTS slice (the grid and strategy modules). The strategy module (the full engine, after the grid module) keeps the rules; the game draws.
+- `const rts = new E.Strategy(game, { map, kinds, sides, player })`: kinds are data (a unit's hp, speed, attack, range, sight, cost and time; a building's size, what it makes, a depot; a resource's amount). `rts.spawn` places them (a building blocks its cells, so flow fields go round it); `rts.update(dt)` and `rts.input()` each step.
+- The camera is free (`game.cam.free = { bounds }`): keys, the screen's edge, a drag on open ground, a zoom toward the pointer. Draw each unit with `{ pick: u }` (`r.actor`, `r.sprite`) so a click finds what is drawn under it (`r.pick`), and a crowd with `every: 3, key: u` (each body redrawn every third frame: 200 hold a phone's frame), then `rts.draw(r)` for the rings, the bars and the box; `ui.hud({ minimap: rts.minimap() })`.
+- On a phone: a tap selects or orders, a drag pans, a long press and a drag draws a box, a pinch zooms. The enemy is data too: `rts.ai('red', { build: [['worker', 5], ['barracks'], ['soldier', 6]], waves: { first, every, min } })`, the same game for the same orders (a match is its own proof).
+- Buildings are `E.SHAPES` entries drawn with `r.shape(id, x, y, 0, { pick: u, mats: { team: '#3a6ad0 cloth' } })` (one entry, each side's colors); a site going up is a shape of its own. The enemy's plan keeps counts (`['footman', 8]`): what it loses it makes again. A bot that gives your side an AI of its own plays the match to its end, the same each time: the slice's test.
+
+**Theme park or city sim (Theme Park, RollerCoaster Tycoon, SimCity).** Start from the SIM slice (the grid and strategy modules).
+- Paths are the TileMap's floor tags (`map.setFloor(cx, cy, 'path')`); guests walk an `E.Grid` whose walkable cells are the path (`grid.path` to a ride's door). A ride fits on open grass with a path beside it, its door the path cell nearest its front.
+- Guests carry money and `needs` (fun, hunger, thirst, tired) that `E.needs` raises each step; `E.choose(guest, options)` takes the ride or shop that serves them best for the walk and the price (an option's `gives: { fun: -.5 }`, its door's x, y, its cost). They queue, ride, pay, think aloud ("THIS LINE IS TOO LONG"), and leave when tired, broke or at closing; the rating is how happy they leave.
+- Time runs at `game.timeScale` 0, 1, 2 or 4 (more fixed steps a frame, not longer ones); `E.Clock` gives the day, the hour and its light (night: `game.lights` on the rides); the empty night can run faster. `E.overlay` shows a value per cell (crowds), `E.tooltip` a box of lines under the mouse.
+- Moving rides are shapes too: a generator's `params` (an angle in 16 or 24 steps) or `facing` (32 steps) each make a still picture, kept, so a turning carousel costs what a still one does.
+
+**3D-era remake (Mario 64, Ocarina, Crash).**
+- Use the `iso` or `threequarter` view with a `TileMap` whose wall heights are platforms (h 8, 16, 24...). The hero is a `Body` with `jump(260)`; walls lower than the hero's feet are walkable, so the level becomes a height map you platform across.
+- Add GPU lighting for mood and `cam.bounds` for framing.
+
+**Third-person stealth and parkour (Assassin's Creed, Metal Gear, Tenchu).** Start from the STEALTH slice.
+```js
+const map = new E.TileMap({ rows: CITY, legend: { '#': 1, A: 2, ',': { floor: 'grass' }, '@': 'hero' },
+  types: { 1: { h: 64, cut: true }, 2: { h: 40, face: 'plaster', roof: 'tiles', windows: true, door: { chance: .5 } } } });
+const hero = new E.Mover({ x, y }), guard = new E.Mover({ x: gx, y: gy, walk: 30, run: 70 });
+guard.mind = new E.Suspicion(); guard.flow = new E.FlowField(map, { climb: 56, drop: 56, jump: 60 });
+// scene: { view: 'iso', views: ['iso', 'threequarter'], input: 'THIRDPERSON', touch: ['jump', 'attack', 'block', 'crouch'], ... }
+// update: hero.exposure = hero.crouch && map.floorAt(hero.x, hero.y) === 'grass' ? 0 : 1; hero.update(dt, map, game.input);
+//         const st = guard.mind.update(dt, E.sees(guard, hero, { map, range: 110 }), hero);
+//         goal: 'alert' the hero, 'search' guard.mind.last, else the next patrol point; guard.flow.update(goal.x, goal.y);
+//         const nx = guard.flow.next(guard.x, guard.y);   // walk toward nx; jump for a 'climb' or 'jump' once nx.edge < guard.r + 4
+//         guard.update(dt, map, { move, jumpPressed });   rig.update(dt, hero.rigState({ attack: slash.state }));
+// draw:   map.drawFloor(r); map.queueWalls(r); r.sightCone(guard, { map, range: 110 }); actors; r.marker(goal.x, goal.y, goal.z, { label: 'LEDGER' });
+```
+- Roofs a jump apart (three or four cells, heights within 11 up and 18 down of each other), several heights, and `cut: true` on the walls nearest the camera so the street stays visible.
+- Takedowns: from behind (same level, close, outside the guard's view, not alert) or from a roof above (`aerial: true`); mark the guard down, and feed its rig `act.otherState()` while the action plays.
+- Telegraph guards' swings (`new E.Attack('overhead', { wind: .38 })`) and let a block in the wind-up's last moments parry and stun them.
+- A checkpoint where the objective is taken: respawn there, and reset the guards.
+
+**Physics toys (Breakout, Asteroids with real collisions, Lemmings).** The physics and terrain modules; each step `world.step(dt)` from the game's fixed step (never the frame's time), so a run is the same at any refresh rate.
+- Breakout: a closed `world.chain` for the walls (its floor a sensor that loses the ball), the bricks static boxes taken out on `on.hit` (`world.remove`), the paddle a kinematic box moved by `moveTo` (it gives the ball its speed), the ball a `bullet` circle with `bounce: 1, friction: 0` and a `maxSpeed`; nudge its angle away from flat on each paddle hit.
+- Asteroids with real collisions: rocks as dynamic convex `world.poly`s with a little `spin`, the ship a poly with `gravity: 0` and `damping`, wrap-around by moving bodies across the edges yourself (`E.wrap`); a rock that splits is removed and two smaller polys added at its place with its speed.
+- Lemmings: an `E.Terrain` level (a picture's cells as materials), each lemming a walker (`land.walk`: a step up of 5, a fall that kills past a landing speed), diggers and bashers carving a small circle or a polygon each step, builders adding a short bar (`addPoly`); hundreds of walkers are cheap (no physics bodies).
+- What touches the terrain fast (a shot) uses `land.ray` for its line; what bounces on it (a grenade) is a physics circle with `world.add(land.collider())`.
+
+**Pinball (Pinball Fantasies, Space Cadet).** The PINBALL kit. A view of its own looking steeply down the table (`new E.View('pinball', 'Table', 0, 62, 1, 1)`), the physics world in table units with `gravity: [0, 450]` down its slope.
+- The walls `world.chain`s with `r: 1.5`; the flippers `world.flipper` (flip on the keys' down and up: `flip(input.down('flipL'))`), bumpers and slingshots with a `kick`, a saucer and a kickback as `world.kicker`s, drop targets static boxes set `off` when hit, lanes and the spinner sensors (`on.enter`); the ball a `bullet` with a `maxSpeed`.
+- A ramp: rails on a layer of their own; a sensor at its mouth switches a climbing ball to that layer (`ball.layer = ball.mask = 2`), one at its end switches it back; draw the ball at the ramp's height there.
+- The rules are counters over the events: targets light the ramp, ramps light the jackpot, the saucer pays it and starts a multiball (more balls in the world); a ball saver's seconds after a launch; a nudge pushes every ball and fills a tilt meter that, full, kills the flippers for the ball.
+- A dot-matrix display: draw the words small on a 128 x 32 canvas, then each of its pixels as a dot (lit or dim). Paint the playfield once to a canvas and draw it each frame.
+- On a phone: `input.zones = [{ x0: 0, y0: 0, x1: .5, y1: 1, act: 'flipL' }, { x0: .5, y0: 0, x1: 1, y1: 1, act: 'flipR' }]` (each half holds its flipper, two thumbs at once); while the ball waits in the lane, the whole screen one zone for the plunger, a swipe up (`input.pan()`) its pull.
+
+**Artillery (Worms, Scorched Earth).** The ARTILLERY kit. A side view at a whole scale, so the terrain's cells stay square: `new E.View('artillery', 'Island', 0, 0, 1, 1)`; the island an `E.Terrain` (y up: draw it with `land.draw(r)`, its points at `r.w(x, 0, y)`).
+- Soldiers are walkers (`land.walk`): its landing speed past a limit is fall damage; under the water line they drown. A blast `land.carve`s, hurts each one by its distance and throws it (`vx`, `vy`, `ground = false`).
+- Turns: `new E.Turns(teams, { mode: 'speed' })` with the two teams as its actors (equal speeds alternate them); each team sends its next one still standing.
+- Shots: a rocket steps its own flight (gravity, the wind, `land.ray` for the line); a grenade is a physics circle in a world of its own with `land.collider()` (bounce, a fuse in steps); a cluster bursts into a fan of small ones.
+- The CPU tries its shots in simulation: for each weapon, angle and power it runs the same step the real shot will (a grenade in a fresh world), scores the blasts it would make (the foes' hurt, its own side's against it), takes the best and fires it with a little error (`Math.random`, seeded in tests). Spread the tries over steps (a few each) so the frame stays smooth.
+- On a phone: `input.steer = 'drag'`; while `input.stickOn`, add up `input.drag()`: the shot goes the other way, its power the pull's length; let go fires. A tap (`clicked()`) walks there. A minimap at the top shows the whole island.
+
+**Rhythm (Dance Dance Revolution, PaRappa, Beatmania).** The RHYTHM kit. The songs module's songs and the rhythm module's `E.Rhythm`.
+- A chart is a string a lane over the song's steps (`'x...x...'`, holds `'h==='`), in parts and an order (`{ parts: { A: [...], B: [...] }, order: 'I A A B' }`), or a track's own notes (`{ track: 1, lanes: 4 }`). Give the song a `len` and let its tracks loop under it.
+- `rh.start()`, then `rh.update()` each step: it judges each lane's press by its distance in ms from its note on the music clock (windows of about 45, 90 and 135 ms suit a phone), and counts combo, score, life and grade. A miss and its sound are yours (`on.judge`).
+- PaRappa's call and response: the teacher's notes are calls (`'c'`), sounded on their steps (`sfx(voice, { step })`) and drawn on a highway of their own (`rh.draw(r, { call: true })`); the player answers in the next bar.
+- On a phone the lanes are columns: `input.zones` of a quarter of the screen each, under a highway of four lanes a quarter of the screen apart, so a thumb plays the note above it.
+- Let the player set the audio offset (Settings, Sound, Calibrate; or `audio.calibrate()` on a screen of your own) before blaming them for being late. Move the dancer, the lights and the crowd with `audio.onBeat`.
+
+**Survival horror (Resident Evil, Alone in the Dark).** The 3D HORROR kit. Each room its own fixed camera (`world.camera.zones`, mode `'zones'`: fixed, turning or on a rail; the cut waits `camera.margin` into the next room, and the stick keeps its way across it), tank or modern controls (`camera.steer` by the player's `E.World3D.CONTROLS`), a pistol held to aim (`camera.lock(hero, foes)`, high and low), doors between rooms (`world.through(door, hero)`, keys with `world.unlock(door, inv)` and the rpg module's inventory), an item box and a typewriter (`trunk`, `typewriter` things; `game.saves`), a flashlight (`world.flashlight`, a world made with `{ spots: 1 }`) and fog.
+
+**3D kart racing (Mario Kart 64, Crash Team Racing).** The 3D RACING kit (the drive module). The circuit is a `world.track` along a closed `E.Path` with heights (banked bends, a hill, a hump to jump, boost `pads`, `gaps` in its walls where a shortcut, a track of its own with `surface: 'dirt'`, leaves and rejoins); karts are `world.vehicle({ kind: 'kart', rig })` raced by `E.Race` (`race.update(dt, null)`: laps, places, its drivers, items); the camera `'behind'` each; set a kart that has left the course back on the road after a moment (Lakitu); two players through `game.splitScreen(2)` and `world.addCamera`.
+
+**Rail shooter (Star Fox 64, Panzer Dragoon).** The 3D FLIGHT kit. The ship is a `world.flyer({ rail: { path, speed, w, h } })`: the rail's point rides on and the ship moves in a window across it; the camera `'behind'` follows the rail's point (`f.frame`), not the ship. Waves of foes live in the rail's frame (a distance along it and an offset across), so they keep up; a roll (`f.rolling`) turns shots aside; a held fire charges a shot that locks on (`f.seek`); at the end, `f.o.rail = null` and `bounds` give free flight round a boss. A wingman talks on `Dialog`'s radio (`modal: false`).
+
+**Sports (Sensible Soccer, NBA Jam, Tecmo Bowl).** Start from the SPORTS slice: two against two in a walled cage, up to four players.
+- The field is a `TileMap` cage in `threequarter` (boards that cut low before the camera, nets); the ball and the players are `E.Body`s. The ball bounces off the ground and the boards (`bounce`), and curls: turn its velocity a little across its path each step while the shooter pushes sideways (aftertouch).
+- A pass leads the teammate (aim where it is going, not where it is); a lob over a defender is `E.arc(from, to, gravity, { apex })`, the throw that lands at its feet; a shot's power fills a meter while its button is held and goes on letting go.
+- The players a person doesn't run play by formation, by where the ball is: with it, the other one runs ahead on the far side; without it, the nearer presses and the other covers the goal. `game.allowJoin({ max: 4 })` lets players 2 to 4 in, each taking a side's next player.
+
+**First-person dungeon (Wizardry, Dungeon Master, Eye of the Beholder).** The 3D CRAWLER kit (the grid module). The 3D engine's `'fixed'` camera at the party's eyes over a level of 2 x 2 tiles a cell; each step and quarter turn is a tween, so the view glides. Gates are `world.thing('door')`s that rise (`world.unlock` for one with a key); the monsters walk an `E.Grid` cell to cell; `E.Fog` keeps what the party has seen for the automap; `E.Turns` in `'atb'` is real time (Dungeon Master), in `'speed'` the dungeon waits for the party (Wizardry). The party's portraits sit under the view (`rig.drawPortrait`).
+
+**Twin-stick shooter (Robotron 2084, Smash TV).** Start from the ADVENTURE kit (a `Body` hero in rooms) with the SHOOTER's ships and bullets.
+- One fixed room in `topdown` (`res: [320, 240]`, `expand`): the hero a `Body` moved by `input.move()`, the left stick or WASD; it fires the way the right stick points (`input.padAim`), else toward the mouse (`input.pointer()` to a ground point), else the way it moves, a shot every 0.08 s from an `E.Bullets` pool (`plane: 'ground'`).
+- Waves spawn from the room's edges by a timeline; grunts walk straight at the hero, others wander, hulks can't be killed, humans to rescue for points. `cam.shake` and `game.freeze(.03)` on every kill keep it loud; `E.Arcade` keeps the score, the lives and the table.
+
+**Bomberman.** Start from the PUZZLE slice's grid or the ARCADE's maze (the grid module).
+- The arena is an `E.Grid` of hard blocks on even cells and soft blocks to break; players and foes are `E.GridMover`s (a turn asked early is kept).
+- A bomb is a cell with a fuse (seconds in your state); its blast runs out cell by cell in four lines (`grid.line`) up to its range, stopping at a hard block, breaking the first soft one and lighting other bombs in its way (a chain). Power-ups drop from broken blocks: range, bombs, speed, a kick (`mover.update(..., { push })`).
+- Two to four players on one machine: `game.allowJoin({ max: 4 })`, a mover and an input each (`game.players[i]`).
+
+**Gauntlet.** Start from the ADVENTURE slice (a `TileMap` dungeon in `threequarter` or `topdown`).
+- Up to four heroes (`game.allowJoin({ max: 4 })`, `cam.frame(heroes)`), health draining by the second, food and potions, keys for doors.
+- Generators spawn monsters until destroyed; hundreds of them walk one shared `E.FlowField` toward the nearest hero (one field for all, recomputed when a hero crosses a cell), drawn as rigs with `{ every: 3 }` (kept images) to stay fast.
+
+**Frogger.** An `E.Grid` of lanes in `overhead`: the frog an `E.GridMover` that hops a cell per press; each lane a row of cars or logs moving at its own speed (`x += v * dt`, wrapping at the screen's edge). On a road a car's box kills; on the river the frog rides a log (add its speed) and drowns off one. Five homes at the top; a clock bar per life.
+
+**Sokoban.** An `E.Grid` from text rows (`#` walls, `$` crates, `.` goals, `@` you); you an `E.GridMover` with `push(cx, cy, dx, dy)` that moves a crate when the cell beyond is free; won when every goal has a crate. Keep each move's state for undo (Backspace) and a reset; count moves and pushes.
+
+**Sonic without the loops (Sonic the Hedgehog's speed on flat ground and slopes).** Start from the PLATFORMER slice: `new E.Platformer({ momentum: true })` (speed builds up and carries, slowing on the way up a slope and gathering on the way down: tiles of `kind: 'slope'`), a roll on down at speed, rings that scatter when hit (`E.Bullets` fired with `grav`) and are lost after a while, springs and long camera leads (`game.follow(hero, { lead: 60 })`). Loops and walls run round need a ground of any angle the Platformer doesn't have: leave them out.
+
+**Cinematic platformer (Prince of Persia, Flashback, Another World).** Start from the PLATFORMER slice with `new E.Platformer({ ledge: true, crouch: true })`: a step is a fixed distance, a jump a fixed arc (no control in the air), a ledge grabbed and climbed in steps, a run that needs room to stop. Screens one at a time (`game.cam.room`), each a room of the rooms module's `E.World`. Animation is the point: the Humanoid's moves at their full key poses, or a mocap clip (`docs/MOCAP.md`) for the climb and the fall; a sword fight is an `E.Fighter` pair from the fight module, in the side view.
+
+**Light guns (Time Crisis, The House of the Dead, Virtua Cop).** Start from the 3D FLIGHT slice's rails (or a 2D screen of `overhead` sprites): the camera rides an `E.Path` (`world.camera` following the rail's point), foes pop out from behind cover on a script by distance, and the player aims with the pointer: a click (a tap on a phone) at `input.pointer()` hits the nearest foe whose `world.project(x, y, z)` point lies within its size on the screen of it and that the camera sees (`world.clear` from the camera's pose); the reticle is drawn at the pointer. Reload by shooting off the screen (or a button); a pedal to take cover (a button that lowers the camera behind cover). Each enemy's shot is telegraphed by a ring that closes.
+
+**Indoor corridor shooter (Doom, GoldenEye 007) on the 3D engine.** Start from the 3D SHOOTER slice's first person: its gun, hitscan (`world.ray`), recoil and hit markers, with a level of text instead of its terrain (`level: { rows }`: corridors of walls, doors that slide or swing, `world.thing('door', ...)` with `locked: 'red'` and keys, lifts as platforms). Monsters are mobs that walk the level's flow field toward you and fire when `world.clear` says they see you; the camera is `'fixed'` with `capture: true`, turned by `camera.takeMouse()`. GoldenEye adds aiming down the sights (the overlay's fov) and guards that react to where they are shot.
+
+**Mash-ups.** The kits don't depend on each other. Some examples:
+- a platformer with Zelda rooms: `cam.room` in the side view;
+- a shooter with RPG shops: scenes plus `Menu`;
+- a brawler with bullet-hell bosses: `Bullets` with the `'ground'` plane;
+- a puzzle game with dialog cutscenes: `Dialog`.
+
+## Building a big game: lessons from Emberdeep
+`examples/emberdeep.html` is the engine's signature game: an endless Diablo-style hack-and-slash of about 2 MB of code, built from some fifty source files. Its structure (`src/emberdeep/DESIGN.md`) scales to any large game.
+
+- **A spine, then content.** A small core defines:
+  - the shared state;
+  - one damage pipeline for every unit;
+  - a handful of effect verbs (projectile, nova, ground area, telegraph, strike, meteor, chain, beam, wave, pull);
+  - the hero's action model;
+  - the monster runtime;
+  - the level builder;
+  - the UI kit.
+  Content never edits the core.
+- **Registries make a language.** Every part is registered: `def('skills' | 'archetypes' | 'affixes' | 'bosses' | 'patterns' | 'itemBases' | 'powers' | 'mechanics' | 'themes' | 'layouts' | 'npcs', id, spec)`. Parts refer to each other by id and combine freely. A monster is an archetype × an element × affixes × depth scaling × a palette. A level is a layout × a theme × mechanics × a monster pool. A boss is a body × an element × patterns.
+- **An event bus instead of hooks everywhere.** Legendary powers, passive keystones, mechanics and tips listen to `hit`, `kill`, `skill`, `dodge`, `step` and `draw` events and check whether they apply. Adding a power never touches the combat code.
+- **Procedural forever.** A recipe per depth draws from the registries. Past the hand-planned depths it composes new combinations in a fixed order (every pair of mechanics, then every triple), recolors themes by depth, varies packs (elements, shared affixes, giants, swarms) and assembles bosses from a pattern library. Both sides of the power curve grow exponentially, the monsters' a little faster.
+- **New animation on the rigs.** Post-process the Humanoid's joints after `rig.update`:
+  - a dodge roll turns every joint around the hips;
+  - drinking re-solves one arm with `E.ik3`;
+  - held tools are drawn from the hand and elbow joints.
+  New creature rigs (IK-legged spiders, a path-following serpent) are posed in 3D and projected with `view.p`.
+- **Test like a player.**
+  - An autopilot drives the hero through a virtual input for balance runs and an attract-mode demo.
+  - Scripted headless playtests (`tools/ed-play.mjs`) and a smoke test over every scene and depth (`tools/ed-smoke.mjs`) keep a big game honest.
+  - A Gallery scene plays every skill and monster for visual review.
+
+## Where to find more: animation and examples
+The engine files carry the engine; the repo (github.com/michaelcrosato/my-3d2dge) also holds a store of motion and a whole game of worked examples. Take from it rather than inventing a walk cycle or a spider from nothing, but take only what a game needs: the store's files are large (a clip set is 75-820 KB, each motion-capture subject about 2.5 MB), so search them and never read one whole. All of it runs at https://my-3d2dge.vercel.app/labs.
+
+**Motion clips** (`docs/MOCAP.md`): 325 curated clips and all 2,548 takes of the CMU motion capture database, in a readable text format of key poses (whole numbers, a legend in every file's header) that plays on any Humanoid at its own build, on either engine (the full engine also turns the face and hair with the body, for rolls and cartwheels). Every clip is free to use: Quaternius and Mesh2Motion are CC0, CMU is free for all uses.
+- **Find** a clip by what it does. The curated sets have catalogs, each clip's name with its tags and a description: `src/mocap/catalogs/quaternius.json` (88 clips: idles, walks, runs, jumps, sword, gun, shield, magic and fist attacks, dodges, hits, deaths, sitting, talking, work), `mesh2motion.json` (177: idles, attacks, emotes and gestures, dodges, climbing, sneaking, zombies, chores) and `cmu.json` (60 moments cut from motion capture: gaits, fights and kicks, dodges, falls and get-ups, chores, monsters and zombies acted by people). The motion-capture takes are in a ledger, one a line with its category, length and description: `node tools/cmu.mjs ledger kick` searches it, or grep `src/mocap/catalogs/cmu-takes.tsv`.
+- **Take** the clips you want into a small set of your own: `node tools/anim-set.mjs src/mocap/sets/quaternius.js examples/cmu-lib/CMU_10.js --clips Idle_Loop,10_01 --name MINE --out mine.js` (the curated sets are `src/mocap/sets/<set>.js`; take `NN_xx` is in `examples/cmu-lib/CMU_<NN>.js`). A clip copied by hand also needs its set's preamble (its `sources`, the bodies it was measured on), so use the tool when you can run commands.
+- **Play** it: load `src/mocap/readable.js`, `src/mocap/mocap.js` and the set after the engine, then `const lib = Mocap.load(MOCAP.MINE); Mocap.drive(rig, lib);` once, and each step `rig.mocap = lib.sample(lib.clip('Idle_Loop'), t)` before `rig.update`. `rig.mocapW` (0 to 1) fades a clip in and out over the rig's own animation, `rig.mocapMask = 'upper'` plays only the chest, head and arms over the rig's own walk, and `lib.moveAt(clip, t)` says how far a travelling clip has carried the body.
+- **Edit** it: a clip is text. Change a key pose's numbers to fix or vary it (the Mocap Lab's AI panel shows a clip as text and plays an edit).
+
+**Objects and materials** (`docs/ASSETS.md`, full engine): still objects written as a few lines of named parts (a barrel is a turned profile of oak and two iron hoops), drawn from any view and facing with `r.shape('barrel', x, y, 0, { facing })` and made solid with `map.solid(...)`; materials (`E.MATERIALS`) dress floors, walls and platform tiles. The card has the format, the core library and the recipe: copy the nearest entry, change it, look at it with `node tools/asset-sheet.mjs mine.js#stool`, use it.
+
+**Worked examples** (`src/emberdeep/`, `src/emberdeep/DESIGN.md`): Emberdeep registers every part on one line, so one search lists them all: `grep -nE "def\(['\"](archetypes|characters|skills)" src/emberdeep/*.js` gives the 29 monster, boss and dummy bodies (with tags: beast, spider, flying, ranged...), the 3 heroes and the skills (Codex's six come from one helper in `29-codex-skills.js`). Bodies that are not people are classes: `grep -n "^class " src/emberdeep/*.js` (an eight-legged crawler with IK legs, a burrowing serpent, a floating eye with a beam, Codex the living book, Dan the scythed beast on reverse-kneed legs). Perception and paired actions in play: `32-wardens.js` (a sentry's mind from `E.Suspicion` and `E.sees`, its cone from `r.sightCone`, an alarm heard through `E.hears`) and `23-executions.js` (`E.ACTIONS.takedown` on the hero and a monster at once, the target from `E.targets`). They lean on the game's helpers and shared state, so adapt them rather than paste them; `docs/CHARACTERS.md` is the recipe for a new body and what makes one read at game scale.
+
+**Starters**: `dist/kits/my-3d2dge-<genre>.html`, one vertical slice per genre (21 of them: the README's kits list, the API card's playbook), each a complete game to copy from (in the handoff package, `kits/`).
+
+**Real 3D**: `dist/my-3d2dge-3d.js` puts a three.js and Rapier world under a game (make the game with `bg: null`); its header is its manual, with a complete game. Its kits, `dist/kits/my-3d2dge-3d-<action|platformer|shooter|horror|racing|flight|crawler>.html`, are served, not opened from a disk (they load `vendor/`); the handoff package leaves them out. `docs/ENGINE-3D.md` says how it fits the engine.
+
+## Performance
+- **Rigs:** projection costs microseconds. The outline composite is the expensive part, so crowds should use `outline: false`.
+- **Walls, floors and PlatformMap chunks** are baked once per view.
+- **Canvas lighting** scans pixels inside each light, so keep radii sensible or use GPU lighting.
+- **Particles** are capped at 900 (`game.particles.max`) and bullets at 800 per pool.
+- **Crowd separation:** use `E.SpatialHash`, not all-pairs checks.
+- The stress test (my-3d2dge.vercel.app/stress-test) benchmarks a device and prints a copyable report.
+
+## Checklist before handing a game back
+- One IIFE starting with `const E = My3D2dge`, holding only your game (no leftover starter menu or slices): between `GAME START` and `GAME END` in a single file, `game/game.js` in the handoff package. No libraries or network requests.
+- A title scene, a gameplay scene with `pausable: true`, and a game-over or win path back to the title.
+- No pause menu, settings screen, key rebinding or full-screen code of your own: they're standard. Your settings, names and menu items go in `new E.Game({ menu: {...} })`; prompts come from `game.input.label(action)`.
+- The camera follows the player and the level is visible. The HUD uses screen pixels (`r.text`, `r.overlay`), anchored to `r.W` and `r.H`, or for a modern game `E.Shell`'s HTML pieces (`ui.hud` every step). With `expand: true`, look at it on a wide monitor and on a phone both ways (`tools/check.mjs` takes `--size 390x844@3`).
+- Sounds for jumping, hitting, pickups and dying; music per scene.
+- Positions and speeds are in world units, `dt` is used everywhere, and nothing draws with anti-aliased canvas calls.
+- Every view in `views` looks right (press `V`), and the skeleton overlay and slow motion look right.
+- `node tools/check.mjs <your page>` (`game/index.html` in the handoff package) passes; look at its screenshots, not only its exit code.

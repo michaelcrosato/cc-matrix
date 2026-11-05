@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script src="vendor/aihub-session.js"></script>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-minutes" content="6">
+<meta name="hub:session-goal" content="Detail: build a 100-point case with photos and taps. Corner: make the quota without getting made.">
+<meta name="hub:session-howto" content="Move: stick/WASD · Watch: L2/right mouse · Photo: R2/left click · Act: Cross/E · Call out/jump-out: Triangle/Q · Shut down: Square/F">
+<meta name="hub:type" content="Game">
+<meta name="hub:players" content="1-4">
+<title>WIRETAP</title>
+<style>html, body { margin: 0; height: 100%; background: #07060a; overflow: hidden; }
+#screen { width: 100%; height: 100%; display: block; image-rendering: pixelated; touch-action: none; }
+#ui { position: fixed; inset: 0; pointer-events: none; z-index: 20; font: clamp(18px, 2.6vh, 34px)/1.35 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #f2ead8; }
+#ui .screen { position: absolute; inset: 0; pointer-events: auto; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 5vh 5vw 9vh; box-sizing: border-box; background: rgba(6,5,4,.55); }
+#ui .screen.title { background: none; align-items: flex-start; justify-content: flex-end; padding-left: 7vw; }
+#ui .screen.wire { background: none; align-items: flex-end; padding-right: 4vw; }
+#ui .screen.box, #ui .screen.cards-screen.inroom { background: none; align-items: flex-end; }
+#ui .panel { max-width: min(1500px, 90vw); max-height: 78vh; display: flex; flex-direction: column; gap: .5em; padding: 1em 1.3em; border-radius: 6px; box-shadow: 0 10px 40px rgba(0,0,0,.6); box-sizing: border-box; }
+#ui .panel.dark { background: #141210ee; border: 2px solid #3a342c; }
+#ui .panel.manila { background: #e9dcb5; color: #2b2418; font-family: "Courier New", Courier, ui-monospace, monospace; }
+#ui .panel.paper { background: #f4efe2; color: #1a1610; font-family: "Courier New", Courier, ui-monospace, monospace; width: min(1300px, 88vw); }
+#ui .panel.cork { background: #a8794a radial-gradient(#b8895a 1px, transparent 1.5px) 0 0/7px 7px; color: #1a1208; width: min(1600px, 92vw); }
+#ui .panel.wire { background: #0b0f0cf2 repeating-linear-gradient(0deg, rgba(143,227,136,.04) 0 2px, transparent 2px 4px); color: #8fe388; border: 2px solid #1f3a1c; font-family: ui-monospace, "Courier New", monospace; }
+#ui .panel.wroom { width: min(900px, 56vw); height: 76vh; }
+#ui h1 { font: 700 1.9em/1.1 "Arial Narrow", "Roboto Condensed", "Helvetica Neue", Arial, sans-serif; letter-spacing: .03em; margin: 0; text-transform: uppercase; }
+#ui h2 { font: 700 1.3em/1.2 "Arial Narrow", "Roboto Condensed", Arial, sans-serif; margin: .2em 0; text-transform: uppercase; letter-spacing: .04em; }
+#ui .kicker { font-size: .75em; letter-spacing: .18em; opacity: .75; text-transform: uppercase; }
+#ui .lede { font-size: 1.05em; margin: .2em 0; max-width: 40em; }
+#ui .small { font-size: .8em; opacity: .85; }
+#ui .quote { font-size: 1.15em; font-style: italic; max-width: 34em; }
+#ui .btn, #ui button { font: inherit; color: inherit; background: #2a2620; border: 2px solid #4a4238; border-radius: 6px; padding: .45em .9em; cursor: pointer; text-align: left; transition: transform .08s; }
+#ui .manila button, #ui .paper button, #ui .cork button { background: #f4f1ea; color: #2b2418; border-color: #b8a888; }
+#ui .wire button { background: #12201299; color: #8fe388; border-color: #2f5a2a; }
+#ui .focus { outline: 4px solid #ffb347 !important; outline-offset: 2px; transform: scale(1.04); z-index: 2; }
+#ui .btn.primary { background: #ffb347; color: #1a1208; border-color: #ffb347; font-weight: 700; }
+#ui .off { opacity: .45; }
+#ui .menu { display: flex; flex-direction: column; gap: .4em; min-width: 12em; }
+#ui .menu-item { font-size: 1.15em; background: #141210cc; }
+#ui .legend { position: fixed; left: 5vw; right: 5vw; bottom: 3vh; display: flex; gap: 1.4em; justify-content: center; flex-wrap: wrap; font-size: .85em; color: #f2ead8; text-shadow: 0 2px 4px #000; pointer-events: none; }
+#ui .lg { display: inline-flex; align-items: center; gap: .35em; }
+#ui .g { display: inline-flex; align-items: center; justify-content: center; min-width: 1.5em; height: 1.5em; border-radius: 50%; background: var(--gc, #444); color: #fff; font-weight: 700; font-size: .9em; }
+#ui .g-pill { border-radius: .6em; padding: 0 .45em; background: #3a3a40; }
+#ui .g-mouse { width: 1em; height: 1.45em; border-radius: .5em; background: #e8e4dc; position: relative; }
+#ui .g-mouse::after { content: ""; position: absolute; top: .12em; width: .38em; height: .55em; border-radius: .3em .1em .1em .1em; background: #ffb347; left: .1em; }
+#ui .g-mouse.r::after { left: auto; right: .1em; border-radius: .1em .3em .1em .1em; }
+#ui kbd { font: 700 .85em system-ui, sans-serif; background: #f8f6f0; color: #1a1814; border-radius: 4px; padding: .1em .45em; border-bottom: 3px solid #9a968e; }
+#ui .cards { display: flex; gap: 1em; flex-wrap: wrap; justify-content: center; }
+#ui .card { width: 15em; min-height: 9em; display: flex; flex-direction: column; gap: .4em; background: #e9dcb5 !important; color: #2b2418 !important; }
+#ui .card-t { font: 700 1.15em "Arial Narrow", Arial, sans-serif; text-transform: uppercase; }
+#ui .card-c { font-size: .8em; color: #8a2a12; }
+#ui .card-l { font-size: .8em; color: #8a2a12; font-weight: 700; }
+#ui .photos, #ui .grid { display: flex; flex-wrap: wrap; gap: .8em; justify-content: center; overflow: auto; }
+#ui .polaroid { background: #f4f1ea !important; padding: .4em .4em 1.2em; transform: rotate(-1.5deg); box-shadow: 0 4px 12px rgba(0,0,0,.4); }
+#ui .polaroid:nth-child(2n) { transform: rotate(1.8deg); }
+#ui .polaroid img, #ui .person img, #ui .ev img { width: 6em; height: 6em; image-rendering: pixelated; display: block; }
+#ui .person, #ui .ev { display: flex; flex-direction: column; align-items: center; gap: .2em; width: 9em; font-size: .8em; text-align: center; }
+#ui .ev.sel { outline: 3px solid #b3261e; }
+#ui .bicon { width: 3em; height: 3em; display: flex; align-items: center; justify-content: center; font-size: 1.6em; background: #3a342c; color: #e9dcb5; border-radius: 4px; }
+#ui .tabs { display: flex; gap: 1em; font-size: .8em; letter-spacing: .12em; }
+#ui .tabs span { opacity: .55; }
+#ui .tabs span.on { opacity: 1; border-bottom: 3px solid #ffb347; }
+#ui .scroll { overflow: auto; }
+#ui .nb-body { min-height: 40vh; }
+#ui .nb-body canvas { width: min(50vw, 640px); image-rendering: pixelated; border: 2px solid #2b2418; }
+#ui .mk { font-size: .8em; font-weight: 700; }
+#ui .meter { display: flex; flex-direction: column; gap: .2em; }
+#ui .bar { height: .7em; background: #00000044; border-radius: .35em; overflow: hidden; min-width: 12em; }
+#ui .bar i { display: block; height: 100%; background: #ffb347; }
+#ui .board .tierbar { display: flex; gap: 1.5em; font: 700 1em "Arial Narrow", Arial, sans-serif; letter-spacing: .1em; }
+#ui .board .tierbar span { opacity: .5; } #ui .board .tierbar span.on { opacity: 1; }
+#ui .slots { display: flex; gap: .7em; flex-wrap: wrap; }
+#ui .slot { width: 7.2em; min-height: 8em; display: flex; flex-direction: column; align-items: center; background: #f4f1ea !important; position: relative; }
+#ui .slot::before { content: ""; position: absolute; top: -.35em; left: 50%; width: .7em; height: .7em; margin-left: -.35em; border-radius: 50%; background: #b3261e; }
+#ui .slot img { width: 4.5em; height: 4.5em; image-rendering: pixelated; }
+#ui .slot-t { font: 700 .8em Arial, sans-serif; text-transform: uppercase; } #ui .slot-n { font-size: .7em; }
+#ui .q { font-size: 2.5em; opacity: .3; }
+#ui .cardrow { display: flex; gap: .5em; flex-wrap: wrap; }
+#ui .bcard { display: flex; align-items: center; gap: .4em; font-size: .8em; }
+#ui .bcard img { width: 2.5em; height: 2.5em; image-rendering: pixelated; }
+#ui .bcard.sel { outline: 3px solid #b3261e; }
+#ui .strings { color: #5a0a06; font-size: .8em; font-weight: 700; }
+#ui .cipher-row { display: flex; gap: 2em; align-items: flex-start; }
+#ui .keypad { display: flex; flex-direction: column; align-items: center; gap: .5em; }
+#ui .pad { display: grid; grid-template-columns: repeat(3, 2.2em); gap: .3em; transition: transform .35s; }
+#ui .key { width: 2.2em; height: 2.2em; display: flex; align-items: center; justify-content: center; border: 2px solid #2f5a2a; border-radius: 6px; font-size: 1.2em; }
+#ui .turn { font-size: 1.4em; }
+#ui .pages { display: flex; flex-direction: column; gap: .4em; }
+#ui .page.sel { border-color: #ffb347; } #ui .page.done, #ui .mono.done { color: #c8ffc0; }
+#ui .decode .big, #ui .big { font: 700 1.8em ui-monospace, monospace; letter-spacing: .08em; }
+#ui .match { color: #ffb347; font-weight: 700; } #ui .nomatch { opacity: .6; }
+#ui .hint { color: #e9dcb5; font-style: italic; }
+#ui .map span { margin-right: .8em; }
+#ui .dialpad { display: grid; grid-template-columns: repeat(3, 3em); gap: .4em; }
+#ui .dkey { text-align: center !important; font-size: 1.3em; }
+#ui .huge { font: 700 3.2em ui-monospace, monospace; color: #ffb347; }
+#ui .boxpanel { width: min(560px, 44vw); }
+#ui .diamond { display: grid; grid-template-areas: ". t ." "l . r" ". b ."; grid-template-columns: 1fr 1fr 1fr; gap: .5em; }
+#ui .dopt { display: flex; align-items: center; gap: .4em; font-size: .9em; }
+#ui .dopt.boxTop { grid-area: t; } #ui .dopt.boxLeft { grid-area: l; } #ui .dopt.boxRight { grid-area: r; } #ui .dopt.boxBottom { grid-area: b; }
+#ui .special { color: #ff9a7a !important; }
+#ui .doc p { margin: .3em 0; white-space: pre-wrap; }
+#ui .check.on { background: #e9dcb5 !important; }
+#ui .wtop { display: flex; justify-content: space-between; font-size: .85em; }
+#ui .wclock { font: 700 1.3em ui-monospace, monospace; }
+#ui .wbody { flex: 1; display: flex; flex-direction: column; gap: .4em; min-height: 0; }
+#ui .wline { color: #ffb347; } #ui .wspk { font-weight: 700; }
+#ui .wwin { font-size: .85em; } #ui .wwin.over { color: #ff7a5a; }
+#ui .energy { display: flex; gap: 3px; align-items: flex-end; height: 24px; }
+#ui .energy i { width: 6px; background: #8fe388; }
+#ui .trans { flex: 1; font-size: .95em; }
+#ui .trans p { margin: .25em 0; } #ui .trans .key { color: #ffd84a; } #ui .trans .min { opacity: .6; font-style: italic; } #ui .trans .typing::after { content: "▌"; }
+#ui .quiet { opacity: .7; font-style: italic; margin: 2em 0; }
+#ui .wbtns { display: flex; gap: .6em; }
+#ui .vp { display: flex; gap: 2px; align-items: flex-end; height: 34px; } #ui .vp i { width: 5px; background: #8fe388; }
+#ui .vrow { display: flex; gap: 1em; align-items: center; }
+#ui .stat { display: flex; gap: .8em; align-items: baseline; } #ui .stat b { font-size: 1.5em; color: #ffb347; }
+#ui .eplist { min-width: 22em; }
+#ui .touchpanel { align-items: center; text-align: center; margin: auto; }
+#ui .big { font-size: 1.3em; }
+#ui .aboutpanel { width: min(1300px, 88vw); } #ui .aboutpanel .doc { max-height: 52vh; }
+#ui .row { display: flex; gap: .6em; }
+.esh-k, .esh-pr kbd { border-radius: 4px; }
+@media (max-aspect-ratio: 1/1) { #ui .panel.wroom { width: 92vw; height: 60vh; } #ui .screen.wire { align-items: center; justify-content: flex-end; } #ui .boxpanel { width: 92vw; } }
+#ui .screen:not(:last-child) { visibility: hidden; }
+</style>
+</head>
+<body>
+<div id="e3-boot" role="status" style="position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;padding:20px;background:#05040a;color:#a9a1c8;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace"><style>@keyframes e3-run{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@keyframes e3-late{to{opacity:1}}</style><b style="color:#f4f0ff;font-size:16px;letter-spacing:.08em">WIRETAP</b><span>Starting · my-3D2dge v0.85.1</span><span style="display:block;height:4px;max-width:440px;overflow:hidden;background:#ffffff14"><span style="display:block;width:30%;height:100%;background:#d9b77c;animation:e3-run 1.2s ease-in-out infinite"></span></span><span style="opacity:0;animation:e3-late .3s 12s forwards">Still starting. If this stays, the game's script did not run: reload, or open the browser's console.</span></div>
+<canvas id="screen"></canvas><div id="ui"></div>
+<script src="engine/my-3d2dge.js"></script>
+<script src="dev-bundle.js"></script>
+</body>
+</html>

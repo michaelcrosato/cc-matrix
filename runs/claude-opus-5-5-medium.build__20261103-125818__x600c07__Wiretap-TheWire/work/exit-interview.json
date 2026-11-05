@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 12:58",
+    "source": "The Wire (2002-2008)",
+    "genre": "Stealth investigation / crime drama, with a corner-management sim (playing the crew) and an asymmetric hidden-identity versus mode",
+    "perspective": "Isometric 2.5D over a 72x56-cell West Baltimore neighborhood (camera turns in 90-degree steps); brawler-view interiors; HTML case-file screens for the Board, notebook, wire room, box and affidavit",
+    "tech": "my-3D2dge v0.85.1 full engine (canvas 2D lighting, E.Shell HTML HUD, E.Dialog, E.Suspicion, FlowField, shapes as data); AI Hub session client 1.4.0; vanilla JavaScript in one IIFE; Web Audio; bundled by a Node script into one HTML file",
+    "artDirection": "Engine-native retro-modern pixel art (PS1-era 2D) pushed toward grit: sodium streetlights, rain, Formstone and brick rowhouses, boarded vacants, phone wires with sneakers over the corner, neon store signs; case-file manila, corkboard and phosphor-green wire-room UI",
+    "animation": "Engine-native procedural Humanoid rigs (walk/run/crouch, engine poses for sitting, phoning, camera-raise, hands up, cuffed), live portraits in dialogue and polaroids, tweens and timers; no frame lists",
+    "audio": "Code-written chip music in the engine's song format with layered tension (8 songs), synthesized effects (shutter, pager, DTMF tones, sirens, cuffs, fence rattles), filtered-noise ambience beds, and Animalese-style gibberish voices from formant grains synced to typed text, with a telephone filter on the wire",
+    "online": "AI Hub Session Protocol v1, shared-world versus for 1-4 players (host-authoritative sim, 10 Hz snapshots under 1,100 bytes, client-reported movement with host speed checks, validated actions, leave-to-bot, server host, finish with standings/scores/stats/awards); local split-screen versus for 2; no other network use",
+    "testing": "Lightweight, token-efficient: headless Node vm tests (boot, every story beat, attract reel loops, a bots-only versus round, corner ledger, cipher, photo scoring, perception targets, box thresholds, affidavit scoring, montage on every branch, flow tests); Playwright Chromium runs driven only by real key presses and mouse events, steered by the on-screen objective: Episode 1 in one continuous run from the title; Episodes 2, 3 and 4 each in one continuous run from Episode select; Episode 5 in one continuous run down each ending (the raid, and follow the money with the long lens), each to the montage; a simulated DualSense (glyphs, Xbox setting, stick inversion); WebKit iPhone touch-only notice and attract; AI Hub harness all four runs passed; viewport-matrix (2 phones, 5 desktops). No physical controller, no real iOS Safari.",
+    "research": "my-3D2dge handoff docs (API.md, parts of AI_GUIDE.md, ASSETS.md, the stealth kit and template) and the AI Hub protocol README; the provided PLAN.md; knowledge of the series from memory; no other web research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 33. Real-input play found most of the late ones: Szabo out of talk range; the crew never looking at the street (no face photo possible); Dana pushed out of her car and unable to shoot from cover; the car's view blocked by a building; the mouse unable to pan to Corey; no more film; no marker on the role-read objective; Esc on a screen also pausing the game; the cipher station counting as done without a decode, softlocking the affidavit; Episode select's Episode 2 state missing Pockets' statement; tackles only counting while moving; Tee's payphone stop inside the bus shelter (the tail could never finish); the raid's search spots invisible; the tail retry dropping the player inside a payphone; and dialogue started over an open screen (the call to Dana's mother from the wire room) never advancing.",
+    "Twenty would block a player, including every one of the real-input finds except the missing marker and the tackle rule.",
+    "Driving the real game in Chromium with only key presses and mouse events, steered by the on-screen objective, with a stall watchdog that dumped state and a screenshot.",
+    "Headless flow tests that teleport the player and set facts directly: they proved no code path deadlocks but missed every reachability, sightline and collision problem a real player hits."
+  ],
+  "engineFeedback": [
+    "How much comes for free and works the same headless: the standard pause/settings/controls/saves, E.Shell's HUD, E.Suspicion, sight cones, flow fields and a fixed-step clock that made deterministic Node tests easy.",
+    "Yes: I assumed shape materials accepted names like 'rusted' and 'linen' as patterns (they are materials, not patterns), and I first missed that pointer events don't report a second mouse button, so left-click while holding right never reached the input.",
+    "The wire room (call scheduler, minimization windows, spot-checks, logging key lines in time, voice ID) and the DOM UI kit with spatial focus navigation, hover focus and device-following glyph legends.",
+    "Knowing what exists in a very large API: the index is huge, so finding the right call (toCell's return shape, mouseGround, input.held) took grepping and small experiments.",
+    "The error reporting that dedupes repeated errors: it hides how often something fails, which misled my first tests; I would overhaul it to keep a count per message.",
+    "Built-in chorded mouse button support (and a documented way to read raw gamepad axes for a second stick), so watch-and-shoot schemes work with a mouse out of the box."
+  ],
+  "promptFeedback": [
+    "It asks for a complete vertical slice with real infrastructure (attract mode, AI Hub, controller-first UX, an About screen) rather than a toy, and the plan it came with was specific enough to build from.",
+    "The plan targeted a 60-75 minute five-episode game with a different file name and model; at medium effort scoping that down while keeping every system was a judgment call the prompt leaves open.",
+    "Fitting every system (field surveillance, chase, tail, box, cipher, affidavit and judge, wire room, the corner as Tee, versus with networking, attract) into one coherent, working build in a single session.",
+    "A real human playthrough of the full story on a TV with a DualSense, start to credits, to judge pacing and readability at 10 feet."
+  ],
+  "aiHub": {
+    "name": "WIRETAP",
+    "tagline": "Somebody's always listening.",
+    "description": "Work both sides of a West Baltimore corner in 2004: build a wiretap case one photo, page and phone call at a time, then run the corner the case is built on. Includes a 1-4 player cops-vs-corner versus mode.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "The Wire (2002-2008)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD move · L2/right mouse watch · R2/left click photo · Cross/E interact · Triangle/Q partner, orders, call out · Create/Tab notebook",
+    "tags": [
+      "story",
+      "versus",
+      "pixel art",
+      "isometric",
+      "crime",
+      "stealth"
+    ]
+  }
+}

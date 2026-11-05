@@ -1,0 +1,56 @@
+// writes src/10-data-about.js and ../exit-interview.json from one source of truth (the feedback text)
+import fs from 'node:fs'; import path from 'node:path'; import { fileURLToPath } from 'node:url';
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'), parent = path.resolve(root, '..');
+const src = {
+  date: '2026-11-04 05:02:26',
+  source: 'Brigandine: The Legend of Forsena (Hearty Robin, PlayStation, 1998). Only the title is a nod; the world, cast, art and music are original.',
+  plan: 'PLAN.md',
+  genre: 'Turn-based grand strategy with a tactical RPG hex-battle layer',
+  perspective: 'Campaign: a three-quarter diorama of the continent, north up. Battles: a tilted overhead hex board with billboard figures (tilt toggle). Story: side-on stage scenes with live portraits.',
+  tech: 'my-3D2dge 0.85.2 (single-file engine, unmodified) with plain JavaScript; AI Hub Session Protocol v1 client 1.4.0; Playwright 1.63 and Node 24 for tests only. No other libraries.',
+  artDirection: 'The engine\'s native HD-rig style: Humanoid knights with live portraits, six hand-built creature bodies drawn from pixel primitives, season palettes, drawn hexes, a clock-face continent.',
+  animation: 'The engine\'s Humanoid rig and E.Attack moves, plus new creature animation (hops, wing-flaps, squash, lunges), season effects (wildfire, ice, gale motes) and spell bursts.',
+  audio: 'All in code: ten step-sequenced songs, about thirty sound effects and Animalese babble voices pitched per speaker, through the engine\'s synthesiser.',
+  online: 'AI Hub shared-world mode (2-4 players): the host\'s copy orders every command, all copies replay the same seeded battle; seats one and two duel and others watch. Passes the hub harness at 2, 3 and 4 players (latency, loss), host-leave and no-player-host scenarios. Local hot-seat: a campaign for 2-4 humans on one machine (pass-and-play) and a two-human skirmish.',
+  testing: 'Headless scripts only (node tests/run.mjs: 522 checks incl. a scripted whole-campaign playthrough), a balance bot, browser screenshots for looks, and the AI Hub harness.',
+  research: 'Light: read the plan, the engine card and the hub protocol; no outside research.',
+  environment: 'Claude Code CLI (headless); Linux; browser unknown (Chromium via Playwright used for checks)',
+  model: 'Anthropic, claude-sonnet-5-5, reasoning effort medium',
+  usage: 'unknown'
+};
+const testing = [
+  'Nine: Meridian was one road away from the player\'s start, so a scripted playthrough won on turn 1; the campaign scene read its map rectangle and cursor before the first draw (crash headless and on loading a save); the first story event fired on turn 1 by mistake; deep links were overwritten by the engine\'s boot; the attract mode exited itself in a test because of its own activity stamp; the font cannot draw several symbols I had used (shown as ?); and the engine\'s corner buttons covered my HUD.',
+  'Three: the Meridian shortcut (the demo could be finished in one season) and the two first-draw crashes in the campaign scene.',
+  'The scripted whole-campaign playthrough plus the all-AI balance bot: they drove every system from the title to an ending in seconds and exposed the Meridian shortcut that no unit test would have.',
+  'The data-validation suite (castles, maps, skills, roads, walkable maps in all four seasons): it never failed once, so it protects the future more than it informed the present.'
+];
+const engine = [
+  'game.advance with game.debug: the same inputs give the same game, so I could play the whole demo in Node. The Humanoid rigs with live portraits also looked good with no art work, and pause, settings, saves and per-device button labels came free.',
+  'Yes. I assumed the font had the pad symbols that input.label returns (a cross, circle, square, triangle) and common punctuation; it does not, so I drew the symbols by hand. A game.go() made before boot finishes is silently replaced by the first scene, and game.every timers vanish at each scene change.',
+  'The hex board and its picking, six creature painters, a 10-foot UI kit (focus model, lists, prompts, sliders, talk box), the battle and campaign simulations with their AIs, and the Animalese voices and songs.',
+  'Fitting a strategy game to an engine whose views assume a world with a ground plane: I drew everything through r.overlay and did my own depth ordering and picking. The API index is also very large to search for a name.',
+  'None. The engine is unmodified.',
+  'Ship a small 10-foot UI toolkit (pad and mouse focus, lists, grids, glyph prompts) and a font that includes controller glyphs and common symbols.'
+];
+const prompt = [
+  'The task\'s spec for controller-first play, attract mode and dev mode was concrete, and the plan\'s exact rules and tables made the design decisions quick.',
+  'The plan was written for another model, effort and date and names a different file and folder than TASK.md, and its scope (25 castles, 36 knights, 30 species, 13 maps, 40 events) is far beyond one session. TASK.md wins, but I had to reconcile them.',
+  'Writing the plan\'s full content (25 castles, 36 knights, 30 species with 3 forms, 13 maps, 40 events) in one session, and keeping a hex battle readable at 320x240. Shipping all of the plan\'s tables (100 skills incl. tier and season variants and monster traits, 33 items, 23 classes) and 2-4 side skirmishes took a generalised battle simulation.',
+  'Mark which parts of the plan are optional and give a size budget, make the plan\'s file names agree with TASK.md, and say whether the About screen, chat reply and JSON must match word for word.'
+];
+const aiHub = { name: 'Brigantime: The Legend of Forseasons', tagline: 'A war told in seasons', description: 'Four season-realms race to Meridian before the Hour-Candle burns out: muster knights and monsters, march on castles, and fight hex battles where the season changes the field. Play a whole campaign, a skirmish, or the same seeded battle against friends in an AI Hub round.', type: 'Game', genre: 'Strategy', source: 'Brigandine: The Legend of Forsena', series: 'Brigandine', players: '1–4',
+  controls: 'D-pad/stick or arrows/WASD move, Cross/Enter confirm, Circle/Backspace back, Square/Space commands or end phase, Triangle/Tab details, mouse hover and click', tags: ['strategy', 'turn-based', 'fantasy', 'story', 'pixel art', 'boss fights'] };
+const ex = { sourceInformation: src, testingFeedback: testing, engineFeedback: engine, promptFeedback: prompt, aiHub };
+fs.writeFileSync(path.join(parent, 'exit-interview.json'), JSON.stringify(ex, null, 2) + '\n');
+const rows = o => Object.entries(o).map(([k, v]) => [k, v]);
+const names = { date: 'Date', source: 'Source', plan: 'Plan', genre: 'Genre', perspective: 'Perspective', tech: 'Tech', artDirection: 'Art Direction', animation: 'Animation', audio: 'Audio', online: 'Online', testing: 'Testing', research: 'Research', environment: 'Environment', model: 'Model', usage: 'Usage' };
+const qa = (qs, ans) => qs.map((q, i) => [q, ans[i]]);
+const about = [
+  { title: 'Source', rows: Object.entries(src).map(([k, v]) => [names[k], v]) },
+  { title: 'Testing', rows: qa(['How many issues did testing catch?', 'How many were critical?', 'Most helpful test', 'Least helpful test'], testing) },
+  { title: 'Engine', rows: qa(['Liked most', 'Stuck or guessed wrong?', 'Most important thing built myself', 'Hardest part', 'Engine changes', 'One thing to change'], engine) },
+  { title: 'Prompt', rows: qa(['Liked most', 'Confusing', 'Hardest thing', 'What to change'], prompt) },
+  { title: 'Credits', rows: [['Design and code', 'Written by Claude (claude-sonnet-5-5) from a plan by claude-opus-5-5.'], ['Engine', 'my-3D2dge by Michael Crosato.'], ['Online', 'AI Hub Session Protocol v1.'], ['Inspiration', 'Brigandine: The Legend of Forsena, whose idea of a continent at war, told in months, started all of this.'], ['Tone', 'Earnest, a little wry, and fond of tidy bureaucracy: kettles, calendars and clocks.']] }
+];
+fs.writeFileSync(path.join(root, 'src/10-data-about.js'), '/* About & Credits: Source Information, Testing, Engine and Prompt feedback (generated by tools/gen-text.mjs). */\nG.ABOUT = ' + JSON.stringify(about, null, 1) + ';\n');
+console.log('ok');

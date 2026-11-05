@@ -1,0 +1,55 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:58",
+    "source": "The Wire (2002-2008)",
+    "genre": "Stealth and investigation, with a shift clock",
+    "perspective": "Threequarter, switchable to topdown and iso",
+    "tech": "my-3D2dge engine v0.85.1 (full build, bundled into one HTML file); AI Hub Session Protocol v1, client 1.3.0 (session.js, unmodified)",
+    "artDirection": "The engine's pixel style with night lighting, the engine's pixel title font, and a Baltimore-block tileset",
+    "animation": "The engine's Humanoid rigs and their poses",
+    "audio": "Music, sound effects and voice written in code: chip-synth music, effects, and a gruff synth blip per letter (no sound files)",
+    "online": "AI Hub parallel round, 1 to 4 players; each copy reports its score",
+    "testing": "Headless Node suite (36 checks, including a full scripted playthrough), a Chromium run of the built file, the AI Hub harness with 2 and 4 players, and a WebKit viewport matrix (phone, tablet, desktop)",
+    "research": "none",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Eight issues: two critical (the hero's rig was never created, so every shift crashed on its first step; the hub ready() call was not made after connect, so no round could start), and six minor layout and flow problems (title overlap, tagline overflow, an unsupported glyph, results alignment, About footer overlap, and a scene-switch race in attract).",
+    "Two: the hero rig crash and the missing hub ready call. Both would have stopped every shift or every hub round.",
+    "The scripted full playthrough, which walks the real systems in order (pickups, pole tuning, witness and lieutenant choices, banking) and reads the outcome back, plus the AI Hub harness run.",
+    "The 10-second attract idle check mostly confirmed a timer. The viewport screenshots only capture the title screen, so they were weaker than a per-scene capture would have been."
+  ],
+  "engineFeedback": [
+    "The threequarter TileMap, the Humanoid rigs, and the Dialog, Menu and Shell screens gave a readable game quickly; the standard pause, settings and controls screens came for free.",
+    "Wrong guesses: a scene switch changes sceneName before enter() runs, because of the fade, so state from the old scene can briefly be live; the font has no middle dot; and a Dialog choice can only be answered through input, so I added a handle to answer it from code.",
+    "The shift state machine: the clock, heat and burns, the pole tuning mini-game, the conversations with their outcomes, the attract AI, and the hub reporting.",
+    "Working out the return shapes of calls (mouseGround, FlowField.dir, centre helpers) without reading the 1.2 MB source, and the timing of scene transitions.",
+    "The scene switch: the name changes before the new scene's enter() runs. A switch should only change the name once the new scene is entered.",
+    "Let a Dialog's choice be answered by code (a select call), so scripts, tests and tools can drive conversations."
+  ],
+  "promptFeedback": [
+    "The explicit checklists: the controls, the invert toggles, the touch-only notice, the hub tags and the About content are all concrete enough to build against.",
+    "The About requirement asks for the feedback sections, but they can only be written after testing, and the brief does not say whether the exit interview or the chat reply holds the answers; the genre is also left open, so the choice of stealth was mine.",
+    "Keeping every listed feature complete at once (attract, hub, glyphs, touch notice, About, save-free settings) with no stubs in one session.",
+    "A gamepad test: I had no controller, so the PlayStation and Xbox prompts and the axis inversion were checked only through the keyboard path and the settings flags."
+  ],
+  "aiHub": {
+    "name": "Wire on the Corner",
+    "tagline": "One shift. Fayette & Monroe.",
+    "description": "A plainclothes detective has one night to make a case on a Baltimore corner: tune the pole, talk to the people who know, stay out of the lookouts' sight, and bring the paper to the lieutenant.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "The Wire (2002-2008)",
+    "series": "The Wire",
+    "players": "1–4",
+    "controls": "Stick or arrows walk, dash runs, confirm interacts and tunes, click to walk",
+    "tags": [
+      "pixel art",
+      "top-down",
+      "story",
+      "exploration"
+    ]
+  }
+}

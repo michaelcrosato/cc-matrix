@@ -1,0 +1,56 @@
+// SOUND EFFECTS: defined in code (audio.define) as chip voices or layered lists of voices. UI, battle (bells,
+// weapons, spells by season, support, statuses, outcomes, creatures), world and timers. G.sfx(name) plays one safely.
+
+G.SFX = {
+  ui_move: { wave: 'pulse12', freq: 'E6', dur: .03, vol: .08 },
+  ui_confirm: [{ wave: 'pulse', freq: 'C6', dur: .05, vol: .12 }, { wave: 'pulse', freq: 'G6', dur: .08, vol: .1, delay: .045 }],
+  ui_cancel: [{ wave: 'pulse', freq: 'G5', dur: .05, vol: .1 }, { wave: 'pulse', freq: 'C5', dur: .08, vol: .09, delay: .045 }],
+  ui_error: { wave: 'square', freq: 'C3', to: 'A2', dur: .14, vol: .12 },
+  ui_open: { wave: 'triangle', freq: 'C5', to: 'G5', dur: .1, vol: .14 },
+  bell_toll: [{ wave: 'sine', freq: 'G3', dur: 1.6, vol: .28, vib: [5, .004] }, { wave: 'sine', freq: 'G4', dur: 1.1, vol: .1 }, { wave: 'triangle', freq: 'D5', dur: .7, vol: .05 }],
+  sword_clang: [{ wave: 'noise', freq: 4200, to: 2000, dur: .09, vol: .2, filter: 'bandpass', q: 3 }, { wave: 'square', freq: 1760, to: 1400, dur: .12, vol: .06 }],
+  slash_whoosh: { wave: 'noise', freq: 900, to: 2600, dur: .14, vol: .14, filter: 'bandpass', q: 1.4 },
+  bow_twang: [{ wave: 'triangle', freq: 'A4', to: 'E4', dur: .12, vol: .16 }, { wave: 'noise', freq: 3000, dur: .05, vol: .06 }],
+  arrow_hit: { wave: 'noise', freq: 1600, to: 500, dur: .07, vol: .16 },
+  cast_charge: { wave: 'sine', freq: 'C4', to: 'C5', dur: .4, vol: .12, vib: [9, .02] },
+  spell_spring: [{ wave: 'sine', freq: 'C6', dur: .12, vol: .1 }, { wave: 'sine', freq: 'E6', dur: .12, vol: .1, delay: .07 }, { wave: 'sine', freq: 'G6', dur: .16, vol: .1, delay: .14 }, { wave: 'sine', freq: 'C7', dur: .2, vol: .08, delay: .21 }],
+  spell_summer: [{ wave: 'noise', freq: 300, to: 1800, dur: .4, vol: .22, filter: 'lowpass' }, { wave: 'saw', freq: 'A2', to: 'E3', dur: .35, vol: .06 }],
+  spell_autumn: [{ wave: 'noise', freq: 2500, dur: .35, vol: .08, filter: 'highpass' }, { wave: 'triangle', freq: 'E3', to: 'B2', dur: .4, vol: .14 }],
+  spell_winter: [{ wave: 'sine', freq: 'B6', to: 'F#6', dur: .35, vol: .08, vib: [14, .03] }, { wave: 'triangle', freq: 'B5', dur: .3, vol: .07, delay: .05 }, { wave: 'noise', freq: 6000, dur: .2, vol: .04, filter: 'highpass' }],
+  spell_hour: [{ wave: 'square', freq: 'C5', dur: .03, vol: .08 }, { wave: 'square', freq: 'G4', dur: .03, vol: .08, delay: .12 }, { wave: 'square', freq: 'C5', dur: .03, vol: .08, delay: .24 }, { wave: 'saw', freq: 'C4', to: 'C3', dur: .4, vol: .05 }],
+  spell_none: [{ wave: 'sine', freq: 'D5', dur: .5, vol: .12 }, { wave: 'sine', freq: 'A5', dur: .5, vol: .09, delay: .05 }, { wave: 'sine', freq: 'D6', dur: .6, vol: .07, delay: .1 }],
+  heal: [{ wave: 'sine', freq: 'C5', to: 'G5', dur: .2, vol: .12 }, { wave: 'sine', freq: 'E5', to: 'C6', dur: .25, vol: .1, delay: .08 }],
+  buff: { wave: 'pulse', freq: 'C5', dur: .3, vol: .1, arp: [0, 4, 7, 12], step: .06 },
+  debuff: { wave: 'pulse', freq: 'C5', dur: .3, vol: .1, arp: [12, 7, 3, 0], step: .06 },
+  poison: { wave: 'square', freq: 'C3', to: 'A2', dur: .2, vol: .1, vib: [20, .1] },
+  burn: { wave: 'noise', freq: 800, to: 300, dur: .25, vol: .14, filter: 'lowpass' },
+  chill: { wave: 'sine', freq: 'G6', to: 'C6', dur: .2, vol: .08 },
+  sleep: [{ wave: 'sine', freq: 'G4', to: 'D4', dur: .3, vol: .1 }, { wave: 'sine', freq: 'D4', to: 'G3', dur: .3, vol: .08, delay: .25 }],
+  stop: [{ wave: 'square', freq: 'C5', dur: .03, vol: .1 }, { wave: 'square', freq: 'C5', dur: .03, vol: .1, delay: .25 }],
+  crit: [{ wave: 'noise', freq: 2400, to: 600, dur: .18, vol: .22 }, { wave: 'square', freq: 'C6', to: 'C5', dur: .15, vol: .08 }],
+  miss: { wave: 'noise', freq: 1200, to: 3000, dur: .12, vol: .06, filter: 'highpass' },
+  ko_monster: [{ wave: 'square', freq: 'G4', to: 'C3', dur: .3, vol: .12 }, { wave: 'noise', freq: 800, to: 200, dur: .3, vol: .1 }],
+  ko_knight: [{ wave: 'saw', freq: 'D3', dur: .5, vol: .12 }, { wave: 'saw', freq: 'A2', dur: .7, vol: .1, delay: .3 }],
+  capture: [{ wave: 'square', freq: 'C6', dur: .04, vol: .08 }, { wave: 'square', freq: 'E6', dur: .04, vol: .08, delay: .06 }, { wave: 'square', freq: 'G6', dur: .04, vol: .08, delay: .12 }, { wave: 'noise', freq: 5000, dur: .2, vol: .05, delay: .1 }],
+  summon_rise: { wave: 'sine', freq: 'C3', to: 'C6', dur: .7, vol: .14, vib: [6, .02] },
+  roar_small: { wave: 'saw', freq: 'A3', to: 'E3', dur: .25, vol: .1, vib: [30, .05] },
+  roar_large: [{ wave: 'saw', freq: 'D2', to: 'A1', dur: .6, vol: .16, vib: [24, .06] }, { wave: 'noise', freq: 400, dur: .5, vol: .1, filter: 'lowpass' }],
+  growl: { wave: 'saw', freq: 'F2', to: 'D2', dur: .35, vol: .12, vib: [26, .08] },
+  chirp: [{ wave: 'sine', freq: 'C7', to: 'G6', dur: .05, vol: .08 }, { wave: 'sine', freq: 'E7', to: 'A6', dur: .05, vol: .07, delay: .07 }],
+  flap: { wave: 'noise', freq: 600, to: 300, dur: .08, vol: .1, filter: 'lowpass' },
+  march_drums: [{ wave: 'noise', freq: 200, dur: .12, vol: .2, filter: 'lowpass' }, { wave: 'noise', freq: 200, dur: .12, vol: .16, filter: 'lowpass', delay: .25 }, { wave: 'noise', freq: 220, dur: .2, vol: .22, filter: 'lowpass', delay: .5 }],
+  banner_flip: { wave: 'noise', freq: 1500, to: 900, dur: .2, vol: .08 },
+  castle_taken: [{ wave: 'square', freq: 'C4', dur: .15, vol: .1 }, { wave: 'square', freq: 'G4', dur: .15, vol: .1, delay: .15 }, { wave: 'square', freq: 'C5', dur: .3, vol: .1, delay: .3 }],
+  candle_hiss: { wave: 'noise', freq: 3000, to: 800, dur: .6, vol: .06, filter: 'highpass' },
+  tide: { wave: 'sine', freq: 'E4', to: 'B4', dur: .5, vol: .1, vib: [4, .03] },
+  timer_tick: { wave: 'square', freq: 'C6', dur: .02, vol: .06 },
+  dial: [{ wave: 'sine', freq: 'A5', dur: .6, vol: .12 }, { wave: 'sine', freq: 'E6', dur: .6, vol: .08, delay: .1 }],
+  wheel: [{ wave: 'sine', freq: 'D4', dur: 1.5, vol: .12 }, { wave: 'sine', freq: 'A4', dur: 1.5, vol: .1, delay: .15 }, { wave: 'sine', freq: 'D5', dur: 1.5, vol: .08, delay: .3 }, { wave: 'sine', freq: 'F#5', dur: 1.5, vol: .07, delay: .45 }],
+  step_soft: { wave: 'noise', freq: 500, dur: .03, vol: .04, filter: 'lowpass' },
+  levelup_sfx: { wave: 'pulse', freq: 'C5', dur: .4, vol: .1, arp: [0, 4, 7, 12, 16], step: .05 }
+};
+/** creature voices by species voice tag */
+G.CREATURE = { chirp: 'chirp', neigh: 'roar_small', hiss: 'burn', growl: 'growl', roar: 'roar_large', giggle: 'chirp', creak: 'growl', moan: 'growl', screech: 'chirp', grunt: 'growl', mew: 'chirp', howl: 'roar_small', grind: 'roar_large', tick: 'stop', rattle: 'stop', squeak: 'chirp', blub: 'poison' };
+G.defineSfx = () => { const a = G.game.audio; for (const [k, v] of Object.entries(G.SFX)) a.define(k, v); };
+G.sfx = (name, o) => { const a = G.game && G.game.audio; if (!a || G.muteAll) return; try { a.sfx(name, o); } catch (e) { /* unknown sound: tests catch it */ } };
+G.spellSfx = elem => G.sfx('spell_' + (['spring', 'summer', 'autumn', 'winter', 'hour'].includes(elem) ? elem : 'none'));

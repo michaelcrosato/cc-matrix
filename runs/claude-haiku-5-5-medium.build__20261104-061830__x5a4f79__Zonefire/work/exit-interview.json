@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:18:30",
+    "source": "Basketball, over-the-top arcade style (genre inspiration; an original game)",
+    "plan": "PLAN.md. The title was drawn this run with a real RNG (secrets.randbelow) from 50 candidates: ZONEFIRE. The plan's own title (BASKETBLAM) was replaced.",
+    "genre": "Arcade sports: 2-on-2 basketball in the over-the-top arcade style, with a four-stop story tour",
+    "perspective": "Side-on broadcast camera (custom orthographic view, pitch 30 degrees, panning with the ball), with an optional High (three-quarter) camera",
+    "tech": "my-3D2dge v0.85.2 (modified copy, changes marked in the engine); AI Hub session client 1.4.0 (unmodified); plain JavaScript; Canvas 2D; Web Audio; Node 24 and Playwright 1.63.0 for the tests; the pause menu is the engine's standard Shell, themed in the game's colours and freezes the match",
+    "artDirection": "The engine's HD style pushed to 90s arcade broadcast: five courts (neon Skybox, sunset Pier, dusk Scrapyard, night Caldera, arena Blam Dome), new courts, props, crowds and lighting",
+    "animation": "The engine's rigs posed by math. Every celebration, taunt and dunk is a keyframed body clip (about 20 celebration clips, the same set for taunts, and one clip per dunk) over both hands, the body's height, the rig's pose and a squash. A hand layer solves both arms by inverse kinematics; a procedural dribble is synced to the ball; keyed body clips for pass, steal and shove; dunk spins for the 360 and 720 and a front flip. Lean is driven by the clips through the rig's lean option (a small engine read, marked as ours).",
+    "audio": "All music, sound effects and voices written in code: 12 songs, 8 stings, about 90 sound effects, a crowd ambience, and gibberish formant voices with captions",
+    "online": "AI Hub shared-world session (HUB SHOWDOWN): host-authoritative snapshots, input messages, the hub's card, leave, time-up and end handling, a server copy, and a session overlay that does not pause",
+    "testing": "80 headless tests via node:vm; 3 browser tests (Playwright); 4 AI Hub harness scenarios; all pass on the final build",
+    "research": "none",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser for the tests: Chromium; the player's browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "About 0.7M tokens by the session's budget counter; API cost in USD unknown; about one hour of session time"
+  },
+  "testingFeedback": [
+    "About 15 issues, found by the tests, the browser run and the hub harness; four were game-breaking: a ball trapped on the rim's centre, a quarter that never ended, players stuck in their jump, and the page failing to start without a body for the canvas",
+    "Four game-breaking issues (a ball trapped on the rim centre, a quarter that never ended, players stuck in their jump, the page failing to start); the rest minor",
+    "The full CPU-vs-CPU matches to the final whistle, with the event counts: they exposed most of the bugs that unit checks missed",
+    "The hub harness as a black box: two scenarios stalled at first. The cause was in our test, which left auto=1 out of the plan's two variants; the harness then waits for a manual start"
+  ],
+  "engineFeedback": [
+    "The HD rigs and the look out of the box; E.TileMap with floorTex; game.advance for fixed steps in tests; E.Dialog; the input labels and glyph names",
+    "Yes: E.arc's apex is the rise over the higher end, not an absolute height (first guessed wrong); the canvas needs document.body, so the scripts must sit at the end of body (a crash until fixed); the hand joints had to be read from solvePose",
+    "The shot model and its decided outcomes, the ball physics against the arena, rims and glass, the CPU brains, the match flow and the netcode, the voices and the songs",
+    "The ball against the rims and the arena walls, and posing a rig's hand from a target (the pose internals were not documented)",
+    "Four changes, each marked /* ZONEFIRE: ... */: public audio buses (sfxBus, musicBus); basketball shorts on the HD legs; hair styles afro, flattop and mohawk; a Dialog voice that may be a function. Each was needed for the game's look or its voices",
+    "A public hook for a rig's hand targets (so a pose layer needs no solvePose wrapping), and a canvas that is created on demand instead of needing document.body at script time"
+  ],
+  "promptFeedback": [
+    "The milestones, the tables of numbers and the list of tests: a clear target to build and check against",
+    "The goal and STAGE.md name the folder and the file differently, and the title came from the plan's pick rather than a pick of this run",
+    "The scope in one session: eleven milestones, about 230 tests and a hub check",
+    "Split it into a playable core first and the polish after, and give the hub check its own budget"
+  ],
+  "aiHub": {
+    "name": "ZONEFIRE",
+    "tagline": "No fouls. No mercy. All BLAM.",
+    "description": "Over-the-top 2-on-2 arcade basketball on five courts with dunks, shoves, Supernova and a story tour against the robot Blambots. Up to four players, on one screen or online.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Basketball (over-the-top arcade style)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD moves · Square or Space shoots · Cross or E passes · R2 or Shift turbo · Circle or Q shoves · Triangle or F lobs",
+    "tags": [
+      "2d",
+      "arcade",
+      "versus",
+      "co-op",
+      "comedy",
+      "pixel art"
+    ]
+  }
+}

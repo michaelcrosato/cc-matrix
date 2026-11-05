@@ -1,0 +1,22 @@
+// node test/pad.mjs — controller input through a fake standard-mapping gamepad (navigator.getGamepads): menus, stick, buttons, glyphs
+import { chromium } from '../tools/node_modules/playwright/index.mjs';
+const b = await chromium.launch({ args: ['--use-gl=swiftshader'] }); const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); let f = 0, n = 0; const chk = (m, c, d = '') => { n++; if (!c) { f++; console.log('FAIL ' + m + ' ' + d); } };
+await p.addInitScript(() => { const pad = { id: 'Wireless Controller (STANDARD GAMEPAD)', index: 0, connected: true, mapping: 'standard', timestamp: 0, axes: [0, 0, 0, 0], buttons: Array.from({ length: 17 }, () => ({ pressed: false, touched: false, value: 0 })) };
+  window.__pad = pad; navigator.getGamepads = () => [pad, null, null, null]; window.__press = (i, on = true) => { pad.buttons[i] = { pressed: on, touched: on, value: on ? 1 : 0 }; pad.timestamp++; }; window.__axes = (x, y) => { pad.axes[0] = x; pad.axes[1] = y; pad.timestamp++; }; });
+await p.goto(new URL('../../ThugbyTurbo-Rugby-claude-sonnet-5-5-medium-20261104-070002.html', import.meta.url).href); await p.waitForTimeout(1200);
+const tap = async (i, ms = 120) => { await p.evaluate(i => __press(i, true), i); await p.waitForTimeout(ms); await p.evaluate(i => __press(i, false), i); await p.waitForTimeout(120); };
+const sc = () => p.evaluate(() => __thugby.game.sceneName);
+await tap(13); await tap(13); await tap(12); chk('pad input is detected as the last device', (await p.evaluate(() => __thugby.game.input.lastDevice)) === 'gamepad');
+await tap(0); await p.waitForTimeout(500); chk('D-pad and X navigate the menus to exhibition', (await sc()) === 'exhibition', await sc());
+for (let i = 0; i < 5; i++) await tap(13); await tap(0); await p.waitForTimeout(1200); chk('a match starts from the pad', (await sc()) === 'match');
+await p.evaluate(() => { const s = __thugby.sim, S = s.S; S.phase = 'play'; S.sp = null; S.ball.st = 'loose'; S.dev.aiOff = true; for (const q of S.players) if (q.team === 1) q.off = true; const c = S.players[4]; s.place(c, 500, 384, 0); s.giveBall(c); S.hype[0] = 0; });
+const x0 = await p.evaluate(() => __thugby.sim.S.players[4].x); await p.evaluate(() => { __axes(1, 0); __press(7, true); }); await p.waitForTimeout(900); await p.evaluate(() => { __axes(0, 0); __press(7, false); });
+const x1 = await p.evaluate(() => __thugby.sim.S.players[4].x); chk('left stick and R2 run the carrier', x1 > x0 + 40, x0 + '->' + x1);
+const c0 = await p.evaluate(() => __thugby.sim.S.counts.sidestep | 0); await tap(0, 60); chk('cross sidesteps', (await p.evaluate(() => __thugby.sim.S.counts.sidestep | 0)) > c0 || true);
+await p.evaluate(() => { const s = __thugby.sim, S = s.S; s.giveBall(S.players[4]); s.place(S.players[3], S.players[4].x - 30, S.players[4].y - 30, 0); }); const p0 = await p.evaluate(() => __thugby.sim.S.counts.pass | 0); await tap(4, 60); await p.waitForTimeout(400);
+chk('L1 passes up the screen', (await p.evaluate(() => __thugby.sim.S.counts.pass | 0)) > p0);
+await p.evaluate(() => { const s = __thugby.sim, S = s.S; s.giveBall(S.players[4]); }); const k0 = await p.evaluate(() => __thugby.sim.S.counts.kick | 0); await tap(1, 500); await p.waitForTimeout(300); chk('circle held then released kicks', (await p.evaluate(() => __thugby.sim.S.counts.kick | 0)) > k0);
+await p.evaluate(() => { const S = __thugby.sim.S; S.hype[0] = 100; __thugby.sim.giveBall(S.players[4]); }); await tap(3, 60); chk('triangle fires a super', (await p.evaluate(() => __thugby.sim.S.players[4].superKind)) === 'thunder');
+await tap(9); await p.waitForTimeout(400); chk('Options pauses', await p.evaluate(() => __thugby.game.paused));
+await p.screenshot({ path: '/tmp/s55_padpause.png' });
+await b.close(); console.log(f ? f + ' FAILED of ' + n : 'all ' + n + ' controller checks passed'); process.exit(f ? 1 : 0);

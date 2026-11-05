@@ -1,0 +1,12 @@
+import { load, check, done } from './lib.mjs';
+const t = load('');
+t.adv(1);
+check('boots to title', t.snap().scene === 'title', JSON.stringify(t.snap()));
+check('no errors on title', !t.errors().length, t.errors().join(' | '));
+t.tap('down'); t.tap('up'); t.tap('confirm'); t.adv(1);
+console.log(JSON.stringify(t.snap()));
+check('new game enters town', t.snap().scene === 'town', JSON.stringify(t.snap()));
+t.adv(2);
+check('no errors in town', !t.errors().length, t.errors().join(' | '));
+console.log(t.logs.slice(0, 20).join('\n'));
+done();

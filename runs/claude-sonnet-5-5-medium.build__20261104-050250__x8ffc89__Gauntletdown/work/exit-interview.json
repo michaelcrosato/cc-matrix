@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:02:50",
+    "source": "Gauntlet (the arcade co-op dungeon crawler)",
+    "plan": "PLAN.md",
+    "genre": "Arcade co-op dungeon crawler: twin-stick hack-and-shoot with maze exploration (catalogue genre: Action)",
+    "perspective": "Three-quarter overhead (engine view threequarter, 55 degree pitch); top-down and isometric selectable in Settings",
+    "tech": "my-3D2dge engine v0.85.2 (unmodified), plain JavaScript in one IIFE built from 14 source fragments; AI Hub Session Protocol v1 client 1.4.0 (session.js, unmodified); Playwright 1.63.0 and Node 24 for tests",
+    "artDirection": "The engine's native HD pixel-art style: procedural 3D-skeleton characters drawn as pixel art, textured TileMap dungeons in three realms (Larder, Ossuary, Furnace) plus the Banquet, engine props and torchlight with canvas lighting. New art made in code: item and HUD sprites, six generator drawings, projectiles, floor marks, title scene",
+    "animation": "The engine's procedural Humanoid and Blob rigs and E.MOVES (overhead, spin, thrust, jab, cross, bash), poses (cast, die), squash and stretch, hit-stop, particles, telegraphed wind-ups for every enemy attack; rank-shrinking monsters, bobbing items, tweened door bars",
+    "audio": "All code: engine chip synth for 40-odd sound effects and 7 original songs (title, larder, ossuary, furnace, boss, hoard, victory); voices are Animalese-style gibberish babble made from pitched syllables (a deep echoing narrator, 4 hero voices). No audio files",
+    "online": "AI Hub shared-world sessions (1-4 players, own card, host-run sim, 12/s client positions, 10/s snapshots, reliable event batches); passes the hub harness (2 players, 4 players with latency/jitter/loss, host-leave, server). Offline: solo and 1-4 player couch co-op, no network",
+    "testing": "One headless command (node tests/run.mjs): 1037 checks across 25 seeds of every floor plus a scripted bot playthrough of all 11 stages to the ending, mechanics, every Dev Tools row and cheat, boss phases, tuning sliders, attract mode; AI Hub harness scenarios; Playwright screenshots, a mocked DualSense and mouse/touch emulation; Xbox-glyph text scan of every screen, co-op join and drop-out in a browser",
+    "research": "Read the engine handoff (API card, index, guide, kits), the AI Hub protocol README, harness and arena example, and the plan; no other research",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium via Playwright 1.63.0 (headless)",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About twelve real issues: the boss hall's rows were different widths, the attract mode crashed the camera bounds with no floor loaded, bots stuck on loot behind sealed walls, bots stunning each other at the boss, the Dev Tools' opening Enter toggling a cheat, the first floor card reading the wrong realm line, HUD icons overlapping the health number and the corner buttons, stick-right switching a joining player's class, high scores not saving where storage is blocked, a dropped-out player instantly rejoining, hard-coded PlayStation names in a few prompts, and a class-card label overlapping text. Two more failures were mistakes in my own test script.",
+    "Two: the unequal boss-hall rows (the last floor would not have built correctly) and the attract-mode camera bounds crash (an error every frame after the first non-floor segment). Everything else was recoverable.",
+    "The scripted playthrough: bots play every floor to the ending through the real scenes. It found the unreachable-loot stalls and the friendly-fire lock at the boss that no mechanics unit test would have, and it proves the descent can be finished.",
+    "Static screenshots of menu screens: they confirmed layout but caught only two overlap bugs and could not show anything about feel, input or sound."
+  ],
+  "engineFeedback": [
+    "The characters: Humanoid and Blob rigs with live portraits, outfits and hit flashes, plus canvas lighting, props, cam.frame for several heroes, allowJoin for drop-in players and the headless game.advance made a good-looking, testable game quick to stand up. The standard pause, settings and controls screens saved a lot of work.",
+    "Yes. The pause menu's custom items do not close the menu, so my Dev Tools opened behind it until I added game.resume(); the confirm press that picked the item then leaked into my Dev screen. A few docs left me guessing at units and return shapes (cornerArea, mouseGround, toGround). The Humanoid weapon list has no axe, bow or shield, so the Ranger carries a gun rig and the Berserker a sword.",
+    "The simulation and everything around it: a multi-source flow field (the engine's has one target), monster AI with telegraphs, generators, projectiles with ricochet and pierce, a seeded floor generator with a key-aware solvability check, the bot, the Dev Tools screens, the Animalese voice babble, the high-score table and the whole AI Hub shared-world layer.",
+    "Knowing exactly how the per-player input split works for a custom preset (half keyboards take the preset's buttons in order) and keeping hero, camera and menu input straight with several players on one screen. The index is huge, so finding the one line that was true took greps and a few tries.",
+    "None. The engine is used exactly as handed over; every gap (multi-source flow field, shot bouncing, a fake wall that draws solid but walks, weapon art) was filled in game code.",
+    "A multi-source FlowField (several heroes, one field) and a documented way to add custom Humanoid weapons (axe, bow, shield), because every top-down co-op game needs both."
+  ],
+  "promptFeedback": [
+    "The plan: exact tables for heroes, monsters, items, tuning ranges and messages meant I rarely had to guess, and the hub README with its harness gave a clear pass or fail for the online part.",
+    "How much to build. The plan is 120 KB and written for a much bigger effort than medium, with engine changes (E1 to E8) and hand-authored floors I chose not to follow. TASK.md also names a model and timestamp that differ from the plan's, which the plan explained, but it took a read to be sure.",
+    "Holding the whole scope together: eleven stages, local co-op, an online mode, an attract mode, Dev Tools, a playthrough test and the feedback text, all while keeping every piece free of placeholders. The shared-world networking was the largest single piece.",
+    "State a priority order for the plan's sections when effort is limited, say whether the plan's engine changes are required or optional, and split the plan into a short must-have list and a longer nice-to-have list."
+  ],
+  "aiHub": {
+    "name": "Gauntletdown",
+    "tagline": "Eat. Shoot. Descend. Repeat.",
+    "description": "A co-op dungeon crawl for one to four hungry fools: shoot generators, grab keys and food before your life force drains away, and descend eleven floors to a king who is very hungry. Couch co-op or an AI Hub session.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "Gauntlet",
+    "series": "Gauntlet",
+    "players": "1–4",
+    "controls": "Move: left stick / WASD. Aim: right stick / mouse. Fire: R2 / click. Magic flask: triangle / right click. Plant: L2 / Shift. Pause: Options / Esc.",
+    "tags": [
+      "top-down",
+      "co-op",
+      "arcade",
+      "fantasy",
+      "comedy",
+      "boss fights"
+    ]
+  }
+}

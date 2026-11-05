@@ -1,0 +1,10 @@
+import { open } from './lib.mjs';
+let { browser, page, errors } = await open({ q: '?debug' });
+await page.keyboard.press('ArrowUp'); await page.keyboard.press('Enter'); await page.waitForTimeout(1500);
+await page.keyboard.down('ArrowDown'); await page.waitForTimeout(1500); await page.keyboard.up('ArrowDown');
+await page.screenshot({ path: '/tmp/dw_about.png' });
+await page.evaluate(() => { __game.go('attract'); __game.timeScale = 3; });
+await page.waitForTimeout(40000);
+console.log(await page.evaluate(() => JSON.stringify({ mode: __M.mode, f: Object.keys(__M.S.flags).length, rep: __M.S.rep })));
+console.log(errors.join('\n') || 'no errors');
+await browser.close();

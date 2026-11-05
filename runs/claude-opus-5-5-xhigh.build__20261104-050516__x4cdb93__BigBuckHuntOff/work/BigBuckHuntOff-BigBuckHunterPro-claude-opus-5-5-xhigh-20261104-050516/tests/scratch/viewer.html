@@ -1,0 +1,689 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;background:#000}#screen{width:100%;height:100%;display:block;image-rendering:pixelated}</style></head><body><canvas id="screen"></canvas>
+<script src="../../engine/my-3d2dge.js"></script>
+<script src="../../engine/modules/vista.js"></script>
+<script src="../../engine/modules/quadruped.js"></script>
+<script src="../../engine/modules/babble.js"></script>
+<script>(() => {
+// BIG BUCK HUNT-OFF
+// The core loop: spot the bucks, shoot clean, pump, never shoot a doe; bag them before they're gone, then read your
+// shots in x-ray and climb the standings.
+//
+// The game's files share this one scope (build/build.mjs joins them inside one function). 00-core holds what every
+// other file reads: units, the content registries, the event bus, the random streams, the dev tuning and the records.
+const E = My3D2dge, { px, clamp, lerp } = E;
+const M = 16, DEG = Math.PI / 180, TAU = Math.PI * 2;
+const HAS_DOM = typeof document !== 'undefined';
+const VERSION = '1.0.0';
+const TITLE = 'BIG BUCK HUNT-OFF';
+const G = {};   // the running game's shared state (scenes, the hunt in progress, the players)
+
+/* ---------- registries: content is data, referred to by id ---------- */
+const REG = {};
+/** def(kind, id, spec): register content (species, critter, hunt, site, trophy, bonus, pattern, prop, bark, voice, song, beat) */
+function def(kind, id, spec) { (REG[kind] = REG[kind] || {})[id] = Object.assign({ id }, spec); return REG[kind][id]; }
+function reg(kind, id) { const r = REG[kind] && REG[kind][id]; if (!r) throw new Error('no ' + kind + ' "' + id + '"'); return r; }
+function regAll(kind) { return Object.values(REG[kind] || {}); }
+function has(kind, id) { return !!(REG[kind] && REG[kind][id]); }
+
+/* ---------- the event bus: gameplay emits, the HUD, barks, audio, stats, the bot and the hub link listen ---------- */
+const bus = {
+  _h: {},
+  on(n, f) { (this._h[n] = this._h[n] || []).push(f); return () => this.off(n, f); },
+  off(n, f) { const l = this._h[n]; if (l) { const i = l.indexOf(f); if (i >= 0) l.splice(i, 1); } },
+  emit(n, d) { const l = this._h[n]; if (!l) return; for (const f of l.slice()) { try { f(d); } catch (e) { if (G.game) G.game.fail('bus:' + n, e); else throw e; } } }
+};
+
+/* ---------- random streams: never Math.random in gameplay ---------- */
+function strHash(s) { let h = 2166136261; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+const RNG = {
+  run: 1,
+  /** the run's seed (a hub session takes it from AIHub.rng('hunt')) */
+  seed(n) { this.run = (n >>> 0) || 1; this._s = {}; return this.run; },
+  _s: {},
+  /** a named stream for the run: world, spawn, ai, bot, fx (fx is cosmetic: draw from it freely) */
+  stream(name) { return this._s[name] || (this._s[name] = E.rng(strHash(name) ^ Math.imul(this.run, 2654435761))); },
+  /** a fresh stream for a name (a site's spawns start the same each time it is played with the same seed) */
+  fresh(name) { return (this._s[name] = E.rng(strHash(name) ^ Math.imul(this.run, 2654435761))); },
+  wrap(r) { return { r, f: () => r(), int: (a, b) => a + Math.floor(r() * (b - a + 1)), range: (a, b) => a + r() * (b - a), pick: l => l[Math.floor(r() * l.length)], chance: p => r() < p }; }
+};
+const FX = () => RNG.stream('fx');
+const fxr = (a = 1, b) => { const r = FX()(); return b === undefined ? r * a : a + r * (b - a); };
+
+/* ---------- dev tuning: Appendix A's sliders, kept as hidden settings in the Dev group ---------- */
+const TUNE_DEFS = [
+  ['animalSpeed', 'Animal speed', 1, .25, 2, .05], ['spook', 'Spook from shots', 1, 0, 2, .05], ['doeShare', 'Does and fawns share', 1, 0, 2, .05],
+  ['spawnRate', 'Spawn pace', 1, .5, 2, .05], ['siteTime', 'Site time limits', 1, .3, 3, .05], ['reticleSpeed', 'Pad reticle speed (px/s)', 400, 150, 900, 10],
+  ['assist', 'Aim-assist friction (1 = none)', .65, 0, 1, .01], ['rounds', 'Rounds in a full tube', 5, 1, 10, 1], ['rackTime', 'Pump time (s)', .22, 0, .6, .01],
+  ['reloadTime', 'Empty-tube reload (s)', 1.25, .2, 3, .05], ['scopeMag', 'Scope magnification', 3.5, 1.5, 6, .1], ['sway', 'Scope sway (px)', 2.6, 0, 6, .1],
+  ['breath', 'Hold-breath seconds', 3, 1, 6, .1], ['calls', 'Calls per site', 2, 0, 5, 1], ['callFreeze', 'Call freeze (s)', 1.4, 0, 4, .05],
+  ['distanceSlope', 'Metres per +1 distance bonus', 75, 25, 200, 5], ['heartMult', 'Heart multiplier', 2, .5, 4, .05], ['headMult', 'Head multiplier', 1.8, .5, 4, .05],
+  ['lungMult', 'Lung multiplier', 1.6, .5, 4, .05], ['runningMult', 'Running-shot multiplier', 1.25, 1, 2, .05], ['antlerBoost', 'Antler drawing scale', 1.15, 1, 2, .05],
+  ['animalScale', 'Animal size boost', 1.1, .8, 1.5, .05], ['fog', 'Fog density', 1, 0, 2, .05], ['timeOfDay', 'Time of day shift', 0, -1, 1, .05], ['timeScale', 'Game speed', 1, .1, 2, .05]
+];
+const TUNE_DEFAULT = Object.fromEntries(TUNE_DEFS.map(d => [d[0], d[2]]));
+/** a tuning value (the dev sliders) */
+function T(k) { const s = G.game && G.game.settings, v = s && s['dev.' + k]; return v === undefined ? TUNE_DEFAULT[k] : v; }
+const TUNE_SETTINGS = TUNE_DEFS.map(([k, label, value, min, max, step]) => ({ key: 'dev.' + k, label, type: 'slider', value, min, max, step, group: 'Dev', hidden: true,
+  apply: (g, v) => { if (k === 'timeScale' && G.devTimeScale !== undefined) G.devTimeScale = v; if (k === 'fog' || k === 'timeOfDay') bus.emit('look', k); } }));
+
+/* ---------- records: best scores, stars, trophies, stats, the Range badge (E.store) ---------- */
+const REC_KEY = 'bbho:records:1';
+const Records = {
+  d: null,
+  load() { const d = E.store.get(REC_KEY, null); this.d = Object.assign({ best: {}, stars: {}, trophies: {}, bestBuck: {}, stats: { hunts: 0, shots: 0, hits: 0, bucks: 0, does: 0, longest: 0, critters: 0, sites: 0, playTime: 0 }, badge: false, champion: false, seen: {} }, d || {}); this.d.stats = Object.assign({ hunts: 0, shots: 0, hits: 0, bucks: 0, does: 0, longest: 0, critters: 0, sites: 0, playTime: 0 }, this.d.stats); return this; },
+  save() { if (this.d) E.store.set(REC_KEY, this.d); },
+  get best() { return this.d.best; },
+  setBest(key, score) { if (!this.d.best[key] || score > this.d.best[key]) { this.d.best[key] = score; this.save(); return true; } return false; },
+  setStars(site, n) { if ((this.d.stars[site] || 0) < n) { this.d.stars[site] = n; this.save(); } },
+  trophy(id, info) { const t = this.d.trophies[id] = Object.assign(this.d.trophies[id] || { seen: 0, bagged: false, best: 0 }, info); this.save(); return t; },
+  stat(k, v, max) { const s = this.d.stats; s[k] = max ? Math.max(s[k] || 0, v) : (s[k] || 0) + v; },
+  reset() { E.store.remove(REC_KEY); this.d = null; this.load(); }
+};
+
+/* ---------- small helpers ---------- */
+const sm = t => t <= 0 ? 0 : t >= 1 ? 1 : t * t * (3 - 2 * t);
+const fmt = n => { const s = String(Math.round(Math.abs(n))), r = s.replace(/\B(?=(\d{3})+(?!\d))/g, ','); return (n < 0 ? '-' : '') + r; };
+const metres = u => u / M;
+const wrapA = a => { while (a > Math.PI) a -= TAU; while (a < -Math.PI) a += TAU; return a; };
+const dist2 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, (a.z || 0) - (b.z || 0));
+const pickNoRepeat = (list, last, r) => { if (list.length <= 2) return list[Math.floor(r() * list.length)]; let x; for (let i = 0; i < 8; i++) { x = list[Math.floor(r() * list.length)]; if (!last.includes(x)) break; } return x; };
+const SEAT_COLORS = ['#e8443a', '#3b82f6', '#22c55e', '#f5b700'];
+const SEAT_NAMES = ['P1', 'P2', 'P3', 'P4'];
+const SHAPES = ['circle', 'diamond', 'brackets', 'triangle'];
+
+// 01-game: the engine's game with our input map, settings, pause items and HTML shell; the cast's gibberish voices.
+const HUB_ON = typeof AIHub !== 'undefined' && !!AIHub.active;
+const HUNT_KEYS = {
+  up: ['KeyW', 'ArrowUp', 'Pad12'], down: ['KeyS', 'ArrowDown', 'Pad13'], left: ['KeyA', 'ArrowLeft', 'Pad14'], right: ['KeyD', 'ArrowRight', 'Pad15'],
+  fire: ['Mouse0', 'Pad7', 'KeyJ'],                 // left click, R2
+  pump: ['KeyR', 'Space', 'Pad2', 'KeyK'],          // R, Space, Square
+  scope: ['Mouse2', 'Pad6', 'KeyL'],                // right click, L2
+  breath: ['ShiftLeft', 'Pad5'],                    // Shift, R1
+  call: ['KeyQ', 'Pad3'],                           // Q, Triangle
+  board: HUB_ON ? [] : ['Tab', 'Pad8'],             // hold: the standings (Create belongs to the hub in a session)
+  tabL: ['KeyQ', 'Pad4'], tabR: ['KeyE', 'Pad5'],   // menus: L1 / R1 turn pages
+  start: ['Enter', 'NumpadEnter', 'Pad9'], pause: ['Escape', 'KeyP', 'Pad9'],
+  confirm: ['Enter', 'NumpadEnter', 'Space', 'Pad0'], cancel: ['Escape', 'Backspace', 'Pad1']
+};
+const GAME_SETTINGS = [
+  { key: 'difficulty', label: 'Difficulty', options: [['easy', 'Easy'], ['normal', 'Normal'], ['pro', 'Pro']], value: 'normal', help: 'Easy: strong aim assist, auto-pump, slower animals, an extra call. Pro: no assist, faster animals, more does' },
+  { key: 'assist', label: 'Aim assist', options: [['off', 'Off'], ['light', 'Light'], ['strong', 'Strong']], value: 'light', help: 'Controller and keys only: the reticle slows over a legal target. Never the mouse' },
+  { key: 'reticle', label: 'Reticle speed', type: 'slider', value: 1, min: .5, max: 1.6, step: .05, help: 'How fast a stick or the keys move your reticle' },
+  { key: 'autoPump', label: 'Auto-pump', type: 'toggle', value: false, help: 'Rack the rifle by itself after every shot' },
+  { key: 'scopeMode', label: 'Scope', options: [['hold', 'Hold'], ['toggle', 'Toggle']], value: 'hold' },
+  { key: 'doeRule', label: 'Doe rule', options: [['classic', 'Classic: you sit out the site'], ['casual', 'Casual: a points penalty']], value: 'classic' },
+  { key: 'trophyCam', label: 'Trophy Cam', options: [['on', 'On'], ['trophies', 'Trophies only'], ['off', 'Off']], value: 'on', help: 'The slow-motion bullet cam on big kills' },
+  { key: 'glint', label: 'Antler glint', type: 'toggle', value: false, help: 'A glint on antler tips, so bucks read at range' },
+  { key: 'bigCaptions', label: 'Large captions', type: 'toggle', value: false },
+  { key: 'rivalTag', label: 'Rival score tag', type: 'toggle', value: true, help: 'The Hunt-Off campaign: the score to beat in the corner' }
+];
+const game = new E.Game({
+  canvas: 'screen', res: [480, 270], expand: true, view: 'side', input: HUNT_KEYS, id: 'bigbuckhuntoff', bg: '#000',
+  autoPause: !HUB_ON, corner: !HUB_ON, fullscreen: HUB_ON ? 'button' : 'tap',
+  menu: {
+    items: [['Restart site', () => G.hunt && G.hunt.restartSite()], ['Restart hunt', () => G.hunt && G.hunt.restartHunt()], ['Dev mode', () => G.dev && G.dev.open()]],
+    settings: GAME_SETTINGS.concat(TUNE_SETTINGS),
+    controls: { fire: 'Shoot', pump: 'Pump / reload', scope: 'Scope', breath: 'Hold breath', call: 'Call', board: 'Standings', tabL: 'Menu page left', tabR: 'Menu page right', up: 'Aim up', down: 'Aim down', left: 'Aim left', right: 'Aim right' },
+    quit: HUB_ON ? false : 'title'
+  }
+});
+G.game = game;
+game.pauseOverlay = false;
+const ui = new E.Shell(game, {
+  theme: { ink: '#f4ead8', paper: 'rgba(28,18,10,.94)', accent: '#e8843a', muted: '#b8a488', danger: '#e8443a', line: 'rgba(232,180,110,.35)', font: '600 18px ui-rounded, "Trebuchet MS", system-ui, sans-serif', titleFont: '800 30px ui-rounded, "Trebuchet MS", system-ui, sans-serif' },
+  screens: { help: {
+    title: 'How to hunt',
+    keys: () => [['Mouse / left stick', 'Aim'], ['Left click / R2', 'Shoot'], ['R or Space / Square', 'Pump the rifle (and reload)'], ['Right click / L2', 'Scope (hold)'], ['Shift / R1', 'Hold your breath (scoped)'], ['Q / Triangle', 'Call: animals stop and look'], ['Tab / Create', 'Standings'], ['Esc / Options', 'Pause']],
+    sections: [['Bucks only', 'Bucks have antlers. Does, fawns and calves do not. Shoot one and you sit out the rest of the site.'],
+      ['Shot placement', 'Heart, head and lungs drop him with one round and score the most. Gut and leg hits wound: finish him before he runs off.'],
+      ['Points', 'Bigger racks, longer shots, running shots and quick draws all score more. Critters are bonus points, but some are protected.']]
+  } }
+});
+G.ui = ui;
+const I = game.input;
+// the wheel pumps too (a notch down)
+if (HAS_DOM && !HUB_ON) addEventListener('wheel', e => { if (G.scene === 'hunt' && !game.paused && !ui.screen && e.deltaY > 0) { I.press('Act:pump'); game.after(.02, () => I.release('Act:pump')); } }, { passive: true });
+
+/* ---------- touch-only devices: no touch controls; "Controller or keyboard required" ---------- */
+const mm = q => (typeof matchMedia === 'function' ? matchMedia(q).matches : false);
+G.touchOnly = mm('(pointer: coarse)') && !mm('(any-pointer: fine)');
+I.touchEnabled = false;
+if (HAS_DOM) for (const ev of ['keydown', 'mousedown', 'mousemove']) addEventListener(ev, e => { if (ev === 'mousemove' && e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) return; if (G.touchOnly) G.touchOnly = false; }, { capture: true, passive: true });
+
+/* ---------- voices ---------- */
+const bab = new E.Babble(game);
+bab.define('emcee', { pitch: 140, wave: 'square', speed: 15, spread: 1.1, vol: .2, echo: .16, formant: 1.05 });
+bab.define('dub', { pitch: 105, wave: 'sawtooth', speed: 10.5, spread: .8, grit: .35, vol: .2, formant: .9 });
+bab.define('granny', { pitch: 260, wave: 'sine', speed: 12, spread: 1.3, warble: .035, vol: .24, formant: 1.2 });
+bab.define('dwayne', { pitch: 185, wave: 'square', speed: 14, spread: 1.2, vol: .16, formant: 1.35 });
+bab.define('loretta', { pitch: 225, wave: 'triangle', speed: 13.5, spread: 1.2, vol: .26, formant: 1.15 });
+bab.define('earl', { pitch: 95, wave: 'square', speed: 9.5, spread: .7, vol: .18, formant: .85 });
+G.bab = bab;
+
+// 10-world: a hunt's landscape: the heightfield from its data, the baked light, scattered props in a grid (drawn as
+// impostors and blocking shots with their trunks and stones), the sky, fog and weather, its vantages and trails.
+const GT = { grass: 0, dry: 1, leaves: 2, dirt: 3, rock: 4, talus: 5, mud: 6, reeds: 7, snow: 8, ice: 9, soil: 10, burn: 11, shore: 12, needles: 13, pasture: 14, yard: 15 };
+const IMP = new E.Impostors();   // every prop's sprites, shared by the hunts
+const CELL = 32 * M;             // the prop grid's cell
+
+/** micro textures per ground type: 64 x 64 signed brightness, an eighth of a metre a texel (cosmetic) */
+function makeMicro(seed) {
+  const out = {}, R = E.rng(seed);
+  const kinds = { 0: 'blades', 1: 'blades', 2: 'leaves', 3: 'speck', 4: 'stone', 5: 'stone', 6: 'speck', 7: 'blades', 8: 'snow', 9: 'snow', 10: 'rows', 11: 'speck', 12: 'pebble', 13: 'needles', 14: 'blades', 15: 'speck' };
+  for (let t = 0; t <= 15; t++) {
+    const a = new Int8Array(64 * 64), n = E.makeNoise(seed + t * 17), k = kinds[t];
+    for (let y = 0; y < 64; y++) for (let x = 0; x < 64; x++) {
+      const q = n(x / 6, y / 6) * 14, h = E.hash2(x * 7 + t, y * 13 + t * 3); let v = q;
+      if (k === 'blades') { const b = E.hash2(x, Math.floor(y / 3) + t * 40); v += b > .72 ? 22 : b < .2 ? -26 : 0; if (h > .985) v = 50; }
+      else if (k === 'leaves') { v += h > .9 ? 34 : h < .12 ? -30 : 0; if (E.hash2(Math.floor(x / 2), Math.floor(y / 2) + 99) > .93) v = 40; }
+      else if (k === 'stone') { v = n(x / 3, y / 3) * 30; if (h > .96) v = -40; }
+      else if (k === 'snow') { v = q * .4 + (h > .97 ? 18 : 0); }
+      else if (k === 'rows') { v = (x % 8 < 2 ? -28 : 6) + q * .6; if (h > .93) v = 26; }
+      else if (k === 'pebble') { v = h > .8 ? 24 : h < .2 ? -24 : q; }
+      else if (k === 'needles') { v = (E.hash2(x, y >> 1) > .6 ? 16 : -14) + q * .4; }
+      else v = q + (h > .93 ? 20 : h < .07 ? -24 : 0);
+      a[y * 64 + x] = clamp(Math.round(v), -110, 110);
+    }
+    out[t] = a;
+  }
+  return out;
+}
+
+class World {
+  constructor(huntId) {
+    const H = this.hunt = reg('hunt', huntId), t0 = Date.now();
+    this.id = huntId;
+    const spec = H.terrain, feats = (spec.features || []).slice();
+    // every site's fan is kept clear of hills that would block it (after the authored features)
+    this.vant = {};
+    for (const vid in H.vantages) this.vant[vid] = Object.assign({ id: vid }, H.vantages[vid]);
+    const fans = [];
+    for (const sid of [...(H.sites || []), H.trophy, H.bonus, ...(H.extraFans || [])].filter(Boolean)) {
+      const S = has('site', sid) ? reg('site', sid) : has('trophy', sid) ? reg('trophy', sid) : has('bonus', sid) ? reg('bonus', sid) : null; if (!S) continue;
+      const v = this.vant[S.vantage]; if (!v) continue;
+      const b = S.frame ? S.frame.bearings : [-35, 35], far = (S.fan || S.distances || [10, 80])[1] + 15;
+      fans.push({ v, b: [b[0] - 8, b[1] + 8], far, trees: S.fanTrees || 0, keep: S.keepHills });
+      if (!S.keepHills) feats.push({ kind: 'clearView', at: v.at, yaw: v.yaw, bearings: [b[0] - 4, b[1] + 4], dist: [3, far], eye: v.eye || 1.7, margin: .6 });
+    }
+    this.fans = fans;
+    const hf = this.hf = new E.Heightfield({ N: 1024 });
+    hf.generate({ seed: H.seed, base: spec.base, features: feats, types: H.types, forest: ctx => { let f = H.forest ? H.forest(ctx) : 0; if (f > 0) for (const F of fans) { const d = Math.hypot(ctx.x - F.v.at[0], ctx.y - F.v.at[1]); if (d < F.far + 20) { const a = wrapA(Math.atan2(ctx.y - F.v.at[1], ctx.x - F.v.at[0]) - F.v.yaw * DEG) / DEG; if (a > F.b[0] - 10 && a < F.b[1] + 10) f = Math.min(f, F.trees * .5); } } return f; },
+      farForest: H.farForest, canopy: H.canopy, far: spec.far });
+    for (const vid in this.vant) { const v = this.vant[vid]; v.gz = hf.height(v.at[0] * M, v.at[1] * M); }
+    this.genMs = Date.now() - t0;
+    if (HAS_DOM) { hf.bake(Object.assign({ sun: this.sunFor(0) }, H.palette)); }
+    this.micro = makeMicro(H.seed);
+    this.props = []; this.grid = new Map();
+    this.scatter();
+    for (const p of H.props || []) this.place(p[0], p[1][0] * M, p[1][1] * M, Object.assign({ authored: true }, p[2] || {}));
+    this.sky = new E.Backdrop(H.sky);
+    this.vista = new E.Vista({ hf, sky: this.sky, fog: this.fogFor(), mist: H.mist ? Object.assign({}, H.mist, { top: (H.mist.top || 0) }) : null, sun: Object.assign({ disc: H.sun.disc }, this.sunFor(0), { color: H.sun.color, glow: H.sun.glow }), micro: this.micro, water: H.water, grade: H.grade, canopyFrom: 150, billboardFar: 230 });
+    this.ms = Date.now() - t0;
+  }
+  sunFor(shift) { const S = this.hunt.sun; return { yaw: S.yaw + (shift || 0) * 25, elev: clamp(S.elev + (shift || 0) * 8, -2, 70), color: S.color, ambient: S.ambient, r: S.r || 5, disc: S.disc, glow: S.glow }; }
+  fogFor() { const F = this.hunt.fog, k = T('fog'); return { color: F.color, near: F.near * M / Math.max(.25, k), far: F.far * M / Math.max(.25, k), max: F.max === undefined ? 1 : F.max }; }
+  refreshLook() { this.vista.setLook({ fog: this.fogFor(), sun: Object.assign({}, this.vista.sun, this.sunFor(T('timeOfDay'))) }); }
+  height(x, y) { return this.hf.height(x, y); }
+  get ground() { return this._g || (this._g = (x, y) => this.hf.height(x, y)); }
+  /** a vantage's eye: { x, y, z, yaw } (z: eye height over the ground there) */
+  eye(vid) { const v = this.vant[vid]; if (!v) throw new Error('no vantage ' + vid); return { x: v.at[0] * M, y: v.at[1] * M, z: v.gz + (v.eye || 1.7) * M, yaw: v.yaw * DEG, v }; }
+  /** a point [bearing (deg from the vantage's yaw), distance (m)] -> world { x, y, z } */
+  at(vid, b, d) { const v = this.vant[vid], a = (v.yaw + b) * DEG, x = v.at[0] * M + Math.cos(a) * d * M, y = v.at[1] * M + Math.sin(a) * d * M; return { x, y, z: this.hf.height(x, y) }; }
+  /** where a world point is from a vantage: [bearing (deg), distance (m)] */
+  bearingOf(vid, x, y) { const v = this.vant[vid], dx = x - v.at[0] * M, dy = y - v.at[1] * M; return [wrapA(Math.atan2(dy, dx) - v.yaw * DEG) / DEG, Math.hypot(dx, dy) / M]; }
+  inFan(x, y, margin = 0) { for (const F of this.fans) { const dx = x / M - F.v.at[0], dy = y / M - F.v.at[1], d = Math.hypot(dx, dy); if (d > F.far + margin) continue; const a = wrapA(Math.atan2(dy, dx) - F.v.yaw * DEG) / DEG; if (a > F.b[0] - margin && a < F.b[1] + margin) return F; } return null; }
+  /* ---- props ---- */
+  place(id, x, y, o = {}) {
+    const P = reg('prop', id), z = (o.z !== undefined ? o.z : this.hf.height(x, y)) - (P.sink || 0) * M;
+    const p = { id, imp: P.imp || id, x, y, z, variant: o.variant || 0, facing: o.facing || 0, scale: o.scale || 1, authored: !!o.authored, occ: null, wind: P.wind ? fxr() * TAU : 0, site: o.site || null, hide: false };
+    if (P.occ) p.occ = P.occ(p);
+    this.props.push(p);
+    const key = Math.floor(x / CELL) + ',' + Math.floor(y / CELL); let c = this.grid.get(key); if (!c) this.grid.set(key, c = []); c.push(p);
+    if (P.shadow && this.hf.col) { const s = this.sunFor(0), a = s.yaw * DEG + Math.PI, L = P.shadow * p.scale * M; this.hf.stampShadow(x + Math.cos(a) * L * .9, y + Math.sin(a) * L * .9, L * 1.1, L * .7, .32, a); }
+    return p;
+  }
+  remove(p) { const i = this.props.indexOf(p); if (i >= 0) this.props.splice(i, 1); const key = Math.floor(p.x / CELL) + ',' + Math.floor(p.y / CELL), c = this.grid.get(key); if (c) { const j = c.indexOf(p); if (j >= 0) c.splice(j, 1); } }
+  /** the hunt's scatter rules: forests, groves and single trees, bushes, rocks, logs, reeds, grass, corn, drifts */
+  scatter() {
+    const H = this.hunt, R = E.rng(H.seed * 3 + 11), hf = this.hf, N = hf.N;
+    for (const rule of H.scatter || []) {
+      const sp = rule.spacing || 8, jit = sp * .45;
+      for (let gy = sp / 2; gy < N - 2; gy += sp) for (let gx = sp / 2; gx < N - 2; gx += sp) {
+        const x = (gx + (R() - .5) * 2 * jit), y = (gy + (R() - .5) * 2 * jit), r1 = R(), r2 = R(), r3 = R(), r4 = R();
+        if (x < 2 || y < 2 || x > N - 3 || y > N - 3) continue;
+        const i = Math.round(y) * N + Math.round(x), ctx = { x, y, h: hf.h[i] / M, type: hf.type[i], forest: hf.forest[i] / 255, mask: hf.mask[i], water: hf.water[i] > hf.h[i], wdist: hf.wdist ? hf.wdist[i] : 99, n: hf.noise[0](x / 31, y / 31), r: r1 };
+        const p = rule.where(ctx); if (!(p > 0) || r1 > p) continue;
+        let nearV = false; for (const vid in this.vant) { const v = this.vant[vid]; if (v.kind !== 'air' && Math.hypot(x - v.at[0], y - v.at[1]) < (rule.clearR === undefined ? 13 : rule.clearR)) { nearV = true; break; } } if (nearV) continue;
+        const F = this.inFan(x * M, y * M, rule.fanMargin === undefined ? 4 : rule.fanMargin); if (F && !(rule.inFan && r2 < (F.trees || 0) * rule.inFan)) continue;
+        let id = rule.prop; if (rule.mix) { let acc = 0; for (const [m, w] of rule.mix) { acc += w; if (r3 * rule.mix.reduce((s, q) => s + q[1], 0) <= acc) { id = m; break; } } }
+        const P = reg('prop', id);
+        this.place(id, x * M, y * M, { variant: Math.floor(r4 * (P.variants || 1)), facing: r2 * TAU, scale: (rule.scale ? rule.scale[0] + (rule.scale[1] - rule.scale[0]) * r3 : 1) });
+      }
+    }
+  }
+  /** the props near a point (grid cells within r) */
+  near(x, y, r, fn) { const c0 = Math.floor((x - r) / CELL), c1 = Math.floor((x + r) / CELL), d0 = Math.floor((y - r) / CELL), d1 = Math.floor((y + r) / CELL); for (let cy = d0; cy <= d1; cy++) for (let cx = c0; cx <= c1; cx++) { const c = this.grid.get(cx + ',' + cy); if (c) for (const p of c) fn(p); } }
+  /** billboard items for the props the lens can see (within far) */
+  gather(L, items, far = 230 * M) {
+    const fx = L.Fx, fy = L.Fy, cx = L.x, cy = L.y, half = Math.atan2(L.W / 2 + 40, L.f) + .1, cosH = Math.cos(half), tt = G.game.time;
+    const c0 = Math.floor((cx - far) / CELL), c1 = Math.floor((cx + far) / CELL), d0 = Math.floor((cy - far) / CELL), d1 = Math.floor((cy + far) / CELL);
+    for (let gy = d0; gy <= d1; gy++) for (let gx = c0; gx <= c1; gx++) {
+      const ccx = (gx + .5) * CELL - cx, ccy = (gy + .5) * CELL - cy, cd = Math.hypot(ccx, ccy);
+      if (cd > far + CELL) continue;
+      if (cd > CELL * 1.5 && (ccx * fx + ccy * fy) / cd < cosH - CELL * .75 / cd) continue;
+      const c = this.grid.get(gx + ',' + gy); if (!c) continue;
+      for (const p of c) {
+        if (p.hide) continue;
+        const dx = p.x - cx, dy = p.y - cy, D = dx * fx + dy * fy; if (D < 6 || D > far) continue;
+        const P = reg('prop', p.id);
+        const it = p.item || (p.item = { x: p.x, y: p.y, z: p.z, imp: IMP, id: p.imp, variant: p.variant, facing: Math.floor((p.facing / TAU) * (P.facings || 1)) % (P.facings || 1), scale: p.scale, box: [P.size[0], P.size[1]], bias: P.bias === undefined ? 12 : P.bias, sway: 0 });
+        it.z = p.z; it.sway = P.wind && D < 60 * M ? Math.sin(tt * 1.3 + p.wind) * P.wind * (L.f / Math.max(D, 1)) * .4 : 0;
+        items.push(it);
+      }
+    }
+    return items;
+  }
+  /** the props whose volumes a ray could cross up to maxT, walking its ground track through the grid */
+  propsAlong(o, d, maxT, fn) {
+    const len = Math.hypot(d.dx, d.dy) * maxT, steps = Math.ceil(len / (CELL * .5)) + 1, seen = new Set();
+    for (let i = 0; i <= steps; i++) {
+      const t = maxT * i / steps, x = o.x + d.dx * t, y = o.y + d.dy * t;
+      for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) { const key = (Math.floor(x / CELL) + ox) + ',' + (Math.floor(y / CELL) + oy); if (seen.has(key)) continue; seen.add(key); const c = this.grid.get(key); if (c) for (const p of c) if (p.occ && !p.hide) fn(p); }
+    }
+  }
+}
+const WORLDS = new Map();
+/** a hunt's world, built once and kept (up to two at a time) */
+function worldFor(huntId) {
+  let w = WORLDS.get(huntId);
+  if (!w) { if (WORLDS.size >= 2) { const k = [...WORLDS.keys()].find(k => !G.world || k !== G.world.id); if (k) WORLDS.delete(k); } w = new World(huntId); WORLDS.set(huntId, w); }
+  return w;
+}
+
+// 11-props: the props as data: their impostor painters (pixel art at any scale, lit from the upper left with E.tones),
+// their size, what blocks a shot (a trunk, a stone, a log; leaves, grass and corn only hide), and the shadow they cast.
+const TT = c => E.tones(c);
+const occTrunk = (rM, hM) => p => [{ k: 'cyl', x: p.x, y: p.y, z0: p.z, z1: p.z + hM * M * p.scale, r: rM * M * p.scale }];
+const occBall = (rM, zM) => p => [{ k: 'sph', x: p.x, y: p.y, z: p.z + zM * M * p.scale, r: rM * M * p.scale }];
+const occBox = (hx, hy, hz) => p => [{ k: 'box', x: p.x, y: p.y, z0: p.z, z1: p.z + hz * M * p.scale, hx: hx * M * p.scale, hy: hy * M * p.scale, a: p.facing }];
+
+/** a broadleaf tree: a tapered trunk, branches, a crown of lit leaf clumps (o: h, crown [rx, ry] m, trunk r m, colours) */
+function broadleaf(o) {
+  return (g, k, v, f, ox, oy) => {
+    const R = E.rng(v * 977 + (o.seed || 1)), u = M * k, h = o.h * (.85 + R() * .3), pal = o.pal[v % o.pal.length], bark = TT(o.bark || '#5a4434');
+    const crx = o.crown[0] * (.85 + R() * .3) * u, cry = o.crown[1] * (.85 + R() * .25) * u, ccy = oy - (h - o.crown[1] * .55) * u, tw = Math.max(1, o.trunk * 2 * u);
+    const lean = (R() - .5) * .12 * h * u;
+    if (h * u < 7) { px.line(g, ox, oy, ox + lean, ccy, bark.sh, 1); px.ell(g, ox + lean, ccy, Math.max(1, crx), Math.max(1, cry), TT(pal[0]).sh); px.ell(g, ox + lean - crx * .25, ccy - cry * .25, Math.max(.6, crx * .6), Math.max(.6, cry * .55), TT(pal[0]).base); return; }
+    // trunk and branches
+    const top = [ox + lean, ccy + cry * .2];
+    px.poly(g, [[ox - tw * .7, oy], [ox + tw * .7, oy], [top[0] + tw * .3, top[1]], [top[0] - tw * .3, top[1]]], bark.sh);
+    if (tw > 1.5) px.poly(g, [[ox - tw * .55, oy], [ox, oy], [top[0], top[1]], [top[0] - tw * .25, top[1]]], o.birch ? TT(o.bark).lt : bark.base);
+    if (o.birch && tw > 1.5) for (let i = 0; i < 8; i++) { const yy = oy - (i + .5) / 8 * (oy - top[1]), xx = lerp(ox, top[0], (oy - yy) / (oy - top[1])); px.rect(g, xx - tw * .4 + R() * tw * .4, yy, Math.max(1, tw * .4), 1, '#2a2420'); }
+    if (tw > 2) px.rect(g, ox - tw * .9, oy - 1, tw * 1.8, 1, bark.deep);
+    const nb = Math.round(3 + R() * 3);
+    for (let i = 0; i < nb; i++) { const t = .35 + R() * .5, bx = lerp(ox, top[0], t), by = lerp(oy, top[1], t) - cry * .3, ex = bx + (R() < .5 ? -1 : 1) * crx * (.4 + R() * .5), ey = by - cry * (.2 + R() * .6); px.line(g, bx, by, ex, ey, bark.sh, Math.max(1, Math.round(tw * .35))); }
+    // the crown: clumps in an ellipsoid, drawn dark, base, lit, then specks
+    const fine = 1 + Math.min(2.2, u * .9), n = clamp(Math.round((o.clumps || 26) * fine), 8, 110), cl = [];
+    for (let i = 0; i < n; i++) { const a = R() * TAU, rr = Math.sqrt(R()), cx = ox + lean + Math.cos(a) * rr * crx * .86, cy = ccy + Math.sin(a) * rr * cry * .8, s = (o.clump || 1.3) * u * (.65 + R() * .6) / Math.sqrt(fine); cl.push([cx, cy, s, R()]); }
+    cl.sort((a, b) => a[1] - b[1]);
+    const C = pal.map(TT);
+    for (const [cx, cy, s, r] of cl) px.disc(g, cx + s * .15, cy + s * .2, s, C[0].deep);
+    for (const [cx, cy, s, r] of cl) px.disc(g, cx, cy, s * .92, (cy > ccy + cry * .25 ? C[0].deep : (r < .5 ? C[0] : C[Math.min(C.length - 1, 1)]).sh));
+    for (const [cx, cy, s, r] of cl) { const c = C[Math.floor(r * C.length)]; px.disc(g, cx - s * .18, cy - s * .2, s * .68, c.base); }
+    for (const [cx, cy, s, r] of cl) if (cy < ccy + cry * .2 && (cx < ox + crx * .3)) { const c = C[Math.floor(r * C.length)]; px.disc(g, cx - s * .35, cy - s * .4, Math.max(.5, s * .34), c.lt); }
+    if (u > .9) for (let i = 0; i < n * (u > 2 ? 6 : 2); i++) { const a = R() * TAU, rr = Math.sqrt(R()) * .92, x = ox + lean + Math.cos(a) * rr * crx, y = ccy + Math.sin(a) * rr * cry, q = R(); px.dot(g, x, y, q < .35 ? C[0].hi : q < .7 ? C[C.length - 1].lt : C[0].sh); if (u > 2.2 && q > .8) px.dot(g, x + 1, y + 1, C[0].deep); }
+    if (o.holes && u > .6) for (let i = 0; i < 3; i++) { const a = R() * TAU; g.clearRect(Math.round(ox + Math.cos(a) * crx * .5), Math.round(ccy + Math.sin(a) * cry * .4), Math.max(1, Math.round(u * .5)), Math.max(1, Math.round(u * .4))); }
+  };
+}
+/** a conifer: tiers of drooping boughs, narrowing to the top (snow on them when o.snow) */
+function conifer(o) {
+  return (g, k, v, f, ox, oy) => {
+    const R = E.rng(v * 613 + (o.seed || 3)), u = M * k, h = o.h * (.85 + R() * .35), w = o.w * (.85 + R() * .3) * u, C = TT(o.pal[v % o.pal.length]), bark = TT(o.bark || '#3e2e24');
+    const H = h * u, base = oy - o.skirt * h * u;
+    if (H < 7) { px.poly(g, [[ox, oy - H], [ox + Math.max(1, w * .6), oy - H * .1], [ox - Math.max(1, w * .6), oy - H * .1]], C.sh); return; }
+    px.rect(g, ox - Math.max(1, u * .2), base - u * .5, Math.max(1, u * .4), oy - base + u * .5, bark.sh);
+    const tiers = clamp(Math.round(o.tiers || 7), 3, 12);
+    for (let i = 0; i < tiers; i++) {
+      const t0 = i / tiers, t1 = (i + 1.25) / tiers, y0 = base - t0 * (base - (oy - H)), y1 = base - Math.min(1, t1) * (base - (oy - H)), hw = w * (1 - t0) * (o.sparse ? .8 : 1) * (.9 + R() * .2);
+      const sag = (y0 - y1) * .25, jag = [];
+      jag.push([ox, y1]);
+      const steps = Math.max(2, Math.round(hw / Math.max(1.5, u * .6)));
+      for (let s = 0; s <= steps; s++) { const tx = s / steps; jag.push([ox + hw * tx, y1 + (y0 - y1) * (.25 + tx * .75) + (s % 2 ? sag * .4 : 0)]); }
+      for (let s = steps; s >= 0; s--) { const tx = s / steps; jag.push([ox - hw * tx, y1 + (y0 - y1) * (.25 + tx * .75) + (s % 2 ? sag * .4 : 0)]); }
+      px.poly(g, jag, C.sh);
+      if (hw > 2) px.poly(g, jag.map(p => [p[0] - (p[0] < ox ? 0 : (p[0] - ox) * .55), p[1] - .6]), o.sparse ? C.sh : C.base);
+      if (hw > 3) px.line(g, ox - hw * .9, y0 - .5, ox - hw * .2, y1 + (y0 - y1) * .5, C.lt);
+      if (o.snow && hw > 1.5) { px.line(g, ox - hw * .85, y0 - 1, ox + hw * .3, y0 - (y0 - y1) * .5, '#f2f6fa', Math.max(1, Math.round(u * .25))); if (hw > 4) px.line(g, ox - hw * .5, y1 + (y0 - y1) * .55, ox, y1 + (y0 - y1) * .3, '#dfe8f0'); }
+      if (o.sparse && hw > 2.5) for (let s = 0; s < 4; s++) px.dot(g, ox + (R() - .5) * hw * 1.4, lerp(y1, y0, R()), C.lt);
+    }
+    if (u > 1 && !o.sparse) for (let i = 0; i < 10; i++) px.dot(g, ox - w * .4 + R() * w * .3, oy - H * (.2 + R() * .7), C.hi);
+  };
+}
+function snag(o) {   // a charred dead tree: a broken trunk, a few bare limbs
+  return (g, k, v, f, ox, oy) => {
+    const R = E.rng(v * 31 + 7), u = M * k, h = o.h * (.6 + R() * .6), tw = Math.max(1, .5 * u), C = TT(o.c || '#2a2422'), top = [ox + (R() - .5) * u * 1.2, oy - h * u];
+    px.poly(g, [[ox - tw, oy], [ox + tw, oy], [top[0] + tw * .3, top[1]], [top[0] - tw * .4, top[1] + u * .5]], C.sh);
+    if (tw > 1.4) px.line(g, ox - tw * .5, oy, top[0] - tw * .3, top[1] + u, C.lt);
+    for (let i = 0; i < 4; i++) { const t = .4 + R() * .5, bx = lerp(ox, top[0], t), by = lerp(oy, top[1], t), s = R() < .5 ? -1 : 1; px.line(g, bx, by, bx + s * (1 + R() * 2) * u, by - (1 + R() * 2) * u, C.sh, Math.max(1, Math.round(tw * .4))); }
+    if (o.snow) px.line(g, top[0] - tw, top[1] + 1, top[0] + tw, top[1] + 1, '#eef2f6');
+  };
+}
+function clumpPaint(o) {   // a bush or a tuft: low clumps (leaves) or blades (grass, reeds)
+  return (g, k, v, f, ox, oy) => {
+    const R = E.rng(v * 211 + (o.seed || 5)), u = M * k, C = o.pal.map(TT);
+    if (o.blades) {
+      const n = clamp(Math.round(o.blades * Math.min(1, u * .5 + .3)), 3, 40), w = o.w * u, h = o.h * u;
+      for (let i = 0; i < n; i++) { const x = ox + (R() - .5) * w * 2, hh = h * (.5 + R() * .6), lean = (R() - .5) * hh * .5, c = C[Math.floor(R() * C.length)]; px.line(g, x, oy, x + lean, oy - hh, R() < .4 ? c.sh : c.base, Math.max(1, Math.round(u * (o.thick || .06)))); if (o.heads && u > .5 && R() < .3) px.line(g, x + lean, oy - hh, x + lean * 1.15, oy - hh - u * .22, TT(o.heads).base, Math.max(1, Math.round(u * .08))); }
+      return;
+    }
+    const n = clamp(Math.round(o.clumps || 9), 4, 24), rx = o.w * u, ry = o.h * u * .5;
+    const cl = []; for (let i = 0; i < n; i++) { const a = R() * TAU, rr = Math.sqrt(R()); cl.push([ox + Math.cos(a) * rr * rx * .8, oy - ry - Math.sin(a) * rr * ry * .8 * (Math.sin(a) < 0 ? .5 : 1), (o.clump || .6) * u * (.7 + R() * .6), R()]); }
+    cl.sort((a, b) => a[1] - b[1]);
+    for (const [x, y, s] of cl) px.disc(g, x + s * .2, Math.min(oy - s * .3, y + s * .2), s, C[0].deep);
+    for (const [x, y, s, r] of cl) px.disc(g, x, Math.min(oy - s * .3, y), s * .9, C[Math.floor(r * C.length)].sh);
+    for (const [x, y, s, r] of cl) px.disc(g, x - s * .2, Math.min(oy - s * .5, y - s * .2), s * .6, C[Math.floor(r * C.length)].base);
+    if (u > .8) for (const [x, y, s, r] of cl) if (r > .5) px.dot(g, x - s * .4, y - s * .5, C[Math.floor(r * C.length)].lt);
+    if (o.berries && u > .8) for (let i = 0; i < 5; i++) px.dot(g, ox + (R() - .5) * rx * 1.4, oy - ry * (.5 + R()), o.berries);
+  };
+}
+function cornPaint(g, k, v, f, ox, oy) {   // a few dry corn stalks with drooping leaves and ears
+  const R = E.rng(v * 47 + 2), u = M * k, C = TT('#c8a860'), D = TT('#a8884a');
+  const n = u < .5 ? 3 : 5;
+  for (let i = 0; i < n; i++) {
+    const x = ox + (i - (n - 1) / 2) * .45 * u + (R() - .5) * .2 * u, h = (2.1 + R() * .5) * u, top = oy - h;
+    px.line(g, x, oy, x + (R() - .5) * u * .2, top, D.sh, Math.max(1, Math.round(u * .07)));
+    if (u > .25) for (let j = 0; j < 4; j++) { const y = oy - h * (.3 + j * .17), s = j % 2 ? 1 : -1, L = (.5 + R() * .4) * u; px.line(g, x, y, x + s * L, y + L * .35, (j % 2 ? C : D).base, 1); px.line(g, x + s * L, y + L * .35, x + s * L * 1.2, y + L * .8, D.sh, 1); }
+    if (u > .4) { px.rect(g, x - Math.max(1, u * .06), top - u * .2, Math.max(1, u * .12), u * .3, C.lt); if (R() < .6) { px.ell(g, x + u * .1, oy - h * .55, Math.max(1, u * .08), Math.max(1, u * .2), '#d8b048'); } }
+  }
+}
+function rockPaint(o) {
+  return (g, k, v, f, ox, oy) => {
+    const R = E.rng(v * 89 + 4), u = M * k, r = o.r * (.7 + R() * .6) * u, h = r * (o.flat || .75), C = TT(o.c || '#8a8278'), pts = [];
+    for (let i = 0; i < 9; i++) { const a = Math.PI + i / 8 * Math.PI, rr = r * (.75 + R() * .35); pts.push([ox + Math.cos(a) * rr * 1.1, oy + Math.sin(a) * h * (.8 + R() * .3)]); }
+    pts.push([ox + r * 1.1, oy]); pts.unshift([ox - r * 1.1, oy]);
+    px.poly(g, pts, C.sh); if (r > 2) { px.poly(g, pts.map(p => [lerp(p[0], ox - r * .25, .25), lerp(p[1], oy - h * .5, .25) - .5]), C.base); px.poly(g, pts.slice(1, 5).map(p => [lerp(p[0], ox - r * .4, .45), lerp(p[1], oy - h * .7, .45)]), C.lt); }
+    if (o.moss && r > 3) for (let i = 0; i < 6; i++) px.dot(g, ox - r * .6 + R() * r * .9, oy - h * (.6 + R() * .3), R() < .5 ? '#6a7a3a' : '#5a6a32');
+    if (o.snow && r > 1.5) { px.poly(g, pts.slice(2, 8).map(p => [p[0], p[1] - .3]).concat([[ox + r * .5, oy - h * .55], [ox - r * .5, oy - h * .55]]), '#e8eef4'); }
+    if (r > 2) px.line(g, ox - r * 1.1, oy - 1, ox + r * 1.1, oy - 1, C.deep);
+  };
+}
+function logPaint(o) {
+  return (g, k, v, f, ox, oy) => {
+    const R = E.rng(v * 61 + 9), u = M * k, L = o.len * (.8 + R() * .4) * u, r = Math.max(1, o.r * u), C = TT(o.c || '#6a5040'), ang = (f % 2 ? .25 : -.18), cx = Math.cos(ang) * L / 2, cy = Math.sin(ang) * L / 2 * .3;
+    const a = [ox - cx, oy - r - cy], b = [ox + cx, oy - r + cy];
+    px.line(g, a[0], a[1], b[0], b[1], C.sh, r * 2); px.line(g, a[0], a[1] - r * .4, b[0], b[1] - r * .4, C.base, Math.max(1, r * 1.1)); if (r > 1.5) px.line(g, a[0], a[1] - r * .75, b[0], b[1] - r * .75, C.lt, 1);
+    px.disc(g, b[0], b[1], r, TT('#a8885a').base); if (r > 2) px.disc(g, b[0], b[1], r * .5, TT('#a8885a').sh);
+    if (o.snow) px.line(g, a[0], a[1] - r, b[0], b[1] - r, '#eef2f6', Math.max(1, r * .6));
+    if (o.moss && r > 2) for (let i = 0; i < 5; i++) px.dot(g, lerp(a[0], b[0], R()), lerp(a[1], b[1], R()) - r * .7, '#6a7a3a');
+  };
+}
+/** a building block: a box with a pitched roof, planks, a door and a window (the barn, the farmhouse, the trap house) */
+function housePaint(o) {
+  return (g, k, v, f, ox, oy) => {
+    const u = M * k, W = o.w * u, H = o.h * u, RH = o.roof * u, D = o.d * u * .35, C = TT(o.wall), Rf = TT(o.roofC), tr = TT(o.trim || '#e8e0d0');
+    const x0 = ox - W / 2, y0 = oy - H;
+    px.poly(g, [[x0 + W, oy], [x0 + W + D, oy - D * .5], [x0 + W + D, y0 - D * .5], [x0 + W, y0]], C.sh);   // the side wall
+    px.rect(g, x0, y0, W, H, C.base);
+    if (u > .3) for (let x = x0 + Math.max(2, u * .6); x < x0 + W; x += Math.max(2, u * .6)) px.line(g, x, y0 + 1, x, oy - 1, C.sh, 1);
+    px.poly(g, [[x0 - u * .3, y0], [ox, y0 - RH], [x0 + W + u * .3, y0]], Rf.sh); px.poly(g, [[x0 + u * .2, y0 - 1], [ox, y0 - RH + 1], [ox, y0 - 1]], Rf.base);
+    px.poly(g, [[ox, y0 - RH], [ox + D, y0 - RH - D * .5], [x0 + W + D + u * .3, y0 - D * .5], [x0 + W + u * .3, y0]], Rf.lt);
+    if (o.barn && u > .25) { const dw = W * .36, dh = H * .62; px.rect(g, ox - dw / 2, oy - dh, dw, dh, C.deep); px.line(g, ox - dw / 2, oy - dh, ox + dw / 2, oy, tr.base, Math.max(1, u * .15)); px.line(g, ox + dw / 2, oy - dh, ox - dw / 2, oy, tr.base, Math.max(1, u * .15)); px.rect(g, ox - dw / 2, oy - dh, dw, Math.max(1, u * .15), tr.base); px.rect(g, ox - u * .6, y0 - RH * .45, u * 1.2, u * .9, C.deep); }
+    if (o.door && u > .25) { px.rect(g, ox - W * .3, oy - H * .7, W * .16, H * .7, C.deep); px.rect(g, ox + W * .1, y0 + H * .25, W * .22, H * .28, '#3a4a5a'); px.rect(g, ox + W * .1, y0 + H * .25, W * .22, Math.max(1, u * .1), tr.base); if (o.lit) px.rect(g, ox + W * .12, y0 + H * .28, W * .18, H * .22, '#f0c060'); }
+    if (o.porch && u > .25) { px.rect(g, x0 - u * .4, oy - u * .25, W + u * .8, Math.max(1, u * .25), TT('#8a6a4a').base); for (const px0 of [x0, x0 + W]) px.rect(g, px0 - u * .1, oy - H * .62, Math.max(1, u * .2), H * .62, TT('#8a6a4a').sh); px.rect(g, x0 - u * .4, oy - H * .66, W + u * .8, Math.max(1, u * .3), Rf.base); }
+    if (o.trapSlot && u > .25) px.rect(g, x0 + W * .1, y0 + H * .2, W * .8, H * .16, '#1a1410');
+  };
+}
+function fencePaint(g, k, v, f, ox, oy) {   // a split-rail section (8 m) seen near side-on
+  const u = M * k, C = TT('#7a6450'), L = 4 * u;
+  for (const sx of [-1, 1]) px.rect(g, ox + sx * L - Math.max(1, u * .08), oy - 1.3 * u, Math.max(1, u * .16), 1.3 * u, C.sh);
+  for (const hz of [.55, 1.05]) { px.line(g, ox - L, oy - hz * u, ox + L, oy - hz * u + (v % 2 ? u * .1 : -u * .05), C.base, Math.max(1, Math.round(u * .12))); if (u > 1) px.line(g, ox - L, oy - hz * u - 1, ox + L, oy - hz * u - 1, C.lt, 1); }
+}
+function haybalePaint(g, k, v, f, ox, oy) { const u = M * k, r = .7 * u, C = TT('#d8b45a'); px.ell(g, ox, oy - r, r * 1.3, r, C.sh); px.ell(g, ox - r * .2, oy - r * 1.05, r * 1.05, r * .8, C.base); if (u > .5) { px.ell(g, ox + r * .55, oy - r, r * .45, r * .75, C.lt); px.line(g, ox - r * 1.2, oy - r * 1.2, ox + r * 1.2, oy - r * 1.2, C.sh, 1); } }
+function lodgePaint(g, k, v, f, ox, oy) {   // a beaver lodge: a mound of sticks and mud
+  const R = E.rng(v + 50), u = M * k, w = 3.2 * u, h = 1.8 * u, C = TT('#5a4632');
+  px.ell(g, ox, oy - h * .2, w, h, C.sh); px.ell(g, ox - w * .15, oy - h * .35, w * .8, h * .75, C.base);
+  if (u > .3) for (let i = 0; i < 40; i++) { const a = R() * Math.PI, rr = R() * .95, x = ox + Math.cos(a) * w * rr, y = oy - h * .2 - Math.sin(a) * h * rr, L = (.3 + R() * .5) * u, an = R() * Math.PI; px.line(g, x, y, x + Math.cos(an) * L, y + Math.sin(an) * L * .4, R() < .5 ? C.deep : C.lt, 1); }
+  px.ell(g, ox - w * .3, oy - h * .9, w * .4, h * .2, '#eef2f6');
+}
+function driftPaint(g, k, v, f, ox, oy) { const R = E.rng(v + 70), u = M * k, w = (2 + R() * 2) * u, h = (.5 + R() * .4) * u; px.ell(g, ox, oy, w, h, '#c8d4e0'); px.ell(g, ox - w * .2, oy - h * .2, w * .8, h * .75, '#e8eef4'); if (u > .5) px.ell(g, ox - w * .35, oy - h * .45, w * .35, h * .3, '#ffffff'); }
+function trapPaint(g, k, v, f, ox, oy) { housePaint({ w: 2.4, h: 1.4, roof: .5, d: 2, wall: '#6a6a5a', roofC: '#4a4a3e', trapSlot: true })(g, k, v, f, ox, oy); }
+function standPaint(g, k, v, f, ox, oy) {   // a ladder tree stand seen from afar (other vantages)
+  const u = M * k, C = TT('#4a4a42');
+  px.line(g, ox - .3 * u, oy, ox - .3 * u, oy - 4.5 * u, C.sh, Math.max(1, Math.round(u * .1))); px.line(g, ox + .3 * u, oy, ox + .3 * u, oy - 4.5 * u, C.sh, Math.max(1, Math.round(u * .1)));
+  for (let i = 1; i < 9; i++) px.line(g, ox - .3 * u, oy - i * .5 * u, ox + .3 * u, oy - i * .5 * u, C.base, 1);
+  px.rect(g, ox - .6 * u, oy - 4.6 * u, 1.2 * u, Math.max(1, .15 * u), C.base); px.rect(g, ox - .6 * u, oy - 5.4 * u, Math.max(1, .1 * u), .8 * u, C.sh);
+}
+function signPaint(g, k, v, f, ox, oy) { const u = M * k, C = TT('#8a6a44'); px.rect(g, ox - Math.max(1, u * .06), oy - 1.4 * u, Math.max(1, u * .12), 1.4 * u, C.sh); px.rect(g, ox - .7 * u, oy - 1.6 * u, 1.4 * u, .6 * u, C.base); if (u > 1) px.rect(g, ox - .5 * u, oy - 1.4 * u, u, 1, C.lt); }
+function bermPaint(g, k, v, f, ox, oy) { const u = M * k, w = 6 * u, h = 2.2 * u, C = TT('#7a6a48'); px.poly(g, [[ox - w, oy], [ox - w * .6, oy - h], [ox + w * .6, oy - h], [ox + w, oy]], C.sh); px.poly(g, [[ox - w * .9, oy], [ox - w * .55, oy - h + 1], [ox + w * .5, oy - h + 1], [ox + w * .2, oy]], C.base); if (u > .5) for (let i = 0; i < 12; i++) px.dot(g, ox - w * .7 + i * w * .12, oy - h * .7 + (i % 3), '#6a7a3a'); }
+
+/* ---------- the props ---------- */
+const AUTUMN = [['#a8421c', '#c8682a', '#e0a03a'], ['#b8301e', '#d84a28', '#e87a3a'], ['#c87a1a', '#e0a02a', '#f0c84a'], ['#8a5a1e', '#b07a2a', '#c8a03a']];
+const propDef = (id, o) => { def('prop', id, o); IMP.define(id, { size: o.size, variants: o.variants || 1, facings: o.facings || 1, paint: o.paint, shape: o.shape, params: o.params, scale: o.shapeScale, pitch: o.pitch }); };
+propDef('oak', { size: [6 * M, 17 * M], variants: 4, wind: .8, shadow: 4.5, occ: occTrunk(.32, 9), paint: broadleaf({ h: 15, crown: [5.2, 7.5], trunk: .32, pal: [AUTUMN[0], AUTUMN[3], AUTUMN[0].concat(['#7a6a2a']), AUTUMN[2]], clumps: 30, seed: 1 }) });
+propDef('maple', { size: [5 * M, 16 * M], variants: 3, wind: .9, shadow: 4, occ: occTrunk(.26, 8), paint: broadleaf({ h: 14, crown: [4.4, 7], trunk: .26, pal: [AUTUMN[1], ['#c02a1e', '#e0482a', '#f08a3a'], AUTUMN[2]], clumps: 28, seed: 2 }) });
+propDef('birch', { size: [3.5 * M, 15 * M], variants: 3, wind: 1.2, shadow: 2.5, occ: occTrunk(.16, 9), paint: broadleaf({ h: 13, crown: [3, 5.5], trunk: .16, bark: '#e8e4dc', birch: true, pal: [['#c8a21e', '#e8c83a', '#f8e87a'], ['#b8962a', '#d8b83a', '#f0d860']], clumps: 20, clump: .95, holes: true, seed: 3 }) });
+propDef('aspen', { size: [3 * M, 14 * M], variants: 4, wind: 1.4, shadow: 2.2, occ: occTrunk(.15, 8), paint: broadleaf({ h: 12.5, crown: [2.6, 6.2], trunk: .15, bark: '#d8d8cc', birch: true, pal: [['#c8901a', '#e8b82a', '#f8e060'], ['#d0a02a', '#ecc43a', '#fae880'], ['#a89a2a', '#c8c03a', '#e0e070']], clumps: 22, clump: .85, holes: true, seed: 4 }) });
+propDef('spruce', { size: [3.4 * M, 19 * M], variants: 3, wind: .3, shadow: 3, occ: occTrunk(.25, 14), paint: conifer({ h: 17, w: 3.2, tiers: 9, skirt: .04, pal: ['#2a4a3a', '#24443a', '#30503e'] }) });
+propDef('fir', { size: [2.8 * M, 16 * M], variants: 3, wind: .3, shadow: 2.6, occ: occTrunk(.22, 12), paint: conifer({ h: 14, w: 2.6, tiers: 8, skirt: .05, pal: ['#2e5240', '#365a44', '#2a4a3c'] }) });
+propDef('snowspruce', { size: [3.2 * M, 17 * M], variants: 3, wind: .2, shadow: 3, occ: occTrunk(.24, 12), paint: conifer({ h: 15, w: 3, tiers: 9, skirt: .03, snow: true, pal: ['#22382e', '#2a4034', '#1e3428'] }) });
+propDef('blackspruce', { size: [1.6 * M, 13 * M], variants: 4, wind: .2, shadow: 1.6, occ: occTrunk(.14, 9), paint: conifer({ h: 11, w: 1.4, tiers: 10, skirt: .1, snow: true, pal: ['#1e2e28', '#24342c', '#1a2a24'] }) });
+propDef('tamarack', { size: [2.6 * M, 15 * M], variants: 3, wind: .5, shadow: 2, occ: occTrunk(.16, 10), paint: conifer({ h: 13, w: 2.4, tiers: 9, skirt: .1, sparse: true, pal: ['#c8841e', '#d89a2a', '#b8781a'] }) });
+propDef('snag', { size: [2.5 * M, 12 * M], variants: 4, shadow: .8, occ: occTrunk(.25, 8), paint: snag({ h: 10, snow: true }) });
+propDef('bush', { size: [1.8 * M, 1.8 * M], variants: 4, wind: .5, paint: clumpPaint({ w: 1.6, h: 1.6, clumps: 11, pal: ['#6a5a2a', '#8a6a2a', '#a87a2a'], seed: 6 }) });
+propDef('sumac', { size: [1.6 * M, 1.8 * M], variants: 3, wind: .6, paint: clumpPaint({ w: 1.4, h: 1.7, clumps: 10, pal: ['#a8281e', '#c83a22', '#e05a2a'], seed: 7 }) });
+propDef('juniper', { size: [1.6 * M, 1.4 * M], variants: 3, paint: clumpPaint({ w: 1.5, h: 1.2, clumps: 10, pal: ['#2e4a3a', '#3a5a44', '#4a6a4a'], berries: '#6a7ab0', seed: 8 }) });
+propDef('willow', { size: [1.6 * M, 2 * M], variants: 3, wind: .6, paint: clumpPaint({ blades: 22, w: 1.2, h: 2, thick: .07, pal: ['#8a3a2a', '#a84a30', '#6a3024'], seed: 9 }) });
+propDef('tallgrass', { size: [1 * M, 1 * M], variants: 4, wind: 1.6, bias: 4, paint: clumpPaint({ blades: 22, w: .6, h: .85, pal: ['#8a8a3e', '#a89a4a', '#6e7a34'], heads: '#c8b878', seed: 10 }) });
+propDef('goldgrass', { size: [1 * M, .9 * M], variants: 4, wind: 1.6, bias: 4, paint: clumpPaint({ blades: 14, w: .7, h: .8, pal: ['#c8a040', '#e0c060', '#a88a3a'], heads: '#f0d890', seed: 11 }) });
+propDef('reeds', { size: [1 * M, 2 * M], variants: 4, wind: 1.2, bias: 4, paint: clumpPaint({ blades: 16, w: .8, h: 1.9, thick: .05, pal: ['#a88a5a', '#8a7448', '#c8a86a'], heads: '#5a3a22', seed: 12 }) });
+propDef('fern', { size: [1 * M, .8 * M], variants: 3, wind: .8, bias: 4, paint: clumpPaint({ w: .9, h: .7, clumps: 8, clump: .35, pal: ['#a87a2a', '#c89a3a', '#8a6a2a'], seed: 13 }) });
+propDef('corn', { size: [1.4 * M, 2.8 * M], variants: 6, wind: 1, bias: 6, paint: cornPaint });
+propDef('rock', { size: [2 * M, 1.8 * M], variants: 5, shadow: 1.2, occ: occBall(.95, .45), paint: rockPaint({ r: 1.1, moss: true }) });
+propDef('boulder', { size: [3.4 * M, 3 * M], variants: 4, shadow: 2, occ: occBall(1.7, .9), paint: rockPaint({ r: 2, c: '#8a8680' }) });
+propDef('talus', { size: [1.6 * M, 1.2 * M], variants: 5, occ: occBall(.7, .3), paint: rockPaint({ r: .8, flat: .6, c: '#9a948c' }) });
+propDef('snowrock', { size: [2 * M, 1.6 * M], variants: 4, shadow: 1, occ: occBall(.9, .4), paint: rockPaint({ r: 1.1, c: '#7a7a80', snow: true }) });
+propDef('libraryrock', { size: [2 * M, 1.6 * M], variants: 3, occ: occBall(.9, .45), shape: 'rock', params: v => ({ r: 7.5, seed: v + 1 }), shapeScale: 1.9, pitch: 6 });
+propDef('log', { size: [3.5 * M, 1 * M], variants: 3, facings: 2, occ: p => [{ k: 'cap', a: [p.x - 1.6 * M, p.y, p.z + .35 * M], b: [p.x + 1.6 * M, p.y, p.z + .35 * M], r: .35 * M }], paint: logPaint({ len: 4, r: .32, moss: true }) });
+propDef('snowlog', { size: [3.5 * M, 1 * M], variants: 3, facings: 2, occ: p => [{ k: 'cap', a: [p.x - 1.6 * M, p.y, p.z + .35 * M], b: [p.x + 1.6 * M, p.y, p.z + .35 * M], r: .35 * M }], paint: logPaint({ len: 4, r: .32, snow: true, c: '#5a4a40' }) });
+propDef('stump', { size: [1 * M, 1 * M], variants: 2, occ: occTrunk(.4, .7), paint: (g, k, v, f, ox, oy) => { const u = M * k, C = TT('#6a5040'); px.rect(g, ox - .4 * u, oy - .7 * u, .8 * u, .7 * u, C.sh); px.rect(g, ox - .4 * u, oy - .7 * u, .45 * u, .7 * u, C.base); px.ell(g, ox, oy - .7 * u, .4 * u, .15 * u, '#b8945a'); } });
+propDef('fence', { size: [4.5 * M, 1.5 * M], variants: 2, facings: 1, bias: 6, paint: fencePaint });
+propDef('haybale', { size: [1.2 * M, 1.5 * M], variants: 1, shadow: .8, occ: occBall(.75, .7), paint: haybalePaint });
+propDef('barn', { size: [9 * M, 12 * M], shadow: 7, occ: occBox(6, 5, 9), paint: housePaint({ w: 12, h: 6.5, roof: 4, d: 10, wall: '#a8321e', roofC: '#4a4a52', trim: '#f0e8dc', barn: true }) });
+propDef('farmhouse', { size: [7 * M, 9 * M], shadow: 5, occ: occBox(5, 4, 7), paint: housePaint({ w: 9, h: 4.5, roof: 3.2, d: 8, wall: '#e8dcc0', roofC: '#5a4a44', door: true, porch: true, lit: true }) });
+propDef('shed', { size: [3 * M, 4 * M], shadow: 2, occ: occBox(1.8, 1.6, 3), paint: housePaint({ w: 3.6, h: 2.4, roof: 1.2, d: 3, wall: '#7a6450', roofC: '#4a3e36', door: true }) });
+propDef('traphouse', { size: [2 * M, 2.2 * M], occ: occBox(1.2, 1, 1.4), paint: trapPaint });
+propDef('lodge', { size: [3.6 * M, 2.4 * M], shadow: 2, occ: occBall(2.4, .6), paint: lodgePaint });
+propDef('drift', { size: [3.5 * M, 1 * M], variants: 4, bias: 4, paint: driftPaint });
+propDef('stand', { size: [1 * M, 5.6 * M], paint: standPaint });
+propDef('sign', { size: [1 * M, 1.8 * M], paint: signPaint });
+propDef('berm', { size: [6.5 * M, 2.4 * M], occ: occBox(6, 1.5, 2.2), paint: bermPaint });
+
+/** occluder volumes a ray might hit: the nearest t (forward-distance parameter) or null */
+function rayVolume(o, d, v) {
+  if (v.k === 'sph') return raySphere(o, d, [v.x, v.y, v.z], v.r);
+  if (v.k === 'cyl') {   // a vertical cylinder from z0 to z1
+    const ox = o.x - v.x, oy = o.y - v.y, a = d.dx * d.dx + d.dy * d.dy, b = 2 * (ox * d.dx + oy * d.dy), c = ox * ox + oy * oy - v.r * v.r, D = b * b - 4 * a * c; if (D < 0 || a < 1e-9) return null;
+    const t = (-b - Math.sqrt(D)) / (2 * a); if (t < 0) return null; const z = o.z + d.dz * t; return z >= v.z0 && z <= v.z1 ? t : null;
+  }
+  if (v.k === 'cap') return rayCapsule(o, d, v.a, v.b, v.r);
+  if (v.k === 'box') {   // a box turned by a about z
+    const ca = Math.cos(-v.a || 0), sa = Math.sin(-v.a || 0), lx = (o.x - v.x) * ca - (o.y - v.y) * sa, ly = (o.x - v.x) * sa + (o.y - v.y) * ca, dx = d.dx * ca - d.dy * sa, dy = d.dx * sa + d.dy * ca;
+    let t0 = 0, t1 = Infinity; for (const [p, q, lo, hi] of [[lx, dx, -v.hx, v.hx], [ly, dy, -v.hy, v.hy], [o.z, d.dz, v.z0, v.z1]]) { if (Math.abs(q) < 1e-9) { if (p < lo || p > hi) return null; continue; } let a = (lo - p) / q, b = (hi - p) / q; if (a > b) [a, b] = [b, a]; t0 = Math.max(t0, a); t1 = Math.min(t1, b); if (t0 > t1) return null; }
+    return t0 > 0 ? t0 : null;
+  }
+  return null;
+}
+function raySphere(o, d, c, r) { const ox = o.x - c[0], oy = o.y - c[1], oz = o.z - c[2], a = d.dx * d.dx + d.dy * d.dy + d.dz * d.dz, b = 2 * (ox * d.dx + oy * d.dy + oz * d.dz), cc = ox * ox + oy * oy + oz * oz - r * r, D = b * b - 4 * a * cc; if (D < 0) return null; const s = Math.sqrt(D), t = (-b - s) / (2 * a); return t >= 0 ? t : ((-b + s) / (2 * a) >= 0 ? 0 : null); }
+function rayCapsule(o, d, A, B, r) {
+  // the nearest t where the ray comes within r of the segment AB (sampled, then refined)
+  const best = { t: null, m: Infinity }, dl = Math.hypot(d.dx, d.dy, d.dz);
+  const segD = t => { const p = [o.x + d.dx * t, o.y + d.dy * t, o.z + d.dz * t], vx = B[0] - A[0], vy = B[1] - A[1], vz = B[2] - A[2], L = vx * vx + vy * vy + vz * vz; let u = L ? ((p[0] - A[0]) * vx + (p[1] - A[1]) * vy + (p[2] - A[2]) * vz) / L : 0; u = clamp(u, 0, 1); return Math.hypot(A[0] + vx * u - p[0], A[1] + vy * u - p[1], A[2] + vz * u - p[2]); };
+  // the closest approach of the ray to the segment's line
+  const ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2], wx = o.x - A[0], wy = o.y - A[1], wz = o.z - A[2];
+  const a = d.dx * d.dx + d.dy * d.dy + d.dz * d.dz, b = d.dx * ux + d.dy * uy + d.dz * uz, c = ux * ux + uy * uy + uz * uz, dd = d.dx * wx + d.dy * wy + d.dz * wz, e = ux * wx + uy * wy + uz * wz, den = a * c - b * b;
+  let tc = den > 1e-9 ? (b * e - c * dd) / den : -dd / a; if (tc < 0) tc = 0;
+  let lo = Math.max(0, tc - (r + Math.sqrt(c)) * 2 / dl), hi = tc + (r + Math.sqrt(c)) * 2 / dl;
+  if (segD(tc) > r) { // maybe the segment's ends are nearer than the line's closest point
+    let m = Infinity, tm = tc; for (let i = 0; i <= 24; i++) { const t = lo + (hi - lo) * i / 24, q = segD(t); if (q < m) { m = q; tm = t; } }
+    if (m > r) return null; tc = tm;
+  }
+  // walk back from the inside to the surface
+  let tin = tc, tout = lo; if (segD(tout) <= r) return tout;
+  for (let i = 0; i < 20; i++) { const mid = (tin + tout) / 2; if (segD(mid) <= r) tin = mid; else tout = mid; }
+  return tin;
+}
+
+// 80-hollow: HOLLOW CREEK, an autumn morning in the hardwoods: whitetails, Granny Mae's farm, the creek, Fog Glade.
+const HOLLOW_CREEK = [[505, -20], [492, 110], [526, 250], [512, 360], [528, 425], [556, 520], [598, 640], [584, 780], [622, 900], [640, 1040]];
+const HOLLOW_CORN = [[700, 560], [862, 556], [866, 682], [702, 688]];
+const HOLLOW_PASTURE = [[598, 556], [698, 558], [700, 690], [600, 694]];
+const HOLLOW_YARD = [[760, 700], [920, 700], [924, 800], [764, 806]];
+const hollowN = E.makeNoise(1101 * 5 + 1);
+def('hunt', 'hollow', {
+  name: 'Hollow Creek', species: 'whitetail', seed: 1101, order: 1, when: 'Autumn morning', blurb: 'Whitetails in the hardwoods, mist on the creek.',
+  sun: { yaw: -20, elev: 13, color: '#ffe2b8', ambient: '#7a84a4', r: 6, glow: '#ffe0b0', disc: '#fff4dc' },
+  fog: { color: '#d4d8dc', near: 140, far: 1500 }, mist: { top: 46, color: '#e6e4e0', density: .55, range: 90 },
+  sky: { sky: ['#6a98d8', '#a8c4e4', '#e8d8c8', '#f4d0a8'], layers: [
+    { kind: 'clouds', color: '#fbf0e4', y: .16, height: .1, parallax: .02, drift: 2 },
+    { kind: 'hills', color: '#9aa6bc', y: .47, height: .1, parallax: .03 },
+    { kind: 'hills', color: '#8a90a0', y: .5, height: .08, parallax: .05, seed: 9 }] },
+  water: { deep: '#2a4446', shallow: '#4a6a62', sky: '#b8c8d0', foam: '#e8ecec' },
+  grade: { mul: '#fff4ea', add: '#060402', gamma: .96 },
+  outline: '#2a1a10', weather: { kind: 'leaves', amount: .35 }, ambience: 'hollow', host: 'granny', call: 'grunt',
+  terrain: { base: { amp: 13, scale: 230, octaves: 5, warp: 40, offset: 40 }, features: [
+    { kind: 'valley', path: HOLLOW_CREEK, width: 60, depth: 7 },
+    { kind: 'ridge', path: [[230, 110], [255, 330], [248, 520], [228, 700], [252, 900]], height: 15, width: 52 },
+    { kind: 'ridge', path: [[760, 260], [900, 330], [1000, 300]], height: 9, width: 70 },
+    { kind: 'flatten', poly: HOLLOW_CORN, z: 'avg', falloff: 26 },
+    { kind: 'flatten', poly: HOLLOW_PASTURE, z: 'avg', falloff: 18, mark: 64 },
+    { kind: 'flatten', poly: HOLLOW_YARD, z: 'avg', falloff: 22, mark: 128 },
+    { kind: 'field', poly: HOLLOW_CORN },
+    { kind: 'flatten', poly: [[255, 160], [345, 150], [360, 235], [270, 262]], z: 'avg', falloff: 30, mark: 32 },
+    { kind: 'river', path: HOLLOW_CREEK, width: 7, depth: 1.1, banks: 6, drop: .6, fall: .004, ford: [[528, 425, 8]] },
+    { kind: 'trail', path: [[420, 430], [500, 428], [528, 425], [560, 426], [640, 440]], width: 2 },
+    { kind: 'trail', path: [[560, 470], [600, 560], [650, 640], [676, 668]], width: 1.6 },
+    { kind: 'trail', path: [[700, 700], [760, 740], [820, 740]], width: 2.4 },
+    { kind: 'plateau', at: [676, 668], r: 3, falloff: 10 },
+    { kind: 'plateau', at: [252, 470], r: 4, dz: .4, falloff: 8 }] },
+  types: c => c.water ? GT.mud : c.mask & 16 ? (c.n2 > .3 ? GT.shore : GT.mud) : c.mask & 1 ? GT.soil : c.mask & 128 ? GT.yard : c.mask & 2 ? GT.dirt : c.mask & 64 ? GT.pasture : c.slope > .75 ? GT.rock : c.wdist < 14 ? (c.n > .1 ? GT.dry : GT.grass) : hollowForest(c) > .45 ? GT.leaves : c.n > .3 ? GT.dry : GT.grass,
+  forest: c => hollowForest(c), farForest: (x, y) => .25 + .6 * (.5 + .5 * hollowN(x / 160, y / 160)),
+  crop: c => c.mask & 1 && !(c.mask & 2) ? 2.2 + c.n2 * .3 : 0,
+  canopy: { min: 11, max: 18 },
+  palette: {
+    types: { 0: { a: '#7a8a3c', b: '#8c9446', c: '#b0a44a', speck: .04, scale: 9 }, 1: { a: '#a89a50', b: '#b4a45a', c: '#c8b46a', speck: .05, scale: 6 }, 2: { a: '#8a5a2a', b: '#a06a2e', c: '#c8481e', speck: .12, scale: 4 },
+      3: { a: '#8a6a44', b: '#7a5e3c', scale: 3 }, 4: { a: '#86827a', b: '#9a958a', scale: 3 }, 6: { a: '#5e4c34', b: '#6a5638', scale: 3 }, 10: { a: '#7a5a3a', b: '#8a6a44', scale: 2 }, 12: { a: '#8a7a62', b: '#9a8a70', c: '#b0a088', speck: .2, scale: 2 },
+      14: { a: '#6e8a3a', b: '#7a9444', c: '#e8e4a0', speck: .02, scale: 8 }, 15: { a: '#8a7458', b: '#9a8264', scale: 4 }, 5: { a: '#8a867e', b: '#9a968e' }, 13: { a: '#6a5a3a', b: '#7a6a44' } },
+    canopy: ['#a8421c', '#c86a2a', '#8a7a2a'], crop: { 10: { c: ['#a88a4a', '#c8a85a', '#d8bc6a'], rows: true, rowsDeg: 90 } },
+    farTypes: (h, s, n) => s > .6 ? GT.rock : n > .2 ? GT.dry : GT.grass
+  },
+  scatter: [
+    { where: c => c.forest * .95, spacing: 6.5, mix: [['oak', .42], ['maple', .32], ['birch', .26]], scale: [.8, 1.2], inFan: .5 },
+    { where: c => (c.mask & 233) || c.water ? 0 : c.forest < .2 ? .02 : 0, spacing: 22, mix: [['oak', .6], ['maple', .4]], scale: [.9, 1.25] },
+    { where: c => (c.mask & 233) || c.water || hollowNearField(c) ? 0 : (c.forest > .15 && c.forest < .7 ? .5 : c.forest < .15 ? .06 : .12), spacing: 7, mix: [['bush', .55], ['sumac', .3], ['fern', .15]], fanMargin: 0 },
+    { where: c => (c.mask & 1) || c.water || hollowNearField(c) ? 0 : c.wdist < 12 ? .55 : (c.mask & 64) ? .08 : c.forest < .3 ? .16 : 0, spacing: 3.2, prop: 'tallgrass', fanMargin: -6, inFan: 1, clearR: 6 },
+    { where: c => (c.mask & 1) && c.r < .99 ? hollowCornEdge(c) : 0, spacing: 1.7, prop: 'corn', fanMargin: -100, inFan: 1 },
+    { where: c => (c.mask & 233) || c.water || hollowNearField(c) ? 0 : c.forest > .3 ? .05 : .01, spacing: 16, mix: [['log', .5], ['rock', .3], ['stump', .2]], fanMargin: 2 },
+    { where: c => c.type === GT.rock ? .3 : 0, spacing: 7, prop: 'rock' }
+  ],
+  vantages: {
+    creekStand: { at: [542, 455], eye: 4.6, yaw: -100, kind: 'treestand', name: 'the creek stand' },
+    fieldBlind: { at: [676, 668], eye: 1.35, yaw: -95, kind: 'blind', name: 'the cornfield blind' },
+    ridgeRock: { at: [252, 470], eye: 2.3, yaw: 10, kind: 'rock', name: 'the ridge outcrop' },
+    gladeEdge: { at: [306, 300], eye: 1.7, yaw: -92, kind: 'ground', name: 'the edge of Fog Glade' },
+    porch: { at: [820, 728], eye: 2.2, yaw: -90, kind: 'porch', name: "Granny Mae's porch" },
+    overlook: { at: [560, 1000], eye: 70, yaw: -95, kind: 'air' }
+  },
+  props: [
+    ['farmhouse', [820, 744], { facing: 0 }], ['barn', [886, 772], { facing: 0 }], ['shed', [770, 776], { facing: 0 }], ['haybale', [860, 748]], ['haybale', [866, 752]], ['haybale', [902, 742]],
+    ['stand', [544, 458]], ['sign', [690, 700]], ['boulder', [254, 474]], ['boulder', [247, 466]],
+    ...Array.from({ length: 15 }, (_, i) => ['fence', [699, 686 - i * 8.6], { facing: Math.PI / 2 }]),
+    ...Array.from({ length: 11 }, (_, i) => ['fence', [604 + i * 8.6, 692], { facing: 0 }])
+  ],
+  sites: ['hollow-1', 'hollow-2', 'hollow-3'], trophy: 'iron-rack', bonus: 'crow-patrol', par: 6200,
+  rivals: { earl: 3400, loretta: 5300, dwayne: 6300 },
+  intro: 'hollow-intro', outro: 'hollow-outro', legendBeat: 'iron-rack-legend', bonusBeat: 'crow-patrol-brief',
+  establish: { from: [560, 1000, 70, -95], to: [560, 760, 45, -100], secs: 7 }
+});
+function hollowForest(c) {
+  const base = .5 + .5 * hollowN(c.x / 140, c.y / 140), d = c.mask & 233 ? 0 : 1, glade = Math.hypot(c.x - 305, c.y - 205) < 70 ? 0 : 1;
+  const ridge = Math.abs(c.x - 245) < 120 ? .35 : 0, creek = c.wdist < 10 ? 0 : 1;
+  return clamp((base - .35) * 2.2 + ridge, 0, 1) * d * glade * creek;
+}
+function hollowNearField(c) { return c.x > 680 && c.x < 885 && c.y > 535 && c.y < 708 && E.polyDist(c.x, c.y, HOLLOW_CORN) < 6; }
+function hollowCornEdge(c) { const d = E.polyDist(c.x, c.y, HOLLOW_CORN); return d < 3.5 ? .9 : 0; }
+
+/* ---------- the sites ---------- */
+def('site', 'hollow-1', {
+  hunt: 'hollow', name: 'Creek Crossing', vantage: 'creekStand', frame: { bearings: [-38, 38], fov: 34, pitch: 4.5 }, distances: [16, 58], time: 60, bucks: 3,
+  director: [[0, { bearing: -16 }], [5, { bearing: 2, dur: 7, ease: 'inOutSine' }], [26, { mode: 'follow' }]],
+  props: [['log', [-24, 27]], ['bush', [16, 30]], ['tallgrass', [-6, 20]], ['tallgrass', [9, 22]], ['oak', [-36, 48], { variant: 1 }], ['maple', [34, 52]], ['birch', [26, 40]], ['rock', [-12, 38]]],
+  critters: [['squirrel', { tree: [34, 44], at: 9 }], ['rabbit', { path: [[22, 17], [8, 15], [-4, 19]], at: 21 }]],
+  script: function* (S) {
+    yield 1.2; S.bark('start');
+    const doe = S.pattern('cross', { kind: 'doe', path: [[-46, 42], [-16, 33], [14, 35], [44, 48]], gait: 'walk', stop: [.45, 2.2] });
+    S.pattern('cross', { kind: 'fawn', follow: doe, back: 2.4 });
+    yield 5;
+    S.pattern('graze', { kind: 'buck', points: S.rng.int(5, 7), from: [42, 52], at: [14, 30], secs: 4.5, exit: [-44, 46] });
+    yield E.any([E.until(() => S.bucksLeft <= 2), 15]);
+    S.pattern('herdPass', { kinds: ['buck', 'doe', 'buck'], path: [[44, 30], [10, 34], [-16, 33], [-46, 40]], gait: 'bound', spacing: 5, points: [S.rng.int(6, 8), 0, S.rng.int(7, 9)], splash: true });
+    yield E.until(() => S.allResolved);
+  }
+});
+def('site', 'hollow-2', {
+  hunt: 'hollow', name: 'Cornfield Edge', vantage: 'fieldBlind', frame: { bearings: [-34, 40], fov: 30, pitch: 2.5 }, distances: [30, 95], time: 70, bucks: 4,
+  director: [[0, { bearing: 26 }], [4, { bearing: 6, dur: 6 }], [30, { mode: 'follow' }]],
+  props: [['haybale', [-10, 40]], ['bush', [-28, 52]], ['oak', [-38, 92]], ['tallgrass', [6, 31]], ['tallgrass', [-18, 34]]],
+  critters: [['turkey', { path: [[-30, 60], [-8, 56], [10, 62]], at: 6, flock: 3 }], ['skunk', { path: [[18, 38], [0, 34], [-20, 40]], at: 30 }], ['bessie', { pos: [-14, 70], at: 0 }]],
+  script: function* (S) {
+    yield 1; S.bark('start');
+    S.pattern('emerge', { kind: 'buck', points: S.rng.int(5, 7), cover: [30, 62], path: [[30, 62], [8, 58], [-20, 64], [-40, 84]], gait: 'run' });
+    S.pattern('emerge', { kind: 'doe', cover: [32, 70], path: [[32, 70], [6, 66], [-24, 70], [-42, 90]], gait: 'run', delay: .6 });
+    yield E.any([E.until(() => S.resolved >= 1), 12]);
+    yield 2.5;
+    S.pattern('emerge', { kind: 'buck', points: S.rng.int(6, 8), cover: [22, 48], path: [[22, 48], [0, 46], [-26, 56], [-40, 72]], gait: 'run', jump: .55 });
+    S.pattern('emerge', { kind: 'buck', points: S.rng.int(4, 6), cover: [26, 54], path: [[26, 54], [4, 50], [-22, 60], [-42, 78]], gait: 'run', delay: .9 });
+    yield E.any([E.until(() => S.resolved >= 3), 16]);
+    yield 2;
+    S.pattern('decoyDoe', { path: [[38, 80], [10, 74], [-20, 80], [-44, 96]] });
+    yield 2.2;
+    S.pattern('emerge', { kind: 'buck', points: 10, cover: [36, 78], path: [[36, 78], [12, 72], [-16, 78], [-42, 94]], gait: 'trot', stop: [.4, 1.8], big: true });
+    yield E.until(() => S.allResolved);
+  }
+});
+def('site', 'hollow-3', {
+  hunt: 'hollow', name: 'Hardwood Ridge', vantage: 'ridgeRock', frame: { bearings: [-32, 32], fov: 32, pitch: 9 }, distances: [22, 75], time: 75, bucks: 4, fanTrees: .22,
+  director: [[0, { bearing: -10 }], [6, { bearing: 8, dur: 8 }], [24, { mode: 'follow' }]],
+  props: [['oak', [-14, 34]], ['maple', [8, 44]], ['oak', [22, 30]], ['birch', [-26, 56]], ['birch', [16, 62]], ['log', [-4, 40]], ['bush', [28, 50]], ['oak', [-30, 26]], ['maple', [-6, 66]]],
+  critters: [['raccoon', { log: [-4, 40], at: 12 }], ['squirrel', { tree: [-14, 34], at: 5 }], ['squirrel', { tree: [22, 30], at: 34 }]],
+  script: function* (S) {
+    yield 1; S.bark('start');
+    S.pattern('cross', { kind: 'buck', points: S.rng.int(6, 8), path: [[-40, 50], [-18, 46], [-2, 52], [16, 46], [38, 56]], gait: 'walk', stop: [.35, 2] });
+    S.pattern('cross', { kind: 'doe', path: [[-40, 60], [-14, 58], [10, 60], [40, 66]], gait: 'walk', delay: 2.5 });
+    S.pattern('bolt', { kind: 'buck', points: S.rng.int(7, 9), bed: [-4, 43], path: [[-4, 43], [10, 50], [36, 66]], after: 14 });
+    yield E.any([E.until(() => S.resolved >= 2), 16]);
+    yield 2;
+    S.pattern('decoyDoe', { path: [[38, 40], [12, 36], [-14, 40], [-40, 48]], gait: 'trot' });
+    yield 1.6;
+    S.pattern('cross', { kind: 'buck', points: S.rng.int(5, 8), path: [[38, 44], [12, 40], [-14, 44], [-40, 54]], gait: 'trot' });
+    yield E.any([E.until(() => S.resolved >= 3), 14]);
+    S.pattern('cross', { kind: 'buck', points: S.rng.int(8, 10), path: [[40, 70], [14, 64], [-10, 68], [-40, 72]], gait: 'walk', stop: [.5, 2.5], big: true });
+    yield E.until(() => S.allResolved);
+  }
+});
+
+// (being written)
+
+// (being written)
+
+
+const [hid, vid] = (location.hash.slice(1) || 'hollow/creekStand').split('/');
+const W = worldFor(hid), L = new E.Lens(); const S = regAll('site').find(s => s.vantage === vid);
+let b = 0;
+game.start({ update(dt) { b += game.input.move()[0] * dt * 20; W.vista.time = game.time; }, draw(r) {
+  const e = W.eye(vid), fr = S ? S.frame : { fov: 34, pitch: 4 };
+  L.setup({ x: e.x, y: e.y, z: e.z, yaw: e.yaw + b * DEG, pitch: fr.pitch, fov: fr.fov }, r.W, r.H);
+  const items = W.gather(L, []); W.vista.draw(r, L, items);
+  r.text(hid + '/' + vid + ' gen ' + W.genMs + 'ms all ' + W.ms + 'ms  draw ' + (W.vista.stats.ms||0).toFixed(1) + 'ms items ' + W.vista.stats.items + ' props ' + W.props.length, 4, 4, '#fff', { shadow: '#000' });
+} });
+})();</script></body></html>

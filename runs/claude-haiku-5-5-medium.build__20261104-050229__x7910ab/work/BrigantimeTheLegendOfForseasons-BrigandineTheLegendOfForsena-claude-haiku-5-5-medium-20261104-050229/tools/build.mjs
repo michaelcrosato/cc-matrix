@@ -1,0 +1,69 @@
+// Build: node tools/build.mjs
+//   1. concatenates src/*.js in name order inside one IIFE, with E (the engine) and G (this game) in scope -> dist/game.js
+//   2. writes dist/index.html, the dev page (the engine and game as separate scripts)
+//   3. writes the single deliverable beside TASK.md, one self-contained HTML file: the AI Hub client first (unmodified),
+//      the hub tags, the page style, the boot splash, the engine, then the game. Nothing is loaded from the network.
+// It fails if src/ holds TODO, FIXME, XXX, placeholder or lorem, or if the game asks for a file that is not inlined.
+import { readFileSync, writeFileSync, readdirSync, mkdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const DEV = dirname(dirname(fileURLToPath(import.meta.url)));
+const OUT_NAME = 'BrigantimeTheLegendOfForseasons-BrigandineTheLegendOfForsena-claude-haiku-5-5-medium-20261104-050229';
+const TITLE = 'Brigantime: The Legend of Forseasons';
+const read = p => readFileSync(p, 'utf8');
+const SRC = join(DEV, 'src');
+const files = readdirSync(SRC).filter(f => f.endsWith('.js')).sort();
+const bad = /\b(TODO|FIXME|XXX|placeholder|lorem)\b/i;
+let body = '';
+for (const f of files) {
+  const text = read(join(SRC, f));
+  const hit = text.split('\n').find(l => bad.test(l));
+  if (hit) throw new Error(`${f} has a forbidden word: ${hit.trim().slice(0, 120)}`);
+  body += `\n// ---- src/${f} ----\n${text}`;
+}
+const game = `(() => {\n'use strict';\nconst E = My3D2dge, G = {};\n${body}\n})();\n`;
+mkdirSync(join(DEV, 'dist'), { recursive: true });
+writeFileSync(join(DEV, 'dist', 'game.js'), game);
+
+const engine = read(join(DEV, 'engine', 'my-3d2dge.js'));
+const hub = read(join(DEV, 'vendor', 'hub', 'session.js'));
+const escapeScript = s => s.replace(/<\/script/gi, '<\\/script');
+writeFileSync(join(DEV, 'dist', 'index.html'), `<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>${TITLE}</title>
+<style>html, body { margin: 0; height: 100%; background: #000; overflow: hidden } #screen { width: 100%; height: 100%; display: block; image-rendering: pixelated; touch-action: none }</style>
+</head><body>
+<canvas id="screen"></canvas>
+<script src="../engine/my-3d2dge.js"></script>
+<script src="game.js"></script>
+</body></html>
+`);
+
+const BOOT = '<div id="e3-boot" role="status" style="position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end;gap:6px;padding:20px;background:#05040a;color:#a9a1c8;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace"><style>@keyframes e3-run{from{transform:translateX(-100%)}to{transform:translateX(340%)}}@keyframes e3-late{to{opacity:1}}</style><b style="color:#f4f0ff;font-size:16px;letter-spacing:.08em">BRIGANTIME</b><span>Starting &middot; my-3D2dge v0.85.2</span><span style="display:block;height:4px;max-width:440px;overflow:hidden;background:#ffffff14"><span style="display:block;width:30%;height:100%;background:#d9b77c;animation:e3-run 1.2s ease-in-out infinite"></span></span><span style="opacity:0;animation:e3-late .3s 12s forwards">Still starting. If this stays, the game\'s script did not run: reload, or open the browser\'s console.</span></div>';
+const single = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>${escapeScript(hub)}</script>
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Your side wins the field: break the enemy commander or hold the keep. Each player commands their own troop.">
+<meta name="hub:session-howto" content="Stick or arrows: move the cursor. A or Enter: confirm. B or Escape: back. Y or E: end the turn.">
+<meta name="hub:session-minutes" content="4">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>${TITLE}</title>
+<style>html, body { margin: 0; height: 100%; background: #000; overflow: hidden } #screen { width: 100%; height: 100%; display: block; image-rendering: pixelated; touch-action: none }</style>
+</head>
+<body>
+${BOOT}
+<canvas id="screen"></canvas>
+<script>${escapeScript(engine)}</script>
+<script>${escapeScript(game)}</script>
+</body>
+</html>
+`;
+writeFileSync(join(DEV, '..', OUT_NAME + '.html'), single);
+console.log(`built: dist/game.js (${files.length} source files), dist/index.html, ../${OUT_NAME}.html`);

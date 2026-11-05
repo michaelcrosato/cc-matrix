@@ -1,0 +1,87 @@
+// Every visible string that is not a label (cards, radio, the briefing, the endings, the About screen). The voice is
+// the source's: terse, all caps on the cards, a radio that talks over the top of the fight. Radio lines are said in
+// gibberish (the voice blips), so the words are for the captions only.
+(() => {
+'use strict';
+const WP = globalThis.WP;
+
+WP.TEXT = {
+  // the radio: [who, text]. who: DEN (the commander), CHIEF (the workers' lead), HAWK (the pilot)
+  'op1.go': ['DEN', 'OPERATION WOLFPACK IS GO. THE RADIO HILL IS YOURS. GOOD HUNTING.'],
+  'op1.hold': ['DEN', 'HOLD THE RIDGE. THEY ARE SENDING BOXES OF THEM UP THE HILL.'],
+  'op1.jeep': ['DEN', 'JEEPS ON THE ROAD. THE ROCKET BOYS ARE RINGING. SHOOT THE ROCKETS OUT OF THE AIR.'],
+  'op1.station': ['DEN', 'THE RADIO IS UP THERE. THE BRIGADIER IS STANDING IN FRONT OF IT. DO NOT LET HIM TALK.'],
+  'op2.go': ['DEN', 'MANGROVE RUN. THE RIVER IS FULL OF SKIFFS. KEEP THE BOATS OFF THE BANK.'],
+  'op2.river': ['HAWK', 'GUNBOAT ON THE BEND. TURRET WARM. SHOOT THE TURRET BEFORE IT TURNS.'],
+  'op2.croc': ['DEN', 'THE CROCODILE IS AT THE BRIDGE. HIT HIS HEAD. THE REST OF HIM IS ARMOR.'],
+  'op3.go': ['DEN', 'PALM VILLAGE. FIVE WORKERS IN THE HUTS. THE CIVILIANS ARE NOT THE ENEMY. KEEP YOUR FINGER OFF THEM.'],
+  'op3.hostage': ['CHIEF', 'THEY ARE IN THE RED HUTS. WE SEE THE WORKERS. GUARDS BY EACH ONE.'],
+  'op3.warthog': ['DEN', 'WARTHOG IN THE PLAZA. THE NOZZLE GLOWS BEFORE IT BURNS. TAKE IT OUT OF THE HATCH.'],
+  'op4.go': ['DEN', 'POWDER KEG DEPOT. THE DYNAMITE CRATES ARE RED. SHOOT ONE AND EVERYTHING IN VIEW GOES UP.'],
+  'op4.depot': ['HAWK', 'MORTAR CREWS BEHIND THE SANDBAGS. THEY LOB; SHOOT THE SHELLS.'],
+  'op4.tanks': ['DEN', 'TANKS ON THE SIDING. THEIR BARRELS GLOW BEFORE THE SHELL. SHOOT THEM OUT.'],
+  'op4.hog': ['DEN', 'THE IRON HOG IS ON THE TRACKS. THE VENTS GLOW BEFORE THE STEAM. SHOOT THE BOILER.'],
+  'op5.go': ['DEN', 'THE KENNEL. IT IS NIGHT AND IT IS RAINING. THE SEARCHLIGHTS WILL FIND YOU.'],
+  'op5.kennel': ['CHIEF', 'THE WORKERS ARE IN THE KENNEL PENS. WHEN THE GUARDS ARE DOWN, THEY RUN.'],
+  'op5.breakout': ['CHIEF', 'THEY ARE OUT. KEEP THEM OUT OF THE SNIPERS\' LINE.'],
+  'op5.tusk': ['DEN', 'MAJOR TUSK IS COMING DOWN FROM THE TOWER. HE HAS A SHIELD. HIT HIS HEAD.'],
+  'op6.go': ['DEN', 'THE CARGO PLANE IS ON THE STRIP. EVERY WORKER ABOARD. THE STORM IS CLOSING IN.'],
+  'op6.gunship': ['HAWK', 'GUNSHIP ON OUR TAIL. ROCKET PODS AND A DOOR GUNNER. KEEP IT ON THE LEFT.'],
+  'op6.hyena': ['DEN', 'HYENA ONE. KRAGG IS LEANING OUT WITH A LAUNCHER. HIT HIM IN THE HEAD.'],
+  'boss.para': ['DEN', 'PARATROOPERS OFF THE HILL. TURN AND SHOOT THEM IN THE AIR.'],
+  'boss.enraged': ['DEN', 'HE IS ANGRY NOW. ANGRY MEN MISS, BUT ONLY SOMETIMES.'],
+  'boss.down': ['DEN', 'THE BIG MAN IS DOWN. CLEAR THE GROUND AND COME HOME.'],
+  'civ.hit': ['DEN', 'YOU SHOT A CIVILIAN. THAT COSTS THE VILLAGE. EYES UP, WOLF.'],
+  'hostage.freed': ['CHIEF', 'HE IS RUNNING. HE IS RUNNING FOR THE RIDGE.'],
+  'hostage.saved': ['CHIEF', 'ONE MORE ON THE TRUCK. RUN, FRIEND, RUN.'],
+  'hostage.lost': ['CHIEF', 'WE LOST ONE. WE LOST ONE.'],
+  'down.one': ['DEN', 'ONE OF YOU IS DOWN. THE REST OF THE PACK KEEPS GOING.'],
+  'fury.on': ['DEN', 'FURY! THE GUN IS HOT. TEN SECONDS, NO RELOADS. FIRE.'],
+  'dyn.boom': ['DEN', 'THAT WAS THE DEPOT. EVERYTHING IN VIEW IS GONE.'],
+  'drop.emergency': ['DEN', 'PARACHUTE DROP: A MAGAZINE, COMING DOWN ON THE FIELD.'],
+  'lost.down': ['DEN', 'THE PACK IS CALLING YOU BACK, WOLF. TRY AGAIN.'],
+  'lost.ammo': ['DEN', 'NO AMMO, NO GRENADES, NO DOORS. EXTRACT.'],
+  'tally.next': ['DEN', 'GOOD. NEXT WE PUSH ON.'],
+};
+
+// the operation cards: the number and the name, for each operation
+WP.CARDS = {
+  op1: ['OPERATION 1', 'RADIO HILL'], op2: ['OPERATION 2', 'MANGROVE RUN'], op3: ['OPERATION 3', 'PALM VILLAGE'],
+  op4: ['OPERATION 4', 'POWDER KEG DEPOT'], op5: ['OPERATION 5', 'THE KENNEL'], op6: ['OPERATION 6', 'LAST FLIGHT OUT'],
+};
+
+// the ranks: the score a tally needs, and the name (the source's pilots, but with more rifles)
+WP.RANKS = [
+  [0, 'PRIVATE'], [4000, 'CORPORAL'], [9000, 'SERGEANT'], [16000, 'LIEUTENANT'], [24000, 'CAPTAIN'], [34000, 'COLONEL'], [46000, 'WOLF'],
+];
+WP.rankFor = score => { let r = WP.RANKS[0][1]; for (const [s, n] of WP.RANKS) if (score >= s) r = n; return r; };
+
+// the endings, by the share of workers who came home (fifteen across the three rescues)
+WP.ENDINGS = [
+  { min: 0.8, title: 'THE PACK COMES HOME', text: 'MOST OF THE WORKERS ARE ON THE PLANE. KRAGG\'S RADIO IS SILENT FOR GOOD. THE COAST IS QUIET, AND THE GULLS ARE BACK.' },
+  { min: 0.4, title: 'SOME COME HOME', text: 'A GOOD HALF OF THE WORKERS MADE IT ONTO THE PLANE. THE REST ARE STILL IN THE HUTS, AND THE PACK WILL NOT FORGET THEM.' },
+  { min: 0, title: 'TOO FEW CAME HOME', text: 'THE PLANE LEFT WITH EMPTY SEATS. THE WOLFPACK WAITS ON THE BEACH AND COUNTS THE NAMES.' },
+];
+
+// the About and Credits lines (also the chat reply's Source Information, in the same order)
+WP.ABOUT = [
+  'OPERATION WOLFPACK',
+  'AN ORIGINAL FIRST-PERSON LIGHT-GUN SHOOTER',
+  'INSPIRED BY TAITO\'S OPERATION WOLF (1987)',
+  '',
+  'GENERAL KRAGG AND THE HYENA LEGION HOLD THE BRIMSTONE COAST.',
+  'FIVE RELIEF WORKERS ARE IN THEIR HANDS. NO ARMY WILL GO IN.',
+  'SO THEY SENT THE PACK.',
+  '',
+  'AIM WITH THE MOUSE, THE STICK OR THE ARROW KEYS.',
+  'HOLD SPACE, Z, J OR CLICK TO FIRE. R OR X (PAD) RELOADS.',
+  'X, K OR THE RIGHT CLICK (PAD B) THROWS A GRENADE AT THE CROSSHAIR.',
+  'SHOOT THE CRATES AND THE GOATS FOR SUPPLIES. SHOOT THE PICKUPS TO COLLECT.',
+  'SHOOT THE PROJECTILES OUT OF THE AIR. DO NOT SHOOT THE CIVILIANS.',
+  '',
+  'ENGINE: MY-3D2DGE 0.85.2 (2D CANVAS, PIXEL DRAWING, CHIP AUDIO).',
+];
+
+// the touch notice
+WP.TOUCH_NOTICE = 'CONTROLLER OR KEYBOARD REQUIRED';
+})();

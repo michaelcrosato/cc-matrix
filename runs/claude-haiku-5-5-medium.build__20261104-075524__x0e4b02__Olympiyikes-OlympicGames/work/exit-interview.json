@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:55:24",
+    "source": "the complete summer and winter Olympic games",
+    "plan": "PLAN.md",
+    "genre": "Arcade multi-event sports",
+    "perspective": "2.5D lanes (brawler view) for the 100m Dash, side view for the Ski Jump, overhead view for Archery",
+    "tech": "my-3D2dge v0.85.2 handoff engine (copy, unchanged), plain JavaScript on canvas; Node 24 for headless tests; Python Playwright with Chromium for screenshots",
+    "artDirection": "Engine pixel style: chibi Humanoid rigs, sky gradients, flat track and ramp shapes, a code-drawn archery target",
+    "animation": "Engine Humanoid rig poses (run, air, down) driven each step",
+    "audio": "Engine chip synth, sound presets and song loops (E.songs); no audio files; no voices",
+    "online": "none",
+    "testing": "Headless scripted playthroughs (21 checks, one command) and browser screenshots",
+    "research": "The engine's own docs only (API card, README, API index); no web research",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium via Playwright for screenshots",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Six game bugs. Two were critical: attract mode never returned to the title, and the tracks, ramp and archery target drew nothing. Four were smaller: the ski camera sat under the hill, unsupported glyphs showed as '?', the results screen read a stale global during a fade, and the medal table compared random numbers with times.",
+    "Two.",
+    "The scripted Quick Games run, from the title through the medal table, because it crosses every scene change and checks that nine medals were handed out.",
+    "The scene-name checks. They passed while the track was blank; only the screenshots caught that."
+  ],
+  "engineFeedback": [
+    "The scene and pause-menu setup, and the headless fixed-step advance, which made the tests repeatable.",
+    "Yes, twice. E.hex returns arrays that the pixel helpers reject, so the colours silently drew nothing. Scene fades also swallow input, so scripted tests need a wait after every scene change. The font lacks the middle dot and the controller symbols.",
+    "The three event simulations, the attract pilot, the dev sliders and the About screens.",
+    "Knowing which draw calls are screen space: r.overlay paints over the actors, so ground shapes have to go in r.decal or r.queue.",
+    "None. The engine copy is unchanged.",
+    "Add the controller symbols and the middle dot to the pixel font, and say in the API card which colour format each draw call takes."
+  ],
+  "promptFeedback": [
+    "The 10-foot rules, and the exact file names and deliverable list.",
+    "The plan is 1700 lines written for a team at max effort, names an Opus folder, and the root folder is not stated clearly: STAGE says root, the plan says beside TASK.md.",
+    "Fitting twelve events, AI Hub, ceremonies and voices into one session. I built three events and stopped there.",
+    "Mark a first-pass scope by priority, name the root folder, and trim the plan to what one session can build, keeping the done checklist the same."
+  ],
+  "aiHub": {
+    "name": "Olympiyikes!",
+    "tagline": "Faster. Higher. Yikes.",
+    "description": "A playful arcade riff on the Summer and Winter Games: mash, time and aim through three events, then check the Quick Games medal table.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "The Olympic Games",
+    "series": "Olympic Games",
+    "players": "1",
+    "controls": "Mash J and K, Space to act, L for turbo, arrows to balance and nudge (pad: square and circle mash, cross acts, triangle turbo)",
+    "tags": ["sports", "arcade", "comedy", "pixel art", "retro"]
+  }
+}

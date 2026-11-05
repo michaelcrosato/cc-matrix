@@ -1,0 +1,36 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#000}canvas{image-rendering:pixelated;width:1440px;height:810px}</style></head><body>
+<canvas id="c" width="480" height="270"></canvas>
+<script src="../../engine/my-3d2dge.js"></script>
+<script src="../../src/00-core.js"></script><script src="../../src/10-terrain.js"></script><script src="../../src/11-render.js"></script>
+<script src="../../src/12-quadruped.js"></script><script src="../../src/13-props.js"></script><script src="../../src/20-hunts.js"></script>
+<script>
+const B = BB; B.HAS_DOM = true;
+const q = new URLSearchParams(location.search), hunt = q.get('hunt') || 'hollow', van = q.get('v') || 'creekStand';
+const t0 = performance.now();
+const lab = q.get('lab');
+const w = lab ? { vantages: { creekStand: { x: 0, y: 0, z: 1.2, yaw: Math.PI / 2 } }, trees: [], props: [], groundAt: () => 0 } : B.loadWorld(hunt, { noColor: false });
+const gen = performance.now() - t0;
+const v = w.vantages[van], H = B.get('hunt', hunt);
+const lens = new B.Lens({ x: v.x, y: v.y, z: v.z, yaw: v.yaw + (+q.get('b') || 0) * -B.DEG, pitch: +(q.get('p') || 3), fov: +(q.get('fov') || 32), W: 480, H: 270 });
+const env = B.envFor(H, 0);
+const objs = [];
+let id = 10;
+for (const p of w.trees.concat(w.props)) { const P = B.PROPS[p.kind]; const myid = id++; objs.push({ x: p.x, y: p.y, z: p.z, rad: p.r + p.h * .5, draw: (r) => P.draw(r, p, { id: myid }) }); }
+const sp = { whitetail: 'deer', elk: 'elk', moose: 'moose' }[H.species] || 'deer';
+const placed = lab ? [[-25, 6, 'buck', 0, 0], [18, 7, 'doe', 2.6, 0], [0, 9, 'buck', .3, 1.5]] : [[-10, 55, 'buck', 0, 0], [8, 45, 'doe', 1.2, 1.2], [20, 70, 'buck', 2.5, 0], [-25, 110, 'buck', -1, 6]];
+for (const [bb, dd, sex, head, spd] of placed) {
+  const [x, y] = B.rel(v, bb, dd);
+  const rig = new B.Quadruped({ species: sp, sex, antlers: sex === 'buck' ? { kind: H.species, points: 10, seed: 3, spread: 52 } : null, size: (sp === 'elk' ? 1.5 : sp === 'moose' ? 1.9 : 1) * 1.1 });
+  const z = w.groundAt(x, y);
+  for (let k = 0; k < 30; k++) rig.update(1 / 30, { x, y, z, heading: head, speed: spd, graze: sex === 'doe' ? 1 : 0, ground: (a, b) => w.groundAt(a, b) });
+  const myid = id++; objs.push({ x, y, z, rad: 2.5, draw: r => rig.draw(r, { id: myid }) });
+}
+const t1 = performance.now();
+const tg = new B.Target(480, 270);
+B.vista.render(tg, lens, lab ? null : w, env, objs);
+const rt = performance.now() - t1;
+const g = document.getElementById('c').getContext('2d');
+g.drawImage(tg.canvas(), 0, 0);
+document.title = 'gen ' + gen.toFixed(0) + 'ms render ' + rt.toFixed(0) + 'ms trees ' + w.trees.length + ' props ' + w.props.length;
+window.done = true;
+</script></body></html>

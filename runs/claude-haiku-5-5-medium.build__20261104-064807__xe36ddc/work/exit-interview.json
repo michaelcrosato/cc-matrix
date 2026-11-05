@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:48:07",
+    "source": "Cricket (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports (cricket), with a comedy story campaign",
+    "perspective": "Broadcast camera behind the bowler, with a wide follow camera for lofted balls",
+    "tech": "my-3D2dge v0.85.2 (engine unmodified), AI Hub session client 1.4.0, plain JavaScript, Web Audio; tests on Node 24 and Playwright 1.63.0 with Chromium 153",
+    "artDirection": "The engine's HD pixel Humanoids at 320x240 expanded; a TileMap ground with mown stripes, creases and rope; cricket kits, bats, stumps and crowd drawn in code",
+    "animation": "The engine's procedural rigs posed every step; the batter's swing uses the engine's slash move, timed to the contact",
+    "audio": "Chip-synth effects and three songs; Animalese-style formant gibberish voices for the commentary and the players; a noise crowd; all written in code, no audio files",
+    "online": "AI Hub Session Protocol v1: a parallel Super Over for 1 to 4 players, with the same six balls for every copy",
+    "testing": "Twelve suites with node test/run.mjs (one command, prints only failures and the count): physics, simulation, specials, features, flow, scripted play of the Nets lessons, co-op and 2-v-2 matches played through every player's inputs, the AI Hub mock, the bundle, browser checks, a showcase suite (the highlights reel, the initials table, all ten showreel segments), and a brief suite (Running Auto, Continue and New Game, Quick Match unlocks, career stats, the About pages, no audio files). Last full run on the final code: 272 passed, 0 failed. Not covered by any suite: a full story playthrough by a bot, a review in an ordinary match, the Xbox glyph switch, and mouse aiming.",
+    "research": "none (the engine's docs and the AI Hub protocol only)",
+    "environment": "Claude Code CLI (headless); Linux under WSL2; Chromium 153 for the browser checks",
+    "model": "claude-haiku-5-5, reasoning effort medium",
+    "usage": "cost unknown; about 0.8M tokens (estimate from the session budget counter); session time about 1.5 hours"
+  },
+  "testingFeedback": [
+    "About a dozen issues were found in the first round, and about ten more in the second, and all were fixed. The main ones: the rigs never animated, the bat and pitch did not draw, the hub round played two innings, the idle timer ran late, the touch-only gate was off, the input preset dropped the menu actions, a removed helper broke commentary, and several settings and dev toggles did nothing.",
+    "Three were game-breaking for their feature: the hub round (two innings instead of one over), the rigs and bat (no animation or bat), and the idle timer (attract never started on time). All three are fixed, and none is known to be open.",
+    "The most helpful test was the headless match run to a result, with the 15-second in-play cap and the scorecard check; the features suite checks each mechanic by running it (stumping, the story's rain, the ghosts, the third umpire, the lessons' goals). The showcase suite caught a crash when the highlights reel returned to results with no match attached, and a showreel that never showed a wicket because a 26-second cap cut each segment short. The brief suite caught stale or missing items against the plan: Running and Continue were missing, and the About text still gave an old check count.",
+    "The least helpful was the toss timing check, rewritten after the flow changed. Scripted play found real bugs (a run lost during a throw, a run step that never fired, a shared press timer that starved the bowler, a gathered ball counted as a catch). Lessons 1 to 11 pass under scripted play, but lessons 10 and 11 use drill settings: a throwing drill with no catch rule for lesson 10, and no umpire error for lesson 11, which needs the pad-hit LBW model to produce a review. Open gaps: in 20 ordinary showreel segments there were no reviews (reviews happen only when a human presses review), so reviews under the normal rules are not shown; and no bot plays the whole five-chapter story from New Game to the ending."
+  ],
+  "engineFeedback": [
+    "The View system and the Humanoid rigs: custom Views with r.w projection gave a broadcast camera from the same primitives, and rigs draw cleanly inside actors.",
+    "Yes. An input preset without the default actions drew warnings, and drawing inside an actor uses its own local space, so absolute coordinates drew nothing. Both cost time.",
+    "The cricket simulation: ball physics and the predictor, timing grades, fielders and catches, running, the umpire, and the bat's drawing.",
+    "The hardest part was drawing in actor-local space and the font's missing symbols (the x sign, sigma, degrees and squared), which showed as question marks.",
+    "None. No engine file was changed; every change is in the game's own source.",
+    "A rig option for a two-handed bat grip, and a way to draw a world point inside an actor's callback."
+  ],
+  "promptFeedback": [
+    "The exact shape of the exit interview, and the explicit rules for the hub and for testing.",
+    "PLAN.md and TASK.md disagree on the folder name, the file name and the model suffix. TASK.md won, but reconciling them cost time. The plan is also much longer than one session.",
+    "Scope was the hardest part. The first pass cut five grounds, six teams, five chapters, around twenty specials, ten showreel segments and the Nets lessons to fit one session. The second pass restored them: five grounds, six teams, five chapters, twenty-one specials, ten showreel segments and eleven lessons. The brief's 'feature-complete' is what made the cuts unacceptable.",
+    "A must-have list and an explicit scope budget, and a single set of names across the task and the plan."
+  ],
+  "aiHub": {
+    "name": "Cricket Kerfuffle",
+    "tagline": "Over-the-top arcade cricket, with tea",
+    "description": "Smash sixes through the pub window, bowl flaming yorkers and take the village green from Lord Thrumpton across five outrageous grounds, the last a foggy Megadome at night. Play up to four players on one screen, or Super Over rounds in AI Hub sessions.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Cricket",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD aims · J ground shot · K loft · L defend · Space run · I special · controller: Cross, Square, Circle, Triangle",
+    "tags": [
+      "sports",
+      "arcade",
+      "comedy",
+      "versus",
+      "co-op",
+      "retro"
+    ]
+  }
+}

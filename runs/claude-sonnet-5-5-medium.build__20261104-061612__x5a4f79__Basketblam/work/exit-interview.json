@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:16:12",
+    "source": "Basketball (over the top arcade style)",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort); built as a trimmed vertical slice of it",
+    "genre": "Arcade sports: 2-on-2 over-the-top basketball with a four-stop story tour",
+    "perspective": "Side-on broadcast camera (custom orthographic view, pitch 30 degrees, panning with the ball), plus a High camera option",
+    "tech": "my-3D2dge v0.85.2 (modified copy), AI Hub Session Client 1.4.0, plain JavaScript, Canvas 2D, Web Audio; Node 24 and Playwright 1.63 for tests",
+    "artDirection": "The engine's native HD pixel style: shaded Humanoid rigs, painted textured court floors, tiered stands with a crowd, comic banners, per-court palettes and backdrops",
+    "animation": "The engine's Humanoid rig system (poses, E.MOVES, procedural gait) driven by a pose layer for shots, dunks, swipes, shoves and spins",
+    "audio": "All in code: chip-synth songs for the title, four courts, camp and victory/defeat, stings, about 25 Web Audio effects, a synthesized crowd bed, and Animalese-style gibberish voices for announcers and story characters. No audio files",
+    "online": "AI Hub Session Protocol v1, parallel mode: BLAM SHOWDOWN, where every player plays the same seeded game against the same CPU crew and the biggest point lead tops the scoreboard; passes the harness check (2 and 3 players, 4 players with latency/loss, host-leave)",
+    "testing": "Headless scripted playthroughs with game.advance (one command: node tests/run.mjs, 73 checks), CPU-vs-CPU balance runs, Playwright browser checks and screenshots, the AI Hub harness; no subagents",
+    "research": "Read the engine handoff docs, the sports kit and the AI Hub protocol; no other research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 10 issues: the steal and shove facing test was inverted, the attract mode was wired to the wrong scene, touch-only detection never fired, progress storage does not persist headless, the camera showed past the map edge, several font glyphs (em dash, check mark, arrows, degree sign) rendered as question marks, a particles.ring call used the wrong argument order, the camp panel covered the court, the announcer box overlapped the dev panel, and the tour test exposed an OT flake from baskets at the buzzer.",
+    "3 were critical: the steal never worked (a core mechanic), the attract mode never started, and the touch-only notice never showed (both are required features).",
+    "The scripted playthroughs: a full CPU-vs-CPU game to the final buzzer and the whole four-stop Blam Tour driven only through input taps and scene changes, followed by the browser run of the AI Hub harness. They exercised every system at once.",
+    "The static content-count checks (five crews, four courts, eight dunks) and the first determinism hash test: they passed from the start and never caught anything."
+  ],
+  "engineFeedback": [
+    "The Humanoid rigs with poses, E.MOVES and live portraits, TileMap floorTex for painting a whole court in code, headless game.advance for exact testing, and the Dialog and Shell pause/settings that come for free.",
+    "Yes. I guessed particles.ring takes (x, y, z, ...) when it is (x, y, r0, r1, color, dur, z); I assumed input.lastDevice starts unset (it starts as keyboard, so touch-only needs its own detection); the bitmap font has no em dash, check mark or left arrow; E.store does not persist headless; Dialog pages are arrays of lines, not strings; and a custom E.View must be added to E.VIEWS before a Game's views list can name it.",
+    "The whole basketball simulation: ball flight with rim and backboard collisions, the shot model with release timing, dunk and alley-oop choreography, steals, shoves and blocks, the CPU brains, and the controller-first 10-foot UI with glyph prompts.",
+    "Getting depth order right for the hoop, net, ball and players in a low side view with r.queue, and keeping the camera, zoom and map edge in agreement, since setZoom is smoothed by the engine.",
+    "Two small changes, each marked BASKETBLAM in the engine: Dialog.voice may be a function (letter, index, pageText) so a synthesized gibberish voice speaks as lines type, and audio.sfxBus / audio.musicBus public getters so the voice and crowd nodes follow the volume settings. The plan's shorts and hair-style additions were not done.",
+    "A device-seen API: game.input.seen = { keyboard, gamepad, touch } that starts empty, so touch-only detection and prompts do not need custom listeners; a close second would be an E.font with a wider glyph set."
+  ],
+  "promptFeedback": [
+    "Clear, checkable requirements (10-foot controller-first UI, attract mode, dev sliders, hub integration) and a detailed plan with concrete numbers that settled most design questions.",
+    "How much of the plan is expected at medium effort: it describes far more content than one session can build (12 songs, 21 voices, 55 sound effects, shared-world netcode, shorts and hair engine work), and it carries file names for another model and timestamp.",
+    "Scope management: choosing which parts of a very large plan to cut while still delivering every TASK.md feature with no stubs, and judging audio quality with no way to listen.",
+    "Mark the plan's must-haves versus nice-to-haves, say which hub mode is acceptable, and give a rough content budget for the chosen effort level."
+  ],
+  "aiHub": {
+    "name": "BASKETBLAM",
+    "tagline": "No fouls. No mercy. All BLAM.",
+    "description": "Over-the-top 2-on-2 arcade basketball with turbo dunks, legal shoving, alley-oops and the SUPERNOVA hot streak. Play a four-stop story tour, local 1-4 player games, or a seeded BLAM SHOWDOWN in an AI Hub session.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Basketball (over the top arcade style)",
+    "series": "",
+    "players": "1-4",
+    "controls": "Stick: move. Square/Space: shoot (hold, release at the top) or dunk with turbo. Cross/E: pass or steal. Circle/Q: shove or spin. R2/Shift: turbo. Triangle/F: alley-oop.",
+    "tags": ["arcade", "sports", "2d", "comedy", "versus", "co-op"]
+  }
+}

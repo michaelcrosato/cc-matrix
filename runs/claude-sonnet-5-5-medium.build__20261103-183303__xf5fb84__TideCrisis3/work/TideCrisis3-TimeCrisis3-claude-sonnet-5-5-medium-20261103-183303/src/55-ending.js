@@ -1,0 +1,12 @@
+// 55-ending.js — the ending: the credits roll (cast with live portraits, "Made with my-3D2dge", the music), the final score.
+Scenes.ending = { camera: { zoom: false }, touch: [],
+  enter() { this.t = 0; this.cast = [['kai', 'KAI NAVARRO', 'CREST agent'], ['rook', 'ROOK HALVORSEN', 'CREST demolitions'], ['mari', 'MARI TEJADA', 'Lumen Coast Guard'], ['juno', 'JUNO ACHTERBERG', 'CREST tech'], ['hale', 'DIRECTOR INES HALE', 'CREST HQ'], ['tomas', 'DR. TOMAS TEJADA', 'Chief engineer'], ['krake', 'ADMIRAL SILAS KRAKE', 'The Tide Tyrant'], ['barracuda', 'BARRACUDA', 'Captain of the Stingray'], ['hammerhead', 'HAMMERHEAD', 'The Enforcer']]; Run._song = 'ending'; musicFor(game, 'ending'); this.sim = Run.sim; },
+  update(dt) { this.t += dt; const I = game.input; if (this.t > 2 && (I.pressed('start') || I.pressed('confirm') || I.clicked()) && this.t > 6) { I.consumeAll(); this.done(); } if (this.t > 4 + this.cast.length * 3.2 + 8) this.done(); },
+  done() { if (this.went) return; this.went = true; enterInitials(Run.sim, Run.mode === 'coop' ? 'coop' : 'arcade', true); },
+  draw(r) { r.overlay(g => { const W = r.W, H = r.H; drawBackdrop(g, W, H, game.time, .55); const sc = this.t;
+    E.font.title(g, 'TIDE CRISIS 3', W / 2, 14, { scale: 3, colors: ['#ffffff', '#9fe3ff', '#3aa0e8', '#1a4f9c'], outline: '#08142a', depth: 2, align: 'center' });
+    T(g, 'THE END', W / 2, 52, '#ffd36a', { scale: 2, align: 'center' }); T(g, 'Port Lumen owes you its dawn.', W / 2, 74, '#ffffff', { scale: 1, align: 'center' });
+    this.cast.forEach((c, i) => { const t0 = 3 + i * 3.2, u = (sc - t0); if (u < 0 || u > 3.6) return; const a = clamp(Math.min(u * 2, (3.6 - u) * 2), 0, 1); px.blend(g, a, 'normal', () => { const rig = speakerRig(c[0]); E.ui.box(g, W / 2 - 100, 100, 200, 60, { bg: ['#10244a', '#081428'], border: reg('speaker', c[0]).color }); if (rig) rig.drawPortrait(g, W / 2 - 70, 130, 44, {}); T(g, c[1], W / 2 - 40, 112, '#ffffff', { scale: 1 }); T(g, c[2], W / 2 - 40, 126, '#9fb8e8', { scale: 1 }); T(g, 'CAST ' + (i + 1) + '/' + this.cast.length, W / 2 - 40, 142, '#6a7ea8', { scale: 1 }); }); });
+    if (sc > 4 + this.cast.length * 3.2) { T(g, 'Made with my-3D2dge · music, sound and voices written in code', W / 2, 120, '#9fe3ff', { scale: 1, align: 'center' }); const sim = this.sim; if (sim) T(g, 'FINAL SCORE ' + Math.max(...sim.players.map(p => p.score)), W / 2, 150, '#ffd36a', { scale: 2, align: 'center' }); }
+    if (sc > 6) promptBar(g, W, H, [['confirm', 'CONTINUE']]); }); }
+};

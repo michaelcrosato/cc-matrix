@@ -1,0 +1,4 @@
+import { load } from './lib.mjs'; const { game, G } = load(); const { Match, Flow, Bus } = G; game.advance(.1);
+const m = Match.create({ home: 'muskrats', away: 'drillers', arena: 'icebox', periods: 1, periodLen: 60, diff: 1, shootout: false, ot: false, seed: 3, noReplay: true });
+Bus.on('*', e => { if (['shot','save','takeaway','poke_steal','check','pass','faceoff_win','whistle','puck_out','block','deflect','goalie_poke','stop'].includes(e.type) && e.type !== 'stop') process.stdout.write(`[${m.t.toFixed(1)}:${e.type}]`); });
+for (let i = 0; i < 120 * 40; i++) { Flow.step(m, 1 / 120); if (i % 240 === 0) { const o = m.puck.owner; console.log(`\nt=${m.t.toFixed(1)} ph=${m.phase} puck=${m.puck.x | 0},${m.puck.y | 0} z=${m.puck.z | 0} owner=${o ? o.nick + (o.plan ? ':' + o.plan.t : '') : '-'} v=${Math.hypot(m.puck.vx, m.puck.vy) | 0}`); } }

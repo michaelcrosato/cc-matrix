@@ -1,0 +1,89 @@
+{
+  "what": [
+    "MASH TV IS A 1-4 PLAYER TWIN-STICK ARENA SHOOTER SET INSIDE THE DEADLIEST GAME SHOW ON TELEVISION.",
+    "FIGHT THROUGH SEALED STUDIO ROOMS AS GOONS, CLAPBOTS, PARTY POPPERS, LAND MIMES AND WORSE POUR IN THROUGH FOUR DOORS.",
+    "GRAB CASH AND RIDICULOUS PRIZES, PLAY TO THE CAMERAS TO KEEP THE RATINGS UP, PICK YOUR ROUTE ON THE STUDIO MAP, AND SURVIVE THREE EPISODES TO THE SEASON FINALE.",
+    "COLLECT FIVE OF THE NINE GOLDEN KEYS TO OPEN THE SECRET GREEN ROOM AND SEE THE TRUE ENDING.",
+    "YOUR HOST: THE IMMORTAL, OILY, SEQUINNED LANCE LUSTRE. KA-CHING! KA-BOOM!"
+  ],
+  "questions": {
+    "testing": [
+      "How many issues did testing catch?",
+      "How many would be considered critical issues / game breaking?",
+      "What was the most helpful test you ran?",
+      "What was the least helpful test you ran?"
+    ],
+    "engine": [
+      "What did you like most about the engine?",
+      "Did you get stuck or guess wrong?",
+      "What was the most important thing you had to build yourself?",
+      "What was the hardest part about using the engine?",
+      "What did you change in the engine, and why?",
+      "If you could change one thing about the engine, what would it be?"
+    ],
+    "prompt": [
+      "What did you like most about this prompt?",
+      "What was confusing?",
+      "What was the hardest thing to do?",
+      "What would you change in this prompt?"
+    ]
+  },
+  "exitInterview": {
+    "sourceInformation": {
+      "date": "2026-11-04 05:02:56",
+      "source": "Smash TV (Williams Electronics arcade game, 1990)",
+      "plan": "PLAN.md",
+      "genre": "Twin-stick arena shooter (arcade), 1-4 player co-op, with a route choice between rooms",
+      "perspective": "Fixed single-screen arena per room from a high three-quarter studio camera (pitch 55); a straight-down overhead camera is a Settings option",
+      "tech": "my-3D2dge handoff v0.85.2 (commit 4390a98, full edition with the arcade module) with 4 small engine patches; AI Hub session client aihub-session 1.4.0; plain JavaScript in one IIFE bundled into one HTML file by a Node 24.22.1 script; Playwright 1.63.0 (Chromium) and Node vm for tests",
+      "artDirection": "The engine's native PS1-era look (320x240 expanded, HD Humanoid rigs, textured TileMap floors and walls, canvas lighting) dressed as a retro-future TV studio: neon, chrome, marquee bulbs, sponsor logos, confetti, spotlights, a jumbotron; all art drawn in code",
+      "animation": "The engine's procedural Humanoid and Blob rigs (gaits, poses, E.MOVES attacks, portraits) plus new motion: the mime's trapped-in-a-box hands, dive-roll slides, cable drops, boss parts and patterns, the wheel's eased spin, tween-driven cards and static wipes",
+      "audio": "All synthesized in code: 8 original songs in the engine's step notation with layers, 12 stings, about 70 synth sound effects, and Babble formant-synthesis gibberish voices for the host, co-host, announcer, bosses and contestants, plus a synthesized studio crowd. Measured in Chromium: songs audible with peaks under 0.3 (no clipping); not judged by ear.",
+      "online": "AI Hub Session Protocol v1, shared-world, 1-4 players (the Lightning Round); local co-op 1-4 on one screen",
+      "testing": "One command (npm test) rebuilds and runs 25 suites, printing only failures and a one-line count: headless Node vm suites driving game.advance, input taps and game.debug (core, input, audio, contestant, weapons, economy, ratings, enemies, rooms, a sweep of all 21 wave rooms by bots, bosses, a full scripted playthrough plus a no-cheat game-over run, ui, dev, attract, touch, a determinism proof, a balance suite where a human-like bot must clear each Episode 1 room in 45-90 s with at most 2 deaths and beat Mashy, a feature audit of TASK.md's requirements, and a 3-copy net loopback on a fake hub with latency and loss), plus a walkthrough with real key presses, clicks and taps in Chromium (pause menu, Dev mode sliders and reset, How to play, Episode map, attract mode, the touch-only notice), a walkthrough with a stubbed standard-mapping DualSense in Chromium (menus, difficulty and lobby, both sticks in play, Options to pause and resume, PlayStation glyphs, the Xbox setting, prompts switching between pad and keys, attract start and exit), Playwright browser checks of the deliverable over file:// at 1280x720 and 1920x1080 (every deep link, keyboard, mouse, touch-only emulation), an audio measurement in Chromium (every song audible without clipping, every sound makes signal, voice pitches as designed: Network about 72 Hz, Announcer 99, Lance 157, Penny 356), and the AI Hub harness 4 times (2 players; 4 players with 150 ms latency, 50 ms jitter and 5% loss; host-leave; server). Screenshots were reviewed for what scripts cannot judge.",
+      "research": "Read the engine's API card whole, the AI_GUIDE sections on standard features, frame order, players, testing and the twin-stick recipe, the asset card, and the engine source for input, the Shell, the arcade module, audio and sprites; read the AI Hub protocol README, session.js, the harness and round.js. Smash TV from general knowledge only: no web research, and every name, line, level and tune is original.",
+      "environment": "Claude Code CLI (headless); Linux; browser unknown",
+      "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+      "usage": "Cost unknown and total tokens unknown (no counter is visible inside the session). Estimate: about 160K output tokens of code and text written (about 555 KB of source, tests and tools at about 3.5 bytes a token), not counting reasoning or input. Session time about 2 h 30 min (05:03 to about 07:35 MST, 2026-11-04)."
+    },
+    "testingFeedback": [
+      "About 28 real issues: 20 found by the scripted suites (headless, net loopback, browser, AI Hub harness, balance, a real-input walkthrough) and 8 found by looking at screenshots. Examples: my coroutine runner made a bare yield wait two steps, so every boss loop and the survive-room clock ran at half speed; the Prize Recap never left after the second episode; remote players' guns fired once and never again on the host; the attract demo stuck on its first reel; Mashy could become unkillable when his body fell before his last arm; two rooms never dropped their Golden Key; pickups drew at 60% size; the camera drifted under overlays. Several more failures were mistakes in the tests themselves, not counted here. The balance suite then showed rooms clearing too fast and Mashy and the Key Gauntlet too hard for an average player; pacing, boss adds and the survive room were retuned until a human-like bot met the targets. Last, a walkthrough with real key presses in Chromium found that Dev mode, opened from the pause menu, ignored the keyboard: the engine's pause screen stayed open and held the input back (scripted taps in the headless suites had hidden it), and that Esc on How to play left it open under the pause menu.",
+      "4 were game breaking: the Prize Recap hang (a full run could not get past Episode 2), Mashy becoming unkillable if his body fell before his last arm (the run stalls in the boss room), remote players doing no damage in AI Hub sessions, and the attract mode stuck on its first reel. The missing keys for Pyro Pit and Mascot Mayhem were serious (fewer routes to the Green Room) but not run-ending.",
+      "The scripted playthrough: two god-mode bots play the whole game on the left path (15 rooms, 3 bosses, 3 recaps, the Green Room, Ending B, initials typed through input, Top Earners), asserting every enemy kind, weapon, hazard, Prime Time, Showstopper and showboat. It found the recap hang and the missing keys in one run. A close second was the net loopback suite (3 game copies on a fake hub with 150 +/- 50 ms latency and 5% loss), which found the dead remote guns before the real harness ever ran. For balance, the human-like bot (it re-aims a few times a second, aims with error and never leads its target) gave a repeatable stand-in for a player: Episode 1 rooms now clear in about 50-57 s with 0-2 deaths.",
+      "A filmstrip of the land mimes at a wide crop: the frames came out too small to judge the trapped-in-a-box motion, so it told me nothing a screenshot had not. The engine checker's view cycle (iso, brawler, side) was also of little use, since this game only uses the three-quarter and top-down views. The lesson from the last bug: headless taps are not real key presses, so the real-input walkthrough now runs with the rest, joined after a final line-by-line re-read of TASK.md by a controller walkthrough with a stubbed DualSense (it found no game bugs)."
+    ],
+    "engineFeedback": [
+      "Exact, deterministic headless play: game.advance in fixed 1/120 s steps, input.tap and a debug handle let one command play the entire game, three networked copies and every scene in a few minutes. Close behind: the standard pause, settings and rebinding screens for free, and HD Humanoid rigs with live portraits, poses and moves that made every character, host and enemy cheap to dress.",
+      "Yes, a few times. World sprites are scaled by the camera zoom alone while geometry scales by the view scale times the zoom (the three-quarter view's base scale is 1.5), so at the zoom that fits the arena (about 0.6) my pickups drew tiny until I passed scale 1/zoom. input.use() clears held keys and taps, so a press on the step a preset changes is lost. A mouse move does not update lastDevice (only a click does), so hover needed my own handling. game.hitFx always freezes, which a shared-world host must avoid. input.names (the Controls screen labels) is only set when there is a DOM.",
+      "The AI Hub shared-world netcode: an authoritative host world, compact snapshots at 15 a second, client prediction for your own contestant, 120 ms interpolation by id, claims and hurt reports, room messages, standings and the session card. After that, the game-show layer: ratings, the reaction table, the line queue with priorities and the Babble formant voices.",
+      "Keeping sizes consistent between engine-drawn things (scaled by the view) and my own pixel painters and sprites across zoom levels, and the interplay between input presets and the Shell: arrows had to aim in play but move the focus in the pause menu, which needed an engine hook to switch presets at the right moment in the frame.",
+      "Four small patches (engine/PATCHES.md): P1 exposes E.HOOKS so the game can switch every player's input preset after input.tick and before the Shell reads navigation; P2 makes the glyph setting default to PlayStation with an Xbox option and apply to every player, including ones who join later; P3 lets E.Arcade enter initials with a given player's input and lets any player continue; P4 adds audio.bus so the Babble voices follow volume and mute.",
+      "Make r.sprite (and px sizes in custom painters) follow the view's full scale, or expose one 'pixels per world unit' number that every drawing path uses, so sprites and hand-drawn art stay in proportion with rigs and maps at any zoom."
+    ],
+    "promptFeedback": [
+      "It defines a whole product, not a toy: controller-first 10-foot UI with native keyboard and mouse, an attract mode, a dev mode with live sliders, local co-op plus an AI Hub session, and a single-file deliverable with an exit interview. Paired with the very specific PLAN.md, there was almost nothing to guess about what done means.",
+      "Small things: TASK.md asks to brainstorm 50 titles and pick one with a random number generator, while the plan says the title was already drawn and not to re-pick it (I followed the plan, since TASK.md says to use the title it gives). The Usage field asks for cost and token counts that an agent inside the session cannot see. And 'Balance is key' has no target a script can check without a human player.",
+      "The scope together with the multiplayer bar: 18 wave rooms, 3 multi-phase bosses, 9 enemy kinds, every front-end screen and cutscene, and a shared-world netcode that had to pass the hub harness at 4 players with latency, loss, host-leave and a server copy. Balancing without a human playtester was the hardest judgement call.",
+      "Give a balance target in measurable terms (for example a bot profile or expected clear times), say how Usage should be estimated or drop it when it cannot be known, and drop or reconcile the title-picking step when a plan already fixes the title."
+    ],
+    "aiHub": {
+      "name": "MASH TV",
+      "tagline": "Mash 'em! Cash 'em! Survive the show.",
+      "description": "A 1-4 player twin-stick arena shooter inside the deadliest game show on TV: blast through studio rooms of goons and robots, grab cash and absurd prizes, keep the ratings up and survive to the Season Finale.",
+      "type": "Game",
+      "genre": "Shooter",
+      "source": "Smash TV",
+      "series": "",
+      "players": "1–4",
+      "controls": "WASD/left stick move · mouse/right stick aim & fire · Space/L2 slide · E/R1 Showstopper · Q/L1 Showboat",
+      "tags": [
+        "arcade",
+        "co-op",
+        "top-down",
+        "pixel art",
+        "comedy",
+        "boss fights"
+      ]
+    }
+  }
+}
