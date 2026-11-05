@@ -286,7 +286,7 @@ function goalChecks(prompt) {
     { type: 'system', subtype: 'informational', timestamp: at, content: 'A hook blocked the turn from ending 9 consecutive times — overriding and ending turn.' }];
 }
 
-// Codex: the main thread's rollout (2 requests, plan limits at the start and end) and one subagent's, which
+// Codex: the main thread's rollout (2 requests, plan limits at the start and end, a 997,500-token context window) and one subagent's, which
 // starts with a copy of the parent's history (including a token count that isn't its own).
 function codexRollouts(thread, model) {
   const d = new Date(), dir = path.join(process.env.CODEX_HOME, 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
@@ -294,7 +294,7 @@ function codexRollouts(thread, model) {
   const limits = (five, week) => ({ plan_type: 'pro', primary: { used_percent: five, window_minutes: 300, resets_at: 1793275800 },
     secondary: { used_percent: week, window_minutes: 10080, resets_at: 1793774604 } });
   const count = (input, cached, output, reasoning, rl) => ({ type: 'event_msg', payload: { type: 'token_count', rate_limits: rl,
-    info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: reasoning } } } });
+    info: { total_token_usage: { input_tokens: input, cached_input_tokens: cached, cache_write_input_tokens: 0, output_tokens: output, reasoning_output_tokens: reasoning }, model_context_window: 997500 } } });
   const sub = crypto.randomUUID();
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, `rollout-${stamp}-${thread}.jsonl`), jsonl([

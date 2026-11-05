@@ -330,7 +330,7 @@ test('a running batch takes changes: limits, pause and ending a run, checked fir
 
   const r = await d2.api('/api/adjust', 'POST', { set: { concurrency: 1, perCli: '', budget: 0, timeout: 30, paused: true }, requeue: ['opus-low__a', 'not-running'] });
   assert.equal(r.status, 200, r.text);
-  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, resumeFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 } });
+  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, resumeFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 }, held: {}, priority: [] });
   const s = await waitFor(async () => { const x = (await d2.api('/api/status?since=0')).json; return x.active.length === 1 ? x : null; });
   assert.ok(s.log.some((l) => l.startsWith('↺ opus-low__a requeued')), s.log.join('\n'));
   assert.ok(s.log.some((l) => l.startsWith('⚙ Parallel runs: 2 → 1')));
@@ -392,6 +392,45 @@ test('a queued batch starts in the slots the batches before it can\'t use, and n
   assert.ok(Math.min(...queued.map(at)) < end(plan), 'the queued batch waited for the plan');
   for (const b of builds) assert.ok(at(b) - end(plan) < 1000, `a build started ${at(b) - end(plan)} ms after its plan: held up by the queued batch`);
   assert.ok(mostAtOnce(rows) <= 4, 'more runs at once than Parallel runs');
+});
+
+test('Max per model: one model of a CLI runs N at a time across the queued batches, its other models beside it', async (t) => {
+  const s = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: `FAKE:sleep=900 ${id}` })) }, perModel: { codex: 1 },
+    agents: [{ id: 'sol', provider: 'codex', model: 'gpt-sol', efforts: ['low', 'high'] }, { id: 'terra', provider: 'codex', model: 'gpt-terra', efforts: ['low'] }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['sol:low', 'terra:low'], only: { testing: ['a', 'b', 'c'] }, concurrency: 6 })).status, 200);
+  const q = await dd.api('/api/run', 'POST', { add: true, pick: ['sol:high'], only: { testing: ['a', 'b', 'c'] } }); // the same model, queued beside it
+  assert.equal(q.status, 200);
+  const done = await finishedSession(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  const rows = (await dd.api('/api/results')).json, sol = rows.filter((r) => r.model === 'gpt-sol'), terra = rows.filter((r) => r.model === 'gpt-terra');
+  assert.deepEqual([sol.length, terra.length], [6, 3]);
+  assert.equal(mostAtOnce(sol), 1, 'two runs of one model at once');
+  assert.equal(mostAtOnce(terra), 1);
+  assert.ok(mostAtOnce(rows) >= 2, 'the other model waited too');
+});
+
+test('Priority from the page: Preview shows its order, Start sends it, a held CLI waits without holding slots, and Apply lifts it', async (t) => {
+  const s = sandbox({ dimensions: { testing: ['a', 'b'].map((id) => ({ id, text: `FAKE:sleep=500 ${id}` })) },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }, { id: 'sol', provider: 'codex', model: 'g', efforts: ['low'] }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  const hold = [{ match: { provider: 'codex' }, hold: true }], sel = { pick: ['opus:low', 'sol:low'], only: { testing: ['a', 'b'] } };
+  const pv = await dd.api('/api/preview', 'POST', { ...sel, priority: hold });
+  assert.deepEqual([pv.status, pv.json.held, pv.json.terminal[0].split('\n')[0]], [200, 2, '# on hold (Priority): starts once its hold is lifted']);
+  assert.equal((await dd.api('/api/preview', 'POST', { ...sel, priority: [{ match: { 'no such': 'x' } }] })).status, 400);
+  assert.equal((await dd.api('/api/run', 'POST', { ...sel, concurrency: 4, priority: hold })).status, 200);
+  const waiting = await waitFor(async () => { const x = (await dd.api('/api/status?since=0')).json; return x.finished === 2 && x.state?.held?.codex === 2 ? x : null; });
+  assert.deepEqual([waiting.running, waiting.active.length, waiting.state.priority], [true, 0, hold]);
+  assert.equal((await dd.api('/api/adjust', 'POST', { set: { priority: [{ match: { provider: 'codex', 'bad key': 'x' } }] } })).status, 400);
+  assert.equal((await dd.api('/api/adjust', 'POST', { set: { priority: [] } })).status, 200);
+  const done = await finishedSession(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  const rows = (await dd.api('/api/results')).json, at = (p) => rows.filter((r) => r.provider === p).map((r) => Date.parse(r.startedAt));
+  assert.deepEqual([rows.length, rows.every((r) => r.status === 'ok')], [4, true]);
+  assert.ok(Math.min(...at('codex')) > Math.max(...at('claude')), 'a held run started before the hold was lifted');
+  assert.ok(done.log.some((l) => l === '⚙ Priority: none'), done.log.join('\n'));
 });
 
 test('a queued batch runs from the config and prompt as they were when it was queued', async (t) => {
