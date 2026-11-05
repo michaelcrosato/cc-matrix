@@ -651,8 +651,8 @@ function cutOffRuns() {
 // ---------------------------------------------------------- this computer
 // What this computer has, for the agents (CLIs → This computer): environments/<computer>.md beside the config, which
 // run-matrix.mjs fills into {{machine}}. The page shows it as the agents get it (without its title and its notes to
-// whoever edits it), with when it was checked; Check again runs check-environment.mjs, which rewrites the part between
-// its markers. Older than STALE_DAYS, the page says to check again.
+// whoever edits it, its headings a level down, as in run-matrix.mjs), with when it was checked; Check again runs
+// check-environment.mjs, which rewrites the part between its markers. Older than STALE_DAYS, the page says to check again.
 const MACHINE_DIR = path.join(path.dirname(CONFIG), 'environments'), STALE_DAYS = 14;
 const machineFile = () => path.join(MACHINE_DIR, `${os.hostname().replace(/[^\w.-]/g, '-')}.md`); // named as check-environment.mjs names it
 function machineInfo() {
@@ -661,7 +661,7 @@ function machineInfo() {
   const m = text?.match(/^Checked (\d{4}-\d\d-\d\d) (\d\d:\d\d) \(([^)]+)\)(.*)$/m); // the time is this computer's
   const at = m ? new Date(`${m[1]}T${m[2]}:00`) : null, ageDays = at ? Math.max(0, Math.floor((Date.now() - at) / 864e5)) : null;
   return { host: os.hostname(), file: path.relative(HERE, file), exists: text != null,
-    text: text?.replace(/<!--[\s\S]*?-->\n?/g, '').replace(/^# .*\n+/, '').trim() ?? null,
+    text: text?.replace(/<!--[\s\S]*?-->\n?/g, '').replace(/^# .*\n+/, '').replace(/^(#{1,5}) /gm, '#$1 ').trim() ?? null,
     checkedAt: m ? `${m[1]} ${m[2]}` : null, timeZone: m?.[3] ?? null, quick: /--quick/.test(m?.[4] ?? ''), ageDays, stale: ageDays != null && ageDays >= STALE_DAYS, staleDays: STALE_DAYS };
 }
 let machineCheck = null; // one check at a time; a second Check again waits for the one going
@@ -705,6 +705,48 @@ function changedVariants(dir, r, dims, tmpl) {
     if (sent != null && !sent.replace(/\s+/g, ' ').includes(text.replace(/\s+/g, ' '))) out.push(d);
   }
   return out;
+}
+
+// The same for a run in stages and its stage: whether it used a different text or goal than the stage of its name has
+// now. Runs record a hash of each (stageHashes); for older runs, whether what they were sent still matches: prompt.md
+// (the stage's text) and the condition in goal.md. A stage no longer in the config can't be out of date.
+const flatText = (s) => s.replace(/\s+/g, ' ').trim();
+function sentStage(dir, r) {
+  const g = sentText(path.join(dir, 'goal.md')), at = g?.indexOf('Done when: ') ?? -1;
+  // No goal.md: the stage had no goal, unless its CLI has no /goal (goalSkipped) and so the goal can't be told.
+  return { text: sentText(path.join(dir, 'prompt.md'))?.trim() ?? null, goal: at >= 0 ? g.slice(at + 11).trim() : g == null && !r.goalSkipped ? '' : null };
+}
+function changedStage(dir, r, stages) {
+  const st = r.stage && stages.find((s) => s.id === r.stage);
+  if (!st) return false;
+  const text = (st.text ?? '').trim(), goal = (st.goal ?? '').trim();
+  if (r.stageHashes) return r.stageHashes.text !== textHash(text) || r.stageHashes.goal !== textHash(goal);
+  const sent = sentStage(dir, r);
+  return (sent.text != null && flatText(sent.text) !== flatText(text)) || (sent.goal != null && flatText(sent.goal) !== flatText(goal));
+}
+// Every stage text and goal finished runs used, by the stage's name, so Setup · Advanced can keep a name to one text
+// (runs are matched by their chain, which names each step's stage): [{ id, text, goal, runs }], text or goal null when
+// it can't be told. A run's are its stage's in the config while they still match, else what it was sent, if that
+// hashes as the run's did (a text with {{placeholders}} was sent filled in).
+let stageLibCache = null;
+function stageLibrary() {
+  const rv = revs(), key = [rv.results, rv.config].join('|');
+  if (stageLibCache?.key === key) return stageLibCache.value;
+  const stages = readJSON(CONFIG, {}).stages ?? [], found = new Map();
+  for (const e of fs.readdirSync(OUT, { withFileTypes: true })) {
+    if (!e.isDirectory()) continue;
+    const dir = path.join(OUT, e.name), r = readJSON(path.join(dir, 'result.json'), null);
+    if (!r?.id || !r.stage) continue;
+    const st = stages.find((s) => s.id === r.stage);
+    let { text, goal } = st && !changedStage(dir, r, stages) ? { text: (st.text ?? '').trim(), goal: (st.goal ?? '').trim() } : sentStage(dir, r);
+    if (r.stageHashes && text != null && textHash(text) !== r.stageHashes.text) text = null;
+    if (r.stageHashes && goal != null && textHash(goal) !== r.stageHashes.goal) goal = null;
+    const k = `${r.stage}\n${text}\n${goal}`;
+    if (found.has(k)) found.get(k).runs++; else found.set(k, { id: r.stage, text, goal, runs: 1 });
+  }
+  const value = [...found.values()];
+  stageLibCache = { key, value };
+  return value;
 }
 
 // A run's dimensions' texts as sent: its prompt (TASK.md for a run in stages) matched against the template it was
@@ -844,7 +886,7 @@ function claudeTranscript(sessionId, cwd) {
 
 function results() {
   const scores = readJSON(SCORES, {});
-  const dims = readJSON(CONFIG, {}).dimensions ?? {};
+  const dims = readJSON(CONFIG, {}).dimensions ?? {}, stages = readJSON(CONFIG, {}).stages ?? [];
   let tmpl = ''; try { tmpl = fs.readFileSync(templatePath(), 'utf8'); } catch {}
   const rows = [];
   for (const d of fs.readdirSync(OUT, { withFileTypes: true })) {
@@ -855,7 +897,9 @@ function results() {
     if (fs.existsSync(path.join(dir, 'goal.md'))) r.hasGoal = true; // sent a /goal: goalMet says how it went, once read
     r.hasInterview = fs.existsSync(path.join(dir, 'work', 'exit-interview.json'));
     if (resumable(dir, r)) r.resumable = true;
+    // changed: the dimensions whose variant's text was edited after the run, and "stage" when its stage's text was.
     const changed = changedVariants(dir, r, dims, tmpl);
+    if (changedStage(dir, r, stages)) changed.push('stage');
     if (changed.length) r.changed = changed;
     // A run from before a dimension was added counts as its olderRuns variant (else its first), as in
     // run-matrix.mjs, so it shows, filters and compares as that. predates lists those dimensions.
@@ -1031,6 +1075,7 @@ const server = http.createServer(async (req, res) => {
 
     if (p === '/api/results' && m === 'GET') return send(res, 200, results());
     if (p === '/api/variants' && m === 'GET') return send(res, 200, variantLibrary());
+    if (p === '/api/stage-texts' && m === 'GET') return send(res, 200, stageLibrary());
     if (p === '/api/feedback' && m === 'GET') return send(res, 200, feedback());
     if (p === '/api/score' && m === 'PUT') {
       const { id, score, notes, seen, startedAt } = await body(req);

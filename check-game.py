@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# A run's game, loaded once in headless Chromium (software WebGL, as on a computer without a GPU) and left alone for a
-# few seconds, the way someone opening it would: what it throws, what it logs as an error, the requests that fail and
-# how long the page takes to load, with a screenshot at the end. The runner calls it for each run that leaves a game
-# (gameCheck in the config; see checkGame in run-matrix.mjs) and reads the one JSON object it prints.
+# A run's game, loaded once in headless Chromium (software WebGL and WebGPU, as on a computer without a GPU) and left
+# alone for a few seconds, the way someone opening it would: what it throws, what it logs as an error, the requests that
+# fail and how long the page takes to load, with a screenshot at the end. The runner calls it for each run that leaves a
+# game (gameCheck in the config; see checkGame in run-matrix.mjs) and reads the one JSON object it prints.
 #
 #   python3 check-game.py GAME.html SHOT.png [SECONDS]
 #
@@ -11,7 +11,13 @@
 import json, os, sys, time
 from pathlib import Path
 
-ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required']
+# WebGPU in software (SwiftShader), which WebGPU engines need here: --enable-unsafe-webgpu alone finds an adapter
+# but the device is lost as a game starts, and --use-vulkan=swiftshader on top slows every screenshot (WebGL games' too)
+# past Playwright's 30 s. A game loaded from file:// is a secure page, which WebGPU also needs. Checked Nov 4 2026 with
+# Chromium 153 on shardfall's, riftlight's and my-3dge's games, and on WebGL games, whose results didn't change. A
+# WebGPU canvas drawing about a frame a second can still come out blank in the screenshot; its errors are what count.
+WEBGPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgpu-adapter=swiftshader']
+ARGS = ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', *WEBGPU, '--autoplay-policy=no-user-gesture-required']
 
 def firsts(items, n=5):
     seen, out = set(), []
