@@ -220,7 +220,7 @@ function selectionArgs(sel = {}, config = CONFIG) {
   const a = ['--config', config, '--out', OUT];
   const stages = sel.stages && typeof sel.stages === 'object' ? Object.entries(sel.stages)
     .map(([st, picks]) => [st, (Array.isArray(picks) ? picks : []).filter((p) => typeof p === 'string' && PICK.test(p))])
-    .filter(([st, picks]) => /^\w+$/.test(st) && picks.length) : [];
+    .filter(([st, picks]) => /^[\w-]+$/.test(st) && picks.length) : []; // stage names as the runner takes them (plan-v2 …)
   if (stages.length) for (const [st, picks] of stages) a.push('--stage', `${st}=${picks.join(',')}`);
   else if (!sel.stages && sel.pick?.length) a.push('--pick', sel.pick.join(','));
   else a.push('--pick', '__none__'); // nothing ticked (or picked for a stage) = nothing runs
@@ -418,7 +418,8 @@ async function adjustRun(msg) {
 
 // A batch's own copy of the config and prompt as they are now: a queued batch starts later, and Setup may change
 // meanwhile. A variant whose text is in a file is copied in as text, and the prompt keeps its file's time (the
-// prompt history says when a version was saved).
+// prompt history says when a version was saved). This computer's file goes in too, in environments/: the runner
+// fills {{machine}} from the one beside the config it's given (see machineFile).
 // It's kept in runs/.batches/ until its session ends, so a session picked up after a restart runs as it was started.
 function snapshot(n) {
   const c = readJSON(CONFIG, null);
@@ -430,6 +431,8 @@ function snapshot(n) {
     fs.copyFileSync(from, to); fs.utimesSync(to, st.atime, st.mtime);
     c.templateFile = path.basename(from);
   }
+  const mf = machineFile();
+  if (fs.existsSync(mf)) { fs.mkdirSync(path.join(dir, 'environments')); fs.copyFileSync(mf, path.join(dir, 'environments', path.basename(mf))); }
   for (const vs of Object.values(c.dimensions ?? {})) for (const v of Array.isArray(vs) ? vs : []) if (v?.text == null && v?.file) { v.text = variantText(v); delete v.file; }
   fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(c, null, 2));
   return dir;

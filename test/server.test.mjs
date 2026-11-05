@@ -3,6 +3,7 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { sandbox, cleanup, dashboard, runner, waitFor, raw, DASHBOARD } from './helpers.mjs';
@@ -150,20 +151,21 @@ test('a batch from the page runs through the fake CLIs and reports progress', as
 });
 
 test('a batch in stages from the page: picks per stage go to the runner, and the results say who continued from whom', async (t) => {
+  // Named as the page names an edited stage (plan → plan-v2), which a batch once left out for its "-"
   const s = sandbox({ dimensions: { testing: [{ id: 'a', text: 'variant A' }] }, agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }],
-    stages: [{ id: 'plan', text: 'Read TASK.md and plan it. FAKE:plan', game: false }, { id: 'build', text: 'Build TASK.md from PLAN.md by {{parentModel}}.' }] });
+    stages: [{ id: 'plan-v2', text: 'Read TASK.md and plan it. FAKE:plan', game: false }, { id: 'build_2', text: 'Build TASK.md from PLAN.md by {{parentModel}}.' }] });
   const dd = await dashboard(s);
   t.after(async () => { await dd.stop(); cleanup(s); });
-  const sel = { stages: { plan: ['opus:max'], build: ['opus:high', 'opus:low', 'bad pick'] }, only: { testing: ['a'] } };
+  const sel = { stages: { 'plan-v2': ['opus:max'], build_2: ['opus:high', 'opus:low', 'bad pick'] }, only: { testing: ['a'] } };
   const pre = (await dd.api('/api/preview', 'POST', sel)).json;
-  assert.deepEqual([pre.count, pre.byStage], [3, { plan: 1, build: 2 }]);
+  assert.deepEqual([pre.count, pre.byStage], [3, { 'plan-v2': 1, build_2: 2 }]);
   assert.equal((await dd.api('/api/preview', 'POST', { stages: {} })).json.count, 0); // nothing picked: nothing runs
   assert.equal((await dd.api('/api/run', 'POST', { ...sel, concurrency: 3 })).status, 200);
   const done = await waitFor(async () => { const st = (await dd.api('/api/status?since=0')).json; return !st.running && st.finishedAt ? st : null; });
   assert.equal(done.exitCode, 0, done.log.join('\n'));
   assert.deepEqual([done.planned, done.finished], [3, 3]);
-  const rows = (await dd.api('/api/results')).json, plan = rows.find((r) => r.stage === 'plan');
-  assert.deepEqual(rows.filter((r) => r.stage === 'build').map((r) => [r.parentId, r.chain.length, r.status]), [[plan.id, 2, 'ok'], [plan.id, 2, 'ok']]);
+  const rows = (await dd.api('/api/results')).json, plan = rows.find((r) => r.stage === 'plan-v2');
+  assert.deepEqual(rows.filter((r) => r.stage === 'build_2').map((r) => [r.parentId, r.chain.length, r.status]), [[plan.id, 2, 'ok'], [plan.id, 2, 'ok']]);
 });
 
 test('Resume failed: the page hears which failed runs can carry on with their session, and a batch from it resumes them', async (t) => {
@@ -408,6 +410,21 @@ test('a queued batch runs from the config and prompt as they were when it was qu
   const sent = fs.readFileSync(path.join(s.out, 'opus-low__v', 'prompt.md'), 'utf8');
   assert.match(sent, /Make a small game[\s\S]*old text/);
   assert.doesNotMatch(sent, /new text|Changed prompt/);
+});
+
+test('a batch from the page fills {{machine}}: its copy of the config has this computer\'s file beside it too', async (t) => {
+  const s = sandbox({ template: 'Make a small game.\n\n## Environment\n{{machine}}\n\nTesting: {{testing}}\n', dimensions: { testing: [{ id: 'a', text: 'variant A' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });
+  fs.mkdirSync(path.join(s.dir, 'environments'));
+  fs.writeFileSync(path.join(s.dir, 'environments', `${os.hostname().replace(/[^\w.-]/g, '-')}.md`), '# box: what this computer has\n\n- **Tools:** node\n');
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['a'] } })).status, 200);
+  const done = await finishedSession(dd);
+  assert.equal(done.exitCode, 0, done.log.join('\n'));
+  const r = JSON.parse(fs.readFileSync(path.join(s.out, 'opus-low__a', 'result.json'), 'utf8'));
+  assert.equal(r.status, 'ok', r.error); // was "Not started: prompt uses {{machine}}, but this computer has no environments/….md"
+  assert.match(fs.readFileSync(path.join(s.out, 'opus-low__a', 'prompt.md'), 'utf8'), /## Environment\n- \*\*Tools:\*\* node\n\nTesting: variant A/);
 });
 
 test('no run is done twice: a queued batch leaves out the runs an earlier one has, and builds on a plan running there', async (t) => {
