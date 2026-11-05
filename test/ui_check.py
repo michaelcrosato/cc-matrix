@@ -9,7 +9,7 @@ test/fake-cli (nothing real starts, nothing is spent) and its own dashboard on a
   python3 test/ui_check.py                  # all engines
   python3 test/ui_check.py --engines chromium --shots /tmp/shots
 """
-import argparse, json, os, shutil, socket, subprocess, sys, tempfile, time, urllib.request
+import argparse, json, os, re, shutil, socket, subprocess, sys, tempfile, time, urllib.request
 from playwright.sync_api import sync_playwright
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -112,6 +112,25 @@ try:
         page.keyboard.press('Tab'); page.wait_for_timeout(600)
         saved = json.load(open(os.path.join(runs, 'scores.json'))).get(rid, {})
         check('the note saved, with the run attempt it belongs to', saved.get('notes') == 'half a thought' and bool(saved.get('startedAt')), str(saved))
+        # Results → Columns: hide one, show one hidden by default, drag a header onto another to move its column, and the
+        # first columns (frozen) stay put while the table scrolls sideways
+        page.get_by_role('button', name='Columns').click(); page.wait_for_selector('#modal[open] .colist')
+        row = lambda name: page.locator('#modal .colrow', has=page.locator('span', has_text=re.compile(f'^{re.escape(name)}$')))
+        row('KB').locator('input').uncheck(); row('requests').locator('input').check(); page.wait_for_timeout(300)
+        page.keyboard.press('Escape'); page.wait_for_timeout(300)
+        heads = lambda: [re.sub(r'[ ▲▼]+$', '', x.strip()).lower() for x in page.locator('table.runs thead th').all_inner_texts()]
+        h0 = heads()
+        page.locator('table.runs thead th', has_text='list $').drag_to(page.locator('table.runs thead th', has_text=re.compile('^time', re.I))); page.wait_for_timeout(400)
+        h1 = heads()
+        box = page.locator('#tab-results .xbar + .scroll'); box.evaluate('e => e.scrollLeft = 400'); page.wait_for_timeout(300)
+        x = page.evaluate("[...document.querySelectorAll('#tab-results table.runs tbody tr:first-child td')].slice(0, 4).map((td) => Math.round(td.getBoundingClientRect().left))")
+        box.evaluate('e => e.scrollLeft = 0'); page.wait_for_timeout(200)
+        x0 = page.evaluate("[...document.querySelectorAll('#tab-results table.runs tbody tr:first-child td')].slice(0, 4).map((td) => Math.round(td.getBoundingClientRect().left))")
+        check('Columns hides and shows columns, a dragged header moves its column, and the first three stay put as the table scrolls sideways',
+              'kb' not in h0 and 'requests' in h0 and h1.index('list $') == h1.index('time') - 1 and x[:3] == x0[:3] and x[3] < x0[3], f'{h0} {h1} {x0} {x}')
+        page.get_by_role('button', name='Columns').click(); page.wait_for_selector('#modal[open] .colist')
+        page.get_by_role('button', name='Reset all').click(); page.wait_for_timeout(300); page.keyboard.press('Escape'); page.wait_for_timeout(300)
+        check('Reset all puts the columns back', 'kb' in heads() and 'requests' not in heads(), str(heads()))
         # a Codex run's details: its list price, requests, tools, subagent tokens and plan limits from Codex's session logs
         page.locator('table.runs tbody tr', has_text='gpt-6.1-sol').filter(has_text='light').get_by_role('button', name='details').click()
         page.wait_for_selector('#modal[open] >> text=API list price')
@@ -193,6 +212,7 @@ try:
         many = [{'id': f'm{i}', 'text': f'FAKE:sleep=150 m{i}'} for i in range(30)]
         c = json.load(open(conf)); c['dimensions']['testing'] += many; json.dump(c, open(conf, 'w'), indent=2)
         page.goto(base + '/#run'); page.wait_for_timeout(1500)
+        page.get_by_role('button', name='Set up', exact=True).click()
         page.get_by_role('button', name='▶ Start').click()
         page.wait_for_function("document.querySelector('#pill').textContent.includes('Running')", timeout=10000)
         page.wait_for_function("!document.querySelector('#pill').textContent.includes('Running')", timeout=60000)
@@ -204,8 +224,14 @@ try:
         c = json.load(open(conf)); c['dimensions']['testing'] += [{'id': f's{i}', 'text': f'FAKE:sleep=12000 s{i}'} for i in range(4)]; json.dump(c, open(conf, 'w'), indent=2)
         api_state = lambda: json.load(urllib.request.urlopen(base + '/api/status'))
         page.goto(base + '/#run'); page.wait_for_timeout(1500)
+        page.get_by_role('button', name='Set up', exact=True).click()
         page.get_by_role('button', name='▶ Start').click()
         page.wait_for_function("status.running && status.state && status.active.length === 2", timeout=20000)
+        page.wait_for_selector('#tab-run .card h2:text-is("Running now · 2")', timeout=10000)
+        mon = page.locator('#tab-run').inner_text()
+        check('Start goes to Monitor: the batch, its models, the runs going now (a row each), each CLI and the log',
+              all(t in mon for t in ['This batch', 'By model', 'Running now · 2', 'By CLI', 'Log']) and page.locator('#tab-run .card', has_text='Running now').locator('table.monitor tbody tr').count() == 2,
+              mon[:300])
         page.wait_for_selector('text=Options · this batch')
         page.fill('#opt-concurrency', '1'); page.press('#opt-concurrency', 'Enter')
         page.get_by_role('button', name='Let them finish').click(); page.wait_for_timeout(800)
@@ -234,7 +260,8 @@ try:
         page.set_viewport_size({'width': 1280, 'height': 900})
         page.get_by_role('button', name='▶ Resume').click(); page.wait_for_timeout(800)
         check('Resume lets runs start again', api_state()['state']['paused'] is False)
-        # + Queue: another batch beside the running one, listed on the Live card; the runs the first has are left out of it
+        # + Queue (in Set up): another batch beside the running one, listed in Monitor; the runs the first has are left out of it
+        page.get_by_role('button', name='Set up', exact=True).click()
         page.get_by_role('button', name='+ Queue').click()
         page.wait_for_function("status.batches && status.batches.length === 2", timeout=10000)
         page.wait_for_selector('#live >> text=Batch 2', timeout=5000)
