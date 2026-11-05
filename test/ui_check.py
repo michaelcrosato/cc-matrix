@@ -153,6 +153,17 @@ try:
         card = cp.locator('#machinecard').inner_text(); cp.close()
         check('CLIs → This computer says the computer has no environment file yet, and offers to write one',
               'has no environment file yet' in card and 'Check this computer' in card, card[:300])
+        # the header holds one row on a laptop, whatever the pill and the badges say (a long pill with warnings wrapped it once)
+        page.goto(base + '/#run'); page.wait_for_selector('#tab-run.on > *')
+        page.evaluate("""() => { document.querySelector('#pill .full').textContent = 'Running · 123 active · 1,111 of 2,261 done · ⚠ 117'; document.querySelector('#pill .short').textContent = '● 1,111/2,261 done ⚠117';
+          for (const t of ['running', 'insights', 'audit']) { const b = document.querySelector(`nav button[data-tab="${t}"]`); b.hidden = false; b.querySelector('.badge')?.remove(); b.insertAdjacentHTML('beforeend', '<span class="badge">553</span>'); } }""")
+        rows = {}
+        for w in (1241, 1280, 1366, 1440, 1500, 1501, 1536, 1920):
+            page.set_viewport_size({'width': w, 'height': 800})
+            rows[w] = page.evaluate("""() => { const r = (q) => document.querySelector(q).getBoundingClientRect(), th = r('#theme'), nav = document.querySelector('header nav'), last = [...nav.querySelectorAll('button:not([hidden])')].at(-1).getBoundingClientRect();
+              return { oneRow: Math.abs(th.top + th.height / 2 - (r('header h1').top + r('header h1').height / 2)) < 8, inView: th.right <= innerWidth, navFits: last.right <= r('#pill').left, h: Math.round(r('header').height) }; }""")
+        check('the header holds one row from 1241px up, tabs whole, with the longest pill and badges', all(x['oneRow'] and x['inView'] and x['navFits'] and x['h'] <= 60 for x in rows.values()), json.dumps(rows))
+        page.set_viewport_size({'width': 1280, 'height': 900})
         # the tabs in order, and links from when two of them had other names
         names = [re.sub(r'\s+', ' ', x).strip() for x in page.locator('header nav button:visible').all_inner_texts()]
         names = [re.sub(r'\s*\d+$', '', x) for x in names]
