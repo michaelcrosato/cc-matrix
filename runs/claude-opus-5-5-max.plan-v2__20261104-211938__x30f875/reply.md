@@ -1,0 +1,1 @@
+No change. I'm leaving `PLAN.md` as it is, and only rewording the condition or running `/goal clear` will stop this check.

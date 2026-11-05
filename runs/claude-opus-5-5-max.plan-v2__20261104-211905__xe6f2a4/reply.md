@@ -1,0 +1,1 @@
+No change. I'm waiting on your decision: `/goal clear` to accept the plan, or tell me to build the game.
