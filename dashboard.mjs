@@ -854,10 +854,6 @@ function results() {
     r.hasReply = fs.existsSync(path.join(dir, 'reply.md'));
     if (fs.existsSync(path.join(dir, 'goal.md'))) r.hasGoal = true; // sent a /goal: goalMet says how it went, once read
     r.hasInterview = fs.existsSync(path.join(dir, 'work', 'exit-interview.json'));
-    if (r.hasInterview) { // the game's title as on its title screen (the AI Hub fields), for Insights
-      const name = readJSON(path.join(dir, 'work', 'exit-interview.json'), null)?.aiHub?.name;
-      if (typeof name === 'string' && name.trim()) r.hubName = name.trim();
-    }
     if (resumable(dir, r)) r.resumable = true;
     const changed = changedVariants(dir, r, dims, tmpl);
     if (changed.length) r.changed = changed;

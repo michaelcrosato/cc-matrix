@@ -273,8 +273,6 @@ test('feedback: each exit interview\'s answers with the questions the run was se
   assert.deepEqual(fb[id].testingFeedback, asked);
   assert.deepEqual(fb[id].engineFeedback.map((a) => a.question), [null, null, null, null, null, null]);
   assert.deepEqual(Object.keys(fb[id]).sort(), ['engineFeedback', 'promptFeedback', 'testingFeedback']);
-  // The game's title from its exit interview is in the results, for Insights' title check.
-  assert.equal((await dd.api('/api/results')).json.find((r) => r.id === id).hubName, 'Fake Game');
   // The questions edited since: the run's are read back out of the prompt it was sent.
   const cfg = (await dd.api('/api/config')).json.config;
   cfg.dimensions.testingFeedback[0].text = '- Something else?';

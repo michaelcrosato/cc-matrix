@@ -2341,6 +2341,11 @@ const runFlags = () => cached('flags', () => {
     if (!r.delivered && r.expectsGame !== false) items.push({ sev: 100, bad: true, tag: 'no game', text: 'Finished OK but left no game file (.html) in the work folder root' });
     if (!r.hasReply) items.push({ sev: 60, tag: 'no reply', text: r.rounds > 1 ? `No final reply: the last of its ${r.rounds} /goal rounds ended without text` : 'No final reply: its last message was empty' });
     if (r.exitInterview === 'missing') items.push({ sev: 55, tag: 'no exit interview', text: 'Its prompt asks for exit-interview.json beside the game, and it left none' });
+    const g = r.gameCheck ?? {}, first = (k) => g[k + 'First']?.[0] ? `: ${g[k + 'First'][0]}` : '';
+    if (g.pageErrors) items.push({ sev: 80, bad: true, tag: 'game throws', text: `Loaded headless, it threw ${plural(g.pageErrors, 'error')}${first('pageErrors')}` });
+    if (g.consoleErrors) items.push({ sev: 65, tag: 'console errors', text: `Loaded headless, it logged ${plural(g.consoleErrors, 'error')}${first('consoleErrors')}` });
+    if (g.failedRequests) items.push({ sev: 45, tag: 'failed requests', text: `Loaded headless, ${plural(g.failedRequests, 'request')} failed${first('failedRequests')}` });
+    if (g.error) items.push({ sev: 45, tag: 'game check failed', text: `The game check couldn't finish: ${g.error}` });
     if (r.exitInterview === 'invalid') items.push({ sev: 50, tag: 'bad exit interview', text: 'Its exit-interview.json isn\'t one JSON object, so its answers aren\'t in the game\'s record as fields' });
     if (goalState(r) === 'no') items.push({ sev: 45, tag: 'goal not met', text: `Its /goal: ${goalText(r)}` });
     if (r.plannerInterview === 'missing') items.push({ sev: 55, tag: 'no planner review', text: 'Its instructions ask for planner-exit-interview.json, and it left none' });
@@ -2519,15 +2524,11 @@ function checksCard(rows) {
   const counted = ok.filter((r) => r.todos != null), todo = counted.filter((r) => r.todos > 0).length;
   add(!counted.length ? 'na' : todo ? 'warn' : 'ok', 'No TODO or FIXME left in games',
     !counted.length ? 'Counted for new runs (or after node run-matrix.mjs --reparse).' : todo ? `${todo} of ${counted.length} games still have some.` : `None in ${plural(counted.length, 'game')}.`);
-  // A plan's builds make one game, so they should agree on its title: the name on its title screen (the exit
-  // interview's AI Hub name), else its file's GameTitle-SOURCE. One that adds a subtitle still agrees.
-  const titleOf = (r) => r.hubName ?? gameName(r) ?? '', tkey = (r) => titleOf(r).toLowerCase().replace(/[^a-z0-9]/g, '');
-  const agree = (a, b) => a.startsWith(b) || b.startsWith(a);
-  const kids = [...groupBy(ok.filter((r) => r.parentId && r.delivered), (r) => r.parentId).values()].filter((rs) => rs.length > 1);
-  const split = kids.filter((rs) => rs.some((a) => rs.some((b) => !agree(tkey(a), tkey(b)))));
-  if (kids.length) add(split.length ? 'warn' : 'ok', 'Builds of one plan use its title', split.length
-    ? `The builds of ${split.length} of ${plural(kids.length, 'plan')} gave their game different titles: ${split.slice(0, 3).map((rs) => [...new Map(rs.map((r) => [tkey(r), titleOf(r)])).values()].join(' / ')).join('; ')}${split.length > 3 ? '; …' : ''}. A builder that picks a title of its own (the brief's Game Title asks for a random pick) makes the plan's game under another name.`
-    : `The builds of each of ${plural(kids.length, 'plan')} kept its title.`);
+  // The game check (gameCheck in the config): each game loaded headless once, by the runner.
+  const checked = ok.filter((r) => r.gameCheck && !r.gameCheck.skipped), throws = checked.filter(gameTrouble);
+  if (checked.length) add(throws.length ? 'warn' : 'ok', 'Games load and run headless without errors', throws.length
+    ? `${throws.length} of ${plural(checked.length, 'game')} threw, logged an error or failed a request in their first ${checked[0].gameCheck.seconds ?? 60} s (listed under Needs a look).`
+    : `All ${plural(checked.length, 'game')} checked did.`);
   const reps = [...groupBy(ok, (r) => r.id.replace(/__r\d+$/, '')).entries()].map(([k, rs]) => {
     const t = rs.map((r) => r.wallMinutes).filter((x) => x > 0);
     return { k, spread: t.length > 1 ? Math.max(...t) / Math.min(...t) : null };
@@ -2560,7 +2561,7 @@ function lookCard(rows) {
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Needs a look'),
       all.length > open.length ? h('label', { class: 'row', style: 'gap:6px' }, h('input', { type: 'checkbox', checked: !!iv.showSeen,
         onchange: (e) => { iv.showSeen = e.target.checked; saveIv(); renderInsights(); } }), `Show reviewed (${all.length - open.length})`) : null),
-    h('p', { class: 'sub' }, 'Finished runs that look off: no game, reply or exit interview, TODOs left, a time, cost or output at least 2× off what\'s usual for its setup, or a game under half the usual size. A score, a note or "looked at" clears one.'),
+    h('p', { class: 'sub' }, 'Finished runs that look off: no game, reply or exit interview, a game that throws or logs errors when the runner loads it, TODOs left, a time, cost or output at least 2× off what\'s usual for its setup, or a game under half the usual size. A score, a note or "looked at" clears one.'),
     shown.length ? h('div', { class: 'scroll' }, h('table', { class: 'look' }, srHead('Play', 'Run', 'Why', 'Files and actions'), h('tbody', {}, shown.slice(0, limit).map((f) => lookRow(f.r,
       f.items.map((i) => h('div', {}, h('span', { class: 'tag ' + (i.bad ? 'bad' : 'warn') }, i.tag), ' ', i.text)))))))
       : h('p', { class: 'muted' }, all.length ? 'All reviewed ✔' : 'Nothing stands out ✔'),
@@ -3092,6 +3093,16 @@ const resumeTag = (r) => r.resumes ? h('span', { class: 'tag', style: 'margin-le
 const goalState = (r) => r.goalMet === true ? 'yes' : r.goalMet === false ? (r.goalChecks === 0 && r.status === 'ok' ? 'unknown' : 'no')
   : r.goalSkipped ? 'skipped' : r.hasGoal ? 'unknown' : '';
 const goalRead = (r) => ['yes', 'no'].includes(goalState(r)); // a verdict was read: met or not
+// The runner's look at a run's game (gameCheck: loaded headless once, left alone a few seconds): what it threw,
+// logged as an error or failed to load.
+const gameTrouble = (r) => { const g = r.gameCheck; return !!g && !g.skipped && !!(g.pageErrors || g.consoleErrors || g.failedRequests || g.error); };
+function gameCheckText(g) {
+  if (g.skipped) return `skipped: ${g.skipped}`;
+  if (g.error) return `didn't finish: ${g.error}`;
+  const bits = [g.pageErrors ? `${plural(g.pageErrors, 'error')} thrown` : null, g.consoleErrors ? `${plural(g.consoleErrors, 'error')} logged` : null,
+    g.failedRequests ? `${plural(g.failedRequests, 'request')} failed` : null].filter(Boolean);
+  return `${bits.length ? bits.join(', ') : 'no errors'} in ${g.seconds ?? 60} s${g.loadMs != null ? `, loaded in ${g.loadMs < 1000 ? `${g.loadMs} ms` : fmtSecs(g.loadMs / 1000)}` : ''}`;
+}
 function goalText(r, reason = true) {
   const checks = r.goalChecks ? plural(r.goalChecks, 'check') : 'no check';
   return { yes: `Met${r.goalChecks > 1 ? ` at check ${r.goalChecks}, after ${r.goalChecks - 1} that didn't pass` : ''}`,
@@ -3205,6 +3216,9 @@ function runDetails(r) {
         line('TODO / FIXME', r.todos),
         line('Reply', r.hasReply ? (r.replyChars ? `${fmtNum(r.replyChars)} characters` : 'yes') : 'none'),
         r.exitInterview ? line('Exit interview', { ok: 'yes', invalid: 'not valid JSON', missing: 'none' }[r.exitInterview] ?? r.exitInterview, 'exit-interview.json, in the game\'s record') : null,
+        r.gameCheck ? line('Game check', gameCheckText(r.gameCheck), r.gameCheck.shot
+          ? h('a', { href: runUrl(`${r.id}/${r.gameCheck.shot}`), target: '_blank', rel: 'noopener' }, 'screenshot') : 'loaded headless once, by the runner') : null,
+        r.leftovers?.length ? line('Left running', plural(r.leftovers.length, 'program'), `stopped by the runner: ${r.leftovers.join('; ')}`) : null,
         r.metGoal ? line('Goal met', { yes: 'yes', no: 'no', skipped: 'skipped', unknown: 'not known' }[r.metGoal], goalText(r, false)) : null,
         r.plannerInterview ? line('Planner\'s review', { ok: 'yes', invalid: 'not valid', missing: 'none' }[r.plannerInterview] ?? r.plannerInterview, 'planner-exit-interview.json: its review of the prompt it was given') : null,
         line('Plan usage', r.plan ? planText(r.plan) : null, r.plan ? planNote(r.plan) : ''),
