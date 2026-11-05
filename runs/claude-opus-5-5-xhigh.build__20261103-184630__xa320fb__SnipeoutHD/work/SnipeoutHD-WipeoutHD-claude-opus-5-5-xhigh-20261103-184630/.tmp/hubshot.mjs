@@ -1,0 +1,12 @@
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+import { NAME } from '../tools/bundle.mjs';
+const DIR = new URL('../tests/out/hub/', import.meta.url);
+const srv = spawn('python3', ['-u', '-m', 'http.server', '0', '--bind', '127.0.0.1'], { cwd: DIR.pathname, stdio: ['ignore', 'pipe', 'pipe'] });
+const port = await new Promise(ok => { let b = ''; const on = d => { b += d; const m = /port (\d+)/.exec(b); if (m) ok(+m[1]); }; srv.stdout.on('data', on); srv.stderr.on('data', on); });
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1600, height: 800 } });
+await page.goto('http://127.0.0.1:' + port + '/harness.html?game=' + NAME + '.html&players=2');
+await page.waitForTimeout(6000); await page.screenshot({ path: 'tests/out/g-hubcard.png' });
+await page.waitForTimeout(30000); await page.screenshot({ path: 'tests/out/g-hubrace.png' });
+await browser.close(); srv.kill('SIGTERM');

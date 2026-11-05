@@ -1,0 +1,14 @@
+import { load } from '../test/lib/load.mjs';
+const { game, G } = load({});
+game.advance(.5);
+const T = game.debug.tools;
+const tryScene = (name, data, secs = 1) => { const n0 = game.errors.length; T.goto(name, data); game.advance(secs); const e = game.errors.slice(n0).map(e => (e.where || '') + ' ' + e.message); console.log(name, JSON.stringify(data || {}), '->', game.sceneName, e.length ? 'ERR ' + e.join(' | ') : 'ok'); };
+tryScene('menu'); tryScene('howto', { from: 'menu' }); tryScene('about', { from: 'menu' }); tryScene('exhibition');
+tryScene('map'); tryScene('location', { loc: 'beach' }); tryScene('location', { loc: 'pool' }); tryScene('location', { loc: 'promenade' }); tryScene('location', { loc: 'villa' });
+G.state.slot = 2; tryScene('location', { loc: 'casino' }, 2);
+tryScene('casino', { station: 'slots' }); tryScene('casino', { station: 'blackjack' }); tryScene('casino', { station: 'roulette' }); tryScene('casino', { station: 'cashier' });
+tryScene('shop', { shop: 'coral', from: 'promenade' }); tryScene('wardrobe', { from: 'villa' }); tryScene('journal', { from: 'villa' });
+tryScene('poolhop', { bot: true }, 25); console.log('pool', G.game.scene.state, G.game.scene.result);
+tryScene('album', { from: 'menu' }); tryScene('dayend', null); tryScene('credits'); tryScene('vresults');
+tryScene('invitation'); tryScene('charselect');
+G.game.scene.pick('lola'); game.advance(2); console.log('after pick', game.sceneName, game.errors.slice(-3).map(e => e.message));

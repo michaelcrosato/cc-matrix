@@ -1,0 +1,27 @@
+// prints the evidence for the controller glyphs, the touch-only behaviour and the filmstrips, from headless Chromium
+import { chromium } from 'playwright';
+import { readdirSync, statSync } from 'node:fs';
+import { NAME } from '../../tools/build.mjs';
+import { ARGS } from '../suites/20-browser.mjs';
+const root = new URL('../../..', import.meta.url).pathname, shots = new URL('../../shots/', import.meta.url).pathname;
+const b = await chromium.launch({ args: ARGS }), say = (ok, what) => console.log((ok ? 'PASS ' : 'FAIL ') + what);
+const page = await b.newPage({ viewport: { width: 1920, height: 1080 } });
+await page.goto('file://' + root + NAME + '.html?backend=webgl'); await page.waitForFunction(() => window.B && B.game && B.game.sceneName === 'title', null, { timeout: 120000 });
+const g = await page.evaluate(() => { const G = B.game, I = G.input, acts = ['use', 'throw', 'strike', 'party', 'selPrev', 'selNext', 'handOff', 'handMain', 'map', 'pause', 'camp', 'examine']; I.lastDevice = 'gamepad'; const ps = acts.map(a => B.fillGlyphs(G, '{' + a + '}')); G.settings.set('glyphs', 'xbox'); const xb = acts.map(a => B.fillGlyphs(G, '{' + a + '}')); const opts = G.settings.spec('glyphs').options.map(o => o[1]); G.settings.set('glyphs', 'playstation'); I.lastDevice = 'keyboard'; const kb = acts.map(a => B.fillGlyphs(G, '{' + a + '}')); return { ps, xb, kb, opts, def: G.settings.default('glyphs') }; });
+console.log('  PlayStation:', g.ps.join(' ')); console.log('  Xbox:       ', g.xb.join(' ')); console.log('  Keyboard:   ', g.kb.join(' '));
+say(g.def === 'playstation' && g.opts.join() === 'PlayStation,Xbox', 'Button symbols setting: PlayStation by default, Xbox the alternative');
+say(g.ps.join(' ') === '✕ ○ □ △ L1 R1 L2 R2 Create Options L3 R3', 'every pad prompt in PlayStation glyphs');
+say(g.xb.join(' ') === 'A B X Y LB RB LT RT View Menu LS RS', 'every pad prompt in Xbox glyphs with the setting');
+say(g.kb.join(' ') === 'F G Space I Tab Tab T R M Esc C X' || g.kb[0] === 'F', 'keyboard prompts name the keys');
+await page.close();
+const ctx = await b.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true });
+const ph = await ctx.newPage(); await ph.goto('file://' + root + NAME + '.html?backend=webgl'); await ph.waitForFunction(() => window.B && B.game && B.game.sceneName === 'title', null, { timeout: 120000 }); await ph.waitForTimeout(800);
+const t = await ph.evaluate(() => ({ only: B.touchOnly(), touch: B.game.input.touchEnabled, corner: !!B.game.cornerArea(), btn: !!document.querySelector('button, [role=button], .esh-corner, [class*=corner]') }));
+await ph.screenshot({ path: shots + 'phone-title.png' });
+say(t.only && t.touch === false, 'phone: touch-only detected, touch stick and buttons off');
+say(t.corner, 'phone: the settings/menu corner button stays');
+await ph.waitForTimeout(10500); say(await ph.evaluate(() => B.game.sceneName) === 'attract', 'phone: the attract mode runs after 10 s idle');
+await ph.touchscreen.tap(195, 400); await ph.waitForTimeout(800); say(await ph.evaluate(() => B.game.sceneName) === 'title', 'phone: a touch returns to the title (notice shown again)');
+await ctx.close(); await b.close();
+const films = readdirSync(shots).filter(f => f.startsWith('film-1920-'));
+say(films.length === 7 && films.every(f => statSync(shots + f).size > 20000), '1920x1080 filmstrips: ' + films.join(', '));

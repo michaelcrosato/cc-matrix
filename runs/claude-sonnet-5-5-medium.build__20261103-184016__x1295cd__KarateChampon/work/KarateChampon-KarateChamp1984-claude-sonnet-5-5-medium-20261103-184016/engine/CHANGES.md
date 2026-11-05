@@ -1,0 +1,4 @@
+# Engine changes (my-3D2dge 0.85.2 handoff)
+1. **EC2 (reduced): PlayStation glyphs by default.** `STANDARD_SETTINGS.glyphs.value` and `Input.glyphs` default to `'playstation'` instead of `'auto'`, so pad prompts show ✕ ○ □ △ unless the player picks Xbox. Restore defaults returns to PlayStation. Why: TASK.md asks for PlayStation glyphs by default with an Xbox option.
+Everything else (right stick as the technique stick, glyph icons, voices, live pause in sessions) is done game-side: `input.padAim` already exposes the right stick, icons are drawn by the game, the voice synth builds on `audio.ctx`.
+2. **EC4: live pause.** `game.live = true` makes `_step` keep running timers and the scene's `update` while `game.paused` is set (the pause menu is open). The scene neutralizes its local input while paused. Why: in an AI Hub shared-world session the host's world and network traffic must not stop when a player opens the menu.

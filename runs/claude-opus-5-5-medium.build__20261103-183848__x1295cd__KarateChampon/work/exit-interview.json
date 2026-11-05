@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:38:48",
+    "source": "Karate Champ (1984 arcade by Data East; known in Japan as Karate Do)",
+    "plan": "PLAN.md",
+    "genre": "1-on-1 point-sparring karate fighting with arcade bonus stages and a mimic-the-master drill",
+    "perspective": "2D side view on a single arena (optional Tatami 2.5D camera)",
+    "tech": "my-3D2dge v0.85.2 (full engine, modified: right-stick codes, standard-setting defaults, a voice bus), AI Hub session client 1.4.0, Web Audio; tests on Node",
+    "artDirection": "the engine's native HD rigs drawn as PS1-era pixel art at 320x240, white-gi vs red-gi fighters on Japanese stages",
+    "animation": "the engine's procedural Humanoid rig plus new karate poses, spins, somersaults, blocks, bows and referee signals",
+    "audio": "code-generated chip music in Japanese pentatonic scales, synthesized sound effects, and Animalese-style gibberish voices",
+    "online": "AI Hub shared-world sessions (Kachinuki, winner stays on, 2-4 players) plus local versus and local Kachinuki",
+    "testing": "headless Node suites driving game.advance and game.debug (data, input, technique, bout, AI, bonus, drill, story full playthrough, versus, attract, dev, UI, audio, smoke, online with a fake hub), browser checks with Playwright 1.63.0 (engine check.mjs, session bytes, and a direct inspection of the shipped file feature by feature) and the real AI Hub harness (2p; 4p with latency 150, jitter 50, loss 5; host-leave; server), behind one command: node tests/run.mjs (all suites)",
+    "research": "the research summarized in PLAN.md (Wikipedia, TASVideos, Shacknews, arcade-history); no new research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "session time about 1 h 25 min (18:38:48 start, files and clock checked at 19:59:49, plus the final checks); API cost and token counts unknown (not visible to the agent in this session)"
+  },
+  "testingFeedback": [
+    "27 game issues, each listed with its fix in ISSUES.md in the dev folder: scene flags that persisted between visits, a crossed-fighters deadlock, an impossible reverse-punch drill, two crashes, CPU timing bugs, lost buffered presses, lunge and jump-kick imbalance, attract-demo timing, a storage fallback, missing font glyphs, and layout overlaps; and, from driving the shipped file in Chromium, unbound keys that did not exit the attract mode and touch controls re-enabled on phones.",
+    "5: a crash at load, the walk-back deadlock that froze a bout after fighters crossed, cutscenes that never ended after the first (story blocked), the reverse-punch drill that could not be passed (story blocked), and a Pots Ahoy! crash when the hero blocked.",
+    "The scripted full playthrough of the Champon Road (story suite): it found three of the five game-breaking bugs. Close second: driving the shipped HTML in Chromium (tests/inspect.mjs), which caught two TASK.md violations the headless suites missed.",
+    "The early mirror CPU-vs-CPU balance tables before the AI could actually react: they mostly measured an AI bug (late blocks), not balance, and had to be rerun after each fix."
+  ],
+  "engineFeedback": [
+    "The procedural Humanoid rig: a fully dressed 3D fighter from a few options, with attack specs, poses and a solvePose hook I could wrap to add bows, blocks, somersaults and referee signals.",
+    "Yes: the side view is 1.5 px per world unit (I assumed 1), the right stick could not be bound to actions, scene objects keep their fields between visits, and E.store has no in-memory fallback in Node, so state leaked or vanished until I found each.",
+    "The point-sparring rules: KC.Bout (referee phases, scoring by timing and spacing, aiuchi, hantei) and the twin-stick technique system; the engine's fight module is built around life bars, so neither could be reused.",
+    "Making karate animations read in profile: spins as continuous facing angles, back kicks aimed behind the rig, and somersaults by rotating every joint after the pose is solved.",
+    "EC1: right-stick codes PadRAxisUp/Down/Left/Right (4-way, hysteresis) so the right stick can be the technique stick; EC2: game-level defaults for standard settings, so glyphs default to PlayStation; EC5: a voice bus with its own volume slider for the gibberish voices. Recorded in engine/CHANGES.md.",
+    "Let the right stick, and any analog axis, be bound as actions out of the box, with its own glyphs, so twin-stick controls need no engine edit."
+  ],
+  "promptFeedback": [
+    "It asks for a complete, testable vertical slice with real infrastructure (attract mode, dev sliders, online, 10-foot UX), and the plan turned a 1984 arcade game into a clear data-driven design.",
+    "The plan used file names and a date for a different run (max effort, 17:47:43) from TASK.md's; TASK.md wins, but the clash had to be noticed. Its scope (online netcode with prediction, EC4 live pause, mocap fallbacks) is also larger than a medium-effort build can follow line by line.",
+    "Balancing a fighting game whose CPU must be beatable but not passive, and making a twin-stick scheme play well on a keyboard, both while keeping every mode (story, versus, Kachinuki, online, attract) on one rules engine.",
+    "Give the plan the run's own file names and date, and mark which plan items are must-have versus optional polish, so a builder can scope without second-guessing."
+  ],
+  "aiHub": {
+    "name": "Karate Champon",
+    "tagline": "Two sticks. One clean strike.",
+    "description": "A point-sparring karate tournament inspired by Karate Champ: land one clean technique and let the referee call it. Climb from white belt to Champ, break boards, smash flying pots and stop a charging bull.",
+    "type": "Game",
+    "genre": "Fighting",
+    "source": "Karate Champ (1984)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick/WASD: move, jump, crouch · Right stick, face buttons or IJKL: techniques · Options/Esc: pause",
+    "tags": [
+      "2d",
+      "arcade",
+      "versus",
+      "retro",
+      "pixel art",
+      "comedy"
+    ]
+  }
+}

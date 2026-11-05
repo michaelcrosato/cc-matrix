@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const file = 'file://' + process.argv[2];
+const b = await chromium.launch({ args: ['--disable-dev-shm-usage'] }), p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+await p.goto(file + '#fight/dojo/kamaboko'); await p.waitForFunction(() => window.KC && KC.game && KC.game.scene); await p.waitForTimeout(2500);
+await p.keyboard.press('Escape'); await p.waitForTimeout(400); for (let i = 0; i < 3; i++) await p.keyboard.press('ArrowDown'); await p.keyboard.press('Enter'); await p.waitForTimeout(400);
+const st = () => p.evaluate(() => ({ panel: KC.Overlay.active, i: KC.Dev.panel && KC.Dev.panel.i, speed: KC.TUNE.gameSpeed, paused: KC.game.paused, shell: !!(KC.game.shell && KC.game.shell.screen), focus: document.activeElement && document.activeElement.tagName }));
+console.log('opened', JSON.stringify(await st()));
+await p.keyboard.press('ArrowDown'); await p.waitForTimeout(150); console.log('down', JSON.stringify(await st()));
+await p.keyboard.press('ArrowRight'); await p.waitForTimeout(150); console.log('right', JSON.stringify(await st()));
+await p.keyboard.down('ArrowRight'); await p.waitForTimeout(800); await p.keyboard.up('ArrowRight'); console.log('held right', JSON.stringify(await st()));
+await b.close();

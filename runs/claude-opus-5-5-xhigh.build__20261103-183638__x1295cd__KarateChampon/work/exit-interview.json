@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:36:38",
+    "source": "Karate Champ (1984 arcade, Data East; known in Japan as Karate Do)",
+    "plan": "PLAN.md",
+    "genre": "1-on-1 point-sparring karate fighting with arcade bonus stages and a mimic-the-master drill",
+    "perspective": "2D side view on a single-screen arena (optional Tatami 2.5D camera)",
+    "tech": "my-3D2dge v0.85.2 (full engine, modified: EC1-EC5), AI Hub session client 1.4.0, Web Audio; tests on Node 24 with Playwright 1.63.0",
+    "artDirection": "the engine's HD rigs as PS1-era pixel art at 320x240, code-drawn Japanese stages, props from the engine's asset store",
+    "animation": "the engine's procedural Humanoid rig with game-side karate poses, spins, somersaults, blocks, referee signals and a code-drawn bull",
+    "audio": "code-generated chip music (pentatonic), code sound effects and an Animalese-style gibberish voice synth with subtitles",
+    "online": "AI Hub shared-world sessions (Kachinuki, winner stays on, 2-4 players) plus local versus and local Kachinuki",
+    "testing": "Allowed: headless tools (game.advance, game.debug) and a scripted full playthrough behind one command that prints only failures and a count; screenshots only for what a script cannot judge; no subagents or workflows. Used: node tests/run.mjs (18 suites, 601 checks: data, input, technique, bout, ai, bonus, story playthrough, versus, online with a fake hub, attract, dev, ui, smoke, the engine's check.mjs page check, and the real AI Hub harness in 4 scenarios, a browser suite that measures the sound and plays techniques with a DualSense fed through the browser's Gamepad API and real key events, and a browser audit of TASK.md line by line: the whole story played and drawn in Chromium, the real-time idle timer, real mouse hover and clicks, the real 2-key join, a touch device's emulation, the music's notes in the output's spectrum)",
+    "research": "the source facts in PLAN.md section 1.1 (Wikipedia, TASVideos, Shacknews, arcade-history); no extra research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Tokens and cost: unknown (no meter available in this session). Session time: 2 h 01 min of wall clock, from the task's start (18:36:38) to the system clock at the last build (20:37:26)"
+  },
+  "testingFeedback": [
+    "About 22 issues. The headless suites caught 13 (among them: jump kicks whose reach bands did not match their flight, the Pots Ahoy! autopilot facing the wrong pot, a drill made unpassable when lunges carried the hero into close range, scene objects keeping a 'finished' flag between visits, the attract director stopping a hair outside reach, player 2's shared-keyboard keys read from the wrong property, menu hover ignoring a fed pointer, and two test-runner bugs). Screenshots caught 8 (props placed outside the visible arena, a missing asset-set load, a menu overflowing at 10-foot size, the 2.5D crowd floating mid-floor, fighters tiny in the hub's tall frames, the bull off screen, overlaps on the market and stadium). A browser audit of the real output caught 1 more: the music went silent whenever the audio device's latency exceeded the engine's look-ahead (Bluetooth headphones, headless Chromium).",
+    "3 were game breaking: the story soft-locked at the second lesson (a scene flag never reset), Lesson II could not be passed once lunges carried the hero too close, and player 2 on a shared keyboard got the wrong keys.",
+    "The scripted playthrough of the whole Champon Road from the title (real menu inputs, lessons played with real keys, nine matches with an autopilot, the bonus stages, promotions, ending, credits, initials), plus an honest no-cheat run: it found the soft-lock that no single-scene test could. Close second: measuring the real audio output in the browser, which found music silently dropping out on laggy audio devices.",
+    "The engine's check.mjs view cycle: it switches through the engine's built-in views (iso, top-down), which this game never uses, and its look notes flagged a dark cutscene title card as low contrast."
+  ],
+  "engineFeedback": [
+    "The procedural Humanoid rig: one rig with options gives a whole dressed cast, attack specs driven by phase and progress let frame data pose every karate technique, and everything runs deterministically headless with game.advance, so whole matches, the story and four networked copies could be tested in a Node vm.",
+    "Yes: the side view's scale is 1.5 pixels a unit, so I made my own views at 1.2; props placed by world numbers landed off screen; gamepad codes are released on every tick when no pad is connected, so the right stick had to be tested through a stubbed navigator.getGamepads; input.feed('move') does not update mouse.t, which the menus use for hover; settings.reset takes a group, not a key; the band hat looks spiky in portraits; and the music scheduler's 0.15 s look-ahead drops every note when the output latency is larger.",
+    "The point-sparring core: KC.Karateka (a state machine on the technique table's frame data, height rules, block, quality scored from timing and spacing, counters, aiuchi) and KC.Bout with the referee and judges (bow, begin, stop, half and full point calls, time-out, the judges' flags), since the engine's fight module is built around life bars. Then the gibberish voice synth and the host-authoritative netcode.",
+    "Making karate read: spins by animating the rig's facing angle, back kicks striking behind the rig, the bow, seiza, blocks and the referee's signals by wrapping rig.solvePose and moving joints with my own IK, while keeping hits independent of the animation so puppets, replays and tests agree.",
+    "EC1: right-stick codes PadRAxisUp/Down/Left/Right (a 4-way gate with hysteresis) so the technique stick can be bound and labelled. EC2: a game can override a standard setting's default (PlayStation glyphs by default). EC3: ✕ ○ □ △ in the 5x7 font. EC4: game.live keeps the world stepping while the menu is open, for shared-world sessions. EC5: the music look-ahead covers the output latency, so laggy devices (Bluetooth headphones) still hear the music. engine/CHANGES.md records them.",
+    "A first-class pose layer on the Humanoid: named poses and joint targets with blend weights, an exported IK helper and a back-thrust kick, instead of wrapping solvePose; and a standard way for update to keep running under the pause menu and hit-stop."
+  ],
+  "promptFeedback": [
+    "It is concrete about the deliverable and the bar: a named single file, every feature with no stubs, a dev mode with live sliders, an attract mode, a 10-foot controller-first UI, and a testing rule (one command, failures only) that kept the work honest. The plan beside it made a big scope buildable.",
+    "PLAN.md names its own file names (max effort, 17:47:43) while TASK.md wants xhigh and 18:36:38; TASK.md wins, as STAGE.md says, but it is easy to miss. 'Usage' asks for cost and token estimates the session cannot see. 'Testing: parameters allowed' reads as both what was allowed and what was done.",
+    "The scope in one sitting: 9 matches, 11 locations, 3 bonus games, lessons, story, versus, local and online Kachinuki, attract, dev mode, voices, all tested; and making two-stick karate techniques read with a procedural rig.",
+    "Mark which numbers in a plan are tunable targets and which are rules; give a priority order for when time runs short; name the target screen (a TV at 1080p, 16:9) and the hub's frame shape; and drop the usage line or say where the numbers come from."
+  ],
+  "aiHub": {
+    "name": "Karate Champon",
+    "tagline": "Two sticks. One clean strike.",
+    "description": "A point-sparring karate tournament inspired by Karate Champ: land one clean technique and let the referee call it. Climb from white belt to Champ, break boards, smash flying pots and stop a charging bull.",
+    "type": "Game",
+    "genre": "Fighting",
+    "source": "Karate Champ (1984)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick/WASD: move, jump, crouch · Right stick, face buttons or IJKL: techniques · Options/Esc: pause",
+    "tags": [
+      "2d",
+      "arcade",
+      "versus",
+      "retro",
+      "pixel art",
+      "comedy"
+    ]
+  }
+}

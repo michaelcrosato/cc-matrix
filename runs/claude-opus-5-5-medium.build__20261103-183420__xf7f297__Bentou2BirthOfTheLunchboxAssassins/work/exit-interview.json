@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:34:20",
+    "source": "Tenchu 2: Birth of the Stealth Assassins (Acquire / Activision, PlayStation, 2000)",
+    "plan": "PLAN.md",
+    "genre": "Third-person ninja stealth-action with melee combat and boss duels",
+    "perspective": "Isometric third person, rotatable in 45-degree steps and zoomable, with a high three-quarter camera option",
+    "tech": "my-3D2dge v0.85.2 handoff engine (nine small patches), AI Hub session client 1.4.0 (unmodified), vanilla JavaScript in one HTML file; Node 24 and Playwright 1.63 Chromium for tests",
+    "artDirection": "The engine's native PS1-era pixel art (320x240 expanded), HD Humanoid rigs with new masks, hats and weapons, canvas lighting, Japanese props and materials written as shape data",
+    "animation": "The engine's procedural rigs and E.ACTIONS with new paired Silent Cut choreographies (5 kinds x 2 characters), grapple, riposte, ninja run, wall hug, swimming, eating and a quadruped hound",
+    "audio": "The engine's chip synth: layered Japanese-scale music (koto, shamisen, shakuhachi, fue, taiko), code-made sound effects, and a formant gibberish voice synth for every spoken line",
+    "online": "AI Hub Session Protocol v1, ghost mode, 1-4 players with the game's own card; offline the Shadow Trial against your own best ghost",
+    "testing": "Headless node:vm suites driving game.advance and game.debug behind one command (failures only, one-line count): mechanics, all four missions completed through their objectives with the autopilot fighting each boss, menus/story flow/ending, attract mode (3 loops), Dev Mode, the Workshop, a mock AI Hub, determinism; Playwright checks of the bundle, a TASK.md audit with a simulated DualSense, keyboard and mouse, and the real AI Hub harness (2 players, 4 players on a lossy network, host leaving). 165 checks pass.",
+    "research": "The engine handoff docs and the AI Hub README; the planner's research (Wikipedia on Tenchu 2) carried in PLAN.md",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 12 real issues, all fixed: guards squared the hero's exposure (they barely noticed anyone); the cut-from-above check never fired from a roof edge; diving was impossible (the engine's Mover overwrote the crouch toggle); guards and bait-eaters got stuck on solid props; a held button didn't count against the attract idle clock; debug teleports left the camera behind under slow motion; after using a gamepad the mouse never took over again (Workshop painting failed); quick key taps were missed by the Workshop; the mouse wheel was ignored mid-attack; plus test-setup issues (rice bales in a path, a hound that smelled the tester, Python buffering the harness server's port).",
+    "3 were game-breaking: no diving (an Undertow and the dive under archers impossible), guards stuck on props (baits and some patrols broken), and the squared exposure (stealth had no tension).",
+    "The missions suite: it completes the Trial, Rice and Ash, Kiri Lake and Moon over Kokaku through their real objectives (cuts, holds, the escort, the timer) with the autopilot fighting each boss, and it found the stuck-on-props bug.",
+    "The headless smoke test of wandering input: it passed at once, because headless runs skip all drawing; only browser screenshots exercised the draw code."
+  ],
+  "engineFeedback": [
+    "The breadth that is already there and works headless: E.Mover parkour, E.sees / E.Suspicion / E.hears, paired E.ACTIONS, the Shell with its standard pause, settings and rebinding, fixed-step game.advance for exact tests, and Humanoid rigs that look good with very little code.",
+    "Yes, a few times: an intent's crouch is a state, not a toggle (it silently undid my toggle); flow fields don't see map.solid props; E.sees already multiplies the target's exposure (I multiplied it again); a single-step scripted press can be lost during hit-stop; and the custom input map must restate the menu keys.",
+    "The stealth layer on top: Shadow Sight and the Ki gauge, light maps baked with line of sight, the guard state machine (bait, bodies, bells, reinforcements), Silent Cut detection and choreographies, bosses with telegraphs, and the mission runtime with checkpoints.",
+    "Knowing what already exists in a 1.2 MB engine: the index is good, but behaviour details (what an intent field means, which systems respect props) are only in the source.",
+    "Nine small patches, listed in engine/PATCHES.md: PlayStation glyphs in the pixel font; PlayStation/Xbox button symbols; masks, jingasa/kabuto hats, spear, bow, club, offhand blades and sashimono on the Humanoid; settings rows on custom Shell screens; hover moves focus; a 10-foot UI scale; plucked music envelopes; a voice bus; and a pause guard for the hub's Create + Options.",
+    "Make FlowField respect map.solid shapes (or offer a nav option for them), so AI never walks into props."
+  ],
+  "promptFeedback": [
+    "It is concrete about the player: a TV at 10 feet, PlayStation glyphs with an Xbox option, attract mode, touch-only handling, dev sliders, and the hub; together with the detailed plan it left little to guess.",
+    "The bracketed file name pattern [GameTitle-SOURCE-...] versus the plan's own name (it was written for a max-effort run), and how 'every feature' should be weighed between TASK.md and a plan far larger than a single session.",
+    "Scope: a full stealth game, four bosses, an escort, a mission editor, attract mode, hub multiplayer and a dev mode in one session, while keeping everything tested and stubs-free.",
+    "Say which plan items are must-haves versus stretch, and give the expected session budget; also note the /tmp space limit in TASK.md itself."
+  ],
+  "aiHub": {
+    "name": "Bentou 2: Birth of the Lunchbox Assassins",
+    "tagline": "Seen by none. Fed by all.",
+    "description": "An isometric ninja stealth-action game: pack your bento of tools, slip past lantern-lit guards, land Silent Cuts and earn your rank across a feudal night of missions, bosses and a mission editor.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "Tenchu 2: Birth of the Stealth Assassins",
+    "series": "Tenchu",
+    "players": "1–4",
+    "controls": "Move WASD/left stick · Jump Space/✕ · Crouch C/○ · Strike click/□ · Grapple G/R1 · Tool R/R2 · Block right click/L1",
+    "tags": [
+      "pixel art",
+      "isometric",
+      "third-person",
+      "story",
+      "boss fights",
+      "retro"
+    ]
+  }
+}

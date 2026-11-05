@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 22:13:26",
+    "source": "Dragon Quest Builders",
+    "plan": "PLAN.md (systems and structure). Title: 50 riffs written by me, drawn with secrets.randbelow (index 18: Dragon Crate Builders)",
+    "genre": "Sandbox action RPG with block building, crafting, town building, a siege and a boss",
+    "perspective": "Third-person isometric; the camera turns in quarter steps and a three-quarter view is available",
+    "tech": "my-3D2dge engine v0.85.2 (handoff), plain JavaScript (ES2020), Canvas 2D; AI Hub client session.js 1.4.0 unmodified; Node 24.22.1 and Playwright 1.63.0 for tests",
+    "artDirection": "A patchwork quilt: block faces are fabric patches with stitched seams and shaded colour, drawn at PS1 resolution (320x240) with the engine's native characters, plus procedural furniture and banner pieces made for this game",
+    "animation": "The engine's humanoid rigs, sword moves and blob squash, plus new animations: a stitch needle that runs round each placed block, a flickering lantern flame, a fluttering banner flag, and a cast pose and roll for the Builder",
+    "audio": "Music, sound effects and voices all written in code, with no audio files: five chip-synth songs, procedural effects, and Animalese voices synthesised with formant filters (each vowel a pitched buzz through its formant bands, consonants noise hisses or clicks), with no words",
+    "online": "AI Hub shared-world mode: one town built together for three minutes by one to four players; the host runs the town, the others send their inputs and draw it from the host's state",
+    "testing": "119 headless checks (including a whole-chapter playthrough with god mode off, two copies joined over a fake hub bus, and the Animalese and pattern checks), the engine's browser checker, and the AI Hub harness in shared-world mode (1, 2 and 4 players, a server host, and a host leaving)",
+    "research": "None beyond the engine's API card and the AI Hub protocol README",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium headless via Playwright",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 12 issues in the game, plus several mistakes in my own tests.",
+    "Two critical: blocks were drawn over the Builder (a depth anchor given in the wrong units), and a hub session did not open into the round, so the AI Hub harness failed its hello check.",
+    "The most helpful test was a browser screenshot of play at two Builder positions; the headless checks could not show the depth bug.",
+    "The least helpful was the engine checker's colour-count and contrast notes, which are tuned for bright scenes rather than a dim block world at night."
+  ],
+  "engineFeedback": [
+    "The humanoid rigs with the E.MOVES set and E.Attack timing, and the standard pause, settings, controls, dialog and menu screens, which cost nothing to get.",
+    "Yes. r.queue takes world units, and I first passed cell numbers, which broke the depth sort. I also guessed at some E.font options and checked game.rotateView only by running it.",
+    "The voxel world: block storage, step-up collision, block rays, room detection and per-block depth-sorted drawing, because the TileMap is a heightmap with one wall per cell.",
+    "Stacking blocks inside the isometric depth-sorted draw, and the size of the engine file and its API card.",
+    "One change: Dialog gained an onLetter(index, talk) hook, marked // DQ:, so each letter can be voiced. No other engine changes.",
+    "Document the units and anchor next to r.queue and r.box, and add stacked voxel columns as a first-class map type."
+  ],
+  "promptFeedback": [
+    "The deliverable list with exact names, the no-subagent rule, the test-output rule, and the AI Hub link.",
+    "PLAN.md names another file and timestamp and runs to 1,674 lines. TASK.md wins, but it was not clear which parts of the plan were required for the demo.",
+    "Fitting the plan into one session. A voxel world drawn in isometric depth order took most of the time.",
+    "Name the file once and say which file wins, and give a smaller minimum demo to aim for."
+  ],
+  "aiHub": {
+    "name": "Dragon Crate Builders",
+    "tagline": "Stitch the realm back together",
+    "description": "Break, craft and build blocks of patchwork, lay out patterns that residents build, win over quirky residents, and hold the town through a night siege to unpick Gnarlgrim. Build one shared town with up to four players.",
+    "type": "Game",
+    "genre": "RPG",
+    "source": "Dragon Quest Builders",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick or WASD walks; Cross or Space jumps; Square or J breaks and strikes; Circle or E places; Triangle or F uses and talks; C crafts; I opens the satchel; mouse aims and clicks",
+    "tags": [
+      "pixel art",
+      "exploration",
+      "boss fights",
+      "story",
+      "comedy"
+    ]
+  }
+}

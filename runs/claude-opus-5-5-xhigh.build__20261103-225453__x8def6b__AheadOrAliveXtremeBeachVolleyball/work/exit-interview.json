@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 22:54:53",
+    "source": "Dead or Alive Xtreme Beach Volleyball (Team Ninja / Tecmo, Xbox, 2003)",
+    "plan": "PLAN.md",
+    "genre": "Sports: arcade 2-on-2 beach volleyball, with a light life-sim vacation (calendar, friendships, gifts, collecting) and minigames (rhythm Pool Hop, casino).",
+    "perspective": "Matches use a side-on TV Broadcast camera (a slight 12-degree yaw, pitch 30) and a behind-the-team Serve Cam; places use a top-down three-quarter view; the island map is isometric; shops and tables are full-screen pixel UI.",
+    "tech": "my-3D2dge v0.85.2 (the handoff package, patched: see Engine Feedback), plain JavaScript in one IIFE, Canvas 2D (WebGPU lighting where the browser has it), the engine's Mocap player with a cut set of 31 clips (Quaternius, Mesh2Motion, CMU), the AI Hub session client 1.4.0. Built and tested with Node 24, Playwright 1.63.0 (Chromium) and Python 3's http.server for the hub harness. One self-contained HTML file, no network at run time.",
+    "artDirection": "The engine's native PS1-era pixel art: HD Humanoid rigs in a new athletic build, dressed in procedurally drawn swimsuits (7 cuts, 14 pixel patterns) and accessories; resort props written as data shapes; time-of-day skies, sea and lighting; a gold-and-teal 10-foot pixel UI with hand-drawn button glyphs.",
+    "animation": "The engine's procedural Humanoid rig, extended with 14 held poses and a timed arm and body overlay driven by the volleyball simulation (a spike's jump starts at its contact time minus its rise), plus 31 motion-capture clips played through Mocap.drive for celebrations, idles, dances, swimming and reactions.",
+    "audio": "All in code with Web Audio: 9 original songs from a chord-aware song builder (steel, marimba, bell, organ and pluck instruments; a rally drum layer; a tempo lift at match point; key changes), 10 jingles, 50 sound effects, ambience loops (waves, wind, crowd, pool, casino, crickets) and Animalese-style gibberish voices synthesized letter by letter for every speaker.",
+    "online": "AI Hub sessions (shared world, 1-4 players): the game's own card, one match on the hub's clock, host-authoritative rules and AI, every copy flying the ball from the same launches, client-judged touches the host validates, snapshots for positions, CPUs for empty or left seats, finish() with standings, awards and stats.",
+    "testing": "One command (node test/run.mjs) that prints only failures and a count: 22 suites and 809 checks, all passing on the final run. Headless in Node with game.advance and game.debug: units (ball flight, rules, judge, data), AI-vs-AI match statistics, the vacation, shops, story, minigames, UI, attract, dev mode, saves, revisiting all 27 scene setups after random input, a fake-hub netcode test at 150 ms latency with jitter and 5% loss, and a scripted playthrough of the whole vacation as all six fighters, to both endings. In Chromium via Playwright from file://: a tour, the attract, an emulated touch-only phone, and a four-player Beach Match on two keyboard halves and two emulated controllers (navigator.getGamepads stubbed with standard-mapping pads). That run checks PlayStation and Xbox glyphs, Serve Cam in a live rally, every attract beat and every photo filter. No physical controller was tested. Also the engine's tools/check.mjs, the AI Hub harness on 127.0.0.1 (4 scenarios), and screenshots and rig sheets for the art. TESTING-LOG.md lists every issue found.",
+    "research": "No web research. Read the engine handoff (API card, guide, index, asset card), the sports kit, the engine source for the Humanoid, Dialog, audio, input and Shell, the AI Hub protocol README, client and harness checks, and the engine repository's motion-capture catalogs. The source game was described from general knowledge, by the plan.",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Cost and tokens unknown (no meter was available to the model). By the system clock the build ran from 2026-11-03 22:54:53 (TASK.md's start time) to 2026-11-04 01:22:38 when this text was last updated, 2 h 27 min."
+  },
+  "testingFeedback": [
+    "47 game issues, each listed in TESTING-LOG.md. Scripted tests caught 20, for example: rallies that never ended because the AI dug everything; a perfect player losing because the CPU spiked into the net; a starting partner never assigned; scene state carried from one visit to the next; Continue and Load crashing; Pool Hop's beat clock; the attract missing input during fades. Screenshots and rig sheets caught 27, for example: the net seen edge-on; overlapping text and panels; tiny text in the engine's HTML menus; two menu actions on one key for keyboard-half players; Serve Cam cutting off a player. Separately, 10 bugs in the tests themselves.",
+    "Seven: the Welcome Match never starting for Ingrid (no one liked her enough to partner up); the game freezing after the Welcome Match (a cutscene flag left set from the arrival); Pool Hop unwinnable when entered from the pool; the Final never called on a second vacation; the credits never ending on a second run; the title crashing while drawing its prompt in the browser (a name clash); and Continue and Load crashing (a missing function).",
+    "The scripted playthrough: six full vacations, one per fighter, from the invitation through every day's events, matches, minigames, shopping and gifts to both endings, the credits and the results. It found 5 of the 7 critical bugs, all of them state that only breaks on a later step or a second run. The revisit test (every scene entered twice, with random input in between) found the 7th.",
+    "The first version of \"no match phase stuck over 15 seconds\". It flagged long but legal rallies, not stuck states, until I redefined it as 15 seconds with no touch and no phase change."
+  ],
+  "engineFeedback": [
+    "That the whole game runs headless in exact fixed steps. A full vacation, four networked copies of a match and the attract all run in Node in seconds and replay exactly, and the Humanoid is drawn from math, so new outfits and poses are code, not art files.",
+    "A few times. The Shell theme's font is a font family, not a CSS shorthand (the menus came out tiny). Mocap is a top-level const, not window.Mocap. game.go with a fade switches scenes later, so tests must wait. Scene objects are reused on every visit, so flags left in them break the next visit. And at yaw 0 the Broadcast view saw the net edge-on. I also trusted Input.halfKeys with menu presets: it gave two menu actions the same key, and I only noticed in a four-player screenshot.",
+    "The volleyball simulation: closed-form ball flight with precomputed net and landing events, contact planning (who plays the ball, when, where and at what height), the timing judge, the AI with its error model, and a design where the same launches drive local and online play.",
+    "Dressing the Humanoid in swimsuits. Its torso is one polygon in one color, so cuts and patterns needed a per-pixel torso fill inside the engine's draw code, kept in step with its depth sorting and shading.",
+    "(1) PlayStation symbols, arrows, accents and punctuation in the pixel font, for prompts and the writing. (2) Button symbols as a Game setting, PlayStation by default with Xbox as the option. (3) A per-letter dialog voice hook, for the Animalese voices. (4) Audio: a voice bus and Voices volume, audio.bus(), PeriodicWave instruments, and decay, filter and detune for music tracks, for the tropical score. (5) Humanoid: an athletic build, swimsuits (7 cuts, 14 patterns), patterned shirts, shorts, six hair styles, a sun hat and a visor, an accessories hook, sandal straps, 14 held poses and a timed arm and body overlay, for the cast and the volleyball moves. (6) input.reserveCombo, so Create + Options stays the AI Hub's. (7) touch: 'never', for touch-only devices. (8) E.onStep, a hook that runs through fades and pauses, so the attract ends on any input. (9) Input.halfKeys gives each action a button no earlier action holds, so a menu preset's alt and extra no longer share keys with confirm and cancel on a keyboard half.",
+    "Make scenes fresh instances on every visit, or say loudly that they persist. Sticky scene state caused more game-breaking bugs than anything else."
+  ],
+  "promptFeedback": [
+    "The definition of done, the testing rules (one command, only failures printed) and the exact exit-interview shape. Together with a detailed plan they left little to guess about what finished means.",
+    "The plan's file names and date came from a different run (claude-opus-5-5-max-20261103-174749) than TASK.md's (xhigh-20261103-225453); TASK.md winning settled it. Usage asks for cost and token estimates the model cannot see.",
+    "The breadth with no stubs allowed: a match engine, a five-day vacation sim, three casino games, Pool Hop, postcards, a story with two endings, local and online multiplayer, an attract mode and dev tools, all real and tested. Balancing the volleyball AI so rallies felt right took the most iterations.",
+    "Let the plan derive its paths and dates from TASK.md instead of hard-coding them, say how to report Usage when no meter exists, and either give a time budget or allow the core to ship first, with the rest flagged as follow-ups."
+  ],
+  "aiHub": {
+    "name": "Ahead or Alive: Xtreme Beach Volleyball",
+    "tagline": "Stay ahead. Stay alive. Stay tanned.",
+    "description": "A five-day island vacation of 2-on-2 beach volleyball, friendships, swimsuit shopping, pool hopping and casino nights, ending with a match for the island against its owner.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Dead or Alive Xtreme Beach Volleyball",
+    "series": "Dead or Alive",
+    "players": "1–4",
+    "controls": "Stick/WASD move · Cross/Space/click hit on time · Square/E shot and block · Circle/Shift dive · Triangle/Q call",
+    "tags": [
+      "sports",
+      "versus",
+      "co-op",
+      "pixel art",
+      "comedy",
+      "arcade"
+    ]
+  }
+}

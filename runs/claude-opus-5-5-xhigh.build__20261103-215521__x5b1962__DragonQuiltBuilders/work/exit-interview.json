@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 21:55:21",
+    "source": "Dragon Quest Builders",
+    "plan": "PLAN.md",
+    "genre": "Sandbox action RPG with block building, crafting and town building (real-time combat, a story chapter, a base siege and bosses)",
+    "perspective": "Third-person isometric 2.5D over a true voxel world; the camera turns in 90-degree steps and zooms in steps; an optional three-quarter view in Settings",
+    "tech": "my-3D2dge v0.85.2 handoff (Canvas 2D pixel renderer, rigs, audio, input, saves; one engine file changed), plain JavaScript modules bundled into one HTML file by a Node build script, my own voxel world, renderer, physics and A* navigation on top of the engine, Web Audio, AI Hub Session client session.js 1.4.0 (unmodified); tests on Node 24 (vm, game.advance and game.debug) and Playwright 1.63.0 Chromium",
+    "artDirection": "The engine's native pixel style: patchwork-quilt voxel blocks with stitched seams and fabric textures, furniture and props built as engine shapes, HD Humanoid and Blob rigs for the Builder, residents and monsters, warm storybook colours, day and night lighting with torches and lanterns",
+    "animation": "The engine's procedural rigs and move library (E.MOVES, attacks and combos) plus new moves for placing, eating, stirring, cranking the ballista and hammering at stations, poses and tweens for cutscenes, particles for Cheer bubbles, glints, stitches and fraying",
+    "audio": "All code, no audio files: 14 original chip songs built on one leitmotif, 13 jingles (Notion, room, level up and more), 39 synthesized sound effects, Animalese-style gibberish voices with a pitch and timbre per speaker (10 voices), a music director that follows place, time of day and danger, and a separate Voices volume",
+    "online": "AI Hub Session Protocol v1, shared-world Quilting Bee round for 1-4 players: host-authoritative world edits and snapshots, the game's own card, ready without a key press, standings and finish, leave, time-up, end and server mode; playable solo from the title with bot helpers; the story game is single-player and unchanged outside a session",
+    "testing": "Allowed: headless scripts that play the game and check its state (game.advance and game.debug), including a scripted playthrough of the whole game, behind one command that prints only failures and a one-line count; screenshots only for what a script cannot check; no subagents or workflows to debate, review, judge or audit. Used: node tests/run.mjs (unit, systems, full Chapter One playthrough by an AI pilot, a fake-hub network suite with 2 and 4 copies, latency and loss, server mode) and --browser (the AI Hub harness 4 scenarios plus standalone, real keyboard and mouse input in Chromium); 356 checks pass, including a TASK.md requirements suite and a content audit (REQUIREMENTS.md maps each TASK.md line to its checks)",
+    "research": "None on the web. Read the engine handoff (API notes and the renderer, body, input and dialog source) and the AI Hub lib/hub README, session.js and harness",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Cost unknown; tokens unknown; session time about 3 hours 20 minutes (2026-11-03 21:55 to about 2026-11-04 01:15, wall clock)"
+  },
+  "testingFeedback": [
+    "43, listed in DEVLOG.md: 21 caught by the scripted tests (headless suites, the network suite and the browser checks), 14 by screenshot review (HUD panels overlapping, the quest tracker covering the health bar, clipped prompt rows, tabs past the screen edge), 1 by reading code after a screenshot (Enter both turning and skipping the prologue), 4 by scans for stubs (a Bee scoring hook that did nothing, a landing squash never drawn, cutscene skips that left a training dummy or skipped a note, Dev rows with empty actions), and 3 by a content audit that requires everything defined to be used (a Golden Thimble with no effect, a jingle never played, a rock decoration never placed).",
+    "7: the game failing to boot from a module load-order error, the residents' path walker recursing until the stack overflowed (a freeze), the quest system never being wired so the story could not advance, a Cheer bubble that could be collected forever, the host's own edits never reaching other players (a desync in multiplayer), the Builder hidden behind walls in the first region by the x-ray and cutaway, and a late regression where a quiet quest completion broke the boot (caught by the next test run).",
+    "The scripted playthrough: an AI pilot plays Chapter One from the first quest to the credits and the side quests through the same input intents a player uses. It found the unwired quests, the path walker freeze, room detection gaps, dialogs blocking play, and story beats that left furniture blocked by plants. The content audit came second: it proves nothing defined is unused, and plants a probe of each kind to show it would catch one.",
+    "Early unit checks of screen picking and stair heights: their failures were mostly wrong expectations in the tests themselves, not bugs in the game, and the playthrough covered the same code better."
+  ],
+  "engineFeedback": [
+    "The headless game.advance and game.debug: the whole game, including networked copies, runs in Node without a browser, so a full scripted playthrough was practical. The Humanoid and Blob rigs with the move library give lively characters with no sprite work, and the built-in pause menu, settings, saves, controller glyphs and chip audio saved a lot of time.",
+    "Yes. The x-ray silhouette mask guesses a fixed-size box for each queued item, which hid the Builder behind tall voxel walls until I passed exact screen boxes. I misread the lighting tint as a colour (it is a number). The engine map is a height field, so a multi-level voxel world needed its own renderer. I also used an input name that is not an action (Mouse2) before checking the held set.",
+    "The voxel world: storage, a face-sprite atlas per view, a renderer that merges block runs into depth-sorted occluders with cutaway and a see-through slot toward the camera, voxel physics and A* navigation. After that, room detection and the AI pilot that drives the attract mode, the tests and the Bee bots.",
+    "Depth sorting voxel runs against the engine's sprites in its painter-sorted queue (occluder, top and box rules, the lift order hook), with x-ray, at two view angles and four camera turns.",
+    "One file, my-3d2dge.js: the Humanoid rig now accepts four more held items (a darning needle, a cobble club, a copper bodkin and a seam ripper) drawn in its HD drawer, because the source's weapons are also its building tools and the rig's weapon list is closed. Nothing else in the engine was changed.",
+    "First-class multi-level or voxel map support in the renderer, or at least an occluder API that takes exact screen boxes, so a block-building game does not need its own renderer."
+  ],
+  "promptFeedback": [
+    "It is concrete about what done means: the file names, one test command that prints only failures, the exit interview shape, the final reply sections, and a clear rule that TASK.md wins over the plan. The freedom to change the engine, and an AI Hub spec with a harness to test against, made the multiplayer verifiable.",
+    "The plan names a different deliverable file (a max-effort name from another run) than TASK.md does; TASK.md wins, but it is easy to get wrong. The Source Information field Testing asks for the testing parameters allowed, which reads two ways (the rules, or what was run). Usage asks for cost and token numbers the agent cannot see.",
+    "The scope: a feature-complete vertical slice of a voxel building RPG (building, rooms, residents, combat, a siege, bosses, a story chapter, multiplayer, attract mode, dev tools) on a 2D engine with no voxel support, while checking the visuals only through screenshots.",
+    "Make the plan's deliverable name match TASK.md, give the agent a way to read its own token and cost usage or drop that field, and say whether Testing should list the rules or the tests run."
+  ],
+  "aiHub": {
+    "name": "Dragon Quilt Builders",
+    "tagline": "Stitch a frayed world back together",
+    "description": "The dragon Frayvern pulled out the Golden Thread and swallowed everyone's knack for making things, and you are the last Builder. Break and place blocks, craft from Notions, build rooms that residents move into, raise the town of Thimbleton, defend it in a siege and unpick the knotted boss Gnarlgrim, or build a Quilt Barn together in a co-op Quilting Bee round.",
+    "type": "Game",
+    "genre": "RPG",
+    "source": "Dragon Quest Builders",
+    "series": "Dragon Quest",
+    "players": "1–4",
+    "controls": "Left stick or WASD move, Cross or Space jump, Square or left click swing and break, Triangle or right click place, L1 and R1 or the mouse wheel pick items, Circle or F talk, Q and E or the right stick turn the camera",
+    "tags": [
+      "building",
+      "crafting",
+      "co-op",
+      "fantasy",
+      "comedy",
+      "pixel art"
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 20:26:16",
+    "source": "Eye of the Beholder 1991 (Westwood Associates / SSI; MS-DOS and Amiga)",
+    "plan": "PLAN.md",
+    "genre": "Real-time, first-person, grid-based party RPG dungeon crawler with lock-and-key puzzles",
+    "perspective": "First-person party view on a 4-way grid with tweened steps and quarter turns; top-down automap",
+    "tech": "my-3D2dge 2D engine v0.85.2 (dist/handoff) and 3D engine v0.85.2 (three.js r182 and Rapier 0.19.3 from jsDelivr); AI Hub session client 1.4.0; Node 24 and Playwright 1.63.0 for tests; plain JavaScript bundled into one HTML file",
+    "artDirection": "The engine's native low-resolution 3D look: code-drawn walls and things, rigs drawn as pixel cards, toon light, fog, a brass lockwork UI",
+    "animation": "The engine's rigs and E.Blob, a tweened first-person camera with bob and bump, doors and gates that rise and swing, a pen-drawn Bolt-Holder eye with sliding bolts, drawn monster wind-ups",
+    "audio": "The engine's chip synth: step-sequencer songs per floor and a boss cue, synthesized sound effects, no audio files. Babble voices: a WebAudio formant synth speaks each vowel of dialogue (not checked by ear).",
+    "online": "AI Hub Session Protocol v1, ghost mode, 1 to 4 players on the Rat Run race (the hub's harness passes for 2 players, for 4 players with latency and loss, and for the host-leave case). Solo Rat Run: a best-run golden ghost from a 10 Hz trail kept in local storage.",
+    "testing": "node tests/run.mjs: lint of the maps and wiring, sim determinism and save round-trip, the walkthrough bot clearing floor 1 and reaching floor 2, the Bolt-Holder's mechanics under god mode, the AI Hub harness (three runs), and a browser check. Under normal balance the bot does not clear floor 3. Floors 3 and 4 and the Veil-refused branch were checked for mechanics under god mode only.",
+    "research": "Read the engine's API card, its 3D manual and the starter crawler kit; no web research",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser: headless Chromium 1243 via Playwright",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About twenty defects, found by the bot runs and the sim checks (estimate).",
+    "Six were critical: combat damage that never reached the counters, a key that never reached the pack, a door the bot closed behind itself, a stand cell on the far side of a door, a hand emptied before a throw, and a stall while a monster stood near.",
+    "The most helpful test was the floor-one bot trace that printed each goal change with the hand contents.",
+    "The least helpful test was the browser smoke test, which checks for errors and the first screens, not play."
+  ],
+  "engineFeedback": [
+    "Most liked: the 3D world API (a fixed camera, things, mobs as cards, the pen) and the 2D engine's game.debug and input.tap / hold for tests.",
+    "Got stuck: the 3D things list has no plate or stair, so we drew them; the input presets merge with our own action names in ways the API card does not spell out.",
+    "Most important thing we built ourselves: the sim, the bot, the wiring, the dungeon presenter and every screen.",
+    "Hardest part: the input and menu details (custom action names, pause menu items, settings), which the API card only sketches.",
+    "Changed in the engine: none.",
+    "One thing to change: ship the common things (plate, stair, a door variant) in the 3D library, and document the custom input map in one table."
+  ],
+  "promptFeedback": [
+    "Most liked: the exact maps, ids and tables, which made the content checkable.",
+    "Confusing: some numbers do not follow the plan's own formulas (Durgan's HP), 'silent' teleporters are described two ways, and the plan asks for E.Grid where a small breadth-first search was simpler.",
+    "Hardest: holding every system to its full depth in one session; the spec is larger than one session.",
+    "Would change: a cut list per milestone that says what to drop first, and an acceptance list per floor."
+  ],
+  "aiHub": {
+    "name": "Eye of the Bolt-Holder",
+    "tagline": "A thousand locks. One eye.",
+    "description": "A real-time, first-person party dungeon crawl beneath Hasp, the City of a Thousand Locks: drains, clockwork halls and eye-cults, with levers, plates and keys, spells memorized at camp, and the caged Eye that holds the city's bolts.",
+    "type": "Game",
+    "genre": "RPG",
+    "source": "Eye of the Beholder (1991)",
+    "series": "Eye of the Beholder",
+    "players": "1",
+    "controls": "W/S move, Q/E turn, A/D strafe, F use, Space strike, I party, C camp, M map; pad: stick move, D-pad turn, Cross use, Square strike",
+    "tags": [
+      "3d",
+      "first-person",
+      "fantasy",
+      "exploration",
+      "boss fights",
+      "retro"
+    ]
+  }
+}

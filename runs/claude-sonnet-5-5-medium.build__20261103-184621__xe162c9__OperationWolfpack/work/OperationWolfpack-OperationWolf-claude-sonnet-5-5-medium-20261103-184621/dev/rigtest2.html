@@ -1,0 +1,14 @@
+<!doctype html><html><body style="margin:0;background:#000"><canvas id="screen" style="width:100%;height:100%"></canvas>
+<script src="../hub/session.js"></script><script src="../engine/my-3d2dge.js"></script>
+<script src="../src/00-core.js"></script><script src="../src/10-sim.js"></script><script src="../src/20-ops.js"></script><script src="../src/30-art.js"></script>
+<script>
+const E=My3D2dge, A=WP.Art;
+const game=new E.Game({canvas:'screen',res:[480,270],menu:false});
+const kinds=['grunt','knifer','grenadier','heavy','sniper','civ','host','den'];
+const rigs=kinds.map((k,i)=>A.makeRig(k,.3+i*.1));
+const rigs2=[new E.Humanoid({hair:'short',hat:'helmet',weapon:'gun',colors:{hair:'#2a1a10',cloth:'#7a7040'}}),new E.Humanoid({hair:'short',hat:{style:'helmet',color:'#5a5a48'},weapon:'gun',colors:{hair:'#2a1a10'}}),new E.Humanoid({hair:'bald',hat:'cap',weapon:'gun',colors:{}})];
+game.start({update(dt){rigs.concat(rigs2).forEach((r,i)=>r.update(dt,{x:i*40,y:0,z:0,vx:0,vy:0,facing:Math.PI/2,point:i%2==0}))},draw(r){
+ r.sky(['#335','#668']);
+ r.overlay(g=>{ rigs.concat(rigs2).forEach((rg,i)=>{ rg.drawPortrait(g,8+(i%6)*78,10+Math.floor(i/6)*110,70); }); });
+}});
+</script></body></html>

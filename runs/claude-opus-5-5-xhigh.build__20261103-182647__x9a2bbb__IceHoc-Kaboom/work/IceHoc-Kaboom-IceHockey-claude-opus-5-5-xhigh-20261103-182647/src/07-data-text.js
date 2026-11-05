@@ -1,0 +1,103 @@
+/* ---- TEXT (11.5, Appendix D): the booth's commentary by event (c: CHUCK WALLOP, play-by-play; m: MOOSE PLUNKETT,
+ * color), Moose's filler, chirps, Coach Marge's tips ({action} becomes a button chip), three-stars lines, pep talks after
+ * a loss, menu blurbs. Tokens: {name} {team} {victim} {goalie} {score} {arena} {period} {a} {b} {home} {away} {hs} {as} ---- */
+const TEXT = {
+  talk: {
+    drop: [['c', "Puck's dropped and we're under way at {arena}!"], ['c', 'Here we go! The {period} is ON!'], ['m', 'Grab a seat. Grab a hot dog. Grab two.'], ['c', 'And the {period} begins! {home} versus {away}!'], ['m', 'Now THIS is hockey, Chuck.']],
+    rush: [['c', '{name} with speed, through center, over the line—'], ['c', '{name} turns on the jets!'], ['c', '{name} wheels out of the zone!'], ['m', 'Look at him go, Chuck. Like a moose on a waterslide.'], ['c', '{name} carries it up ice, nobody near!'], ['c', 'Here comes {name}, head of steam!']],
+    deke: [['c', '{name} dangles, dances, and DEKES!'], ['c', 'Oh, {name} just undressed {victim}!'], ['m', 'He left {victim} in the parking lot.'], ['c', 'Toe drag! {name} with the silky mitts!'], ['m', 'Hands of a surgeon. Feet of a surgeon too.'], ['c', 'Spin-o-rama! {name} is showing off now!']],
+    windup: [['c', 'Big wind-up… {name} with the CLAPPER!'], ['c', '{name} loads it up from the point!'], ['m', 'Duck, everybody. He\'s winding up.'], ['c', '{name} pulls the hammer back!']],
+    shot: [['c', '{name} fires!'], ['c', '{name} lets it go!'], ['c', 'Shot by {name}!'], ['c', '{name} snaps one on net!'], ['c', 'Slapper from {name}!']],
+    goal: [['c', '{name} SHOOTS — {name} SCORES!'], ['c', 'GOAL! {name} lights the lamp!'], ['c', 'He shoots, he SCORES! {team} {score}!'], ['m', 'Ding-dong, nobody home.'], ['c', 'IN! {name} finds the twine!'], ['c', '{name} buries it! The {team} faithful are on their feet!'], ['m', 'You could hear that one in the parking lot, Chuck.'], ['c', 'Bar down! They heard that one in the parking lot!']],
+    goal_top: [['c', 'TOP SHELF, where Grandma hides the cookie tin!'], ['c', 'Upstairs! {name} goes top cheese!'], ['m', 'Where Mama keeps the peanut butter.']],
+    goal_low: [['c', 'Five-hole! Right between the pads!'], ['m', 'Through the legs. The goalie\'s gonna hear about that one at home.'], ['c', 'Squeaks through! {goalie} won\'t like that one!']],
+    goal_ot: [['c', '{name} SCORES IN OVERTIME! THE {team} WIN IT!'], ['c', 'SUDDEN DEATH! {name}! IT\'S OVER!']],
+    onetimer: [['c', 'One-timer — BANG! {name} buries it!'], ['c', 'Tape to tape and {name} one-times it HOME!'], ['m', 'He didn\'t even look at it, Chuck. Didn\'t need to.'], ['c', 'Cross-crease feed — {name} doesn\'t miss!']],
+    kaboomgoal: [['c', 'The puck went in, and the GOALIE went with it!'], ['c', 'KA-BOOOM! {name} blows the doors off!'], ['m', 'Somebody call the fire department. And my mother.'], ['c', 'A fireball from {name}! The net is in ORBIT!']],
+    save: [['c', 'Save, {goalie}!'], ['c', '{goalie} says no!'], ['c', 'Kick save by {goalie}!'], ['m', 'He stopped that with his face, Chuck. You can\'t teach that.'], ['c', 'Big stop by {goalie}!'], ['c', '{goalie} gets a pad on it!'], ['c', 'Robbery! {goalie} with the larceny!']],
+    glove: [['c', 'Glove save, and a BEAUTY!'], ['c', '{goalie} snags it out of the air!'], ['m', 'Like catching a mosquito with chopsticks.'], ['c', '{goalie} flashes the leather!']],
+    post: [['c', 'Off the POST! The iron says no!'], ['c', 'PING! Off the pipe!'], ['m', 'Lemmy\'s posts are on the payroll, Chuck.'], ['c', 'Clang! {name} rings it off the iron!']],
+    bighit: [['c', 'OH! {victim} just got a free trip to next Tuesday!'], ['m', 'He hit him so hard his ancestors felt it.'], ['m', 'That\'s a delivery, Chuck, and nobody signed for it.'], ['c', 'BIG HIT! {name} flattens {victim}!'], ['c', '{name} finishes his check and then some!'], ['m', 'Somebody get the license plate of that Flood Wagon.'], ['c', 'BOOM! {victim} is wearing the ice!'], ['m', 'He\'ll be seeing tweety birds till Tuesday.']],
+    glass: [['c', 'THROUGH THE GLASS! Somebody get a broom!'], ['m', 'That glass is coming out of somebody\'s paycheque.'], ['c', 'The glass EXPLODES! {victim} goes in, the glass goes out!'], ['m', 'Front row\'s getting the full experience tonight.']],
+    crack: [['c', 'Into the glass! You can see the crack from up here!'], ['m', 'Cracked the glass. Cracked my heart a little too.']],
+    fight: [['c', 'The gloves are off! {a} and {b} are going at it!'], ['m', 'Now we got ourselves a dance, Chuck.'], ['c', 'They drop \'em! {a} and {b}!'], ['m', 'I lost fourteen teeth doing that. Found nine.']],
+    fightwin: [['c', '{name} wins the scrap! Down goes {victim}!'], ['m', 'That\'s a TKO, Chuck. Technical Knock-on-the-ice.'], ['c', '{name} by decision! {victim} heads to the sin bin!']],
+    turtle: [['c', '{name} turtles! The crowd lets him hear it!'], ['m', 'Hockey sweater on, hockey courage off.']],
+    kaboom: [['c', 'The meter\'s full… it\'s… KA-BOOOOM!'], ['c', 'KABOOM MODE! The {team} are ON FIRE!'], ['m', 'Hold onto your toques, folks.'], ['c', 'KA-BOOM! The whole barn is shaking!']],
+    gilded: [['c', 'GILDED MODE! The Grizzlies are glowing!'], ['m', 'Gold flames, Chuck. That\'s just showing off.']],
+    mascot: [['c', 'Polar Pete is DOWN! Somebody check on the bear!'], ['m', 'He\'s a mascot, Chuck. He\'s paid in hugs.'], ['c', 'MASCOT DOWN! Polar Pete has been bodychecked!']],
+    hattrick: [['c', 'HAT TRICK! Here come the hats!'], ['c', 'Three for {name}! The hats are raining down!'], ['m', 'I got a hat trick once. Three penalties.']],
+    period: [['c', 'That\'s the end of the {period}. {home} {hs}, {away} {as}.'], ['c', 'The horn sounds on the {period}! {home} {hs}, {away} {as}.'], ['m', 'Time to flood the ice and refill the nachos.']],
+    final: [['c', 'THAT\'S IT! The {team} win it, {score}!'], ['c', 'The final horn! {team} take it!'], ['m', 'Good game, good game, good game. That\'s the handshake line, Chuck.']],
+    tie: [['c', 'It ends in a tie! Everybody kiss your sister!'], ['m', 'Nobody wins. Nobody loses. Everybody gets a juice box.']],
+    pp: [['c', 'Power play for the {team}!'], ['m', 'Man advantage. Move it around, find the open man.'], ['c', 'The {team} go on the power play!']],
+    item: [['c', 'Fans are throwing goodies! {name} grabs the {item}!'], ['m', '{item}! That\'s a hockey food group, Chuck.'], ['c', '{name} snags the {item} off the ice!']],
+    octopus: [['m', 'Octopus on the ice. It\'s tradition, Chuck. Don\'t ask which tradition.'], ['c', '{victim} slips on the octopus!'], ['c', 'Eight arms, zero friction! Down goes {victim}!']],
+    thinice: [['c', 'The ice BREAKS! {victim} goes for a swim!'], ['m', 'Thin ice? I never skated on the thick stuff.'], ['c', 'SPLASH! {victim} has been dunked in Lake Kabonk!']],
+    buried: [['c', '{victim} is buried in the snowbank!'], ['m', 'Looks like a snowman with skates, Chuck.']],
+    vault: [['c', 'VAULT LOCKED! That KABOOM bounced right off him!'], ['c', 'THE VAULT IS CRACKED! He\'s human after all!'], ['m', 'He\'s very big, Chuck.']],
+    twister: [['c', 'The Golden Twister! Sterling spins!'], ['m', 'Hit him while he\'s spinning, kids. Daddy can\'t buy you a helmet.']],
+    shootout: [['c', 'It\'s a SHOOTOUT! One on one!'], ['c', '{name} with the puck at center… here he comes!'], ['m', 'Ice water in the veins, Chuck. Or Hot Cocoa.']],
+    boost: [['c', 'Glitterman\'s Gilded Boost! The Grizzlies get faster!'], ['m', 'Money can\'t buy you love. It CAN buy you skates.']],
+    organ: [['c', 'DORIS! PLAY THE SONG!'], ['m', 'Here comes the organ. The Muskrats feel it!']],
+    blocked: [['c', 'Blocked by {name}!'], ['m', 'He took one for the team, Chuck. Right in the shin pads.'], ['c', '{name} goes down to block it!']],
+    takeaway: [['c', '{name} picks his pocket!'], ['c', 'Stolen by {name}!'], ['m', 'Pickpocket. Should be a law.']]
+  },
+  filler: [
+    'I played eleven seasons. Lost fourteen teeth. Found nine.', 'My first coach said I had the hands of a surgeon. Then he saw me skate.', 'Thin ice? I never skated on the thick stuff.',
+    'In my day we didn\'t have helmets. We had hats. Wool ones.', 'I once took a slapshot to the head. Woke up speaking French. Only for a week.', 'My mother still calls me Moose. My mother named me Moose.',
+    'You know what they say, Chuck. Skate to where the puck is going. And where the nachos are.', 'I scored a goal once. Into my own net. Best feeling of my life until I looked up.',
+    'Flood Wagon driver is the best job in sports, Chuck. Nobody chirps the Flood Wagon.', 'I tried figure skating one summer. Too many spins. Not enough hitting.',
+    'Gus has been driving that Flood Wagon since before the wheel was round.', 'Doris on the organ, Chuck. That woman could make a dial tone sound like a goal song.',
+    'Big Lou knits between periods. Made me a scarf. It\'s still the warmest hit I ever took.', 'The Icebox used to be a cow barn. You can still smell the history.',
+    'Lemmy talks to his goalposts. They talk back, Chuck. I\'ve heard \'em.', 'I had a mullet in \'88. It had its own fan club.',
+    'You can\'t teach size, Chuck. You can feed it, though. Poutine.', 'They say the puck is round. I say it\'s flat. Agree to disagree.',
+    'My knees make a sound like a bag of chips now. Worth it.', 'Coach Marge cut me from peewee. Best thing that ever happened to me. I still cry about it.',
+    'A hockey game is just a bunch of folks skating angrily at a hamburger, Chuck.', 'When I was a kid the Kaboom Cup was a coffee can. Still is, mostly.'
+  ],
+  chirps: [
+    'Nice flow! Did your mom cut it with a skate blade?', 'You skate like a fridge on a waterbed!', 'Is that a stick or a toothpick?', 'Your five-hole\'s wider than the highway!',
+    'You\'re a pylon with a pulse!', 'Hey goalie, want a net? You\'re not using yours!', 'Your slapshot couldn\'t pop a bubble!', 'You\'ve got the hockey sense of a boiled perogy!',
+    'Nice turnover! Bake it yourself?', 'My grandma checks harder, and she\'s ninety!', 'Your hands are made of mittens!', 'Skate much? Or just stand there professionally?',
+    'I\'ve seen snowmen with better edges!', 'You couldn\'t score in a phone book!', 'Your helmet\'s doing all the thinking!', 'You pass like a vending machine — takes forever, then nothing!',
+    'Hey, the Zamboni called. It wants its speed back!', 'Is that a beard or a beaver?', 'You\'re about as quick as a glacier on a lunch break!', 'Your wrist shot\'s a wrist NOT!',
+    'Hope your stick has insurance!', 'You\'re playing like your skates are on backwards!', 'Was that a deke or a sneeze?', 'Even the octopus is faster than you!',
+    'You couldn\'t hit water if you fell out of a boat!', 'Shoulda stayed on the bench, buddy!', 'I\'ve met lampposts with better hockey IQ!', 'You\'re the human version of a missed net!',
+    'Get a load of the Flood Wagon over here!', 'Your mom\'s still waiting in the parking lot!'
+  ],
+  tips: {
+    skate: 'Skate with the stick. Hold {turbo} to turbo. It runs out, so pick your moments.',
+    pass: '{pass} passes. Point where you want it to go.',
+    shoot: 'Tap {shoot} for a wrister. Hold it for a slapshot. Let go to fire.',
+    onetimer: 'Pass coming your way? Hit {shoot} for a ONE-TIMER.',
+    defense: 'No puck? {shoot} checks, {deke} pokes, {pass} switches to whoever\'s closest.',
+    deke: 'With the puck, {deke} dekes past a check. Fools goalies too.',
+    boom: 'Hits, passes, saves, goals: they fill the BOOM meter. Fill it and the whole team goes KABOOM.',
+    gloves: 'Somebody\'s got a grudge. Hold {lob} to drop the gloves.',
+    fight: 'In a scrap: {pass} jab, {shoot} haymaker, {deke} duck, {lob} yank the sweater.',
+    items: 'Fans throw goodies on the ice. Skate over \'em.',
+    pp: 'Power play! They\'re a skater short. Move it and shoot.',
+    saucer: '{lob} with the puck flips a saucer over their sticks.',
+    chirp: '{chirp} chirps. Gets in their heads.',
+    shootout: 'Shootout! In net: {pass} butterfly, {shoot} poke, {deke} dive.',
+    kaboom: 'KABOOM! Hold {shoot} all the way for a KABOOM shot. Hits are double.',
+    camera: '{camera} swaps between the Broadcast and Overhead cameras.'
+  },
+  stars: [
+    'The third star: {name}, who hit everything but the Flood Wagon.', 'Second star: {name}, with {g} goals and a smile that could melt the ice.', 'And the first star of the game… {name}!',
+    'Third star: {name}. Showed up, skated hard, made his mother proud.', 'Second star: {name}, who turned the ice into a hall of mirrors.', 'The first star, the big cheese, the head muskrat… {name}!',
+    'Third star: {name}, the human wrecking ball.', 'Second star: {name}! {s} saves and nerves of maple syrup.', 'First star: {name}, and it wasn\'t even close!',
+    'Third star: {name}, for services to the glass repair industry.', 'Second star: {name}, who never met a puck he didn\'t like.', 'First star: {name}! Take a bow, kid!'
+  ],
+  pep: [
+    "That's one game. You know how many games I've lost? Neither do I. I stopped counting at a thousand. Get up.",
+    "Pond hockey's about one thing: you fall through, you climb out. So climb out.",
+    "They hit you. Fine. Next time hit 'em first and say sorry after. Then don't say sorry.",
+    "The mall wins this one. Malls always win the first one. Then the roof leaks.",
+    "You're one game from saving this town. Lose it again and I'll make you drive the Flood Wagon. Uphill."
+  ],
+  blurbs: {
+    cuprun: 'Five games. Five barns. One Cup. Save the Ol\' Icebox.', exhibition: 'Any two teams, any barn. 1 to 4 players.', practice: 'Coach Marge\'s drills: every move in the book.',
+    records: 'Hardest shots, biggest hits, stars and badges.', settings: 'Cameras, commentary, sound and controls.', about: 'Credits, the source and the build notes.'
+  }
+};

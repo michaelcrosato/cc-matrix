@@ -1,0 +1,11 @@
+import { spawn } from 'node:child_process';
+import { chromium } from 'playwright';
+const dir = process.argv[2];
+const srv = spawn('python3', ['-u', '-m', 'http.server', '0', '--bind', '127.0.0.1'], { cwd: dir, stdio: ['ignore', 'pipe', 'pipe'] });
+const port = await new Promise(res => { let buf = ''; const on = d => { buf += d; const m = /port (\d+)/.exec(buf); if (m) res(+m[1]); }; srv.stdout.on('data', on); srv.stderr.on('data', on); });
+const b = await chromium.launch({ args: ['--disable-dev-shm-usage'] }), p = await b.newPage({ viewport: { width: 1400, height: 900 } });
+await p.goto(`http://127.0.0.1:${port}/harness.html?game=game.html&players=4&latency=150&jitter=50&loss=5&auto=1`);
+await p.waitForFunction(() => document.body.dataset.complete === 'true', null, { timeout: 240000 });
+const r = await p.evaluate(() => window.__hubCheck); console.log(JSON.stringify(r, null, 0).slice(0, 2500));
+await p.screenshot({ path: dir + '/harness.png' });
+await b.close(); srv.kill('SIGTERM');

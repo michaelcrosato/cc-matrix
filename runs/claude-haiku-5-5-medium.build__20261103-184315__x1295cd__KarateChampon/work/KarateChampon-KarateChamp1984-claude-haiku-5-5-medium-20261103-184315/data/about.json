@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:43:15",
+    "source": "Karate Champ (1984 arcade, Data East; Japanese title Karate Do)",
+    "plan": "PLAN.md",
+    "genre": "Fighting: 1-on-1 point-sparring karate with arcade bonus stages",
+    "perspective": "2D side view (engine 'side' view, pitch 0)",
+    "tech": "my-3D2dge engine v0.85.2 (handoff package, sparse-cloned), Web Audio, Node 24 for tests",
+    "artDirection": "Engine's Humanoid rigs as PS1-style pixel art at 320x240 (res ps1, expand), with custom stage backdrops",
+    "animation": "Engine's procedural Humanoid rig with E.MOVES karate-adjacent moves, driven from the fight's own state",
+    "audio": "Code-generated sequencer music and sound effects; gibberish formant voices synthesized in Web Audio",
+    "online": "AI Hub shared-world session, Kachinuki, 2-4 players (host runs the bouts; the game draws its own card; hub harness passes 4 configurations); local versus 1-2 players (keyboard, or keyboard + pad); local Kachinuki with up to 4 humans: keyboard P1, keyboard P2, pad 1, pad 2 (CPU fills empty seats)",
+    "testing": "Headless Node suites (78 checks: data, input, technique, bout, AI, bonus, flow, modes, pads, audio, UI, story playthrough of all 17 nodes, dev), browser screenshots, the AI Hub harness (4 configurations)",
+    "research": "Brief: the facts in PLAN.md section 1.1 (scoring, timer, bonus stages as summarized there); no other research",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 12 issues were caught by the early tests, screenshots and playthrough runs. Most were logic and wiring faults (a missing alias that broke boot, a dev scene field overwritten, a drill that matched the wrong technique, a fighter with no personality). Later, the hub harness and the modes suite caught a parser error on my side (wrong field names) and a title/attract loop assumption; both fixed.",
+    "Four were breaking: the boot failure, the practice scene crash, the dev screen crash, and the store that kept no save headless, which stopped the story flow. All four are fixed and the suite is green.",
+    "The most helpful test was the scripted story playthrough over the whole ladder, because it exercised every scene transition at once.",
+    "The least helpful was the 20-seed CPU balance probe: it mostly showed the random stream dominating outcomes, and it was hard to read without the side and seed swap."
+  ],
+  "engineFeedback": [
+    "The Humanoid rig and E.Backdrop, with the Dialog and Menu helpers, let a complete fight look right with no art files. The headless game.advance plus draw option made scene checks possible.",
+    "Stuck or guessed wrong: game.go is a fade, so a state read right after it is one second early; the store returns false with no storage, so I added a memory fallback.",
+    "Built myself: the fight simulation (technique matrix, timing, scoring, blocks, aiuchi, hantei), the CPU, the bonus rules, the drills, the online Kachinuki and the gibberish voice synth.",
+    "Hardest part: getting the pose from fight state into the rig each step without drawing on every frame, and keeping the rig state serializable for guests.",
+    "Engine changes: none. The game uses the engine as shipped and works around its gaps in game code.",
+    "One thing to change: a headless store that keeps data in memory, so Node tests can use the same save path."
+  ],
+  "promptFeedback": [
+    "The staged structure (read STAGE.md, then TASK.md wins over PLAN.md) and the explicit done-when list made the deliverables clear.",
+    "Confusing: the plan's file names still say opus-max, while TASK.md says haiku-medium; I used TASK.md's names. Also the plan describes far more scope than one session can finish.",
+    "Hardest: the online netcode and the test harness wiring, which both need exact protocol details.",
+    "Change: state the scope cut-off explicitly (for example which features are must-have for a first build) and the expected test counts."
+  ],
+  "aiHub": {
+    "name": "Karate Champon",
+    "tagline": "Two sticks. One clean strike.",
+    "description": "A point-sparring karate tournament inspired by Karate Champ: land one clean technique and let the referee call it. Climb from white belt to Champ, break boards, smash flying pots and stop a charging bull.",
+    "type": "Game",
+    "genre": "Fighting",
+    "source": "Karate Champ (1984)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick/WASD: move, jump, crouch · Right stick, face buttons or IJKL: techniques · Options/Esc: pause",
+    "tags": [
+      "2d",
+      "arcade",
+      "versus",
+      "retro",
+      "pixel art",
+      "comedy"
+    ]
+  }
+}

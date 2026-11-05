@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 21:59:11",
+    "source": "Dragon Quest Builders",
+    "plan": "PLAN.md",
+    "genre": "Sandbox action RPG: block building, crafting and town building, with real-time combat, a siege and bosses",
+    "perspective": "Third-person isometric 2.5D over a true voxel world, turning in 90-degree steps with zoom steps; three-quarter view as a setting",
+    "tech": "my-3D2dge v0.85.2 (full engine, lightly modified) with a custom voxel world, renderer, physics and navigation in plain JavaScript (ES2020); Canvas 2D; Web Audio; AI Hub Session Protocol v1 client 1.4.0; Node 18+ vm for headless tests; Playwright 1.63.0 for browser checks",
+    "artDirection": "The engine's native pixel style (ps1 resolution, shaded HD puppet rigs, canvas lighting) with an original patchwork-quilt look: every block a 16x16 fabric patch with stitched seams, felt UI panels with running-stitch borders, a patchwork logo",
+    "animation": "The engine's procedural Humanoid and Blob rigs and E.MOVES, plus new moves (place, eat, stir, chop), poses for notions, sleep, KO and cheering, tools drawn on the rig (darning stick, cobble club, Seam Ripper), boss telegraphs, swinging doors, a fluttering banner, portal swirls, an unravel effect",
+    "audio": "All in code: 14 original songs in the engine's step sequencer built on a leitmotif (a town waltz with layers by town level, boss fury layer, Bee raid layer), 12 jingles, 45 synthesized sound effects, and an Animalese formant voice synth with a profile per character on its own Voices volume bus",
+    "online": "AI Hub shared-world sessions (1-4 players): the Quilting Bee co-op round with the game's own card, host-run world, client prediction, snapshots and reliable edit events, standings, awards, time-up, leave, end and server mode; solo Bee with bots offline",
+    "testing": "Headless scripted tests in Node (game.advance and game.debug): 19 suites including a full scripted playthrough, a fake multi-copy AI Hub with latency and loss, attract-mode loops; Playwright screenshots and the AI Hub harness's four scenarios in Chromium",
+    "research": "No web research on the source game. Read the engine handoff docs (API card, guide sections, renderer, input, dialog and audio source) and the AI Hub protocol README; the plan stage did the same",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "Estimated: about 122.7M tokens in total over 208 model calls (121.3M cache reads, 0.86M cache writes, 0.56M output, under 1K uncached input), from the session log; about $80 at Opus-class list prices ($0.50/M cache read, $6.25/M cache write, $25/M output), the exact rate for this model unconfirmed; session time about 2 h 20 min (21:59 to about 00:20)"
+  },
+  "testingFeedback": [
+    "42 issues, tallied from this session: 32 bugs in the game and its AI, and 10 mistakes in the tests themselves. Game bugs: x-ray silhouettes missing (wall items had no screen box); the deep Lint Hollow hid the player; the Quilters' Hall room failed on uneven ground; the attract mode silenced all audio, collided with a prop, left the finale cutscene running and left its builder seated on a ballista; stair lips blocked walking; the deep-water rule was wrong; Spin Stitch could not charge; room hints picked a wall-top area; Gnarlgrim could walk into the Rift's void; Rift spawns stuck behind the void; saves stored every plant; Bee clients never saw monsters (a duplicate method name); the version label showed '?'; the Knot Wall towered at full height; damaged blocks healed between hits (a seconds-vs-hours mix-up); M12 needed a far turn-in; 'survive 3 waves' only counted after the boss; the ballista aim arc was too narrow, its bolts hit walls and fell short, and any hit (even zero damage) knocked the player off it; skipping the finale never showed the results; and seven Autopilot faults (out-of-reach spots, chasing monsters across the map, a talk loop that never yielded, not equipping crafted weapons, ignoring the Knot Cage, not clearing plants, residents in the way); and menu hover only worked after a mouse click.",
+    "8 were game breaking for a player: the Hall room not forming (softlocks quest M10), damaged blocks healing between hits (mining could become impossible), Gnarlgrim falling into the void (the siege ends without its boss), the ballista dismount on any hit (the boss nearly impossible to Tangle), the results never showing after a skipped finale, invisible monsters for co-op clients, the player hidden in the opening area, and silenced audio after the attract mode.",
+    "The scripted playthrough with the Autopilot: it plays the real systems from New Game to Chapter Clear and found the block-healing, ballista, siege-flow and finale bugs that no single-system check caught.",
+    "The world-generation determinism check: it never failed and only confirmed what the design already guaranteed."
+  ],
+  "engineFeedback": [
+    "Its views are plain linear projections with exact whole-pixel control, so a voxel renderer could plug straight into its depth-sorted queue, x-ray, lighting and particles; the Humanoid rigs, dialog, menus, saves and settings came for free.",
+    "Yes: queued occluders need a screen box for the x-ray pass, which I only found by reading the flush code; and the default iso view's height step is not a whole number of pixels, so I made my own views.",
+    "The voxel world: storage, a face-sprite atlas renderer with column runs, cutaway and water, circle-body physics with stairs, and A* navigation, because the engine's TileMap is a heightmap.",
+    "Depth sorting real 3D blocks with a 2D painter's queue built for heightmap walls: lifting actors over the blocks they stand on and keeping roofs in front.",
+    "Small, marked // DQB: an input wheelSteps() accessor that works while the camera wheel is off and a right-stick flick(), a Dialog onLetter hook for per-letter voices, a Voices audio bus, and tool kinds (stick, club, Seam Ripper) drawn on the Humanoid's sword joints; and moving the mouse now counts as using it, so menus answer to hover and prompts switch to mouse icons without a click.",
+    "A first-class block or voxel map type with its own lift hook and occluder boxes, so 3D building games do not have to rebuild the renderer."
+  ],
+  "promptFeedback": [
+    "A clear definition of done and a detailed plan: every system had a place, and the controller-first, 10-foot rules made the UI decisions easy.",
+    "The plan's file names used a different model and timestamp than TASK.md; TASK.md wins, but it took a moment to be sure.",
+    "Making a whole chapter completable through real triggers and proving it with an automated playthrough, alongside netcode and an attract mode, in one pass.",
+    "Ask for a smaller vertical slice or allow staged delivery; the plan's scope (17 quests, two bosses, a siege, online co-op, an attract mode) is very large for one session."
+  ],
+  "aiHub": {
+    "name": "Dragon Quilt Builders",
+    "tagline": "Stitch a frayed world back together",
+    "description": "Gather, craft and build block by block to mend a patchwork kingdom unravelled by a dragon. Raise rooms for quirky residents, defend your town and unpick a knotted boss, or raise a barn together in co-op Quilting Bee rounds.",
+    "type": "Game",
+    "genre": "RPG",
+    "source": "Dragon Quest Builders",
+    "series": "Dragon Quest",
+    "players": "1–4",
+    "controls": "Stick/WASD move · ✕/Space jump · □/Click break · △/Right-click place · L1 R1/wheel items · ○/F talk",
+    "tags": [
+      "building",
+      "crafting",
+      "co-op",
+      "fantasy",
+      "comedy",
+      "pixel art"
+    ]
+  }
+}

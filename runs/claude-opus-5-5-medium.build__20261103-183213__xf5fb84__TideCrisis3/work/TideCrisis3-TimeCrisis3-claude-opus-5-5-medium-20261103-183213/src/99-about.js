@@ -1,0 +1,58 @@
+// 99-about: the About and credits data, one source for three places: the in-game About pages, exit-interview.json
+// (tools/build.mjs writes it from TC.about.exit()) and the final chat reply.
+
+const ABOUT = {
+  sourceInformation: {
+    date: '2026-11-03 18:32:13',
+    source: 'Time Crisis 3 (Namco and Nextech; arcade 2003 on Namco System 246, PlayStation 2 2003)',
+    plan: 'PLAN.md',
+    genre: 'On-rails light-gun shooter with a cover system',
+    perspective: 'First-person rail camera (cover pose and stand pose per player), with third-person cutscene cameras',
+    tech: 'my-3D2dge handoff v0.85.2 full engine (patched: PlayStation glyphs, long guns, wheel codes, audio buses), a custom JS software 3D renderer (Rail3D: z-buffered, perspective-correct, banded light, dithered fog) inside the engine\'s pixel buffer, AI Hub session client 1.4.0; plain JavaScript, no other libraries',
+    artDirection: 'The engine\'s native PS1-era pixel style in perspective 3D: the engine\'s own materials as banded textures, new procedural materials (corrugated containers, lanterns, hazard stripes, lit windows, water), engine Humanoid rigs as depth-tested billboards',
+    animation: 'The engine\'s procedural Humanoid rigs (poses, run, crouch, die, flip, climb, attack moves) driven from the simulation, plus code-posed meshes for vehicles and mechs (gunboat, truck, helicopter, six-legged walker) and camera animation (cover duck, recoil, hit jolt, sway, whip-pan rails, slow motion)',
+    audio: 'All in code: songs on the engine\'s chip tracker (theme, briefing, three stage themes with layers, boss, final boss, range, results, stings, continue, game over, ending ballad), synthesized sound effects, Web Audio ambience, and an Animalese-style formant gibberish voice synth for every speaker',
+    online: 'AI Hub Session Protocol v1, shared-world co-op for 1–4 players (host-authoritative Sim, input and shot messages up, snapshots and events down); local split-screen co-op for two',
+    testing: 'Headless Node suites through one command (node tests/run.mjs) using game.advance and game.debug, bot playthroughs of every stage, Playwright browser checks of the single HTML file, and the AI Hub harness',
+    research: 'The handoff\'s engine docs (README, API card, guide, index) and engine source where needed, the AI Hub protocol README and harness, and the plan\'s notes on Time Crisis 3 (taken from Wikipedia at planning time); no new web research',
+    environment: 'Claude Code CLI (headless); Linux; browser unknown',
+    model: 'Anthropic, claude-opus-5-5, reasoning effort medium',
+    usage: 'unknown (no token or cost counter was available to me); session time about 1 h 25 min (18:32 to about 19:57)'
+  },
+  testingFeedback: [
+    'About 25. The headless bot playthroughs and the content validators found most of them: areas that could never be cleared, targets nobody could see or shoot, and crashes. Screenshots found the rest: cover crates filling the stand view, glyphs missing from the font, and HUD overlaps in split screen.',
+    'Eight were game breaking: grenade and rocket threats that never counted down (you could not take cover from them in time); the Bulldog parked behind a container (1-3 could not be won); canal-bridge and moored-boat enemies the boat left behind (1-4 stuck); a sluice lock hidden behind a catwalk barrier (3-2 stuck); a Training drill stuck on a civilian cut-out; a drone-entry crash; and a load-order crash in the cutscene data.',
+    'A full ARCADE run by the fair Autopilot bot, headless, logging time, lives and the cause of every hit for each area. It showed exactly which area stalled and why, in seconds.',
+    'The first smoke test, which only checked for errors after 200 s of play. It passed while the game sat frozen on a continue screen, so it told me nothing until I logged the state of each area.'],
+  engineFeedback: [
+    'The Humanoid rigs draw themselves from any View at any scale, so dropping them into my own perspective renderer as depth-tested billboards worked on the first try. E.materialTile and E.shapeMesh exist for exactly this kind of 3D renderer, and the headless game.advance made bot playthroughs of the whole game take seconds.',
+    'Yes. Timers set with game.after before game.start are cleared by the first scene change; a scene change takes longer than 0.2 s because of the fade, so tests must wait; a crouching Humanoid\'s head (23.6 u) is taller than crouch-height cover; and input.label returns the PlayStation cross while the pixel font could not draw it.',
+    'Rail3D, a JavaScript software renderer inside the engine\'s pixel buffer: perspective-correct textured triangles with near clipping, a z-buffer, the engine\'s banded light with ordered dither, quantized fog, a procedural sky, depth-tested particles and lines, and engine rigs composited as billboards.',
+    'The handoff has no 3D engine, so a first-person light-gun game meant building perspective on a 2D engine. Rigs are drawn orthographically with one depth for the whole figure, so hiding behind cover needed care: enemies sink behind low cover and are clipped at the cover\'s base.',
+    'Five small patches, logged in engine/PATCHES.md: PlayStation button symbols by default (with Xbox as the option); long guns for Humanoids (rifles with a stock, and gunLen); WheelUp and WheelDown as bindable codes; game.audio.bus() so my Web Audio voice synth and ambience follow the volume settings; and new font glyphs (the cross, circle, square and triangle, plus an em dash, an ellipsis, a middle dot, a gear, infinity and a left arrow).',
+    'Add a perspective view for rigs and shapes: the same View API with a camera position and field of view, so first-person and rail games can use the engine\'s own queue, lighting and depth sorting instead of a separate renderer.'],
+  promptFeedback: [
+    'The clear contract: exact file names, the four feedback sections in three places, one test command that prints only failures, "TASK.md wins" over the plan, and a detailed plan to start from.',
+    'The plan\'s folder and file names (claude-opus-5-5-max-20261103-174731) differ from the names in TASK.md (medium-20261103-183213), and the plan wants everything inlined while TASK.md allows CDN dependencies. "TASK.md wins" settled both. "Testing: testing parameters allowed" in Source Information was ambiguous.',
+    'Scope. A three-stage light-gun game with six bosses, a software 3D renderer, AI Hub netcode, split-screen co-op, an attract mode, a dev panel and Training is a lot for one session, and every area had to be winnable and readable, not just present.',
+    'Say how long the session may run and which plan items may be cut, and give TASK.md\'s required features as a numbered checklist the final reply can tick off.'],
+  aiHub: { name: 'Tide Crisis 3', tagline: 'Duck. Pop. Shoot. Beat the tide.', description: 'An original arcade light-gun rail shooter in PS1-style pixel 3D: duck behind cover, switch between four weapons and race each area\'s clock to retake an island\'s tidal barrier before the dawn king tide. Play solo, couch co-op or AI Hub co-op for up to four.', type: 'Game', genre: 'Shooter', source: 'Time Crisis 3', series: 'Time Crisis', players: '1–4', controls: 'Mouse or stick aims · left click/R2 fires · hold right click/L2 for cover and reload · wheel/R1 switches weapons', tags: ['first-person', 'arcade', 'co-op', 'boss fights', 'pixel art', 'retro'] }
+};
+TC.ABOUT = ABOUT;
+const SI_LABELS = [['date', 'Date'], ['source', 'Source'], ['plan', 'Plan'], ['genre', 'Genre'], ['perspective', 'Perspective'], ['tech', 'Tech'], ['artDirection', 'Art direction'], ['animation', 'Animation'], ['audio', 'Audio'], ['online', 'Online'], ['testing', 'Testing'], ['research', 'Research'], ['environment', 'Environment'], ['model', 'Model'], ['usage', 'Usage']];
+const TQ = ['How many issues did testing catch?', 'How many were critical or game breaking?', 'The most helpful test', 'The least helpful test'];
+const EQ = ['What I liked most about the engine', 'Did I get stuck or guess wrong?', 'The most important thing I built', 'The hardest part of using the engine', 'What I changed in the engine, and why', 'One thing I would change'];
+const PQ = ['What I liked most about this prompt', 'What was confusing', 'The hardest thing to do', 'What I would change in this prompt'];
+TC.about = {
+  pages() {
+    const A = ABOUT, qa = (qs, as) => qs.map((q, i) => ['', (i + 1) + '. ' + q + ' — ' + (as[i] || 'unknown')]);
+    return [
+      { title: 'ABOUT', rows: [['GAME', 'TIDE CRISIS 3, an original arcade light-gun rail shooter. C.R.E.S.T. agents retake Port Lumen and the Meridian Tidewall from Admiral Krake before the dawn king tide.'], ['MADE BY', 'Claude (Anthropic, claude-opus-5-5), from a plan written by claude-opus-5-5.'], ['ENGINE', 'my-3D2dge v0.85.2 by Michael Crosato (MIT License).'], ['ONLINE', 'AI Hub Session Protocol v1.'], ['THANKS', 'To everyone who stood up from behind a crate at exactly the wrong moment.'], ['NOTE', 'Inspired by Time Crisis 3 (Namco, 2003). The world, cast, story, art, music and code are original; no names, levels or assets from the source are used.']] },
+      { title: 'SOURCE INFORMATION', rows: SI_LABELS.map(([k, l]) => [l.toUpperCase(), A.sourceInformation[k] || 'unknown']) },
+      { title: 'TESTING FEEDBACK', rows: qa(TQ, A.testingFeedback) },
+      { title: 'ENGINE FEEDBACK', rows: qa(EQ, A.engineFeedback) },
+      { title: 'PROMPT FEEDBACK', rows: qa(PQ, A.promptFeedback) },
+      { title: 'LICENSES', rows: [['ENGINE', 'my-3D2dge: MIT License.'], ['AI HUB', 'session.js client 1.4.0, pasted unmodified.'], ['ASSETS', 'None: every model, texture, sound and voice is generated by code.']] }];
+  },
+  exit() { const A = ABOUT; return { sourceInformation: A.sourceInformation, testingFeedback: A.testingFeedback, engineFeedback: A.engineFeedback, promptFeedback: A.promptFeedback, aiHub: A.aiHub }; }
+};

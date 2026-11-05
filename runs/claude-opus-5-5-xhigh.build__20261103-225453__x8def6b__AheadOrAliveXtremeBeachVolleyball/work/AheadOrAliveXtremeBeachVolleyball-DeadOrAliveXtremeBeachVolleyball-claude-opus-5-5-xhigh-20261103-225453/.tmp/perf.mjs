@@ -1,0 +1,12 @@
+import { load } from '../test/lib/load.mjs';
+import { runMatch, startCfg } from '../test/lib/bots.mjs';
+const { game, G } = load({});
+game.advance(.3);
+const cfgP = G.quickMatchCfg({ seed: 11 }); cfgP.difficulty = 'Easy';
+const M = startCfg(G, game, cfgP); M.perfectPlayer = true;
+const log = [];
+G.bus.on('touch', e => log.push(M.now.toFixed(1) + ' ' + e.p.cast + ' ' + e.kind + ' ' + e.q));
+G.bus.on('point', e => log.push('   POINT ' + e.side + ' ' + e.why + ' ' + (M.lastPoint && M.lastPoint.kind) + ' ' + e.score));
+let misses = 0; const hum = M.players[0];
+const I = runMatch(G, game, M, { until: M2 => { if (M2.plan && M2.plan.p === hum && M2.plan.missed) { misses++; M2.plan.missed = false; log.push('   human missed plan ' + M2.plan.kind + ' d=' + Math.hypot(M2.plan.P[0] - hum.x, M2.plan.P[1] - hum.y).toFixed(0)); } return false; } });
+console.log(log.slice(0, 70).join('\n')); console.log(I.final, 'misses', misses);

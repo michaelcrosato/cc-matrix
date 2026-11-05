@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:35:30",
+    "source": "Tenchu 2: Birth of the Stealth Assassins (Acquire / Activision, 2000)",
+    "plan": "PLAN.md (written by claude-opus-5-5 at max effort)",
+    "genre": "Stealth action: third-person ninja stealth with light melee combat and boss duels",
+    "perspective": "Isometric third person on the engine's iso view (rotatable in 45-degree steps, zoomable), with the three-quarter view as an alternative",
+    "tech": "my-3D2dge v0.85.2 (single-file 2D engine, HTML canvas, used unmodified); plain JavaScript bundled by a small Node script; AI Hub Session Protocol v1 with client 1.4.0 (unmodified); Playwright 1.63.0 with headless Chromium for tests",
+    "artDirection": "The engine's native HD pixel-art look at PS1 resolution (320x240 minimum, expands to any screen): shaded Humanoid and Blob rigs, textured TileMap floors and walls, lantern lighting, rain and falling leaves, a night palette with red and gold accents, and a red brush-slash splash for Silent Cuts",
+    "animation": "The engine's native rig animation (Humanoid and Blob rigs, moves, Attack and Combo, poses), plus new paired actions written for this game: ten Silent Cut animations (five kinds, each in Sojiro's way and Kaede's) built on the engine's action system. Boss telegraphs are ground marks and wind-up poses.",
+    "audio": "All written in code: a chip-synth song for each mission in the hirajoshi scale with chase and alarm layers, a boss theme, synthesized effects (shamisen twang, alarm bell, taiko, splash) and Animalese-style babble voices, one timbre per character. No audio files",
+    "online": "AI Hub ghost mode for 1 to 4 players (Session Protocol v1: the game's own card, progress every second, ghost positions at 10 Hz, result with stats and awards). The standalone Shadow Trial races your own best ghost. No other network use",
+    "testing": "Headless only: one command (tools/test.mjs) drives the built page in Chromium with scripted input, 91 checks including a playthrough of all four missions with real actions, every tool, all four bosses, the grapple chain up the keep, dev mode, the Workshop editor, glyph settings and attract mode; plus the AI Hub harness with 2 and 4 players, latency and loss, and a host-leave run; screenshots for layout. No subagents or workflows",
+    "research": "Read the engine's API card, the stealth kit and the AI Hub README; relied on PLAN.md's summary of the source. No web research on the source itself",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); tested in headless Chromium via Playwright; player browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown (no cost or token estimate was available to me); session time about one hour"
+  },
+  "testingFeedback": [
+    "About ten real issues: a bundle-order bug that crashed at load, scene input presets silently replacing the custom controls, god mode still letting bosses knock the hero around, required objectives (the flask, the ledger, the magistrate) placed inside solid buildings, the last mission never ending, and several HUD and results layout overlaps and ambiguous tool names. A few more failures were test-script mistakes, not game bugs.",
+    "Three were critical: the scene input override (every new action was dead), the required flask and ledger sitting inside solid walls where nobody could reach them, and the final mission never completing after the boss.",
+    "The scripted playthrough that finishes each mission with real actions (cuts from behind, grapple chain up the three keep tiers, each boss, the exit). It found the unreachable objectives and the mission that never ended.",
+    "The attract-mode run: it passes whether or not the AI shows anything worth watching, so it only proves there is no crash. The plain title screenshot was also low value."
+  ],
+  "engineFeedback": [
+    "The ready-made stealth parts (Mover with climbing and takedown actions, E.sees and Suspicion, FlowField) and the native look: the very first screenshot already looked like a finished PS1 game. Deterministic game.advance made headless play easy.",
+    "Yes. A scene's input preset replaces the game's custom input map each time a scene is entered, so labels for my new actions came back blank until I passed my own map to every scene. I also had to read Mover to learn that a playing action overrides the body's position, and that hit-stop makes short advance() calls do nothing.",
+    "A data-driven mission runtime, the menu screens, the dev panel, the Workshop editor, ten custom Silent Cut actions, the attract autopilot, and the AI Hub card and ghosts.",
+    "Knowing which behaviours live where in a 1.2 MB source file, and tall isometric roofs occluding the hero and guards. Swimming has no native support for ground views, so water became a floor tag with my own rules.",
+    "none: the engine was used unmodified.",
+    "Let a scene keep or merge the game's own input map instead of replacing it, and give Mover a native swim and dive state."
+  ],
+  "promptFeedback": [
+    "Clear deliverables and a precise, checkable AI Hub protocol with a harness that gives a plain pass or fail. The plan was well organised and the freedom to choose the source's spirit was welcome.",
+    "The plan is bigger than a medium-effort run can build, and it was unclear which of its features count as required when TASK.md says 'no stubs'. The shared /tmp filling up was not covered either.",
+    "Fitting a max-effort plan into a medium-effort build while verifying the look without a human. Animations were checked only by scripted playback, not by eye.",
+    "Say which parts of the plan may be cut when it exceeds the budget, and say whether features that only the plan names count as required."
+  ],
+  "aiHub": {
+    "name": "Bentou 2: Birth of the Lunchbox Assassins",
+    "tagline": "Seen by none. Fed by all.",
+    "description": "An isometric ninja stealth-action game: pack a two-tier bento of tools, slip through lantern-lit nights, silence guards with Silent Cuts and duel four bosses. Play the Night Delivery round in AI Hub, racing the other players' shadows. Includes a Workshop to paint and play your own missions.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "Tenchu 2: Birth of the Stealth Assassins",
+    "series": "Tenchu",
+    "players": "1–4",
+    "controls": "Move: stick or WASD. Silent Cut: Square or J. Kaginawa: Triangle or E. Tool: R1 or Q. Crouch: Circle or C. Ki Focus: L2 or Tab",
+    "tags": [
+      "stealth",
+      "ninja",
+      "isometric",
+      "story",
+      "boss fights",
+      "pixel art"
+    ]
+  }
+}

@@ -1,0 +1,68 @@
+/* ABOUT: one source of truth for the About and Credits screen, the final report and exit-interview.json (tools/build.mjs
+ * writes that file from this object). Plain text only. */
+B.ABOUT = {
+  sourceLabels: { date: 'Date', source: 'Source', plan: 'Plan', genre: 'Genre', perspective: 'Perspective', tech: 'Tech', artDirection: 'Art Direction', animation: 'Animation', audio: 'Audio', online: 'Online', testing: 'Testing', research: 'Research', environment: 'Environment', model: 'Model', usage: 'Usage' },
+  source: {
+    date: '2026-11-03 18:53:30',
+    source: 'Eye of the Beholder (Westwood Associates / SSI, 1991; MS-DOS and Amiga)',
+    plan: 'PLAN.md',
+    genre: 'Real-time, grid-based, first-person party RPG dungeon crawler (a blobber) with lock-and-key puzzles',
+    perspective: 'First person at the party\'s eyes on a four-way grid with tweened steps and quarter turns, plus a top-down parchment automap and full-screen overlay screens',
+    tech: 'my-3D2dge v0.85.2 (2D engine, from dist/handoff, patched) and my-3D2dge 3D v0.85.2 (three.js r182 WebGPU/WebGL 2 and Rapier 0.19.3 from jsDelivr); AI Hub session client 1.4.0; plain JavaScript bundled into one HTML file; Node 24 for the headless tests',
+    artDirection: 'The engine\'s native retro-modern look: code-drawn low-res 3D (pixel resolution, toon light, fog, torch shadows), monsters and people as pixel-art rig cards, creatures, wall mechanisms and the caged Eye modelled in code from boxes, balls and tubes, procedural textures, and a brass "lockwork" 10-foot UI with hand-made 12x12 item icons',
+    animation: 'The engine\'s procedural rigs and moves (E.Humanoid, E.Blob, E.MOVES wind-ups and strikes, die poses), a tweened first-person camera (steps, turns, bumps, head bob), pen-animated creatures (leech, spider gait, hound, rat knot, gazer, the Bolt-Holder\'s sliding bolts and lids), animated levers, gates, secret walls, clock hands and Great Locks, first-person weapon swings',
+    audio: 'All synthesized in code: the engine\'s chip synth with nine original step-sequencer songs (floor themes with a fight layer that fades in during combat, title, camp, boss, ending, race) and seven stings, over 100 synthesized sound effects with stereo panning by bearing, and a custom Web Audio formant babble synth for Animalese/Simlish-style voices on its own volume bus',
+    online: 'AI Hub Session Protocol v1, ghost mode, 1 to 4 players: the Rat Run race with our own card, seat-coloured ghosts, progress and results; on its own, a solo Rat Run time trial against the local best-run ghost',
+    testing: 'Headless Node tests through the engine\'s game.advance and game.debug (one command, failures and a one-line count), including a scripted full playthrough bot on both of Veil\'s branches; headless Chromium (Playwright) checks of the bundled file and the AI Hub harness; screenshots at 1920x1080, 1280x720 and 1024x768 and slow-motion filmstrips at 1920x1080 (tests/shoot.mjs) only for looks; the PlayStation and Xbox glyphs, real-mouse drag and drop and the touch-only notice (an emulated phone) are also checked in headless Chromium',
+    research: 'Read the provided plan (its research section covers the source, the engine and the AI Hub), the engine\'s manuals (API card, 3D engine header, crawler kit) and the AI Hub protocol README; no web research beyond that',
+    environment: 'Claude Code CLI (headless); Linux; browser unknown',
+    model: 'Anthropic, claude-opus-5-5, reasoning effort medium',
+    usage: 'unknown'
+  },
+  testingQ: ['How many issues did testing catch?', 'How many would be considered critical issues / game breaking?', 'What was the most helpful test you ran?', 'What was the least helpful test you ran?'],
+  testing: [
+    'About 35. Lint found 5 decorations not on walls; the rules suites found Slumber undone by its own noise, a voice rule that never clicked and a secret counted twice; the walkthrough bot and a 32-seed balance sweep found a mis-placed lever step, a too-strict Tumbler Lock rule, the Stair to the Light failing once the dead boss was cleared away, the boss drifting onto the cell needed to re-turn its relocked lock, the boss cell staying blocked after its death, and balance spikes on Snick, the Gauntlet, the Barracks, the floor 2 Workshop and the boss; the browser and AI Hub runs found a draw crash after leaving the attract mode, timers on game time instead of the wall clock, WebGPU errors in the hub iframes and hub progress paced on game time; screenshots and filmstrips found about ten look problems.',
+    'About 10: the unfinishable ending, the boss blocking its own relocked lock, the blocked boss cell, the attract-exit crash, Slumber never working, the balance spikes that wiped every run, and the hub session sending no progress reports.',
+    'The scripted full playthrough with its multi-seed balance sweep: the bot plays all four floors and both of Veil\'s branches by the real rules. After its own play was fixed (formation swaps, memorizing new slots, ammunition checks) its failures pointed at game bugs and balance walls. On 32 seeds that were never used while tuning (1000-1031) it reached the ending every time; the suite keeps 8 more untuned seeds (2001-2008) as a standing check.',
+    'The per-screen text-fit layout check: it passed from the start and found nothing the screenshots did not.'
+  ],
+  engineQ: ['What did you like most about the engine?', 'Did you get stuck or guess wrong?', 'What was the most important thing you had to build yourself?', 'What was the hardest part about using the engine?', 'What did you change in the engine, and why? (none if nothing)', 'If you could change one thing about the engine, what would it be?'],
+  engine: [
+    'The 3D crawler slice and the pen: a fixed first-person camera, level text, things drawn by code and live rig portraits made a convincing dungeon quickly, and headless game.advance made the sim testable in Node.',
+    'Yes: the level walls take their colour from the legend entry rather than the level\'s color option, the pause key is handled before the scene sees it (solved with a pausable getter), and secret walls needed boxes matched to the wall material.',
+    'A deterministic, view-free simulation of the whole game (grid party, wiring language, real-time combat, monsters, the boss) plus a walkthrough bot that plays it, and a single focus-navigation UI system for controller, keyboard and mouse.',
+    'Keeping the 3D world, the 2D overlay, the input map and the pause menu in step across many overlay screens, and knowing which engine behaviours (pause, menu keys, mouse device) run before the scene.',
+    'Four small patches to the 2D engine, listed in PATCHES.md: a voice bus with its own volume and an audio.bus() accessor for the babble synth; a { pan } option on sfx through a StereoPannerNode for sounds by bearing; the Button symbols setting limited to PlayStation (default) and Xbox; and a beard option on E.Humanoid, because dwarves need beards. The 3D engine was not changed.',
+    'A built-in grid-crawler layer (cells, wall features, doors and secret walls that share the level wall material) so a blobber does not have to rebuild them on top of the free 3D world.'
+  ],
+  promptQ: ['What did you like most about this prompt?', 'What was confusing?', 'What was the hardest thing to do?', 'What would you change in this prompt?'],
+  prompt: [
+    'It is concrete about the deliverables (file names, the About screen, the exit interview) and leaves the design open, and the plan gave a complete, checkable target.',
+    'The plan is far larger than one session can finish in full detail; it was not clear how much of the plan\'s quantity (every screenshot review, every suite) was required versus every system.',
+    'Making a real-time party crawler beatable by an automated bot while keeping it fair for people, and fitting a controller-first 10-foot UI around a dense genre.',
+    'State a time or token budget, and say which plan items may be cut for quantity, so the build can scale its ambition to what can actually be finished and tested.'
+  ],
+  credits: [
+    'EYE OF THE BOLT-HOLDER',
+    'Design, code, art, sound and writing: Claude (Anthropic, claude-opus-5-5), from a plan by claude-opus-5-5.',
+    'Engine: my-3D2dge v0.85.2 and my-3D2dge 3D v0.85.2 by Michael Crosato (MIT License).',
+    'three.js r182 (MIT License). Rapier 0.19.3 (Apache-2.0). AI Hub session client 1.4.0.',
+    'No image, model or sound files: everything is drawn and synthesized by code.',
+    'Inspired by Eye of the Beholder (Westwood Associates / SSI, 1991). No names, text or assets from it are used.',
+    'Thank you for playing.'
+  ],
+  gamePage: [
+    'EYE OF THE BOLT-HOLDER',
+    'A thousand locks. One eye.',
+    'Hasp, the City of a Thousand Locks, is being locked in from below. Lead a party of four, later six, down through the Hasp Drains, the Tumbler Halls, the Gloam Deeps and the Eye\'s Vault, gather the Three Wards, open the Undergate, and turn the Great Locks of the Bolt-Holder.',
+    'Version 1.0.0, built 2026-11-03.'
+  ],
+  aiHub: {
+    name: 'Eye of the Bolt-Holder',
+    tagline: 'A thousand locks. One eye.',
+    description: 'A real-time, first-person party dungeon crawl beneath Hasp, the City of a Thousand Locks: four floors of drains, clockwork halls and eye-cults, levers, plates and keys, spells memorized at camp, and the caged Eye that holds the city\'s bolts.',
+    type: 'Game', genre: 'RPG', source: 'Eye of the Beholder (1991)', series: 'Eye of the Beholder', players: '1–4',
+    controls: 'Stick/WASD move · D-pad/Q E turn · ✕/F use · □/Space strike · L2 R2/R T hands · △/I party',
+    tags: ['3d', 'first-person', 'fantasy', 'retro', 'exploration', 'boss fights']
+  }
+};

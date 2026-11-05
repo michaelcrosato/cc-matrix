@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 23:11:45",
+    "source": "Dead or Alive Xtreme Beach Volleyball (Team Ninja / Tecmo, Xbox, 2003)",
+    "plan": "PLAN.md",
+    "genre": "Sports (arcade 2-on-2 beach volleyball) with a light life-sim vacation (calendar, friendships, gifts, swimsuit collecting) and minigames (rhythm Pool Hop; casino slots, blackjack, roulette)",
+    "perspective": "Matches: a side-on TV Broadcast camera (yaw 8, pitch 32) with an alternate Serve Cam behind your team; walkable places: three-quarter; island map: isometric; shops, casino tables and menus: full-screen canvas UI over the world",
+    "tech": "my-3D2dge v0.85.2 (the full engine, my-3d2dge.js, patched: see Engine Feedback), plain JavaScript in one IIFE, AI Hub session client 1.4.0 (unmodified); tests on Node 24 and Playwright 1.63.0 with Chromium; one self-contained HTML file, no runtime libraries or network",
+    "artDirection": "The engine's native PS1-era pixel art (res ps1, expand): HD Humanoid rigs on a custom athletic build with code-drawn swimsuit cuts and 14 patterns, extra hair styles and accessories; resort objects written as E.SHAPES data; custom backdrops by time of day; a tropical palette",
+    "animation": "The engine's native rig animation as the base (procedural walk, run, idle, jump and held poses), an arm-IK layer (E.ik3) around solvePose for every volleyball move and photo pose, timed from the match's contact plan, and 20 motion-capture clips played through the engine's Mocap.drive (cut with tools/anim-set.mjs from its Quaternius, Mesh2Motion and CMU sets) for celebrations, gestures, gift reactions, party dances, idles and Sonny's pratfall",
+    "audio": "All synthesized in code: 9 songs in the engine's step sequencer with added instruments (steel drum, marimba, pluck, bell, organ, pad), 10 jingles, about 50 sound effects, noise ambience loops, and Animalese-style letter-by-letter voices with a profile per character",
+    "online": "AI Hub Session Protocol v1 in shared-world mode: 1-4 players, the game's own card, host-authoritative match with deterministic ball launches on the hub clock, client-judged touches the host validates, CPUs in empty seats, finish() standings with stats and an MVP award",
+    "testing": "19 suites behind one command (node test/run.mjs prints only failures and a count; 355 checks): headless game.advance / game.debug suites for core, data, ball, rules, match, vacation, casino, Pool Hop, UI, attract, dev mode, postcards, motion clips, a clause-by-clause TASK.md audit, real-browser checks with real key and touch events (two players on one keyboard, a touch-only phone), a by-hand review's checks of the remaining paths (New Vacation+, letters, the save screen, the title postcard, the hub's time-up), and a scripted whole-vacation playthrough to both endings; a Playwright browser tour with a touch-only device; the AI Hub harness in four scenarios; screenshots and the engine checker for looks; no subagents",
+    "research": "Read the engine handoff (API card, index, guide sections, asset card, the sports kit, the Humanoid, Dialog and audio source) and the AI Hub protocol README and harness. The source game was described from general knowledge; no web research.",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 31 game issues: a line opened inside a dialog's callback firing its own ending at once (it could skip story lines and a time slot), New Vacation+ missing its Skip the Welcome Match option, a leftover empty loop in the casino props, Sonny lines missing his ALL-CAPS bursts, saves that were never wired into the game (only the tests set them up), the clip player replacing the rigs' own move code, crashes from a name clash and a scoping slip, scenes drawn before they were entered, a sound table the browser rejected, an attract mode you could not leave during its photo beat, 50-touch rallies, AI skill that barely mattered, a slot machine paying 132%, a split-keyboard key clash on the join screen, missing font glyphs, and framing and overlap problems on several screens.",
+    "About 9: dialog follow-ups skipping story lines and a time slot, saving, autosave and Continue doing nothing in the real game, rigs losing every volleyball move after their first motion clip, the title crash (two systems both named G.dev), a crash on every attack, the scene registry missing at load, the menu crashing when drawn before entry, the music instrument error, and the attract mode trapping the player.",
+    "The scripted whole-vacation playthrough (both endings, every story event, the casino, Pool Hop and saves) together with the AI-vs-AI match statistics (rallies average 6.2 touches, inside the 3-8 target), and the clause-by-clause TASK.md audit; and, for online play, the AI Hub harness run in four scenarios.",
+    "The single-frame title screenshots and the engine checker's view cycling: useful once each, but they could not show timing or motion, which only the scripted runs caught."
+  ],
+  "engineFeedback": [
+    "The Humanoid rig: one constructor gives a shaded, dressed, animated character that also draws its own portrait, and its pose can be post-processed, so swimsuits, new hair and every volleyball move were additions, not rewrites. The fixed-step clock made every test deterministic.",
+    "A little: I passed 0 as the alpha of groundRing, used a material pattern name that does not exist (plaster), and had to read the source to learn that joined players take the scene's keys through halfKeys. The index answered most other questions.",
+    "The volleyball itself: a closed-form ball, contact planning, the timing judge, blocks, faults, the AI and its error model; and the swimsuit cuts and patterns drawn inside the torso.",
+    "Hooking into the Humanoid's draw, which is one large function: swimsuits needed an engine patch for a callback.",
+    "Six patches, each marked AOA: in the source: PlayStation symbols and arrows in the 5x7 font; the Button symbols setting (PlayStation by default, Xbox option, in the Game group); a per-letter function voice in Dialog; a voice bus and bus() accessor; named instrument waves, pluck decay, lowpass and detune for music; swim shorts and a swimDraw hook in the Humanoid; reserveCombo so Options is ignored while Create is held (an AI Hub rule).",
+    "A documented per-part draw hook for outfits, so new clothing needs no engine edit."
+  ],
+  "promptFeedback": [
+    "It is concrete about the player's experience (a 10-foot controller-first UI, glyph rules, the touch-only gate, the attract mode, dev sliders) and about the deliverables, so done is clear.",
+    "The plan asks for far more content than one medium-effort session can build in full; how to trade breadth for depth was left to judgement.",
+    "Fitting a five-day vacation sim, three minigames and online play around a timing-based sports core, with every screen controller-first.",
+    "Say which parts of a plan are musts and which are stretches, so the builder can scope deliberately."
+  ],
+  "aiHub": {
+    "name": "Ahead or Alive: Xtreme Beach Volleyball",
+    "tagline": "Stay ahead. Stay alive. Stay tanned.",
+    "description": "A five-day island vacation of 2-on-2 beach volleyball, friendships, swimsuit shopping, pool hopping and casino nights, ending with a match for the island against its owner.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Dead or Alive Xtreme Beach Volleyball",
+    "series": "Dead or Alive",
+    "players": "1–4",
+    "controls": "Stick/WASD move · Cross/Space/click hit on time · Square/E shot and block · Circle/Shift dive · Triangle/Q call",
+    "tags": [
+      "sports",
+      "versus",
+      "co-op",
+      "pixel art",
+      "comedy",
+      "arcade"
+    ]
+  }
+}

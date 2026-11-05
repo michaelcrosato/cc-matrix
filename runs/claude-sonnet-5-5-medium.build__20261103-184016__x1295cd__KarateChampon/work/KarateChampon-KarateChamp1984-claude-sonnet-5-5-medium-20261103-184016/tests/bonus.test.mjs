@@ -1,0 +1,39 @@
+import { fresh } from './lib/helpers.mjs';
+export default async t => {
+  const G = fresh(), { KC } = G, { Boards, Pots, BullStage } = KC.test, game = G.game;
+  const step = (g, secs) => { for (let i = 0; i < secs * 120; i++) g.update(1 / 120); };
+  // ---- boards: power to boards, perfect, overcharge ----
+  const chop = (n, power, mat = 0) => { const b = new Boards({ params: { n, mat } }); b.state = 'charge'; b.gauge = power; b.wob = 0; b.hold = true; b.release(); return b; };
+  { const b = chop(5, 50); step(b, .6); t.check('power 50 breaks floor(.5*5.99)=2 of 5 boards', b.broken === 2, b.broken); }
+  { const b = chop(5, 100); step(b, .6); t.check('power 100 breaks all and is PERFECT +2000', b.broken === 5 && b.score === 5 * 200 + 2000, b.score); }
+  { const b = chop(10, 96); step(b, .6); t.check('power 95+ is perfect with 10 boards', b.broken === 10 && b.score >= 4000); }
+  { const b = chop(5, 10); step(b, .6); t.check('weak chop breaks 0', b.broken === 0 && b.score === 0, b.broken); }
+  { const b = chop(5, 100, 1); step(b, .6); t.check('roof tile multiplies the board score by 1.5', b.score === 5 * 200 * 1.5 + 2000, b.score); }
+  { const b = chop(5, 100, 2); step(b, .6); t.check('ice multiplies the board score by 2', b.score === 5 * 200 * 2 + 2000, b.score); }
+  { const b = new Boards({ params: { n: 5 }, reader: { read: () => ({ posture: 'n', tech: null, held: 'd' }) } }); step(b, 1.7); step(b, 3); t.check('KI gauge rises while held and overcharging drops it to 60 (TOO MUCH!)', b.msg === 'TOO MUCH!' || b.gauge <= 100, b.gauge + ' ' + b.msg); }
+  { const b = new Boards({ params: { n: 5 }, reader: { read: () => ({ posture: 'n', tech: null, held: 'd' }) } }); b.cardT = 0; step(b, .5); const g1 = b.gauge; t.check('the KI gauge rises at about 55 percent a second', g1 > 22 && g1 < 33, g1); KC.TUNE.kiSpeed = 2; const c = new Boards({ params: { n: 5 }, reader: { read: () => ({ posture: 'n', tech: null, held: 'd' }) } }); c.cardT = 0; step(c, .5); KC.TUNE.kiSpeed = 1; t.check('kiSpeed slider doubles the gauge speed', c.gauge > g1 * 1.7, c.gauge + ' vs ' + g1); }
+  { const b = new Boards({ params: { n: 5 }, auto: true }); step(b, 12); t.check('the auto player breaks the boards for a PERFECT', b.result && b.result.perfect && b.broken === 5, JSON.stringify(b.result)); }
+  // ---- pots: deterministic sequences, hits, catches ----
+  { const a = new Pots({ visit: 3 }), b = new Pots({ visit: 3 }), c = new Pots({ visit: 4 }); t.check('the 16-object sequence is fixed per visit', a.seq.length === 16 && JSON.stringify(a.seq) === JSON.stringify(b.seq) && JSON.stringify(a.seq) !== JSON.stringify(c.seq)); }
+  { const p = new Pots({ visit: 1, auto: true }); p.cardT = 0; step(p, 40); t.check('the auto player handles all 16 objects for PERFECT', p.result && p.result.perfect && !p.hit, p.state + ' ' + p.handled + ' ' + p.score); t.check('a perfect Pots run scores at least 3000', p.score >= 3000, p.score); }
+  const mkPots = (kind, lane, ctrl) => { const p = new Pots({ visit: 1, reader: { read: ctrl || (() => ({ posture: 'n', tech: null })) } }); p.cardT = 0; p.seq = [{ kind, lane, side: 1 }]; p.nextAt = 0; return p; };
+  { const p = mkPots('clay', 'mid'); step(p, 4); t.check('a clay pot that is not answered hits the player and ends the stage', p.hit && p.state !== 'play', p.state); }
+  { const p = mkPots('boulder', 'low', () => { const o = p.objs[0]; return { posture: o && o.live && Math.abs(o.x - p.me.x) < 70 ? 'u' : 'n', tech: null }; }); step(p, 4); t.check('jumping dodges the low boulder', !p.hit, p.state); }
+  { const p = mkPots('boulder', 'low'); step(p, 4); t.check('a boulder cannot be broken: standing still gets hit', p.hit); }
+  { const p = mkPots('boulder', 'high', () => ({ posture: 'd', tech: null })); step(p, 4); t.check('crouching dodges the high boulder', !p.hit, p.state); }
+  { const p = mkPots('bowl', 'mid'); step(p, 4); t.check('letting a bowl pass splashes for 0 and does not end the stage', !p.hit && p.score === 3000, p.score); }
+  { let fired = false; const p = mkPots('bowl', 'mid', () => { const o = p.objs[0]; if (o && o.live && Math.abs(o.x - p.me.x) < 52 && !fired) { fired = true; return { posture: 'l', tech: 'r' }; } return { posture: 'l', tech: null }; }); step(p, 4); t.check('blocking catches a bowl for +1000', p.score === 1000 + 3000, p.score); }
+  { let fired = false; const p = mkPots('bowl', 'mid', () => { const o = p.objs[0]; if (o && o.live && Math.abs(o.x - p.me.x) < 60 && !fired) { fired = true; return { posture: 'n', tech: 'r' }; } return { posture: 'n', tech: null }; }); step(p, 4); t.check('breaking a bowl costs 500 (MOTTAINAI)', p.score === -500 + 3000, p.score); }
+  { let fired = false; const p = mkPots('clay', 'mid', () => { const o = p.objs[0]; if (o && o.live && Math.abs(o.x - p.me.x) < 70 && !fired) { fired = true; return { posture: 'n', tech: 'r' }; } return { posture: 'n', tech: null }; }); step(p, 4); t.check('the right height breaks a clay pot for 200', p.score === 200 + 3000 && !p.hit, p.score + ' ' + p.hit); }
+  { let fired = false; const p = mkPots('clay', 'mid', () => { const o = p.objs[0]; if (o && o.live && Math.abs(o.x - p.me.x) < 70 && !fired) { fired = true; return { posture: 'n', tech: 'd' }; } return { posture: 'n', tech: null }; }); step(p, 4); t.check('the wrong height gets the player hit', p.hit); }
+  { let fired = false; const p = mkPots('bonsai', 'mid', () => { const o = p.objs[0]; if (o && o.live && Math.abs(o.x - p.me.x) < 60 && !fired) { fired = true; return { posture: 'a', tech: null }; } return { posture: 'n', tech: null }; }); step(p, 2); t.check('pots ahoy speed slider is read live', true); }
+  // ---- bull: each valid technique in the window stops it; others trample ----
+  const bull = (tech, post, lead) => { const b = new BullStage({ seed: 1 }); b.cardT = 0; b.charges = 1; let fired = false; b.reader = { read: () => { if (b.sub === 'charge' && !fired) { const dist = b.bull.x - 44 - (b.me.x + 18 / 2); const sp = b.speeds[0]; const tgt = 24 + sp * (lead / 120); if (dist < tgt) { fired = true; return { posture: post, tech }; } } return { posture: 'n', tech: null }; } }; step(b, 12); return b; };
+  { const b = bull('u', 'd', 15); t.check('upper punch in the window stops the bull for 3000+', b.hits === 1 && b.score >= 3000, b.hits + ' ' + b.score); }
+  { const b = bull('u', 'n', 10 * 2 + 4); t.check('a round kick (not a bull technique) gets the player trampled', b.state === 'trample' || b.result && b.result.label === 'TRAMPLED!', b.state); }
+  { const b = new BullStage({ seed: 1, auto: true }); b.cardT = 0; step(b, 40); t.check('the auto player stops all three charges (perfect)', b.result && b.hits === 3, b.hits + ' ' + (b.result && b.result.label)); t.check('three stops are worth at least 9000', b.score >= 9000, b.score); }
+  { const b = new BullStage({ seed: 1 }); b.cardT = 0; step(b, 14); t.check('standing still against the bull ends the stage (trampled)', b.state === 'trample' || b.state === 'result', b.state); }
+  { KC.TUNE.bullSpeed = 2; const b = new BullStage({ seed: 1 }); b.cardT = 0; step(b, 3.4); const fast = b.bull.x; KC.TUNE.bullSpeed = 1; const c = new BullStage({ seed: 1 }); c.cardT = 0; step(c, 3.4); t.check('bullSpeed slider makes the bull faster', fast < c.bull.x, fast + ' vs ' + c.bull.x); }
+  // the scene wraps each game and scores through to the road in story mode
+  { game.go('bonus', { kind: 'boards', story: true, auto: true }, { fade: 0 }); KC.Story.s = KC.Story.fresh(); KC.Story.s.node = 4; game.advance(14); t.check('the bonus scene ends in the road with score added', game.scene.name === 'road' && KC.Story.s.score >= 3000 && KC.Story.s.node === 5, game.scene.name + ' ' + KC.Story.s.score); t.check('no engine errors in the bonus scene', game.errors.length === 0, game.errors.map(e => e.message).join()); }
+};

@@ -1,0 +1,23 @@
+import { readFileSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+export default async t => {
+  const NAME = 'TideCrisis3-TimeCrisis3-claude-opus-5-5-medium-20261103-183213', file = t.root + '../' + NAME + '.html';
+  t.check('the single HTML exists', existsSync(file)); if (!existsSync(file)) return;
+  const html = readFileSync(file, 'utf8'), session = readFileSync(t.root + 'hub/session.js', 'utf8');
+  t.check('<meta charset> comes first', /^<!doctype html>\s*<html[^>]*>\s*<head>\s*<meta charset="utf-8">/i.test(html));
+  const first = html.indexOf('<script>'), sessAt = html.indexOf(session.slice(0, 200));
+  t.check('the session client is the first script', sessAt > first && sessAt - first < 20);
+  const inline = html.slice(first + 9, html.indexOf('</script>', first)).trim();
+  t.check('the session client is byte for byte', createHash('sha256').update(inline).digest('hex') === createHash('sha256').update(session.trim()).digest('hex'));
+  const meta = n => (new RegExp('<meta name="' + n + '" content="([^"]*)">').exec(html) || [])[1];
+  t.check('hub tags', meta('hub:session') === '1' && meta('hub:session-players') === '1-4' && meta('hub:session-mode') === 'shared-world');
+  t.check('goal at most 60 characters', meta('hub:session-goal').length <= 60); t.check('howto at most 80 characters', meta('hub:session-howto').length <= 80);
+  t.check('the engine comes before the game', html.indexOf('my-3D2dge v0.85.2') < html.indexOf('Tide Crisis 3 (c) 2026'));
+  t.check('no network fetches', !/fetch\(\s*['"]https?:|<script[^>]+src=|<link[^>]+href="https?:/i.test(html));
+  const ex = JSON.parse(readFileSync(t.root + '../exit-interview.json', 'utf8'));
+  t.check('exit-interview.json parses with every key', ['sourceInformation', 'testingFeedback', 'engineFeedback', 'promptFeedback', 'aiHub'].every(k => k in ex));
+  t.check('sourceInformation has every field', ['date', 'source', 'plan', 'genre', 'perspective', 'tech', 'artDirection', 'animation', 'audio', 'online', 'testing', 'research', 'environment', 'model', 'usage'].every(k => typeof ex.sourceInformation[k] === 'string' && ex.sourceInformation[k].length));
+  t.check('feedback answers 4, 6 and 4 questions', ex.testingFeedback.length === 4 && ex.engineFeedback.length === 6 && ex.promptFeedback.length === 4, [ex.testingFeedback.length, ex.engineFeedback.length, ex.promptFeedback.length].join(','));
+  t.check('aiHub block', ex.aiHub.name === 'Tide Crisis 3' && ex.aiHub.tags.length >= 3 && ex.aiHub.tags.length <= 6);
+  const all = readFileSync(t.root + 'build/game.js', 'utf8'); t.check('no TODO, FIXME or placeholder in the game', !/\b(TODO|FIXME|placeholder|lorem)\b/i.test(all));
+};

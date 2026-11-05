@@ -1,0 +1,3 @@
+import { fresh, steps } from '../tests/lib/util.mjs';
+const { KC, game } = fresh(); game.go('attract'); steps(game, 2); const sc = game.scene, s = sc.sub, b = s.bout;
+for (let i = 0; i < 120 * 12 && sc.step === 'bout'; i++) { steps(game, 1); const [W, R] = s.fighters; if (R.tech === 'roundKick') { const T = R.T; console.log(sc.t.toFixed(3), R.phase, 'k', R.k, 'fr', R.fr.join('/'), 'face', R.face, 'Wx', W.x.toFixed(1), 'Rx', R.x.toFixed(1), 'gap', R.gapTo(W).toFixed(1), 'band', R.contactBand(T).map(v=>v.toFixed(1)).join('-'), 'prof', W.profile(), 'resolved', R.resolved, 'strike', JSON.stringify(R.strike(W)), 'ph', b.phase, 'freeze', b.freeze.toFixed(2)); } }

@@ -1,0 +1,22 @@
+// Turns every dev view overlay on during play and reports any page or game error. Usage: node tools/overlaycheck.mjs
+import { chromium } from 'playwright';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+const here = dirname(fileURLToPath(import.meta.url));
+const file = resolve(here, '..', '..', 'SublimeCrisis3-TimeCrisis3-claude-haiku-5-5-medium-20261103-183312.html');
+const browser = await chromium.launch({ headless: true });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = [];
+page.on('pageerror', e => errors.push(e.message));
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+await page.goto(pathToFileURL(file).href, { waitUntil: 'load' });
+await page.waitForFunction(() => window.TC && TC.game && TC.game.scene, null, { timeout: 60000 });
+await page.evaluate(() => { TC.game.go('play', { cfg: { mode: 'stage', stage: 1, difficulty: 'Normal', intro: false } }, { fade: 0 }); });
+await page.waitForTimeout(1000);
+await page.evaluate(() => { TC.tuneSet('view.hitVolumes', true); TC.tuneSet('view.colliders', true); TC.tuneSet('view.aiLabels', true); TC.tuneSet('view.threatDebug', true); });
+await page.waitForTimeout(3000);
+const n = await page.evaluate(() => TC.current.play ? TC.current.play.sim.enemies.length : -1);
+await page.screenshot({ path: 'check-output/overlay.png' });
+await browser.close();
+console.log(`enemies on screen: ${n}; ` + (errors.length ? errors.slice(0, 3).join(' | ') : 'overlay ok'));
+process.exit(errors.length ? 1 : 0);

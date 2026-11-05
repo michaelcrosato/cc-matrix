@@ -1,0 +1,73 @@
+import { load } from '../test/lib/load.mjs';
+const { game, G, E } = load({ quiet: false });
+const I = game.input, T = () => game.debug.tools, err = () => game.errors.splice(0).map(e => e.where + ': ' + e.message + ' @ ' + (e.stack || '').split('\n').slice(1, 3).join(' '));
+const step = (name, fn, sec = 1) => { try { fn(); } catch (e) { console.log('THROW', name, e.stack.split('\n').slice(0, 3).join(' | ')); } game.advance(sec); const e = err(); console.log(name.padEnd(28), game.sceneName, e.length ? 'ERR ' + e.join(' || ') : 'ok'); };
+step('boot', () => {});
+step('title->menu', () => I.tap('confirm'));
+step('menu down', () => I.tap('down'));
+step('howto', () => G.go('howto', { from: 'menu' }));
+step('about', () => G.go('about'));
+step('about page', () => I.tap('tabR'));
+step('exhibition', () => G.go('exhibition'));
+step('exh next', () => { for (let i = 0; i < 5; i++) { I.tap('down'); game.advance(.1); } I.tap('confirm'); });
+step('exh ready', () => I.tap('confirm'), 2);
+step('new vacation', () => G.newVacationFlow());
+step('invitation confirm', () => { I.tap('confirm'); game.advance(.1); I.tap('confirm'); });
+step('charselect pick', () => I.tap('confirm'), 1);
+for (let k = 0; k < 30 && game.sceneName === 'cutscene'; k++) { I.tap('confirm'); game.advance(.6); }
+console.log('after arrival', game.sceneName, err());
+step('tutorial match', () => {}, 2);
+G.devPerfect = true; T().cpuControl(true);
+for (let k = 0; k < 400 && game.sceneName === 'match'; k++) game.advance(1);
+console.log('tutorial over', game.sceneName, err(), JSON.stringify(G.M && G.M.score));
+step('results continue', () => I.tap('confirm'), 1);
+for (let k = 0; k < 30 && game.sceneName === 'cutscene'; k++) { I.tap('confirm'); game.advance(.6); }
+console.log('after welcome', game.sceneName, G.state.day, G.state.slot, err());
+step('map', () => G.go('map'));
+step('map card', () => I.tap('confirm'));
+step('loc beach', () => G.go('location', { loc: 'beach' }));
+step('loc pool', () => G.go('location', { loc: 'pool' }));
+step('loc promenade', () => G.go('location', { loc: 'promenade' }));
+step('loc villa', () => G.go('location', { loc: 'villa' }));
+step('loc casino', () => G.go('location', { loc: 'casino' }));
+step('shop', () => G.go('shop', { shop: 'riptide' }));
+step('shop buy', () => I.tap('confirm'));
+step('wardrobe', () => G.go('wardrobe'));
+step('journal', () => G.go('journal'));
+step('journal friends', () => I.tap('tabR'));
+step('album', () => G.go('album', { all: true }));
+step('poolhop', () => { G.poolBot = true; G.go('poolhop'); }, 25);
+console.log('pool k', G.SCENES.poolhop.k, G.SCENES.poolhop.state, G.SCENES.poolhop.falls);
+step('casino slots', () => { G.state.chips = 100; G.go('casino', { game: 'slots' }); });
+step('slots spin', () => I.tap('confirm'), 5);
+step('blackjack', () => G.go('casino', { game: 'blackjack' }));
+step('bj deal', () => I.tap('confirm'), 1);
+step('bj stand', () => I.tap('stand'), 4);
+step('roulette', () => G.go('casino', { game: 'roulette' }));
+step('rl bet spin', () => { I.tap('confirm'); game.advance(.1); I.tap('extra'); }, 6);
+step('cashier', () => G.go('casino', { game: 'cashier' }));
+step('dayend', () => G.go('dayend'));
+step('dayend sleep', () => I.tap('confirm'), 1.5);
+step('dev open', () => G.dev.open());
+step('dev tab', () => I.tap('tabR'));
+step('dev close', () => I.tap('cancel'));
+step('photo', () => { G.go('location', { loc: 'beach' }); game.advance(.5); G.photo.open(); });
+step('photo snap', () => I.tap('confirm'));
+step('photo close', () => I.tap('cancel'));
+step('semifinal', () => T().story('semifinal'), 2);
+for (let k = 0; k < 30 && game.sceneName === 'cutscene'; k++) { I.tap('confirm'); game.advance(.6); }
+console.log('semi', game.sceneName, err());
+step('final', () => T().story('final'), 2);
+for (let k = 0; k < 30 && game.sceneName === 'cutscene'; k++) { I.tap('confirm'); game.advance(.6); }
+console.log('final', game.sceneName, err());
+step('party', () => T().story('party'), 1);
+for (let k = 0; k < 60 && game.sceneName === 'cutscene'; k++) { I.tap('confirm'); game.advance(.6); }
+console.log('after party', game.sceneName, err());
+step('credits', () => G.go('credits'), 2);
+step('vresults', () => G.go('vresults'), 1);
+step('title', () => G.go('title'), 1);
+step('attract idle', () => {}, 11);
+console.log('attract', G.attract.active, game.sceneName);
+for (let k = 0; k < 110; k++) { game.advance(1); const e = err(); if (e.length) console.log('attract err', game.sceneName, e); }
+console.log('attract now', game.sceneName, G.attract.BEATS[G.attract.beat].id);
+step('attract stop', () => I.tap('confirm'), 1);

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-03 18:29:10",
+    "source": "Ice hockey (over-the-top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports: 3-on-3 ice hockey with goalies, a fight minigame, a 5-chapter story campaign (the Cup Run), exhibition, practice drills, 1-4 player versus",
+    "perspective": "2.5D TV broadcast camera (engine threequarter view, pitch 55) tracking the puck; Overhead option (topdown); ice-level brawler view for fights, replays and player intros",
+    "tech": "my-3D2dge v0.85.2 (full engine, patched: font symbols, hub controller rule, Humanoid gear hook, organ/brass waves, lowpass, voice bus, dialog voice hook); plain JavaScript, one self-contained HTML file; AI Hub session client 1.4.0; Node 24 and Playwright 1.63 (Chromium) for tests",
+    "artDirection": "The engine's native PS1-era pixel art (ps1 resolution, expand) with HD Humanoid rigs, plus code-drawn hockey sticks, skates, helmets with visors, goalie pads/blocker/catcher/cage, jersey numbers, procedural team logos, five dressed arenas (stands and fans, boards, translucent breakable glass, nets, props, lights) and effects",
+    "animation": "The engine's procedural Humanoid rigs, with a solvePose overlay for skating strides, crossovers, hockey stops, backward skating, stick handling, passes, wrist and slap shots, checks, pokes, deke spins, goalie stances and saves, celebrations; engine moves (jab, haymaker, hook), guard stance, down/cheer poses for fights and reactions",
+    "audio": "All in code: chip-synth music in the engine's song format (theme, menu, locker room, pond, Grindhouse, mall, final, play with drive/KABOOM/fight layers, a Flood Wagon waltz, victory, defeat, credits), organ stings, synthesized sfx (post ping, slapshot, glass shatter, goal horn, buzzer, whistle), a crowd bed with reactions, and Animalese-style formant babble voices per character",
+    "online": "AI Hub Session Protocol v1, shared-world, 1-4 seats: host-run match, client intents at 15 Hz with press counters, 15 Hz snapshots, interpolation and own-skater prediction, own game card, finish with standings, scores, stats and awards; plus local 1-4 players on one machine",
+    "testing": "One command (node tests/run.mjs): headless Node suites driving the game with game.advance and game.debug (units, systems, 4 local players, determinism, dev mode, attract mode, AI balance, a scripted whole-story playthrough, all 7 drills played through controller input only, each chapter played unforced by a bot to see its events happen on their own, text pools), Playwright browser checks (pages, menus, mouse hover and click, glyphs, touch-only), the AI Hub harness in 5 configurations, a real-input AI Hub session between two game copies, and the AI Hub's own library-admission check (scripts/hub-check.mjs: 2, 3 and 4 players on a poor network, host leaving, a dedicated-server host, and the game on its own; 6 runs, 86 checks, all passed); screenshots reviewed by eye",
+    "research": "Read the engine handoff docs (README, API.md, AI_GUIDE sections, sports kit, engine source for font, glyphs, Humanoid, audio, Dialog) and the AI Hub protocol README and harness; no web research on hockey",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 35. In the game: remote AI Hub players' input being dropped on the host (they could not control their skaters); a name clash that crashed the browser build; arena lamps blowing the ice out to pure white; nobody able to act during the shootout; AI shooters losing their wind-up while stopping; goalies saving nearly everything; one-timers that never scored; no fights at all in natural play, even in the Gloves Off chapter; thin ice that never broke on its own; random shot height making the Top Shelf drill luck; the aim side lost when releasing the stick with the shot; drill 2 teammates ignoring loose passes; Lou's KABOOM check in drill 7 being undodgeable; auto-switch swapping skaters out from under a steering player; too many hockey stops and KABOOMs; a lost tap during hit-stop; a faceoff crash; the chapter 4 showcase shootout not starting. Plus several mistakes in my own test setups.",
+    "5 were game breaking: remote players unable to control anything online, the browser crash, the never-ending shootout, almost no goals in AI games, and the faceoff crash with an empty team.",
+    "The real-input AI Hub session (two copies of the game in the harness, key events sent to the client, the host's world checked): it found the dropped remote input that the official harness checklist passes over. Close second: unforced natural play of each chapter, which showed fights, thin ice and one-timers were not happening on their own.",
+    "The determinism check (same seed twice, same game): it never failed, so it found nothing, though it guards replays and the attract mode."
+  ],
+  "engineFeedback": [
+    "The procedural Humanoid rigs: dressing and posing skaters, goalies, referees and the cast in code, with live portraits for dialog, gave a lot of character for free, and the fixed-step headless game made testing cheap.",
+    "Yes: the threequarter view's base scale of 1.5 meant zoom 1 was far too close for a rink; hit-stop from hitFx swallows taps; changing zoom re-bakes the floor, so a continuous zoom was not an option; and px.sprite's scale placement took trial and error.",
+    "The hockey simulation itself: skating physics, the substepped puck against curved boards, posts and nets, the goalie save solver, and the arena drawing (stands, boards, breakable glass panels, nets).",
+    "Depth ordering custom 3D-ish geometry (boards, glass, nets, stands) with the queue/decal model, and keeping the floor bake cheap.",
+    "Five small patches: PlayStation symbols in the font, Options ignored while Create is held (AI Hub), a Humanoid gear hook for sticks and goalie gear, organ/brass waves plus lowpass and a voice bus in audio, and a per-letter function voice in Dialog.",
+    "A first-class hook for held items and attachments on the Humanoid (sticks, bats, rackets) with hand placement, instead of only sword, gun and staff."
+  ],
+  "promptFeedback": [
+    "The clear separation of what to build (TASK.md) from how (a detailed plan), and the concrete done criteria: dev mode with sliders, attract mode, hub play, the feedback sections.",
+    "The plan's file names used the max-effort run's suffix while TASK.md gave the medium one; TASK.md won. 'Online' points at the hub library rather than saying shared-world, which the plan settled.",
+    "Fitting the full feature list (story, 5 arenas, 7 drills, fights, shootout, online, dev mode, attract mode) into one coherent, tested build at once.",
+    "Say whether the plan's scale (dozens of systems) should be trimmed for a lower effort level, and give a usage or time budget so scope can be matched to it."
+  ],
+  "aiHub": {
+    "name": "Ice Hoc-Kaboom",
+    "tagline": "Over-the-top 3-on-3 arcade hockey",
+    "description": "Glass-shattering hits, dropped gloves and explosive KABOOM slapshots as the Mukluk Falls Muskrats fight to save their rink. Story, exhibition and up to four players.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Ice hockey",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD skate · ✕/J pass · □/K shoot · ○/L deke · △/I saucer & gloves · R2/Shift turbo",
+    "tags": [
+      "arcade",
+      "sports",
+      "versus",
+      "comedy",
+      "pixel art",
+      "story"
+    ]
+  }
+}

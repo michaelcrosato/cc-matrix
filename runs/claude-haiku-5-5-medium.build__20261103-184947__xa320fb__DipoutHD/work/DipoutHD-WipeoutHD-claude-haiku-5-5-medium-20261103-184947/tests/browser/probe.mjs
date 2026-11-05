@@ -1,0 +1,21 @@
+// Probe: open the bundle, jump to a race and save screenshots. Usage: node probe.mjs <scene> <outPrefix> [waitMs]
+import { chromium } from 'playwright';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const DEV = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const BUNDLE = join(DEV, '..', 'DipoutHD-WipeoutHD-claude-haiku-5-5-medium-20261103-184947.html');
+const [scene = 'race', out = 'probe', wait = '3000'] = process.argv.slice(2);
+const browser = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = [];
+page.on('pageerror', (e) => errors.push('pageerror: ' + e.message));
+page.on('console', (m) => { if (m.type() === 'error') errors.push('console: ' + m.text().slice(0, 300)); });
+await page.goto('file://' + BUNDLE, { waitUntil: 'load' });
+await page.waitForFunction(() => window.__dipout && window.__dipout.app && window.__dipout.app.game, null, { timeout: 60000 }).catch(() => {});
+await page.waitForTimeout(3000);
+if (scene !== 'title') await page.evaluate((s) => window.__dipout.go(s, s === 'race' ? { track: 'nordlicht', cls: 1, laps: 3, mode: 'race', pilot: 0 } : undefined), scene);
+await page.waitForTimeout(Number(wait));
+await page.screenshot({ path: join(DEV, 'tests', 'out', out + '.png') });
+console.log(JSON.stringify(await page.evaluate(() => window.__dipout.snapshot()), null, 0).slice(0, 600));
+console.log(errors.filter((e) => !/INVALID_OPERATION|adapters|WebGPU|deprecated/.test(e)).slice(0, 8).join('\n') || 'no errors');
+await browser.close();
