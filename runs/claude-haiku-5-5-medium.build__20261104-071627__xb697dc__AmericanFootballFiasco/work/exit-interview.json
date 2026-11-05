@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:16:27",
+    "source": "American football (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports (American football), with beat-'em-up hit feel and a light story campaign (THE FIASCO CUP)",
+    "perspective": "Three-quarter camera from the sideline with a camera director that picks each moment's shot (the line, the follow, the close-up, the overhead kick, the wide whistle); replays from three angles",
+    "tech": "my-3D2dge engine v0.85.2 (handoff package, commit 4390a9852fe0, with three small changes logged in ENGINE-CHANGES.md), vanilla JavaScript, Canvas 2D and Web Audio; Playwright 1.63.0 for the browser checks; no CDN or libraries",
+    "artDirection": "The engine's native look: HD Humanoid rigs drawn as pixel art at res ps1 (320x240, expanded to the window), procedural turf with painted end zones, stands with a crowd and swaying pennants, lights (LIGHTS OUT goes dark, with lamps on the players), a spinning ball, flying helmets, a referee and a mascot made from engine parts",
+    "animation": "The engine's Humanoid rig poses (run, down, cheer, hips, wince) driven from the match each step, a victory dance that alternates two poses on the beat, and the ball's spin; no motion-capture clips",
+    "audio": "All music, sound effects and voices written in code: a field song, a title theme, synthesized sound effects, and Animalese babble voices for the radio and the cutscenes",
+    "online": "AI Hub Session Protocol v1, shared-world mode for two players: the host's copy runs the match, the guest sends its inputs and calls, and the host sends the state back eight times a second. Passes the hub's own two-player check, also with simulated latency and loss",
+    "testing": "Headless Node tests (test/run.mjs: 53 checks over boot, the match, the attract mode, the Dev mode, the cup and its cutscenes, the features, the couch join, touch-only detection, and the flow through results and the reel), Playwright screenshots (tools/shots.mjs, tools/shots-screens.mjs), and the AI Hub harness's automatic check (tools/hub-check.mjs)",
+    "research": "none (the engine's API card and its sports kit were read; no web research)",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium 1243 through Playwright",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Testing caught eleven issues across the two passes: seven in the match and the online start, and four visual ones found in screenshots. The most useful checks caught: the ball was never marked held, so no tackle or touchdown could end a play and the match stalled (critical); the radio dialog never ticked; a scene change needed a no-fade option; the Dev mode's update ran before its scene; the online round crashed while drawing before the map existed (the hub check caught it); the online start failed because the ball was created after the human picks that use it (the hub check caught it, and it was critical for online play); and a lateral rule that could never fire at the snap (the feature suite caught it). Screenshots caught four visual problems: the camera was too close, the controller prompts ran across the field, the hot-streak line used an unsupported glyph, and the radio box covered the call hint.",
+    "Two were critical: the stall (no play could end, so no score was possible) and the online start failure (the online round could not begin). Both are fixed; every run of the whole-match test and the two-player hub check now passes. The hub check also passes with 150 ms latency, 50 ms jitter and 5% loss.",
+    "The most helpful test was the two-player hub check run through the harness: it runs both copies of the game on a simulated network and reports each rule the hub checks, so the online start failure and the draw-before-map crash showed up at once. The whole-match test was a close second.",
+    "The least helpful was the boot suite: it passes on the first run and checks only that the files load and the title is the first scene. The Play Lab's turnover column shows picks only, which is less useful than it looks."
+  ],
+  "engineFeedback": [
+    "The Humanoid rig with its poses, the Menu and Dialog APIs, and game.advance with game.debug made the match testable in a plain Node VM. The Blob and the sprite helpers made the mascot and the helmets quick to build.",
+    "Yes. Scene changes fade by default, so an unwaited test saw the old scene. Dialog must be ticked every step, which the card implies but does not say. The pixel font lacked the PlayStation symbols, and the glyph setting defaulted to Auto. The hub client expects the game's scene to call connect and ready in order, and the card does not say what to do if the connect call resolves after a scene change. The harness needs the game served from the harness's own origin, which the README says but the first attempt missed.",
+    "The match simulation: the downs, the play calls, the QB and the throws, the catches and picks, the laterals, the carriers, the tackles and Big Hits, the late hit and its flag, the Fiasco meter and its cards, LIGHTS OUT, the replay and the highlight reel, the Play Lab, the drills, and the online snapshot, in the simulation and extras files.",
+    "The 67 KB card and the 1.2 MB engine file took the most time at the start. The hub protocol was the second slowest: finding what a shared-world game must send and when took a full read of the protocol README and the client's behaviour under the harness.",
+    "Four changes, logged in ENGINE-CHANGES.md: E1 adds the PlayStation symbols to the 5x7 pixel font, E2 makes PlayStation the default glyph set, E5 lets a dialog voice be a function, and session.js is vendored unmodified (no engine change). Lights and camera zoom were used as the engine documents them, with no change.",
+    "A Dialog that ticks itself from the game's loop, and a single way for a hub client to say 'the match is not ready yet' so a shared-world game can wait for the first start without holding a scene."
+  ],
+  "promptFeedback": [
+    "The shape of the exit interview, the TASK.md checklist, and the rule that every feature must be implemented: it gave a clear measure of what was left after the first pass.",
+    "The plan asks for much more than a session can hold, and the two messages from the stop hook asked for the same goal again. A clear priority order and a stopping point would have made the first pass better aimed.",
+    "The hardest part was judging what 'implemented' means for systems like the broadcast camera director and the highlight reel: the reel is clip playback with three camera angles, not a director.",
+    "Say up front which features are required for the done condition and which are stretch goals, and ask for the stopping point at the start rather than at the end."
+  ],
+  "aiHub": {
+    "name": "American Football Fiasco",
+    "tagline": "Call it, snap it, hit it, win the Cup",
+    "description": "The Tumbleweed Junction Fiascos have lost 99 games in a row, and the owner has bet the field on the Fiasco Cup. Call plays from big cards, then run, pass and hit your way down a seven-a-side field, alone, with a friend, or online.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "American football (over the top arcade style)",
+    "series": "",
+    "players": "1–2",
+    "controls": "Stick moves; J throws or hands off (a click throws to a man); K juke or dive; L hits; hold Shift for turbo; Q switches defenders",
+    "tags": [
+      "arcade",
+      "pixel art",
+      "comedy",
+      "story",
+      "co-op",
+      "versus"
+    ]
+  }
+}

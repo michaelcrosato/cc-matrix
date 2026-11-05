@@ -1,0 +1,56 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:06:43",
+    "source": "baseball (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade baseball, with a home run derby and spring training (sports)",
+    "perspective": "Plate Cam: a perspective from behind the plate, drawn in screen pixels. Broadcast field view: a three-quarter TileMap view.",
+    "tech": "my-3D2dge engine v0.85.2 (handoff package), plain JavaScript; AI Hub client 1.4.0 (unmodified); Playwright 1.63.0 for the browser checks; Node 24",
+    "artDirection": "The engine's pixel-art Humanoid rigs at PS1 resolution with expand; the field, the stands and the Plate Cam are painted in code; the title uses the engine's title font",
+    "animation": "The engine's rig poses and move set (E.move overhead, slash, recover, crouch, stance ready); no mocap clips",
+    "audio": "Engine chip synth only: sound effects and four songs made in code; Animalese-style babble voices for the announcer's big calls",
+    "online": "AI Hub ghost-mode Home Run Derby, 1 to 4 players, through lib/hub (Protocol v1, client 1.4.0)",
+    "testing": "Headless tests in one command (node tests/run.mjs), with scripted matches, a scripted derby, the drill and the mock hub; browser screenshots and the AI Hub harness",
+    "research": "Read the engine handoff documents (API card, index, guide) and the AI Hub protocol README; no other research",
+    "environment": "Claude Code CLI (headless); Linux under WSL2; browser: Chromium via Playwright",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 16 real issues: the fence distances were inverted, fielders ran to the ground under a fly and dropped it, the Plate Cam put the plate off the screen, the CPU curveball aimed under the zone, the pitcher drew as big as the batter, the scorebug and the pitch chips covered the play, the derby batter was not drawn, and the field camera was too close. Plus several test bugs of mine.",
+    "Three were game-breaking: the fence (home runs and fair balls called wrong), the fly balls (CPU games stuck at 0-0 for 34 innings), and the plate off the screen (no duel to play).",
+    "The most helpful test was a trace of every plate appearance (each swing, call, play and result), which showed the fly-ball problem that the screenshots did not.",
+    "The least helpful was the source-text check: it flagged the word for the platform's random generator in a comment."
+  ],
+  "engineFeedback": [
+    "game.advance with input.tap and game.debug made whole playthroughs scriptable, and the Humanoid rigs with E.move poses look like a game.",
+    "Got stuck: a scene switch enters the new scene after its fade, so state set just before game.go was replaced. Rigs do not scale with distance, so the far pitcher needed a second, smaller rig. There is no bat weapon, so the bat is drawn by hand.",
+    "The rules, the pitch and contact model, the fielding and the Plate Cam projection: all built in the game's own code.",
+    "The Plate Cam: a perspective from behind the plate, with sprite rigs whose size cannot follow depth.",
+    "The button symbols default is now PlayStation (ENGINE-CHANGES.md), because the task asks for PlayStation glyphs.",
+    "A per-call scale for a Humanoid, so players far away read as far away."
+  ],
+  "promptFeedback": [
+    "The milestones, the explicit AI Hub protocol, and the one-command test rule.",
+    "The file names in the plan name another model and effort than the task, and the task wins; the plan is about 2,100 lines, and it is not clear which parts are must-haves.",
+    "Fitting nine milestones into one session: the build is a cut version (two parks, no Tour, no mocap).",
+    "Mark the must-haves, give a step budget, and name the deliverable folder."
+  ],
+  "aiHub": {
+    "name": "Batzooka Baseball",
+    "tagline": "Over the top. Over the wall. Over the moon.",
+    "description": "An original over-the-top arcade baseball game: pitch fireballs, swing a rocket-powered bat, and send the ball over the wall in a home run derby, alone, on one couch, or online with up to four players.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Baseball",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick or WASD aims; ✕ or Space swings and winds up; □, J or right-click fires the Batzooka; Q and E change pitch; the mouse aims and clicks",
+    "tags": [
+      "arcade",
+      "versus",
+      "pixel art",
+      "comedy"
+    ]
+  }
+}

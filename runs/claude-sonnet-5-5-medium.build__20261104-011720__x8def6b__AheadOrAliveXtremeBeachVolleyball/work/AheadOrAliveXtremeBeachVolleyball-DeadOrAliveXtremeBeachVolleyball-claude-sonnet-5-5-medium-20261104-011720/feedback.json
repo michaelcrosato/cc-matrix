@@ -1,0 +1,23 @@
+{
+ "usage": "unknown (no cost or token figures are exposed to the session; the session ran as a single Claude Code CLI agent with no subagents)",
+ "testing": [
+  "Testing caught about 9 real issues: input presets that dropped confirm/cancel, a stale map node list that could skip a story beat, tab actions missing from the match preset (dev panel crashed with warnings), a CPU partner that yielded to the human so both stood still, a missing heart glyph, over-zoomed place scenes, a roulette ball that jumped, and a menu hover test that needed a real browser. A further handful were mistakes in my own test scripts.",
+  "Two were game breaking: the missing confirm/cancel actions (every menu was dead on keyboard and pad) and the stale map state that could silently skip the story beat for the reveal.",
+  "The scripted full playthrough (autopilot plays every story match, shops, gifts, casino, Pool Hop, photos, save/load, endings) plus the AI Hub harness runs (2 and 4 players, host-leave, server). Together they exercise nearly every scene in about a minute.",
+  "The headless menu hover test: draw is skipped headless so there were no click targets to test. It had to move into a real browser test. A few early checks that always passed ('|| true') were also useless and were tightened."
+ ],
+ "engine": [
+  "Headless play with game.advance and game.debug, the fixed 1/120 s clock, the ready-made Humanoid rigs with E.MOVES, and the Shell: pause menu, settings, controls, saves and full screen came for free and worked on the first try. E.View made the broadcast and serve cameras a one-line job.",
+  "Yes. A custom input preset object replaces the defaults, so confirm, cancel and start vanished until I merged E.Input.DEFAULT in (the card says every preset has them). Menu click targets only exist after a draw, so headless tests cannot click. game.go fades, so scene switches need { fade: 0 } in tests. The pixel font had no PlayStation symbols or hollow heart.",
+  "The whole volleyball simulation (closed-form ball flight, referee, timing judge, AI with intercept prediction and chemistry), the 10-foot canvas UI kit (menus, sliders, glyph prompts, node navigation), walkable places, the casino, Pool Hop, photo mode, the attract director, the AI Hub driver and the Animalese voices.",
+  "Scenery and props under the no-arc, no-gradient pixel rule: knowing which helpers exist, depth-sorting a net that spans the whole court, and getting swimwear and distinct hairstyles out of a Humanoid that only has shirts, tunics and five hair styles. Windowed lists also needed a hack because Menu has no scrolling.",
+  "In my-3d2dge.js: (1) PlayStation symbols and arrows added to the 5x7 font; (2) 'glyphs' setting is now a PlayStation/Xbox choice in the Game group, default PlayStation; (3) Dialog.voice may be a per-letter function, for Animalese; (4) default input glyph style is PlayStation; (5) touch: 'never' option hides touch controls for good; (6) a third audio bus for voices (audio.bus('voice'), voiceVolume) behind a Voices setting. (7) a Humanoid extras hook (rig.extras) drawn at the projected head, used for sunglasses, hair flowers and a sweat band. Not done from the plan: a dedicated swimwear outfit, new hair/hat styles and extra music-instrument options.",
+  "Make custom input presets extend the defaults (or warn loudly), and add first-class swimwear, more hair styles and a scrolling Menu widget."
+ ],
+ "prompt": [
+  "A concrete deliverable list (dev mode with live sliders and reset, 10 s attract, controller-first prompts with glyph options, hub integration, single file) and a detailed plan. The 'feature-complete vertical slice, no stubs' bar kept me honest.",
+  "How much of the 2,000-line plan is mandatory when the effort setting is medium. Names also differ between plan and TASK.md (file names, dev folder), and the plan lists engine patches (swimwear, audio buses, reserved combo) that are far larger than the 'change anything' wording suggests.",
+  "Breadth: more than a dozen systems (match sim and AI, calendar, shops, social, casino, rhythm, photo, hub, local multiplayer, attract, dev mode, audio, UI) all had to be complete and tested in one session without stubs.",
+  "Mark must-have versus nice-to-have in the plan, or size the feature list to the effort level. Say outright which plan paths and names are overridden by TASK.md so none need guessing."
+ ]
+}

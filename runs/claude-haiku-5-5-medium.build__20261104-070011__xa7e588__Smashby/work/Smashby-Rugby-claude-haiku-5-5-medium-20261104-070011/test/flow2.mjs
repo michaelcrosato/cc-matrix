@@ -1,0 +1,11 @@
+import { loadGame } from './load.mjs';
+const { ctx, SM, E } = loadGame();
+const h = ctx.__smashby, game = h.game, I = game.input;
+const snap = () => game.debug.snapshot();
+game.advance(.5);
+game.advance(11, { draw: true });
+console.log('after 11 s idle on the title (draw on):', snap().scene, 'phase', snap().phase, 'errors', (game.errors||[]).map(e=>e.message||String(e)).slice(0,3));
+game.advance(5);
+console.log('match running: phase', snap().phase, 'run', snap().run, 'score', snap().score);
+I.tap('pause'); game.advance(.2);
+console.log('pause tapped scene', snap().scene, 'paused', game.paused);

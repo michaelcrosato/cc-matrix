@@ -1,0 +1,22 @@
+// Screenshot a page of the build in headless Chromium (review aid): node tools/shot.mjs <file.html#hash> [--size 1920x1080] [--seconds 3] [--out name.png]
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
+import { resolve, join, dirname } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
+const DEV = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const args = process.argv.slice(2), opt = (n, d) => { const i = args.indexOf('--' + n); return i >= 0 ? args[i + 1] : d; };
+const target = args.find(a => !a.startsWith('--') && !/^\d+(\.\d+)?$/.test(a)) || 'build/index.html#court/skybox';
+const [sw, sh] = opt('size', '1920x1080').split('x').map(Number), secs = +opt('seconds', 3), out = opt('out', 'shot.png');
+const [file, hash] = target.split('#');
+mkdirSync(join(DEV, 'check-output'), { recursive: true });
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: sw, height: sh } });
+const errors = [];
+page.on('pageerror', e => errors.push(String(e && e.stack || e)));
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+await page.goto(pathToFileURL(resolve(DEV, file)).href + (hash ? '#' + hash : ''));
+await page.waitForTimeout(secs * 1000);
+await page.screenshot({ path: join(DEV, 'check-output', out) });
+const snap = await page.evaluate(() => (window.__bb && window.__bb.game.debug.snapshot()) || null).catch(() => null);
+console.log('shot', out, JSON.stringify(snap), errors.length ? 'errors: ' + errors.slice(0, 3).join(' | ') : 'no errors');
+await browser.close();

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:09:01",
+    "source": "Basketball, in the over-the-top arcade style (genre inspiration; an original game with its own teams, courts and story)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports: 2-on-2 basketball with a short story ladder (the Blam Tour), Exhibition for 1-4 players, Blam Camp tutorial",
+    "perspective": "Side-on broadcast camera (custom orthographic view, pitch 30 degrees, panning with the ball) with a zooming, slow-motion dunk cam; optional High camera (the engine's three-quarter view)",
+    "tech": "my-3D2dge v0.85.2 (full engine, modified), AI Hub session client 1.4.0, plain JavaScript, Canvas 2D, Web Audio; built and tested with Node 24, Playwright 1.63 (Chromium) and Python http.server",
+    "artDirection": "The engine's native HD pixel style pushed to a 90s arcade broadcast: code-painted court floors (asphalt, boardwalk planks, concrete, glowing basalt, maple), three-tier crowds that react, angled glass backboards and spring nets, neon and canvas lighting, new prop shapes, comic banners",
+    "animation": "The engine's procedural Humanoid rigs, plus a basketball pose layer (two-bone IK hands) for the ball-synced dribble with crossovers, shooting form, 12 choreographed dunks, hanging on the rim, steals, shoves, blocks, spin moves, celebrations and per-player taunts",
+    "audio": "All in code: 12 songs with dynamic layers (Supernova, Overclock, clutch), 8 stings, about 60 synthesized sound effects, a crowd ambience bed, and Animalese-style gibberish voices from formant filters for 23 speakers, with captions",
+    "online": "AI Hub Session Protocol v1 shared-world sessions for 1-4 players (own card, host-authoritative snapshots and input messages, leavers turn CPU, server copy, time-up finish); also 1-4 players on one machine",
+    "testing": "One command (node tests/run.mjs) over 17 suites and about 2,400 checks: headless Node runs with game.advance and game.debug (including a scripted playthrough of the whole Tour, all ten camp lessons, attract loops, AI soaks on every court, a fake-hub network), the bundle, Playwright Chromium (deep links, audio smoke test, screenshots) and the AI Hub harness's four scenarios; then browser scripts on the shipped page with real keys and clicks (Dev Mode sliders and reset, idle into attract and out, Camera High and Xbox symbols through Settings, the audio output measured and recorded) and the harness driven by hand; no subagents",
+    "research": "None beyond the engine's handoff documentation and the AI Hub protocol README",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Cost and token counts unknown (not visible inside the session); session time about 2 hours 50 minutes (06:09 to about 09:00)"
+  },
+  "testingFeedback": [
+    "About 35 issues: 17 caught by the headless suites (physics, rules, mechanics, the Tour playthrough, Blam Camp, attract, audio, content), 4 by the CPU soaks and their stats, 2 by the browser console, 11 by reviewing screenshots and 1 by driving the AI Hub harness by hand.",
+    "8 were critical: online, the other players' seats were played by the CPU instead of their owners (the hand-off ran on a timer that the scene change cleared; the fake-hub suite now checks that a client's keys move its player on the host); a human inbounder could hang the game forever; the event bus overwrote the events' own id field so every power-up event threw; the settings' apply functions crashed at boot; Blam Camp could not chain lessons; a lesson step completed twice and crashed; two lessons could never be finished; Dev Mode never opened from its deep link.",
+    "The scripted playthrough of the whole Tour: a bot plays the human seat through the real inputs from the prologue through a lost stop and rematch, the final, the ending, credits, unlocks and the Hall of Blam, then CONTINUE TOUR after a reload. It found the inbound hang that nothing else would have.",
+    "The determinism proof: the engine's exact fixed step made it pass the first time and it never failed; the AI soaks that measured scoring and dunk rates taught far more."
+  ],
+  "engineFeedback": [
+    "Headless play with exact fixed steps: game.advance ran whole matches, the whole Tour and every camp lesson in Node at about fifty times real speed, so balance and flow could be measured instead of guessed. Close behind: rigs that pose themselves and floors painted by a function.",
+    "A few times: game.after timers are cleared by a scene change (Dev Mode did not open); the rig's joint frame had to be read from solvePose before the hand IK lined up; the pixel font lacks a middle dot, a left triangle and a check mark (they drew as ?); the pause and settings screens are sized in CSS pixels, tiny on a TV; and a 30-degree side view at 240 pixels tall left no room for four tiers of stands and a sky, so the arena was redesigned.",
+    "The basketball itself: a decide-then-fly shot model over real rim, backboard, net and floor physics (substepped so nothing tunnels), and a pose layer over the rig (two-bone IK hands) that dribbles the actual ball, shoots, dunks twelve ways and hangs on the rim.",
+    "Making the procedural Humanoid hold, dribble and slam a ball convincingly in every build, and sorting the hoop in depth (rim and net split into back and front halves, the glass cheated 30 degrees toward the camera) in an orthographic side view.",
+    "Shorts and socks on the Humanoid (basketball players do not wear trousers); afro, flattop and mohawk hair styles; E.Dialog's voice may be a per-letter function so the gibberish voice speaks as text types; public audio.sfxBus and audio.musicBus getters so voices and the crowd bed follow the volume settings. E.build names this copy (bashketball 2026-11-04). No engine bugs needed fixing.",
+    "A ten-foot mode for the HTML Shell (pause, settings, controls) that scales with the screen; here it is scaled with CSS zoom from the game."
+  ],
+  "promptFeedback": [
+    "A definition of done that can be checked line by line, and a plan that gives a starting number for everything (geometry, tuning, difficulty tables, line samples), which turned design debates into slider tuning.",
+    "The plan carries another run's names and dates (it says to use TASK.md's, which worked); the title is to be picked with a random number generator, but the plan had already picked one (BASKETBLAM) and said not to re-pick; TASK.md wins, so I brainstormed fifty and re-picked in the build session (secrets.randbelow(50) returned 3, BASHKETBALL) and renamed the game late; and Usage asks for cost and tokens that the agent cannot see from inside the session.",
+    "The breadth in one session: five courts with twists, eighteen players, twelve dunks, a story, ten lessons, an attract mode, dev mode and online play, each with tests, while balancing the CPU so scores land at 30-60 a team with about a third of baskets being dunks.",
+    "Mark the plan's must-haves apart from its nice-to-haves, state that HTML menus must scale for a TV too, and have the harness fill in Usage."
+  ],
+  "aiHub": {
+    "name": "BASHKETBALL",
+    "tagline": "No fouls. No mercy. All BLAM.",
+    "description": "Over-the-top 2-on-2 arcade basketball: turbo dunks that leave the atmosphere, legal shoves, glass-shattering slams and a robot-run championship. Play the Blam Tour story, Exhibition for 1-4 players, or online in AI Hub sessions.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Basketball (over-the-top arcade style)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD move; Square/Space shoot or block; Cross/E pass or steal; R2/Shift turbo; Circle/Q shove or spin; Triangle/F alley-oop; L1/R taunt",
+    "tags": [
+      "2d",
+      "arcade",
+      "versus",
+      "co-op",
+      "comedy",
+      "pixel art"
+    ]
+  }
+}

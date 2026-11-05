@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:03:17",
+    "source": "TrackMania 2003 (Nadeo)",
+    "plan": "PLAN.md",
+    "genre": "Racing (arcade time attack), with track-building puzzles",
+    "perspective": "Third-person chase camera; orbiting camera on the title, attract and editor screens",
+    "tech": "my-3D2dge 2D engine and 3D engine v0.85.2 (commit 4390a98), three.js r182 (WebGL 2 fallback), Rapier 0.19.3, esbuild 0.25.12, playwright-core 1.63.0 (checks)",
+    "artDirection": "The engine's toon 3D style with ink outlines and pixel-art UI, all drawn by code (pen parts, no image files)",
+    "animation": "Code-driven car, checkpoint gate and camera motion; no rig animation",
+    "audio": "Engine songs and effects; car engine and babble voices synthesised in code",
+    "online": "AI Hub Session Protocol v1, ghost mode (client 1.4.0)",
+    "testing": "24 headless checks behind one command: roads, car physics, bot on all 15 roads, run rules, scene flow, a scripted whole-game playthrough, online ghost session, editor and puzzles; Playwright boot and screenshot checks of the built file",
+    "research": "none",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About eight real bugs were caught; three were critical: the steering sign (no bot finished), the countdown braking the car off the line, and loops drawn face-down so the car drove through them.",
+    "Three of them were game-breaking: no run could be driven, every run began with a respawn, and loops could not be driven at all.",
+    "The most helpful test was a bot run of every road that counts respawns, because it exposed the three critical bugs at once.",
+    "The least helpful test was the page's no-error check: it passed while the game was broken, and a silent canvas stub hid the look until screenshots were taken."
+  ],
+  "engineFeedback": [
+    "The pen for code-drawn parts, the fixed camera, and the engine's menus, pause and settings were the best parts of the engine.",
+    "Stuck on the 3D track and vehicle: they don't drive a loop, and the boot runs asynchronously, so tests must await game.booted.",
+    "The road mesh and colliders, the car model, the bot, the run rules and every mode are my own; the engine supplied only the world, camera, menus and boot.",
+    "The hardest part was the 3D side's size and the headless canvas, which needed a stub before the world would build under Node.",
+    "Changed in the engine: E1 pen frame (any orientation), E2 camera up vector, E4 analog triggers, E5 PlayStation glyphs by default, E6 exported toon bands, each for a reason in the plan.",
+    "I would add one call that builds a racing road with a loop, or a documented road-mesh helper, since that is what this game needed most."
+  ],
+  "promptFeedback": [
+    "The plan's detail on the car model, the controls and the validated physics appendix was the most useful part of the prompt.",
+    "The plan is sized for a far bigger build than one session; the title rule, where TASK.md wins, was clear.",
+    "The hardest thing was scope: a loop road and a split screen are each still bigger than this session.",
+    "I would add a smaller first milestone and a note on what to cut first when time runs short."
+  ],
+  "aiHub": {
+    "name": "CRACKMANIA",
+    "tagline": "Crack the clock.",
+    "description": "A desert time-attack racer: fifteen roads in three environments, medals, ghosts, a survival gauntlet, hot-seat cups, a track editor and puzzles, and AI Hub ghost races.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "TrackMania (2003)",
+    "series": "TrackMania",
+    "players": "1–4",
+    "controls": "R2/W gas, L2/S brake, left stick or arrows steer, Circle/Enter respawn, Triangle/R restart",
+    "tags": [
+      "3d",
+      "arcade",
+      "vehicles",
+      "retro",
+      "low-poly"
+    ]
+  }
+}

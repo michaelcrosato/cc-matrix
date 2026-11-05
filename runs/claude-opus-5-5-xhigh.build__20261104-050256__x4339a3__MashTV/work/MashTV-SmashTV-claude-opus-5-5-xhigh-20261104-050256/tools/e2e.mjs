@@ -1,0 +1,35 @@
+// node tools/e2e.mjs: TASK.md features driven through the real UI in Chromium, as a player would
+import { chromium, devices } from 'playwright';
+import { readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
+import { OUT } from './build.mjs';
+const file = new URL('../../' + OUT + '.html', import.meta.url).pathname, url = pathToFileURL(file).href;
+const html = readFileSync(file, 'utf8'), session = readFileSync(new URL('../vendor/hub/session.js', import.meta.url), 'utf8');
+const game = html.slice(html.lastIndexOf('<script>'));   // the game's own script (the engine's docs mention 'TODO'-free API words)
+const leftovers = (game.match(/\b(TODO|TBD|FIXME|placeholder|lorem ipsum|coming soon|not implemented|stub)\b/gi) || []);
+console.log('1. game script in the delivered HTML: TODO/placeholder/stub words =', leftovers.length);
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+const S = () => p.evaluate(() => MT.game.sceneName);
+await p.goto(url + '?e2e=1#room=1-1'); await p.waitForTimeout(2500);
+await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+const labels = await p.evaluate(() => [...document.querySelectorAll('.esh button')].filter(b => b.offsetParent).map(b => b.textContent));
+console.log('2. Escape opens the pause menu:', JSON.stringify(labels));
+await p.click('.esh button:has-text("Dev mode")'); await p.waitForTimeout(400);
+const before = await p.evaluate(() => ({ open: MT.dev.isOpen(), speed: MT.T.playerSpeed }));
+await p.keyboard.press('ArrowDown'); await p.waitForTimeout(150); await p.keyboard.press('ArrowRight'); await p.waitForTimeout(150); await p.keyboard.press('ArrowRight'); await p.waitForTimeout(200);
+const moved = await p.evaluate(() => ({ speed: MT.T.playerSpeed, badge: MT.devActive() }));
+await p.screenshot({ path: 'shots/e2e_dev.png' });
+await p.keyboard.press('KeyR'); await p.waitForTimeout(200);
+const reset = await p.evaluate(() => MT.T.playerSpeed);
+console.log('3. Dev mode from the pause menu:', JSON.stringify(before), '-> two presses of right:', JSON.stringify(moved), '-> R resets to', reset);
+await p.keyboard.press('Escape'); await p.waitForTimeout(300);
+console.log('   Esc closes it, play resumes:', JSON.stringify(await p.evaluate(() => ({ dev: MT.dev.isOpen(), paused: MT.game.paused, scene: MT.game.sceneName }))));
+await p.goto(url + '?e2e=2'); await p.waitForTimeout(11500);
+const att = await S(); await p.keyboard.press('KeyK'); await p.waitForTimeout(500);
+console.log('4. 10 s idle on the title ->', att, '; a key ->', await S());
+const ctx = await b.newContext({ ...devices['iPhone 13'] }); const t = await ctx.newPage(); await t.goto(url + '?e2e=3'); await t.waitForTimeout(2000);
+const btn = await t.evaluate(() => ({ only: MT.touchOnly(), btn: MT.game.scene.touchBtn, touchUI: !!document.querySelector('[data-sys="touch"] [data-act]') }));
+const box = await t.evaluate(() => { const c = document.getElementById('screen').getBoundingClientRect(), S = MT.game.screen, B = MT.game.scene.touchBtn; return { x: c.left + (B.x + B.w / 2) * c.width / S.W, y: c.top + (B.y + B.h / 2) * c.height / S.H }; });
+await t.tap('#screen', { position: { x: box.x, y: box.y } }); await t.waitForTimeout(500);
+console.log('5. Touch-only:', JSON.stringify(btn), '; tapping SETTINGS opens:', await t.evaluate(() => MT.game.shell && MT.game.shell.screen));
+await b.close();

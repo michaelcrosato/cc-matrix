@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:50:58",
+    "source": "Ice hockey (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports: 3-on-3 ice hockey with goalies, a fight minigame, a story campaign (the Cup Run), exhibition, practice drills and online versus",
+    "perspective": "2.5D TV broadcast camera (engine threequarter view, pitch 55) that tracks the puck; Overhead (topdown) option; brawler view for fights and replays",
+    "tech": "my-3D2dge v0.85.2 (handoff package, patched: font glyphs, Create+Options rule, voice/crowd audio buses, Dialog voice hook), plain JavaScript in one IIFE, AI Hub session client 1.4.0; tests with Node vm and Playwright 1.63.0 (Chromium)",
+    "artDirection": "Engine native PS1-era pixel art (res ps1, expanded), HD Humanoid rigs dressed as skaters, goalies, refs and set-piece people; hockey gear (sticks, skate blades, goalie pads, numbers) drawn by the game over the rigs; drawn-in-code team logos, rink, boards, glass, stands, crowds and lights",
+    "animation": "The engine's procedural Humanoid rig (run gait, E.MOVES jab/haymaker/bash/thrust, poses, flip, down) driven by the simulation state; new hockey motions are state mappings, no skeletal solvePose overrides",
+    "audio": "All music, effects and voices are synthesized in code: engine chip synth for effects and songs, Web Audio for the goal horn, organ stings, crowd bed and Animalese-style formant babble voices for every character; no audio files",
+    "online": "AI Hub Session Protocol v1, shared-world mode, 1-4 players: host-authoritative simulation, 15 Hz input and snapshot messages, client prediction for the own skater, game card; passes the harness in all 4 configurations",
+    "testing": "Headless scripts with game.advance and game.debug (unit, systems, input, attract, dev, drills, a scripted playthrough of the whole story), a balance simulation, the AI Hub harness in 4 configurations, and a few screenshots; no subagents",
+    "research": "Read the engine handoff (README, API card, sports kit, headers), the AI Hub protocol and the supplied PLAN.md; no web research on hockey (general knowledge)",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown (Chromium headless was used for checks)",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "Session time about 1 h 10 min (05:50 to about 07:00); API cost and token counts: unknown"
+  },
+  "testingFeedback": [
+    "About 10 real issues: AI checks could never fire (the AI set the cooldown the action code then read), goal records lost their shot type because Bus.emit overwrote a field named type, drill setup was undone by the faceoff reset, hub traffic stopped before the countdown ended, goalie and shot-height balance problems, missing glyphs in the pixel font, a stop-state flag the drill could not observe, a camera zoom far too close, and a tip box wider than its text.",
+    "3 were game breaking: no hits at all in AI play, drills starting in a faceoff, and the shared-world host sending nothing during the card (the harness failed host-leave).",
+    "The scripted playthrough of the whole story (all 5 chapters through cutscenes, matches, results and the credits) plus the AI Hub harness: they exercise every system end to end and caught the integration bugs.",
+    "Screenshots from the slow software-rendered headless browser: they show the look but game time barely advances, so they were weak for judging play. The 10-game balance averages were noisy too."
+  ],
+  "engineFeedback": [
+    "The fixed-step headless mode (game.advance, game.input.tap/hold, game.debug) that lets a whole game be tested with no browser, and the Humanoid rigs, TileMap floors, lights, particles, scenes, Dialog and standard pause/settings/controls that come for free.",
+    "Yes: the Dialog voice option only accepts an sfx name, Bus-style fields collide with my own event naming (my bug), r.w returns floats, the pixel font lacks arrows and check marks beyond a short list, and zoom 1 shows far less of a 70x44-tile rink than I first assumed.",
+    "The match simulation: the hockey rink geometry and collisions, skating, puck, goalie save solver, checks and glass, fights, BOOM/KABOOM, items, AI, replay and the AI Hub netcode, since the engine ships a 2v2 cage kit but no hockey.",
+    "Drawing hockey gear on a rig that has no stick, skates or pads (without wrapping solvePose) and keeping depth order of big custom board and glass panels in a ground view.",
+    "Four small changes: added the PlayStation symbols to the 5x7 font, ignored Options while Create is held (AI Hub rule), added audio.bus() with voice and crowd buses and volume fields, and let a Dialog voice be a function so each speaker can babble.",
+    "A documented way to add weapons, gear and extra joints to a Humanoid (a stick or pads) and a public audio graph API with filters on oscillator voices."
+  ],
+  "promptFeedback": [
+    "The detailed plan: every system, number, screen and test was specified, so it was possible to build to it without design dithering, and the TASK.md checklist was clear.",
+    "The plan and TASK.md differ in file names (the plan names another model and time), and the plan asks for far more than one session can finish at normal fidelity (a solvePose animation lab, organ waves, 6 teams of art, web harness) with no priority order beyond milestones.",
+    "Making every plan item real and playable: five story chapters with cutscenes, seven drills, online netcode, attract mode, dev mode and tests, in one sitting.",
+    "Mark which plan items are must-have for a demo and which are stretch, give a target size for the code, and say how to resolve conflicts between the plan and TASK.md before the build starts."
+  ],
+  "aiHub": {
+    "name": "Ice Hoc-Kaboom",
+    "tagline": "Over-the-top 3-on-3 arcade hockey",
+    "description": "Glass-shattering hits, dropped gloves and explosive KABOOM slapshots as the Mukluk Falls Muskrats fight to save their rink. Story, exhibition and up to four players.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Ice hockey",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD skate · ✕/J pass · □/K shoot · ○/L deke · △/I saucer & gloves · R2/Shift turbo",
+    "tags": ["arcade", "sports", "versus", "comedy", "pixel art", "story"]
+  }
+}

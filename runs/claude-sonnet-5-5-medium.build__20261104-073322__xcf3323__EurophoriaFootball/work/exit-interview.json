@@ -1,0 +1,58 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-04 07:33:22",
+  "source": "European football (an over-the-top arcade take on it: terraces, chants, flares, tifos, tactics, dives, VAR, tabloids, commentary clichés, cup magic)",
+  "plan": "PLAN.md (Europhoria Football, written by claude-opus-5-5 at max effort); where it and TASK.md disagree, TASK.md won (file and folder names use claude-sonnet-5-5-medium-20261104-073322)",
+  "genre": "Arcade sports: 5-a-side football with super strikes, slide tackles that send people flying, dives and VAR, a story-driven five-round Cup Run, 1 to 4 local players and online versus through AI Hub",
+  "perspective": "TV broadcast camera: side-on, raised 40 degrees (a custom engine View) scrolling with play; Classic (55) and Aerial (78) are options in Settings",
+  "tech": "my-3D2dge v0.85.2 (handoff package, full engine, with three small marked changes listed in engine/CHANGES-ENGINE.md); plain JavaScript in one IIFE, built by tools/build.mjs into one HTML file; AI Hub session.js 1.4.0 pasted unmodified; Playwright 1.63.0 and headless Chromium for checks; no other libraries, no network except the hub client",
+  "artDirection": "The engine's native HD pixel-art look at PS1 resolution: shaded volumetric Humanoid rigs in club kits (hoops, stripes, halves, sashes, shirt numbers), textured per-stadium pitches with weather and floodlights, code-drawn crests, stands full of fans, tabloid front pages, pixel-art PlayStation, Xbox, keyboard and mouse glyphs",
+  "animation": "The engine's Humanoid rig and E.MOVES (kick, sweep, bash, poses, flips) driven by each footballer's state, plus procedural slides, knockdowns, keeper dives and bicycle kicks (with a new whole-body tilt added to the engine rig), volleys, bicycle kicks, skill moves and goal celebrations; no motion-capture clips",
+  "audio": "No audio files. Sound effects, twelve original songs, a noise-bed crowd with team chants, and Animalese-style babble voices for Barry, Trev, Mags and the squad are all synthesised in code with the engine's synth and WebAudio",
+  "online": "AI Hub Session Protocol v1, shared-world, 2 to 4 players: the host's copy runs the match, the others send their intent and draw 15 Hz snapshots; passes the AI Hub harness at 2 and 4 players with latency and loss, host-leave and server scenarios",
+  "testing": "Headless Node tests of the simulation, scenes and a scripted whole-cup playthrough (game.advance, scripted intents) behind one command, node tools/test.mjs, which prints only failures and a count; the AI Hub harness through Playwright; screenshots only for what a script cannot check. No subagents or workflows used",
+  "research": "none beyond reading the supplied plan, the engine's API card, the sports kit and the AI Hub protocol README",
+  "environment": "Claude Code CLI (headless); Linux; browser unknown (checked in headless Chromium through Playwright)",
+  "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+  "usage": "unknown"
+ },
+ "testingFeedback": [
+  "About ten real issues: two set-piece soft-locks (a goalkeeper taking a goal kick never let go; a free-kick taker who was knocked over just before the whistle never shot because the AI's charge timer ran out while he lay down), a shootout that waited forever on an idle human taker, the match scene overwriting its own `view` property with the MatchView (an engine 'unknown view' warning on the second visit), a nested overlay in the results screen, and several wrong-looking visuals found by screenshots (over-zoomed camera, camouflage puddles, white net walls, overlapping notices).",
+  "Three would have been game-breaking: the goal-kick soft-lock, the knocked-down free-kick taker soft-lock and the idle shootout taker, because a match could never finish.",
+  "The AI-versus-AI soak: three whole matches simulated to full time at 120 steps a second in about three seconds each, which must end with a winner. It found both soft-locks at once, and the scripted whole-cup playthrough (a bot driving the human's footballer through every screen) then proved the flow from the prologue to the ending.",
+  "The half-keyboard mapping check and the 'content references' check: they passed first time and never failed again. The screenshots were not cheap either, but they were the only way to see that the camera, puddles and nets looked wrong."
+ ],
+ "engineFeedback": [
+  "The headless fixed-step game (new E.Game in Node, game.advance, game.input.tap) and the Humanoid rigs: a whole 5-a-side match, a cup and a hub round could be tested without a browser, and the characters already look like footballers once they have a kit. The standard pause, settings, controls, boot and full-screen features saved a great deal of work, and TileMap plus r.shape-style props gave a stadium quickly.",
+  "A few times. game.go() cross-fades, so a scene change is not in place after a short game.advance (my tests failed until I advanced past the fade). The scene object is also the game's own property bag: storing a MatchView in `scene.view` silently replaced the scene's view id. And E.Backdrop is invisible under a ground-view floor, so the skyline had to be queued as world geometry.",
+  "The football itself: ball physics with curl, posts, bar and net, possession, tackles, fouls, advantage, cards, VAR, set pieces, shootouts, the Save Duel and the team AI, and then the cup flow (tabloids, talks, the map, team talks) and the dev panel. The engine gives rigs, maps and menus, but no sports rules.",
+  "Lateral whole-body motion: the rig could only lie along its facing, roll forward or hop, so I added a tilt state to the engine myself. Working out which engine pieces are private (audio buses and the noise buffer) for the crowd engine was the other friction.",
+  "Three changes, all marked `// EF:` and recorded in engine/CHANGES-ENGINE.md: E.Dialog's `voice` may be a function (babble per speaker); E.Humanoid takes a `kit` option (hoops, stripes, halves, sash, shirt number); and E.Humanoid.update takes `tilt: { axis, angle, lift }`, a whole-body tilt about the hips so keeper dives, diving headers and bicycle kicks lean for real.",
+  "A `game.go(scene, data, { fade: 0 })` default for headless games so tests need not know about the fade, and a documented way to reach the audio context for custom crowd sound."
+ ],
+ "promptFeedback": [
+  "The plan was an unusually complete map: folder layout, module list, action table with keyboard halves, event names, tuning table and data shapes, so a medium-effort build never stalled on 'what should this be called'. TASK.md's insistence on a controller-first 10-foot UI, an attract mode, dev sliders and hub support gave the demo a clear definition of finished.",
+  "The plan names a dev folder and an HTML file after claude-opus-5-5-max and a different date, while TASK.md asks for sonnet-5-5-medium and today's stamp; it also says 'follow the plan' and 'TASK.md wins' without saying which parts of a 2,000-line plan are must-haves. A 45-60 minute demo with five clubs, nine drills, replays from turned angles, tifos and an album is also more than one medium-effort pass can deliver at full depth.",
+  "Scope: making every system real at once (rules, referee, VAR, Save Duel, shootouts, replay, co-op, online) and keeping all of them from soft-locking each other. Second hardest was making the crowd, commentary and menus feel like football on TV with nothing but code-drawn pixels and synthesised sound.",
+  "Mark the plan's features as must, should and could, and state once which names the build should use. Add a short list of 'definition of done' checks per system (the plan has this at the end; it would help earlier) and a note about the headless scene-change fade."
+ ],
+ "aiHub": {
+  "name": "Europhoria Football",
+  "tagline": "Fish out of water. Fans out of control.",
+  "description": "Over-the-top arcade football: a broke seaside club gets into Europe's biggest cup by a typo and rides its crowd's euphoria to the final. Slide tackles that launch people, super strikes, dives, VAR and two commentators who cannot stop punning.",
+  "type": "Game",
+  "genre": "Sports",
+  "source": "European football",
+  "series": "",
+  "players": "1–4",
+  "controls": "Stick/WASD move · ✕/J pass · □/K shoot (hold) · ○/L lob · R2/Shift sprint · R1/E skill · L1+R1/Space Europhoria",
+  "tags": [
+   "arcade",
+   "comedy",
+   "versus",
+   "co-op",
+   "story",
+   "pixel art"
+  ]
+ }
+}

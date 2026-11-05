@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { OUT } from './open.mjs';
+const browser = await chromium.launch({ headless: true, args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await browser.newPage();
+p.on('pageerror', e => console.log('PAGEERROR', e.message.slice(0, 300)));
+p.on('console', m => { if (m.type() === 'error') console.log('CONSOLE', m.text().slice(0, 300)); });
+await p.goto(pathToFileURL(path.join(OUT, 'hub-parent.html')).href, { waitUntil: 'load' });
+await p.waitForTimeout(25000);
+for (const f of p.frames()) console.log('frame', f.url().slice(-30), await f.evaluate(() => typeof window.__game).catch(e => 'ERR ' + e.message.slice(0, 100)));
+await browser.close();

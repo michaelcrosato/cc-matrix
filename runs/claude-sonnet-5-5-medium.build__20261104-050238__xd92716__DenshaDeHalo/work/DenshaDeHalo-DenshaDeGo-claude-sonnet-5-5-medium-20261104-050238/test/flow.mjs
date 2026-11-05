@@ -1,0 +1,16 @@
+import { chromium } from '../engine/node_modules/playwright/index.mjs';
+import { resolve } from 'node:path';
+const b = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader'] });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = []; p.on('pageerror', e => errs.push('PAGEERR ' + e.message)); p.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
+await p.goto('file://' + resolve(process.argv[2] || 'index.html')); await p.waitForTimeout(2000);
+const go = async (name, data, shot) => { await p.evaluate(([n, d]) => { const D = window.__dh.DH; let data = d ? eval('(' + d + ')') : undefined; window.__dh.game.go(n, data, { fade: 0 }); }, [name, data]); await p.waitForTimeout(1200); if (shot) await p.screenshot({ path: 'shots/' + shot + '.png' }); console.log(name, await p.evaluate(() => window.__dh.game.sceneName)); };
+const sumCode = `(()=>{ const D=window.__dh.DH; const run=new D.Run(D.stageById('S1'),{}); run.cal=true; for(let i=0;i<60*900&&!run.finished&&!run.failed;i++){D.autopilot(run);run.step(1/60,{horn:run.autoHorn});run.depSched=0;} return {sum:run.summary(), stage:D.stageById('S1'), career:true, run, why:'TEST', opts:{}}; })()`;
+await go('results', sumCode, 'results');
+await go('gameover', sumCode, 'gameover');
+await go('ending', undefined, 'ending');
+await go('log', undefined, 'log'); await go('help', '{}', 'help'); await go('about', undefined, 'about'); await go('freerun', undefined, 'freerun'); await go('halomap', undefined, 'halomap2');
+await go('attract', undefined, 'attract'); 
+await p.waitForTimeout(2500); await p.screenshot({ path: 'shots/attract2.png' });
+console.log(errs.slice(0, 10).join('\n') || 'no errors');
+await b.close();

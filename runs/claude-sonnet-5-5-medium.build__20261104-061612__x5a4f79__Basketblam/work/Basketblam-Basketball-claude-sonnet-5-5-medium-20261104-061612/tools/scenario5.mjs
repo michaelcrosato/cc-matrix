@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const file = process.argv[2];
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = []; page.on('pageerror', e => errs.push(String(e.stack || e).split('\n').slice(0, 2).join(' | ')));
+await page.goto(pathToFileURL(resolve(file)).href + '#howto'); await page.waitForTimeout(800);
+await page.evaluate(() => { window.__bb.game.input.lastDevice = 'gamepad'; }); await page.keyboard.press('ArrowRight'); await page.waitForTimeout(400);
+await page.evaluate(() => { window.__bb.game.input.lastDevice = 'gamepad'; }); await page.waitForTimeout(200);
+await page.screenshot({ path: 'check-output/glyph-ps.png' });
+await page.evaluate(() => { window.__bb.game.settings.set('glyphs', 'Xbox'); window.__bb.game.input.lastDevice = 'gamepad'; }); await page.waitForTimeout(300);
+await page.screenshot({ path: 'check-output/glyph-xbox.png' });
+console.log(errs.length ? 'ERRORS ' + errs.join(' || ') : 'no errors');
+await browser.close();

@@ -1,0 +1,93 @@
+/* ---- SKILLS AND SPELLS (§6.7) ----
+ * kind: special | spell | passive. elem: 'user' (the user's element), 'none', a season or 'hour', or absent (support).
+ * p: physical power (×ATK) or, with magic, flat spell power. range [min, max]; area: single r1 r2 self-r1 self-r2 adj cone2
+ * cone3 line3 line4 troop ward. who: foes allies all ownMon. mobile: usable after moving. needMove: hexes moved first. */
+const SK = (id, name, kind, o) => G.def('skill', id, Object.assign({ name, kind, range: [1, 1], area: 'single', who: 'foes', mp: 0 }, o));
+const SELF = [0, 0];
+SK('rally', 'Rally', 'special', { range: SELF, area: 'self-r1', who: 'allies', mp: 4, mobile: true, buff: ['valor', 2], anim: 'cheer', desc: 'Allies around you gain Valor.' });
+SK('charge', 'Charge', 'special', { elem: 'user', p: 1.3, mp: 5, mobile: true, needMove: 2, anim: 'thrust', desc: 'Move 2+ hexes, then strike hard.' });
+SK('shieldwall', 'Shield Wall', 'special', { range: SELF, area: 'adj', who: 'allies', mp: 6, mobile: true, buff: ['warded', 1], anim: 'block', desc: 'Adjacent allies are Warded.' });
+SK('holystrike', 'Holy Strike', 'special', { elem: 'none', p: 1.5, mp: 8, mobile: true, antiHour: 1.5, anim: 'overhead', desc: 'Ignores element; ×1.5 vs Hour.' });
+SK('layonhands', 'Lay on Hands', 'special', { heal: 60, who: 'allies', mp: 10, mobile: true, anim: 'cast', desc: 'Heal one adjacent ally.' });
+SK('aimedshot', 'Aimed Shot', 'special', { elem: 'user', p: 1.2, range: [2, 4], mp: 4, hitBonus: 20, bow: true, desc: 'A careful shot: +20 hit.' });
+SK('volley', 'Volley', 'special', { elem: 'user', p: .8, range: [3, 5], area: 'r1', mp: 8, bow: true, desc: 'Arrows rain on an area.' });
+SK('pinning', 'Pinning Shot', 'special', { elem: 'user', p: .9, range: [2, 4], mp: 6, mobile: true, status: ['chill', 70], bow: true, desc: 'A shot that Chills.' });
+SK('piercing', 'Piercing Arrow', 'special', { elem: 'user', p: 1.1, range: SELF, area: 'line4', mp: 10, always: true, bow: true, desc: 'Every unit on a line.' });
+SK('eagleeye', 'Eagle Eye', 'passive', { desc: 'Bows reach 1 hex further.' });
+// the five element families: Bolt, Hex, Storm, Tempest
+const BOLT = { spring: 'bramble', summer: 'cinder', autumn: 'galeleaves', winter: 'hoarfrost', hour: 'timeshear' };
+const HEX = { spring: 'drowse', summer: 'kindle', autumn: 'rot', winter: 'frostbite', hour: 'stophex' };
+const STORM = { spring: 'bramblestorm', summer: 'cinderstorm', autumn: 'leafstorm', winter: 'froststorm', hour: 'hourstorm' };
+const TEMPEST = { spring: 'verdanttempest', summer: 'solarflare', autumn: 'harvestmoon', winter: 'blizzard', hour: 'hourstorm' };
+G.SPELL_FAMILY = { Bolt: BOLT, Hex: HEX, Storm: STORM, Tempest: TEMPEST };
+[['bramble', 'Bramble', 'spring'], ['cinder', 'Cinder', 'summer'], ['galeleaves', 'Gale of Leaves', 'autumn'], ['hoarfrost', 'Hoarfrost', 'winter'], ['timeshear', 'Time Shear', 'hour']].forEach(([id, n, el]) =>
+  SK(id, n, 'spell', { elem: el, magic: true, p: 14, range: [1, 4], mp: 5, ignoreTide: el === 'hour', desc: 'A bolt of ' + G.SEASON_NAME[el] + '.' }));
+[['drowse', 'Drowse', 'spring', 'sleep', 60], ['kindle', 'Kindle', 'summer', 'burn', 70], ['rot', 'Rot', 'autumn', 'poison', 70], ['frostbite', 'Frostbite', 'winter', 'chill', 70], ['stophex', 'Stop', 'hour', 'stop', 40]].forEach(([id, n, el, st, ch]) =>
+  SK(id, n, 'spell', { elem: el, magic: true, range: [1, 4], mp: 6, status: [st, ch], desc: G.get('effect', st).name + ' ' + ch + '%.' }));
+[['bramblestorm', 'Bramble Storm', 'spring'], ['cinderstorm', 'Cinder Storm', 'summer'], ['leafstorm', 'Leaf Storm', 'autumn'], ['froststorm', 'Frost Storm', 'winter'], ['hourstorm', 'Hour Storm', 'hour']].forEach(([id, n, el]) =>
+  SK(id, n, 'spell', { elem: el, magic: true, p: 22, range: [1, 4], area: 'r1', who: 'all', mp: 10, burns: el === 'summer', desc: 'A storm over 7 hexes. Hits friends too.' }));
+SK('verdanttempest', 'Verdant Tempest', 'spell', { elem: 'spring', magic: true, p: 34, range: [1, 5], area: 'r2', who: 'all', mp: 16, status: ['sleep', 20], desc: 'A great spring storm.' });
+SK('solarflare', 'Solar Flare', 'spell', { elem: 'summer', magic: true, p: 34, range: [1, 5], area: 'r2', who: 'all', mp: 16, status: ['burn', 30], burns: true, desc: 'The sun falls on 19 hexes.' });
+SK('harvestmoon', 'Harvest Moon', 'spell', { elem: 'autumn', magic: true, p: 34, range: [1, 5], area: 'r2', who: 'all', mp: 16, drain: .25, desc: 'Drains a quarter of the harm.' });
+SK('blizzard', 'Blizzard', 'spell', { elem: 'winter', magic: true, p: 34, range: [1, 5], area: 'r2', who: 'all', mp: 16, status: ['chill', 30], desc: 'A howling winter storm.' });
+SK('manasiphon', 'Mana Siphon', 'spell', { range: [1, 4], mp: 2, steal: 12, desc: 'Steal 12 MP.' });
+SK('haste', 'Haste', 'spell', { range: [0, 3], who: 'allies', mp: 8, buff: ['haste', 2], desc: 'An ally moves faster.' });
+SK('mend', 'Mend', 'spell', { heal: 30, range: [0, 3], who: 'allies', mp: 5, desc: 'Heal an ally.' });
+SK('purify', 'Purify', 'spell', { range: [0, 3], who: 'allies', mp: 4, cleanse: true, desc: 'Clear statuses and debuffs.' });
+SK('renewal', 'Renewal', 'spell', { heal: 24, range: [0, 3], area: 'r1', who: 'allies', mp: 10, desc: 'Heal allies in an area.' });
+SK('wardofseasons', 'Ward of Seasons', 'spell', { range: [0, 3], area: 'r1', who: 'allies', mp: 9, buff: ['warded', 2], desc: 'Allies in an area are Warded.' });
+SK('greaterrenewal', 'Greater Renewal', 'spell', { heal: 36, range: [0, 4], area: 'r2', who: 'allies', mp: 16, desc: 'Heal allies in a wide area.' });
+SK('dawnlight', 'Dawnlight', 'spell', { elem: 'none', magic: true, p: 26, range: [1, 4], area: 'r1', mp: 14, antiHour: 1.5, ignoreTide: true, desc: 'Holy light; ×1.5 vs Hour.' });
+SK('goad', 'Goad', 'special', { range: [1, 2], who: 'ownMon', mp: 3, mobile: true, buff: ['valor', 1], buff2: ['haste', 1], anim: 'wave', desc: 'A monster gains Valor and Haste.' });
+SK('packtactics', 'Pack Tactics', 'passive', { desc: 'Your monsters +10 hit.' });
+SK('roar', 'Roar', 'special', { range: SELF, area: 'self-r2', mp: 6, mobile: true, status: ['weakened', 60], anim: 'roar', desc: 'Foes nearby may be Weakened.' });
+SK('callofwild', 'Call of the Wild', 'special', { range: SELF, area: 'troop', who: 'ownMon', healPct: .2, mp: 12, mobile: true, desc: 'Heal your monsters 20%.' });
+SK('bondoffang', 'Bond of Fang', 'special', { range: [1, 4], area: 'single', who: 'ownMon', mp: 10, mobile: true, buff: ['valor', 2], buff2: ['warded', 2], buff3: ['haste', 2], inWard: true, desc: 'One monster: Valor, Warded, Haste.' });
+SK('verdantoath', 'Verdant Oath', 'special', { elem: 'spring', range: SELF, area: 'ward', who: 'allies', healPct: .1, buff: ['warded', 2], mp: 10, mobile: true, desc: 'Allies in your Ward heal and are Warded.' });
+SK('warcry', 'Warcry', 'special', { elem: 'summer', range: SELF, area: 'ward', who: 'allies', buff: ['valor', 2], mp: 8, mobile: true, desc: 'Allies in your Ward gain Valor.' });
+SK('quietcounsel', 'Quiet Counsel', 'special', { elem: 'autumn', range: SELF, area: 'ward', who: 'allies', buff: ['haste', 1], mp: 10, mobile: true, desc: 'Allies in your Ward gain Haste.' });
+SK('reaping', 'Reaping', 'spell', { elem: 'autumn', magic: true, p: 20, range: [1, 3], mp: 8, drain: .5, desc: 'Heals you half the harm.' });
+SK('madgambit', 'Mad Gambit', 'special', { elem: 'winter', magic: true, p: 30, range: [1, 3], mp: 6, mobile: true, misfire: .25, desc: '25%: it misfires and Chills you.' });
+SK('frozenhour', 'Frozen Hour', 'spell', { elem: 'winter', range: [1, 4], mp: 12, status: ['stop', 70], desc: 'Stop 70%.' });
+SK('restore', 'Restore', 'spell', { elem: 'hour', healPct: .5, range: [0, 3], who: 'allies', mp: 14, desc: 'Heal half of max HP.' });
+SK('turning', 'Turning', 'special', { elem: 'none', magic: true, p: 40, range: [1, 3], area: 'r1', mp: 0, mobile: true, once: true, antiHour: 2, breaksTimeless: true, ignoreTide: true, desc: 'Once a battle; ×2 vs Hour; breaks Timeless.' });
+SK('ambush', 'Ambush', 'passive', { desc: '+30% damage from a forest hex.' });
+SK('thirteenthstroke', 'Thirteenth Stroke', 'special', { elem: 'hour', p: 1.6, range: SELF, area: 'adj', mp: 0, mobile: true, ignoreTide: true, anim: 'spin', desc: 'Strikes every foe around him.' });
+SK('still', 'Still', 'special', { elem: 'hour', range: SELF, area: 'self-r2', mp: 0, mobile: true, status: ['stop', 70], every: 3, anim: 'cast', desc: 'Stop every foe within 2.' });
+SK('unmaking', 'Unmaking', 'spell', { elem: 'hour', range: [1, 3], mp: 20, pctMax: .25, desc: 'Takes a quarter of max HP.' });
+SK('timeless', 'Timeless', 'passive', { desc: 'Immune to effects; half damage until the Wheel turns.' });
+SK('pollenpuff', 'Pollen Puff', 'special', { elem: 'spring', range: SELF, area: 'self-r1', mp: 6, mobile: true, status: ['sleep', 50], desc: 'Sleep 50% around.' });
+SK('entangle', 'Entangle', 'special', { elem: 'spring', p: .6, range: [1, 2], mp: 5, status: ['chill', 70], desc: 'Roots that Chill.' });
+SK('scream', 'Mandrake Scream', 'special', { elem: 'spring', range: SELF, area: 'self-r2', mp: 10, status: ['sleep', 50], desc: 'Sleep 50% within 2.' });
+SK('sleepdust', 'Sleep Dust', 'spell', { elem: 'spring', range: [1, 3], area: 'r1', mp: 8, status: ['sleep', 60], desc: 'Sleep 60% in an area.' });
+SK('thorns', 'Thorns', 'passive', { desc: 'Melee attackers take 10% back.' });
+SK('rootsweep', 'Root Sweep', 'special', { elem: 'spring', p: .9, range: SELF, area: 'adj', mp: 6, mobile: true, desc: 'Strikes every foe around.' });
+SK('dive', 'Dive', 'special', { elem: 'user', p: 1.2, mp: 4, mobile: true, needMove: 2, anim: 'dive', desc: 'Fliers: move 2+, then swoop.' });
+SK('torrent', 'Torrent', 'special', { elem: 'spring', p: 1, range: SELF, area: 'line3', mp: 6, always: true, anim: 'breath', desc: 'Water along a line.' });
+SK('coil', 'Coil', 'special', { elem: 'user', p: .8, mp: 4, mobile: true, status: ['chill', 60], anim: 'coil', desc: 'Squeeze: Chill 60%.' });
+SK('emberspit', 'Ember Spit', 'special', { elem: 'summer', p: .9, range: [1, 2], mp: 3, mobile: true, status: ['burn', 30], anim: 'breath', desc: 'Burn 30%.' });
+SK('firebreath', 'Fire Breath', 'special', { elem: 'summer', p: 1.2, range: SELF, area: 'cone2', mp: 8, always: true, status: ['burn', 25], anim: 'breath', desc: 'Fire in a cone.' });
+SK('howl', 'Howl', 'special', { range: SELF, area: 'self-r2', who: 'allies', mp: 5, mobile: true, buff: ['valor', 1], anim: 'roar', desc: 'Allies nearby gain Valor.' });
+SK('pounce', 'Pounce', 'special', { elem: 'user', p: 1.2, mp: 5, mobile: true, anim: 'pounce', desc: 'A leaping strike.' });
+SK('rebirth', 'Rebirth', 'passive', { desc: 'Once a battle, rises at 30% HP.' });
+SK('sunriddle', 'Sun Riddle', 'special', { elem: 'summer', range: SELF, area: 'self-r1', mp: 8, status: ['sleep', 50], desc: 'Sleep 50% around.' });
+SK('wispfire', 'Wisp Fire', 'special', { elem: 'autumn', magic: true, p: 9, range: [1, 3], mp: 4, mobile: true, desc: 'A wisp of autumn flame.' });
+SK('fear', 'Fear', 'special', { elem: 'autumn', range: SELF, area: 'self-r1', mp: 5, mobile: true, status: ['weakened', 60], desc: 'Weakened 60% around.' });
+SK('drain', 'Drain', 'special', { elem: 'user', p: 1, mp: 4, mobile: true, drain: .5, desc: 'Heals half the harm.' });
+SK('gravechill', 'Grave Chill', 'special', { elem: 'winter', range: SELF, area: 'self-r1', mp: 7, status: ['chill', 40], desc: 'Chill 40% around.' });
+SK('gale', 'Gale', 'special', { elem: 'autumn', p: .7, mp: 5, mobile: true, push: true, desc: 'Pushes the foe a hex.' });
+SK('trample', 'Trample', 'special', { elem: 'user', p: 1, range: SELF, area: 'line3', mp: 6, mobile: true, always: true, anim: 'gore', desc: 'Tramples a line.' });
+SK('thickhide', 'Thick Hide', 'passive', { desc: 'DEF +10%.' });
+SK('frostarmor', 'Frost Armor', 'special', { elem: 'winter', range: SELF, area: 'single', who: 'allies', mp: 5, mobile: true, buff: ['frostarmor', 2], desc: 'DEF +40% for 2 bells.' });
+SK('avalanche', 'Avalanche', 'special', { elem: 'winter', p: 1, range: [1, 2], area: 'r1', who: 'all', mp: 9, always: true, desc: 'Snow crashes on an area.' });
+SK('hurlice', 'Hurl Ice', 'special', { elem: 'winter', p: 1, range: [2, 3], mp: 5, anim: 'throw', desc: 'A thrown block of ice.' });
+SK('frostfang', 'Frost Fang', 'passive', { desc: 'Bites Chill 30%.' });
+SK('frostbreath', 'Frost Breath', 'special', { elem: 'winter', p: 1.2, range: SELF, area: 'cone3', mp: 8, always: true, status: ['chill', 40], anim: 'breath', desc: 'Ice in a wide cone.' });
+SK('tailsweep', 'Tail Sweep', 'special', { elem: 'user', p: .9, range: SELF, area: 'adj', mp: 6, mobile: true, anim: 'tailsweep', desc: 'Sweeps every foe around.' });
+SK('windup', 'Wind-up', 'special', { range: SELF, area: 'single', who: 'allies', mp: 3, mobile: true, buff: ['windup', 2], desc: 'Next attack ×1.5.' });
+SK('pendulum', 'Pendulum', 'special', { elem: 'hour', p: 1.1, range: SELF, area: 'adj', mp: 6, mobile: true, desc: 'Swings at every foe around.' });
+SK('stopbite', 'Stopping Bite', 'passive', { desc: 'Bites Stop 20%.' });
+SK('engulf', 'Engulf', 'special', { elem: 'user', p: .9, mp: 4, mobile: true, status: ['poison', 40], desc: 'Poison 40%.' });
+SK('regenerate', 'Regenerate', 'passive', { desc: 'Heals 10% each turn.' });
+SK('groundpound', 'Ground Pound', 'special', { elem: 'user', p: 1, range: SELF, area: 'adj', mp: 7, mobile: true, anim: 'stomp', desc: 'Pounds every foe around.' });
+SK('screech', 'Screech', 'special', { range: SELF, area: 'self-r1', mp: 5, mobile: true, status: ['weakened', 60], desc: 'Weakened 60% around.' });

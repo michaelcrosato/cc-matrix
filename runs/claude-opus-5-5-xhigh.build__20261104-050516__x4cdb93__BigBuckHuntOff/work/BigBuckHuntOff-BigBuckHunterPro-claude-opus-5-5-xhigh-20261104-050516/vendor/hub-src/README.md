@@ -1,0 +1,874 @@
+# AI Hub
+
+An arcade wall for games built by AI models. Games can be single HTML pages
+or project folders with their own code and assets; the hub finds them, dresses
+them, and gets out of the way. Shared engines live in `lib/`.
+
+**Live:** <https://crosato-arcade.vercel.app> — public, no sign-in. This repo
+stays private; only the built site is reachable.
+
+---
+
+## Adding a game
+
+Put the `.html` file in `games/`. That is the whole procedure.
+
+```
+games/Whatever_You_Called_It.html
+```
+
+Reload the wall on `pnpm dev` and it is there; the public site gets it with
+the next deploy. No code to touch, no list to edit, no naming rules to
+remember — mixed case, spaces, underscores and hyphens are all
+fine.
+
+```bash
+git add games/ && git commit -m "Add Whatever You Called It" && git push
+```
+
+### Where the game's details come from
+
+Nothing is typed in by hand. On every build, `scripts/scan.mjs` reads just the
+`<head>` of each file for catalogue metadata (the audio inventory also reads source text and asset paths):
+
+| From the game | Becomes |
+|---|---|
+| `<title>Undertow — Seven Guardians Below</title>` | Name **Undertow**, tagline **Seven Guardians Below** |
+| `<meta name="description">` | The blurb in the drawer |
+| `<meta name="theme-color">` | That cabinet's marquee colour and the light it throws |
+| `<link rel="icon" href="data:…">` | The emblem on its screen (a relative path works in a project folder) |
+| `<meta property="og:image">` | Its cover art, in a project folder that ships the image |
+| file size, the date first added to the hub | The File size rail, the Newest sort |
+
+A game with none of these still works — it gets its filename as a name and a
+colour derived from its slug.
+
+### Names on the wall
+
+No two entries show the same name. When names collide (case and accents
+ignored), the oldest entry, the first added to the hub, keeps the plain name
+and later ones are numbered in the order they were added: **Ashbound**,
+**Ashbound (2)**, **Ashbound (3)**. The scan does it on every build, so a
+duplicate needs no manual work, and nothing in the game file or the catalogue
+changes. Search still finds each by its plain name, and attempts at one
+original still stack under it. `pnpm test` fails if two entries ever show the
+same name. See [the 28 Oct curation](docs/curation-2026-10-28.md).
+
+### Several builds of one game
+
+Two ways, whichever suits the moment:
+
+```
+games/Void-Explorer-v0.4.html      ← same folder, version in the name
+games/Void-Explorer-v0.5.html         v0.5 becomes current, v0.4 moves to history
+
+games/void-explorer/v0.4.html      ← or a folder per game, files named as versions
+games/void-explorer/v0.5.html
+```
+
+One tile either way, showing the newest build, with the older ones a click away
+in its drawer.
+
+A version is only recognised when it is unmistakable: `-v2`, `-v0.4`, `-1.2`.
+A bare trailing number is left alone, so `snake-2.html` stays its own game
+rather than quietly becoming build 2 of `snake`. Hiding a game by accident is
+worse than showing one tile too many.
+
+### The library's naming convention
+
+Any name works, but the library names its files by source, so `games/` sorts
+into families:
+
+```
+games/Out-Run-SUPER-RUNOUT-The-coast-is-calling-2026-09-11-model-unknown.html
+      source  title                             made       model
+```
+
+The source is the classic a game riffs on, or `original` when there is none;
+`model-unknown` is used until the model is known (`GPT-6-Astra-Pro`). A
+filename cannot say where the source ends and the title begins (`Out-Run` or
+`Out-Run-SUPER`?), so the wall's Original and Inspired split reads the catalogue's `source`
+field instead (see *Extra metadata*), and the filename only sorts the folder.
+
+The scan reads the pattern. The date and model say when and by what a file was
+made, not which game it is, so they stay out of the slug
+(`out-run-super-runout-the-coast-is-calling`), and the date becomes the day the
+game joined the wall. A later file with the same source and title —
+`…-2026-10-02-model-unknown.html` — is a newer build of that game: one tile,
+the newest in front, the older file in its drawer. To keep only the newest,
+delete the older file.
+
+The [2026-10-19 root HTML intake](docs/imports/2026-10-19-root-html-intake.json)
+uses `GameTitle-SOURCE-model-effort-YYYYMMDD-HHMM.html` for new entries. The
+title, inspiration, model and effort are also recorded in `data/overrides.json`,
+so the filename is not used as the display title. Explicit source dates and
+times take precedence; missing times use a documented file-modification or
+export-time fallback in the audit. Arrival dates still record the actual
+import time. Gemini defaults to Gemini 4 Argon and Muse to Muse Wonder 1 unless
+the package states otherwise; missing details remain unknown. Exact duplicates
+keep their existing URLs, and differing packages with uncertain revision
+lineage are kept as separate entries, numbered apart on the wall (see *Names
+on the wall*). These names do not use
+the older source-first filename grouping rule above.
+
+### Folders: collections and projects
+
+A folder under `games/` is one of three things, decided by what is in it:
+
+```
+games/claude/snake.html            a folder of games is a COLLECTION: every file
+games/claude/tetris.html           is its own tile, and a Collection rail appears
+
+games/orbit/index.html             a folder with an index.html is a PROJECT:
+games/orbit/game.js                one game whose page loads its own files.
+games/orbit/sprites/hero.png       Nothing else inside it becomes a tile.
+
+games/void-explorer/v0.5.html      files named only as versions are BUILDS
+                                   of the game the folder names (above)
+```
+
+Collections nest projects too (`games/claude/orbit/index.html`), and a project
+can be versioned by its folder name (`games/orbit-v2/index.html`). Only the
+top-level folder names the collection. A project can point at its own favicon
+and `og:image` with relative paths, and the wall uses them.
+
+## Importing a lot at once
+
+For a big pile — loose `.html` files, project folders, `.zip` packages, any mix
+of them in any folder layout — use `pnpm ingest` instead of copying by hand:
+
+```bash
+pnpm ingest ~/exports --dry-run          # see the plan; nothing is written
+pnpm ingest ~/exports                    # everything lands flat in games/
+pnpm ingest ~/exports --keep-folders     # its top-level folders become collections
+pnpm ingest ~/opus-games --into claude   # all of it into games/claude/
+```
+
+For versioned provenance, full dependency fingerprints, and machine-readable plans,
+see [Import registry and structured plans](docs/import-registry.md).
+
+
+What it does, so you do not have to:
+
+- **Dates.** `data/added.json` records when each entry joined the hub, so
+  *Newest first* shows the latest imports. Original source timestamps are
+  preserved separately in `data/source-dates.json` and the import registry;
+  importing an older game today does not bury it behind earlier imports.
+- **Duplicates.** A page byte-identical to one already on the wall is skipped
+  and reported. Running the same import twice changes nothing.
+- **Clashes.** Nothing is ever overwritten. A second `snake.html` becomes
+  `snake-<its folder>.html`. Names that differ only in case count as a clash,
+  because they would collide on a Windows or macOS checkout.
+- **Zips.** A package holding a finished game — a plain `index.html`, or a
+  `dist/`/`build/` folder next to its source — is unpacked into a project
+  folder. A zip of several single-file games becomes a collection. A package
+  that is only source (a `package.json`, an `index.html` pointing at
+  `/src/main.ts`) is reported as needing a build, not half-imported.
+- **Root paths.** Bundlers write `src="/assets/index-3f2a.js"`, which inside the
+  hub would point at the hub, not the game. Unpacked pages get those rewritten
+  to relative paths. Anything it cannot fix (a bundle that builds URLs at
+  runtime) is listed so you know which to rebuild with a relative base.
+- **Secrets and clutter.** `.env` files, private keys and other credentials
+  (`.aws/`, `.ssh/`, `.vercel/`, `.git-credentials`, `.netrc`,
+  `credentials.json`…), `.git`, `node_modules` and `__MACOSX` are never copied
+  into `games/`, which is public, and a symbolic link is never followed. The
+  report names what was left out, so a live key that came along can be rotated.
+- **Source.** Opaque archives stay at their original input location. The importer
+  does not copy them into the repository or deployment. Keep your originals;
+  a successful runtime import is not a backup of source files or private data.
+
+Afterwards it rescans and lists titles shared by more than one tile — often
+the same game saved under different filenames. Those are never merged for you;
+move them into one folder as `v1.html`, `v2.html` if they are builds of one game.
+
+Before publishing a library import, check its genre, shelf (`Game`, `Tech demo`
+or `Tool`), and any claimed source inspiration against the actual runtime.
+Capture and inspect a real screenshot strip at `covers/<slug>/0.jpg`, `1.jpg`
+and `2.jpg`: a title or initial view, followed by two useful game or tool views.
+Use the shared 640×480 JPEG quality 58 format. Loading, blank and error screens
+do not count as screenshots; keep uncertain model details unset.
+
+Two runs that differ in their bytes are two entries, even when they share a
+name: the wall numbers them apart (*Names on the wall*), so they need no
+review. Only when it is unclear whether an import is a game at all, or which
+game it is, set `"unsure": true` and a `reviewNote` in its
+`data/overrides.json` entry. It appears on the **Unsure** shelf on the wall and
+in the Couch, with its own screenshots and URL for comparison. Its genre and
+type stay intact. Remove `unsure` once the identity is resolved; the shelf
+hides when it is empty.
+
+**Local engine dependencies.** The importer also recognizes Three.js and
+Rapier references from jsDelivr, unpkg, esm.sh, Skypack and JSPM, and rewrites
+them to the exact version on the local library shelf. It handles both inline
+HTML and separate JavaScript modules, adds the import maps needed by addons,
+and leaves embedded engines and supplied local mappings alone. Unmapped bare
+`three` and `@dimforge/rapier…` imports use the game's detected version, or the
+latest version on the shelf when none is specified.
+Unsupported versions or missing package files are reported and their references
+are preserved. Games copied by hand must supply their own correct import map;
+use `pnpm ingest` to apply the localization automatically.
+
+The shelf includes all 13 Three.js releases from `0.180.0` through `0.186.1`
+and all 12 official Rapier variants at `0.19.3`, `0.20.0` and `0.21.0`: 2D/3D,
+standard/SIMD/deterministic, each with ordinary and compatibility packages.
+See `lib/vendor/README.md` for paths, import maps and verification commands.
+
+**Size.** GitHub refuses any single file over 100 MB and warns above 50 MB;
+the scan flags both. Inputs or expanded packages over 95 MiB are reported and skipped. For the whole wall,
+a library of ~400 games at ~2.5 MB each (~900 MB) packs to roughly 500 MB in
+git, under GitHub's 1 GB recommendation and 2 GB push limit. Deploy it from
+the repo: Vercel builds from GitHub with room to spare, whereas `vercel
+deploy` from the folder is capped at 100 MB of uploads on the Hobby plan.
+Pushes don't deploy, to keep Vercel's usage down (`"git": {
+"deploymentEnabled": false }` in `vercel.json`): to deploy, push with it set
+to `true`, then set it back to `false` in the next commit.
+Replaced builds stay in git history, so the repo grows with every update.
+
+## Running it locally
+
+```bash
+pnpm dev          # http://localhost:7417
+```
+
+There is no build step and no `node_modules` — `pnpm install` has nothing to
+install. The dev server re-scans `games/` on every refresh, so dropping a file
+in and hitting reload is the whole loop. (It remembers each file's parsed head
+until the file changes, so that stays instant at four hundred games.)
+
+```bash
+pnpm test         # parsers, layout rules, zip reading, search and filters, Couch and Catalogue logic
+pnpm scan         # rebuild data/games.json by hand; --list prints every game
+pnpm dev --host 0.0.0.0   # reach it from your phone on the same wifi
+```
+
+The scan's output is worth a glance after a big import. Past forty games it
+prints a summary instead of every title, followed by anything that needs you:
+files too large for GitHub, projects that still load files from the site root,
+project folders whose extra pages might really be separate games.
+
+## Playing
+
+Clicking a cabinet runs the game **inside** the hub, so leaving it puts you back
+on the wall with your scroll position, search and filters exactly as you left
+them. Nothing is written into a game file to make that work — the hub only
+attaches listeners to the game's document, which it is allowed to do because
+the games are served from the same origin.
+
+The bar in the corner has three buttons: **←** back to the wall, **🎲** roll
+another random game from what the wall was showing, and **✕**. A tap of ✕
+folds the bar down to just the ✕ (tap again to bring it back); holding it
+removes the bar entirely until the hub is reloaded. The browser's Back button
+always works too. The hub claims no keys while a game runs, so every key
+belongs to the game.
+
+If a game misbehaves in a frame, *Open on its own page* in its Details drawer
+runs it in a plain tab.
+
+Under the sign, the big buttons. **Games** (the default) has a row to itself.
+Under it, five across: **All**, **Original** and **Inspired** (every game is
+one or the other: an original has no `source`, an inspired one riffs on a
+classic; from the other shelf they go back to Games), **Tech demos & tools**
+(demos, tools and websites, the other shelf),
+and **Surprise me**, which plays a random game from whatever the search and
+filters are showing. The shelf comes from each game's `type` in
+`data/overrides.json`; anything not catalogued counts as a game. The search
+box sits in the sign's top corner.
+
+Under those, a sticky toolbar of five dropdowns: **Genre**, **Players**,
+**Filters**, **Sort** and **View**. Filters holds every other filter (Model,
+Tags, File size, and whatever field the games carry next); it opens downwards
+and each filter's values fly out to the right (in place on a phone). Choices
+apply as you tap and a menu stays open, so you can tick several: several in
+one filter widen the wall (Racing or Flight), different filters narrow it.
+Players is *Single player* or *Multiplayer*, and Multiplayer opens head counts
+(*4 players* finds every game that seats four). Whatever is filtering the wall
+shows under the toolbar as chips with a ×, plus *Clear all*. Nothing shows a
+count: an option that would empty the wall is greyed out instead. The filters
+are worked out per shelf, and their order lives in `ORDER` in
+`assets/js/manifest.js`.
+
+### Sources and stacks
+
+Many games are attempts at the same classic: nine at Dragon Quest, seven at
+Final Fantasy Tactics. **View** decides how the wall stacks, remembered per
+device. *Stack by source* is the default: each series is one stacked cabinet,
+and originals that share a name (six Stratas) stack together. Open a series and
+each game in it is a stack. Open one of those and every attempt is laid out. A
+series with only one game skips the middle step, and a stack of one is just the
+game. Each step is a link, so Back climbs out again. The trail at the top of the
+wall shows where you are, and each game's drawer links to *All N attempts* at
+the same game.
+
+View can instead stack by **Genre**, **Players** or **Model** (pressing such a
+stack filters the wall to it; games with no value for it follow the stacks),
+or not at all. View also sets the size: *One per row* (the default: a wide
+cabinet with its whole blurb beside the screen) or *Three per row*. A phone
+shows one per row either way.
+
+## Six ways into the library
+
+The wall is one way into the library. The switch in the corner of every view
+(**Wall · Couch · Catalogue · Atlas · Timeline · Deck**) leads to five more, built over the same games
+and the same memory of this device: a game starred in one is starred in all,
+and a game played anywhere counts everywhere. An open game travels with you
+when you switch, and so does a search, as far as it is plain words. Hidden
+games stay hidden in all six.
+
+### The Couch — `/couch`
+
+The hub as a console's home screen, for a TV and a controller. One game at a
+time fills the screen: its stills cross-fade behind everything, tinted with
+its own colours, and its name, blurb, facts and keys sit over them. Under it
+run the rails: *Jump back in*, *Your favourites*, *Fresh on the wall*, one per
+genre, one for each series with three or more games (*Inspired by Final
+Fantasy*) and each model that made three or more, *Originals*, *Play together*
+and *Tech demos & tools*. Until you touch anything, the hero is *Today's
+spotlight*, a pick that changes with the date.
+
+| | Keyboard | Controller |
+|---|---|---|
+| Move | arrows; Home/End, PageUp/PageDown | D-pad or left stick |
+| Play | Enter | A |
+| More info | I | Y |
+| Favourite | F | X |
+| Back | Esc or Backspace | B |
+| Previous / next rail | ↑ / ↓ | LB / RB |
+| Search | / or S | View |
+| Surprise me | R | Menu |
+
+*More info* opens the game's own page: its stills as a gallery, its controls
+turned into keycaps, its facts and builds, and two rails, *Other attempts at …*
+and *More like this*. Search is a TV search screen with an on-screen keyboard
+the pad can drive; on a keyboard, just type. A mouse and a touch screen work
+too: point or tap to pick, click or tap again to play.
+
+While a game runs the Couch claims nothing, keys and buttons alike. With no
+mouse to reach the bar in the corner, **hold View and Menu together for a
+second** to come back. Left alone for a minute, the home screen drifts through
+random games, like a console's attract mode.
+
+### The Catalogue — `/catalogue`
+
+The hub as a reading room: every game a record, on paper instead of in a dark
+room, to query, sort, chart, compare and export. Across the top, figures for
+whatever is selected: how many records, how big, original against inspired,
+models named, the newest addition, games with several builds.
+
+The query is the whole selection, and it lives in the address, so any state of
+the catalogue is a link. Bare words search everything, as on the wall; fields
+narrow it down:
+
+```
+genre:racing   genre:"life sim"   model:gpt   source:"metal slug"   series:"final fantasy"
+tag:pixel   type:demo   origin:original   players:2   players:multi
+size:<500kb   size:1mb..4mb   added:>2026-09-20   added:2026-09-01..2026-09-15   added:<7d
+builds:>1   is:fav   is:played   is:new   has:model
+
+-genre:shooter              a minus leaves matches out
+genre:racing genre:flight   one field twice: either
+genre:rpg tag:3d            two fields: both
+```
+
+You rarely need to type it. Every facet on the left is a small bar chart, with
+the whole library ghosted behind your selection, and clicking a bar adds its
+term (shift-click leaves that value out). Drag across *Added over time* to
+take a span of days; click a bin of *File size* for a range of sizes. Each
+term shows as a chip under the query, with a ×, and `?` lists the syntax by
+example.
+
+The table sorts by any column and groups by genre, lineage, model or week
+added. **↑ ↓** (or **j k**) move through it, **Enter** plays, **Space** marks a
+record, **F** favourites, **O** opens a game on its own page, **/** writes a
+query. Beside the table sits the record card: the game's stills and colours,
+every fact it carries (each one a link that queries it), its lineage, meaning
+every attempt at the same game in the order they arrived, then similar games
+and builds. Mark two to four records and **Compare** lines them up side by
+side, differences picked out. **Export** downloads the selection as CSV or
+copies it as a Markdown table.
+
+### The Atlas — `/atlas`
+
+A transit map of the library's genres. Pick a district, then browse its
+departure board to find a game. Map and board pages keep large collections
+manageable, with every entry reachable. Each departure has artwork, Play,
+Details and a favourite control. The selected district lives in the URL.
+
+### The Timeline — `/timeline`
+
+A journal of the library as it grows. Select a month or a day, switch between
+newest and oldest, and browse entries grouped by their arrival date. These are
+dates added to the hub, not the dates the original games were created. Load
+more entries to continue through large days; entries without dates have their
+own section. Date and order selections can be shared as links.
+
+### The Deck — `/deck`
+
+One shuffled game at a time, with artwork and a short description. Play it,
+save it as a favourite, or skip to the next card. Previous retraces your picks;
+finishing the deck offers a fresh deal. The seed and current card live in the
+URL, so reopening a link restores the same order. **Unplayed only** uses this
+device's play history.
+
+All three include text search, Games / All entries / Tech demos & tools /
+Unsure shelves, favourites, details with older builds, and the shared player.
+Press **/** to search and **Escape** to close details. The player's back button
+returns to the current selection. Search, shelf and favourites changes reset
+the view's narrower selection; **Reset selection** clears it all.
+
+Browser checks, with optional Playwright installed: start `pnpm dev`, then run
+`node scripts/explore-browser.mjs`. Pass a deployed site URL to check production.
+
+## Playing together: AI Hub sessions
+
+Every game can be played with up to three friends, each on their own device,
+through an **AI Hub session**: the hub deals the games (Random Mode), keeps
+the clock, carries the network traffic and keeps score. There is no chat and
+no way for players to message each other; they talk in an app of their own.
+
+What a game must do is the **AI Hub Session Protocol**, specified in
+[`lib/hub/README.md`](lib/hub/README.md) and served at
+<https://raw.githubusercontent.com/michaelcrosato/ai-hub/main/lib/hub/README.md>. That page is the
+whole interface: it is the one thing handed to whichever agent builds a game.
+The page holds only the interface and the hub's facts: no example values,
+suggested numbers or design advice, since an agent takes any of those as the
+way to build the game. A game declares one of three modes:
+
+- **Parallel**: everyone plays their own copy, from the same
+  start, on the same clock; the hub draws a live scoreboard from each copy's
+  progress. Every game with a score or a finish can do it, with no networking,
+  and it is how the existing library joins sessions.
+- **Ghost**: parallel, and each copy also shows the other players'
+  characters while they are in the same area of the game, without them
+  touching its world.
+- **Shared world**: one world for everyone, run by the host's copy.
+
+Games tagged with the older modes keep working: `race` plays as ghost, `co-op`
+and `versus` as a shared world.
+
+In short: the `hub:session` metas in the head, the small `session.js` client
+pasted in unmodified as the first script, a round reported with its stats and
+awards, and outside a session the game plays exactly as it always would. What
+the hub does around a round (points, awards, formats, the deal, the
+scoreboard, what travels where) is in
+[`docs/session-hub.md`](docs/session-hub.md). The plan behind all of it, and
+why, is [`docs/multiplayer-plan.md`](docs/multiplayer-plan.md).
+
+A game that declares it shows a *Hub session* line in its details
+(`1–4 players · Parallel · about 4 min`), and the Catalogue finds them all
+with `has:session`. Those fields never become rails. A parallel game is
+not a multiplayer game on the wall: each player plays alone.
+
+Games that play in sessions include **Blaze Cup** (a shared world, in teams),
+**Arwingdings**, **Merry-Go-Kart 64**, **Brine Line 64** and **Urethane
+Switchyard** (tagged race, so played as ghost), and **Grand Theft Motto III**
+(a shared world: the whole campaign, together).
+
+To test a game against the protocol, open the harness, which loads 1–4 copies
+next to each other on a simulated network:
+
+```
+pnpm dev
+http://localhost:7417/lib/hub/harness.html?game=/games/mygame.html&players=4&latency=150&jitter=50&loss=5
+```
+
+`node scripts/hub-check.mjs games/mygame.html` runs the automatic conformance
+checks with Playwright: a parallel game at 1 and 2 players, a ghost game or a
+shared world at 2, 3 and 4 on a bad network (within the seats it declares),
+each with a player leaving, then the game on its own. `--record` writes the
+verdict into `data/overrides.json`, where a failing game gets `"session": "0"`
+and is never dealt. The three examples in `lib/hub/examples/` (**Starfall**,
+parallel; **Comet Dash**, ghost; **Star Arena**, a shared world) are the hub's
+reference games and pass it; the protocol page does not link them, so no agent
+copies them.
+
+### Bringing the library to sessions
+
+Two scripts keep thousands of games on the protocol without editing them by
+hand:
+
+```bash
+node scripts/hub-client.mjs                         # which client every game carries
+node scripts/hub-client.mjs --write games/claude    # upgrade the unmodified ones, a batch at a time
+```
+
+A pasted client is replaced only when it is exactly a released one (its hash
+is in `scripts/lib/hub-client.mjs`), so an edited copy is listed and left
+alone. Clients only add, so an older one keeps working; upgrade when games
+should use something new.
+
+```bash
+mkdir -p .cache
+node scripts/retrofit.mjs pick --wave 1 > .cache/wave1.txt   # one build of each title: readable, no WebGPU needed; smallest first
+awk 'NR % 7 == 0' .cache/wave1.txt > .cache/pilot.txt        # a pilot of about thirty, small to large
+node scripts/retrofit.mjs run $(cat .cache/pilot.txt) --jobs 2 \
+  --agent "claude -p --model claude-haiku-5-5 --max-turns 30 --permission-mode acceptEdits --output-format json" \
+  --agent "claude -p --model claude-sonnet-5-5 --max-turns 30 --permission-mode acceptEdits --output-format json"
+```
+
+`retrofit.mjs` brings an existing game to parallel, game by game:
+
+- It first asks whether this browser can run the game at all
+  (`hub-check --draws-only`), and spends nothing on one it can't: a WebGPU-only
+  game in a browser without WebGPU, even when its title screen shows. On a
+  machine without a GPU, `--browser-args` with SwiftShader's flags (in
+  `scripts/hub-check.mjs`) gives such games a software adapter.
+- A tool step puts the client and the metas first in its head (`prepare`).
+- A model, cheapest first, wires the score, the end and the session steps from
+  the prompt in [`lib/hub/retrofit.md`](lib/hub/retrofit.md), which quotes the
+  protocol's parallel section word for word. It works on a copy of the
+  game in a folder of its own, so it can change nothing else and two jobs
+  never meet.
+- The static check (`check`), a budget of 150 changed lines, and
+  `hub-check --retrofit` judge it: two players with one leaving, then the game
+  on its own compared with the original.
+- Each model gets a second try with what failed, then the next one does, up to
+  `--max-cost` dollars a game.
+- A game that passes keeps its changes for you to review. Any other is put back
+  exactly as it was, with a `sessionNote` in `data/overrides.json` saying why,
+  so later runs skip it (`--again` retries).
+
+Every try lands in `.cache/retrofit.jsonl` with its cost when the agent prints
+one. Run a pilot of about thirty varied games, read the pass rate and cost per
+game, play a few that passed, then do the rest in waves. Nothing is committed
+for you: commit what passed in batches of about fifty.
+
+### A session — `/session`
+
+The session itself: players pick a generated name, take one of four seats,
+the host picks how to win (**Party**: 8 rounds and three bonus awards worth 3
+points each; **Sprint**: 5 rounds; **First to 12**; **Endless**) and starts
+**Random Mode**. The hub deals every game that declares `hub:session` and
+seats everyone, in an order fixed by the session's seed, and none comes round
+twice until all have been played. The host can narrow which games are dealt,
+in the lobby before the first round or between rounds: by mode (Parallel,
+Ghost, Shared world), by round length (Short, Medium, Long), by genre, and by
+what made the game: the model, the effort it was made at and the month it was
+added. Each choice shows how many games it leaves, and a row with nothing
+chosen keeps every game. Each round is played from the protocol's
+start signal to its result. The moment it ends, the results land over it
+(places, points, the game's stats and awards, the table moving) while the next
+game is already loading underneath; a quick spin of the deck then shows the
+next game, how to win it and its controls (or the game shows its own card, in
+its own style), and lifts on its ready prompt:
+about half a minute from one game to the next, less when everyone is ready
+(the host sets the card's countdown in the lobby: 10, 20 or 30 seconds). The table: one point for every
+player beaten, then wins, then average place. When the format says so, a final
+screen crowns the winner with a podium and the session awards (Showstopper,
+Hot streak, Steady hand). The seated tab with the lowest seat hosts; if it
+leaves, the next seat takes over, and a round it was running is void.
+
+**Across devices** (`/session`):
+- The host signs in with Google, picks a name, and gets an invite link,
+  `/session#<code>`.
+- Friends open the link, pick a name and play as guests, no account needed.
+  Behind the scenes each guest gets an anonymous account.
+- Each seat shows its connection. The host can remove a player for the rest
+  of the session.
+- Every round is saved: the game, who placed where, the points, and each
+  player's stats and awards.
+- **Relay only** in the lobby sends all of a player's connections through the
+  TURN relay, so the others never see that device's IP address (remembered in
+  the browser, as `localStorage['ai-hub:relay-only']`).
+- While no game in the library declares `hub:session`, the reference games
+  are dealt instead, so a session always has something to play.
+- Parallel games far outnumber the ones played together, so the deal
+  alternates between the two, and a parallel round shows a live
+  scoreboard over the game, top right, folded with a tap.
+- A session nobody ended is ended after a day without activity (an hourly
+  job, `supabase/migrations/0005_end_stale_sessions.sql`).
+
+How it works:
+- Presence, round control and the WebRTC handshake go over the session's
+  private Supabase Realtime channel.
+- Game traffic goes straight between the players' browsers (a WebRTC mesh,
+  `assets/js/session/mesh.js`), so a busy game costs the free plan nothing.
+- Where browsers can't connect directly, a Cloudflare TURN relay takes over.
+  Its short-lived credentials come from the `turn` Edge Function.
+- Every player keeps the host's time (`clock.js`), which is how rounds start
+  together.
+
+**Between tabs of one browser**, no accounts, which is how to try games on one
+machine:
+
+```
+pnpm dev
+http://localhost:7417/session?transport=local&examples=1#try      (open it in up to four tabs)
+```
+
+- `examples=1` adds the two reference games to the deal.
+- The host's address can shorten things for testing: `&limit=20` (a round's
+  limit, seconds), `&ready=10` (the ready deadline) and `&results=5` (the
+  results card).
+- `node scripts/session-browser.mjs` plays a whole session in four tabs: a
+  player who never readies, a host who leaves mid-round, and a round played by
+  those left. It then plays a round between two separate browser contexts over
+  the real WebRTC mesh; the script itself stands in for Supabase there.
+
+## Signing in, votes and play time
+
+Nobody needs an account to play. **Sign in** (top corner of every view) uses
+Google, and is only for:
+- 👍 or 👎 on a game: in its details, or offered after you close a game you
+  played for half a minute;
+- your play history on every device: which games, and for how long they were
+  open in front of you;
+- hosting a session.
+
+The hub asks Google for nothing but who you are, and shows nobody your
+Google name or photo. The account menu has *Play with friends*, *Privacy*,
+*Sign out* and *Delete my data*. What is stored is on
+[`/privacy/`](https://crosato-arcade.vercel.app/privacy/).
+
+How it's built:
+- The accounts live in the Supabase project `ai-hub` (ref
+  `ncbiljxbxfrotlszdghi`).
+- `supabase/migrations/` holds the tables, and the row-level security that
+  decides who may read or change each row. Every write goes through a
+  function that checks who is asking.
+- `supabase/tests/rls.sql` checks all of it in one self-cleaning run of the
+  SQL editor.
+- The page code is in `assets/js/account/`. It loads the vendored
+  supabase-js only for a signed-in device.
+- A sign-in is kept in the browser storage of one address, so
+  `vercel.json` sends every other one (deployment URLs, the old
+  `ai-hub-five-mu.vercel.app`) to `crosato-arcade.vercel.app`.
+- If Supabase is unreachable or paused, sign-in hides and everything else
+  works as before. The free project pauses after about a week without use;
+  resume it from the Supabase dashboard.
+
+Known limits:
+- Games run on the hub's own origin, so a game could read the signed-in
+  user's Supabase token. Row-level security confines the damage to that
+  user's own votes, plays and sessions, and Google's tokens are not kept.
+  The real fix is serving games from a separate custom domain.
+- Peer-to-peer play shows players' IP addresses to each other (`/privacy/`
+  says so), unless a player turns on **Relay only** in the lobby.
+
+## Optional extras
+
+None of this is needed. All of it is ignored if absent.
+
+**Hand-made cover art** — drop `covers/<slug>.png` (or `.jpg`, `.webp`) and it
+replaces the generated art for that game. Slugs are listed in `data/games.json`.
+
+**Real screenshots** — `pnpm shots` opens each game, waits for its title screen
+and saves a cover. Needs Playwright, which is not installed by default:
+
+```bash
+pnpm add -D playwright && pnpm exec playwright install chromium
+pnpm shots                # four at a time; --jobs 8 for more, --only <slug> for one
+```
+
+A project with its own `og:image` already has a cover and is skipped.
+
+**Extra metadata** — `data/overrides.json`, keyed by slug, wins over anything
+scraped:
+
+```json
+{
+  "undertow": {
+    "model": "Claude Opus 5",
+    "harness": "Claude Code",
+    "status": "polished",
+    "tags": ["pixel-art", "dungeon"]
+  }
+}
+```
+
+Here is the part worth knowing: **the filter rails are not declared anywhere.**
+They are read off whatever the games actually carry. Fill in `model` on a few
+games and a Model rail appears on the wall by itself; remove them and it goes.
+Any field works, including ones invented on the spot. A game can also carry its
+own, with `<meta name="hub:model" content="…">` in its head. A field whose
+values are nearly all different (a build id, a URL) is searchable but never
+becomes a rail. Every field is searchable. `harness` is searched and shown in
+the drawer but never gets a rail, and neither do `source` and `series`, which
+have Original, Inspired and the stacks.
+
+`collection` comes from the folder a game sits in, but it is an ordinary field:
+an override, or a `hub:collection` meta, replaces it.
+
+The library's own catalogue uses these fields, all in `data/overrides.json`:
+
+| Field | What it is | On the wall |
+|---|---|---|
+| `genre` | one of a fixed list (Racing, Platformer, Life Sim, Tech Demo…) | the Genre rail, and the cabinet's panel |
+| `type` | `Game`, `Tech demo` or `Tool` | the shelf: games, or tech demos & tools |
+| `tags` | 2–5 from a fixed vocabulary (`3d`, `retro`, `co-op`, `touch`…) | the Tags rail |
+| `players` | `1–2`, `1–4`… only when a game has co-op or versus | the Players rail: *Single player*, or *Multiplayer*, which drops a menu of head counts (*4 players* finds every game that seats four). A game with no `players` is single player |
+| `source` | the classic a game riffs on, as it is titled (`Dragon Quest IX`); none for an original | Original or Inspired, the stacks, the drawer, and search |
+| `series` | the franchise, only when it is not the source itself (`Dragon Quest` for `Dragon Quest IX`) | the stacks |
+| `controls` | a one-line summary | the drawer |
+| `description` | one or two plain sentences | the drawer |
+
+Every game with the same `source` must have the same `series`; `pnpm test`
+checks. A game can name its own source with `<meta name="hub:source">`
+(`hub:inspired-by`, the older name, still works). Source leads the rail strip.
+Genre, Collection, Type and Players follow it when they exist; the
+rest follow by how many games carry them. `docs/curation-2026-09-24.md`
+records how the library was curated: which file of each game was kept, and
+which older iterations it replaced. `docs/curation-2026-09-28.md` records the
+import from the source-named GPT-games folder and maps the old slugs to the
+current ones; `docs/curation-2026-09-28-new-ai-stuff.md` records the smaller
+import that followed it.
+
+Setting `"hidden": true` drops a game from the catalogue entirely.
+`"restricted": true` keeps it in the catalogue but off the wall, where only dev
+settings can bring it back — used for the companionship-business sims.
+
+### Dev settings
+
+There is no button for them. **Shift + F2** opens them on a keyboard; on a
+phone, tap the "AI Hub" title five times quickly. A PIN is asked first (any of
+0000, 1111, 1234, 8888, 9999) and stays unlocked for that browser tab until
+you press Lock. Inside:
+
+- **Show all content** — restricted games appear, flagged *Hidden*, and the
+  sign shows a reminder while it is on
+- **Show slugs and file sizes on cabinets**
+- **Open every game in a plain tab** — for a game that misbehaves in the frame
+- **This device** — forget play history, favourites, or plain-tab choices
+- **Library** — counts per shelf, how many are hidden, size, when the
+  catalogue was built
+
+This is a lock for a shared screen, not security: the PINs live in the page's
+JavaScript, and every game is a public file.
+
+## How it is put together
+
+```
+games/            the drop zone
+covers/           optional art, by slug
+sources/          historical source packages; new imports leave originals at input
+data/
+  overrides.json  optional metadata, by slug
+  added.json      first-seen dates, maintained automatically
+  source-dates.json original source dates, used to order builds
+  games.json      generated every build; gitignored, never edited
+couch/            the Couch: a page of its own, over the same library
+catalogue/        the Catalogue, likewise
+atlas/            the Atlas: genre districts and departure boards
+timeline/         the Timeline: a journal of arrivals
+deck/             the Deck: one shuffled discovery at a time
+session/          a session: friends, Random Mode and the table
+auth/             where Google sends you back after signing in
+privacy/          what is stored, and how to delete it
+assets/js/        native ES modules, no bundler
+  color.js        theme-color → cabinet lighting, via OKLCH
+  art.js          the six procedural screen patterns
+  filter.js       search, facets, sorting, sources and stacks (pure, tested)
+  library.js      the games every view starts from, less any hidden ones
+  similar.js      other attempts, and "more like this" (pure, tested)
+  ui/grid.js      the wall, rendered in batches as you scroll
+  ui/player.js    the framed player and the ways out of it, for every view
+  ui/views.js     the switch between all six selection interfaces
+  explore/        Atlas, Timeline, Deck and their shared search/player shell
+  couch/          rails, pad and keys, the game page, search (logic tested)
+  catalogue/      the query language, tallies, table, record card, compare
+  session/        seats, names, Random Mode, scoring; local, Realtime and WebRTC transports
+  account/        sign-in, votes, play time, the account menu
+assets/vendor/    supabase-js, pinned and checked
+cloudflare/       Worker and Wrangler config for `pnpm release`
+supabase/         migrations, RLS tests, the turn Edge Function (not deployed to the site)
+scripts/
+  scan.mjs        the build; walks games/, writes games.json
+  ingest.mjs      bulk import of pages, folders and zips
+  dev.mjs         local server, re-scans on every request
+  release.mjs     publish to Cloudflare: only what the site serves, shelf trimmed to what games load
+  shots.mjs       optional screenshots
+  lib/layout.mjs  what a path is: game, build, project, collection
+  lib/intake.mjs  what a package holds, and what never to import
+  lib/zip.mjs     a small zip reader, so the project stays dependency-free
+  audit3d.mjs     static rules every 3D game must pass (seconds)
+  hub-check.mjs   a game against the session protocol, for its mode; --record keeps the verdict
+  hub-client.mjs  every game's pasted session client, upgraded by script
+  retrofit.mjs    an existing game brought to parallel: tool, model, checks
+  session-browser.mjs  a whole session in four tabs, end to end
+  check3d.py      one 3D game in headless browsers, WebGL2 and WebGPU
+  sweep3d.py      check3d over many games, grouped by error signature
+  matrix3d.py     quality settings, a quality switch, and window sizes
+lib/
+  three/          three.js r186, the one copy every 3D game imports
+  rapier/         Rapier 0.20 physics
+  kit/            the shared 3D kit: boot, input, touch, post, physics
+  hub/            the AI Hub Session Protocol: spec, client, harness, examples
+  vendor/         versioned Three.js and Rapier packages for imported games
+```
+
+The games on the shared kit run on the same stack: three.js r186 with `WebGPURenderer`
+(WebGL2 when WebGPU is missing), loaded once from `lib/three` through an
+import map, and the kit in `lib/kit` for boot, quality tiers and keyboard,
+gamepad and touch input. `lib/kit/README.md` is the guide for porting or
+fixing a game, including the traps found so far; `lib/README.md` covers
+upgrading three.js and Rapier and the local patches to re-apply.
+
+Imported games can instead keep their original engine version and renderer
+through `lib/vendor/`. Those packages do not replace the patched shared stack.
+
+Vercel runs `node scripts/scan.mjs` as the build command and serves the
+repository. There is no framework and nothing is compiled.
+
+`pnpm release` publishes the same site to Cloudflare Workers instead (not live
+yet): it stages only what the site serves into `.cache/release/site`, with the
+library shelf cut to the files games actually load (about 14,700 files in all,
+under the free plan's 20,000), splits any file over Cloudflare's 25 MiB limit
+into parts that `cloudflare/worker.js` streams back whole, and deploys with
+Wrangler. `--dry-run` stages and reports; `--local` serves the staged site with
+Cloudflare's runtime on port 8787.
+
+### A note on colour
+
+Games ship theme colours meant to sit *behind* a game, not to light a dark
+room: Undertow's is `#050c12`, Little Orbit's is `#efe2c9`. Used as-is, half the
+wall would be invisible and the other half would glare. Each one is taken into
+OKLCH, its hue kept, and its lightness and chroma pushed into a band that reads
+as a lit marquee. Only a game whose colour is a true grey has no hue to keep;
+that one gets a stable hue hashed from its slug.
+
+The rest of the interface has no colour of its own on purpose. Every saturated
+pixel on the wall belongs to a game.
+
+### Audio source review
+
+On the **Wall**, open Dev settings with **Shift + F2** (not Ctrl + F2), or
+five taps within 2.5 seconds on “AI Hub”. The existing PIN flow is unchanged: `0000`,
+`1111`, `1234`, `8888`, or `9999`; unlock lasts for the tab until **Lock**.
+Under **Audio source review**, select **Contains MP3**, **Contains WAV**, or
+**MP3 or WAV (either)**. Tick **Explicit placeholder music** to intersect that
+condition with the format selection, and type a title, tag or evidence phrase
+in the review search. **Reset audio filters** clears all three controls.
+The counts refer to individual catalogue records, across shelves, not stacks.
+This review includes restricted catalogue records inside the unlocked panel;
+it does not change wall visibility or the Show all content setting.
+
+Expand a result for source paths, line numbers and short matching excerpts.
+The inventory lists local files, inline payload identities and remote references;
+remote audio is never downloaded by the scanner. `MP3`, `WAV`, and
+`placeholder music` are generated in `audioTags` and are also searchable in the
+ordinary wall, Couch and Catalogue search. Audio formats include voice and sound
+effects, and are independent of placeholder music. Original-audio, provenance
+and license statements are source claims, not automatic clearance or infringement
+findings.
+
+The normal scan/build, dev refresh and importer regenerate this inventory.
+Project records own their folder's assets and source text; loose HTML records
+follow resolvable literal local code/data/audio references, without assigning
+unrelated files from their collection. Retained builds are combined per game.
+Repeated local paths, inline payloads and remote URLs (ignoring query/fragment)
+are deduplicated. Counts measure distinct reference identities, not tracks:
+a remote source and its local copy remain separate identities; query-dependent
+remote resources may be combined. Case of extensions and MIME aliases is ignored,
+but filesystem path case is preserved.
+
+This is a static English-text review aid. It recognizes explicit nearby music /
+soundtrack / BGM placeholder statements, plus structured soundtrack-manifest
+purpose evidence. It excludes detected negations and art/SFX/voice placeholders.
+It may miss statements with unusual wording, other languages or distant context.
+Text is read from HTML, JS/TS, JSON, Markdown, plain text, CSS and SVG. Unreferenced
+loose assets, dynamically assembled paths, opaque encodings, archives, nonliteral
+fetches, Web Audio synthesis and external code are outside its coverage. Absence
+of a tag is not evidence of absence of audio or of license clearance.
+
+Regression checks: `npm test`, `npm run build`, and (with optional Playwright
+installed and the dev server running) `node scripts/audio-review-browser.mjs`.
+Pass a site URL to the latter to verify deployed counts and controls.

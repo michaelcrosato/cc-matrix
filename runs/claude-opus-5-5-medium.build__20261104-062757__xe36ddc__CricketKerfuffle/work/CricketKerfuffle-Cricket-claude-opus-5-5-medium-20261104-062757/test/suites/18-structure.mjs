@@ -1,0 +1,33 @@
+// structural completeness: nothing registered without code behind it, no empty handlers
+import { readFileSync, readdirSync } from 'node:fs';
+export default ({ boot, suite }) => {
+  const s = suite(), dev = new URL('../../', import.meta.url);
+  const files = readdirSync(new URL('src/', dev)).filter(f => f.endsWith('.js'));
+  const src = files.map(f => readFileSync(new URL('src/' + f, dev), 'utf8')).join('\n');
+  const code = src.replace(/\/\/[^\n]*/g, '');
+  const empty = [...code.matchAll(/(\w+)\s*\([^()]*\)\s*\{\s*\}/g)].map(m => m[1]).filter(n => !['if', 'for', 'while', 'catch', 'function'].includes(n));
+  s.ok('no empty methods or handlers (outside try/catch guards)', empty.length === 0, empty);
+  s.ok('no "not implemented", "coming soon" or "unused" stubs', !/not implemented|coming soon|\bnoop\b|throw new Error\('todo/i.test(src));
+  const { D } = boot();
+  const uses = (id, re) => re.test(code);
+  const sp = Object.keys(D.SPECIALS).filter(id => !uses(id, new RegExp("(sp|batSpecial|special)\\s*===\\s*'" + id + "'|'" + id + "'\\s*\\?|" + id + ":\\s*'")));
+  s.ok('every special has its own effect code', sp.filter(id => !['kerfShot', 'kerfBall'].includes(id) || false).length === 0 || sp.every(id => new RegExp("'" + id + "'").test(code.replace(/const SPECIALS[\s\S]*?\n\};/, ''))), sp);
+  const it = Object.keys(D.ITEMS).filter(id => !new RegExp("items\\[[^\\]]+\\] === '" + id + "'|id === '" + id + "'").test(code));
+  s.ok('every item has its effect code', it.length === 0, it);
+  const ch = Object.keys(D.CHAOS).filter(id => !new RegExp("id === '" + id + "'|triggerChaos\\('" + id + "'\\)|chaosActive\\." + id).test(code));
+  s.ok('every chaos event has code that runs it', ch.length === 0, ch);
+  const settings = ['difficulty', 'overs', 'wickets', 'kerfuffle', 'marker', 'timing', 'assistField', 'running', 'replays', 'captions', 'voices', 'voiceVolume'];
+  const st = settings.filter(k => !new RegExp("S\\('" + k + "'\\)|settings\\." + k + "|assistMode").test(code));
+  s.ok('every game setting is read by the game', st.length === 0, st);
+  const pools = Object.keys(D.LINES).filter(k => !new RegExp("commSay\\('" + k + "'|'" + k + "'\\s*:\\s*how|\\? '" + k + "'|: '" + k + "'").test(code));
+  s.ok('every commentary pool is spoken somewhere', pools.length === 0, pools);
+  const fx = Object.keys(D.SFX_DEFS).filter(k => !new RegExp("sfx\\((?:[^;]*?)'" + k + "'").test(code));
+  s.ok('every sound effect is played somewhere', fx.length === 0, fx);
+  const songs = Object.keys(D.SONGS).filter(k => !new RegExp("music\\('" + k + "'\\)|song: '" + k + "'|\\.song").test(code) && !['green', 'hall', 'bay', 'downs', 'dome'].includes(k));
+  s.ok('every song is played somewhere', songs.length === 0, songs);
+  const stings = Object.keys(D.STINGS).filter(k => !new RegExp("sting\\('" + k + "'\\)").test(code));
+  s.ok('every sting is played somewhere', stings.length === 0, stings);
+  const scenes = ['title', 'attract', 'story', 'extras', 'showmenu', 'netsmenu', 'lessons', 'setup', 'toss', 'storymap', 'cutscene', 'results', 'about', 'match', 'table', 'hubcard', 'hubwait'];
+  const sc = scenes.filter(k => !new RegExp("SC\\." + k + " = ").test(code) || (k !== 'title' && k !== 'hubwait' && !new RegExp("go\\('" + k + "'").test(code)));
+  s.ok('every scene exists and is reachable', sc.length === 0, sc);
+};

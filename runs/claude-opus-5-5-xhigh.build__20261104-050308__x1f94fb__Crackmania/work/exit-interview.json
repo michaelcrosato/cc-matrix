@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:03:08",
+    "source": "TrackMania (2003, Nadeo)",
+    "plan": "PLAN.md",
+    "genre": "Arcade racing (time attack) with a track-building puzzle mode",
+    "perspective": "Third-person chase camera (far, close, hood) in races; orbiting three-quarter camera in the editor and puzzles; trackside TV cameras in replays",
+    "tech": "my-3D2dge v0.85.2 (its 2D engine runs the game: fixed 1/120 s steps, scenes, input, menus, settings, audio, rigs, particles, UI; its 3D engine draws the worlds), three.js r182 (WebGPURenderer with WebGL 2 fallback), Rapier 0.19.3 (ray and shape casts against the track; the car is a custom kinematic model), AI Hub session client 1.4.0; built with esbuild 0.25 into one HTML file; tested with Node 24 and Playwright 1.63 (Chromium)",
+    "artDirection": "The engine's native low-resolution toon 3D (a PS1-class picture, ink outlines on code-drawn parts, toon light bands), pixel-art textures baked by code (asphalt, curbs, dirt, ice, sand ripples, rock strata), saturated TrackMania-style trackside colour: red and white curbs, chunky gates with dot-matrix boards, chevron boost pads, three environments (desert, countryside, alpine dusk)",
+    "animation": "The engine's rigs and poses (E.Humanoid crowd, Monsieur Drapeau's flag routine, character portraits in dialogs), its tweens, plus code-driven animation: suspension, wheel spin and steer, body lean, boost flames, flop roll-overs, windmills, pumpjacks, cows, tumbleweeds, start lights, chevrons, confetti and fireworks, block drop-ins in the editor demo",
+    "audio": "All synthesized in code: eight songs in the engine's chip notation with layers (Crack the Clock, Heat Shimmer, Hedge Fund, Thin Ice, Blueprint, Ghost Guild, Paint Job, Victory Lap), medal and event stings, a WebAudio car engine per car (oscillators, waveshaper, five-speed gearbox, tyre, wind and scrape noise), UI and race effects, Animalese-style gibberish voices for Coco, Monsieur Drapeau, the Ghost Guild and the crowd",
+    "online": "AI Hub Session Protocol v1, ghost mode: up to four players time-attack the same track for three minutes and see each other as ghost cars; the game's own card, progress and one result per player. Local: hot seat (2-8) and split screen (2-4)",
+    "testing": "One command (node tools/test.mjs): 810 headless checks in 16 suites that drive the real game, starting with a requirement-by-requirement audit of TASK.md (104 checks) with game.advance and game.debug (track compiler, block geometry, car physics, race rules, ghosts, the author bot on all 15 tracks and 6 puzzles, campaign, editor, puzzles, survival, hot seat, split screen, online with a fake hub, UI, and a scripted whole-game playthrough through the real menus, 149 checks of its own); --browser: 44 Playwright checks of the built file from file:// (boot, picture, every deep link, Node and browser bot times equal, the replay playing, attract, the touch-only gate and its Settings); --hub: the AI Hub harness in its three configurations (2 players; 4 players with latency, jitter and loss; the host leaving). Testing was unrestricted: headless tools, the browser and screenshots as needed",
+    "research": "TrackMania (2003) facts were taken from the plan (PLAN.md), which records the research done while planning; no further web research during the build. The engine and AI Hub repositories were read (manuals, API card, protocol README, harness)",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Cost and token counts: unknown (not visible to me). Session time: about 2 hours 5 minutes (05:03 to about 07:08)"
+  },
+  "testingFeedback": [
+    "15 real defects were caught by testing (failing test runs and screenshot reviews; mistakes in the tests themselves not counted): stacked split-screen viewports swapped by the engine (each player saw the other's camera), Rapier shape-cast normals read in the wrong frame (cars stuck to rails), an upside-down car falling through the road, cars topping out 20 km/h under their rated speed, menus whose buttons only existed when drawn, the focus carrying over between screens, lower-skill bots out-driving the author bot, Survival rivals faster than Coco, the editor touching a freed course after a test drive, the split screen's second camera crashing, #replay/last with no saved replays crashing, a broken line in Survival, missing font glyphs, menu tiles overflowing the 240-pixel screen, and the hood camera inside the car",
+    "6 were game breaking: cars sticking to the rails (Rapier normals), the car falling through the road when upside down, the Survival gauntlets being unwinnable (rivals faster than the author), the split-screen crash, the swapped split-screen views, and the replay crash",
+    "The bot suite (the author bot driving all 15 tracks and 6 puzzle solutions through the real race rules) together with the scripted whole-game playthrough through the real menus: between them they caught the physics, balance and focus bugs",
+    "The block geometry suite (path continuity, winding, link frames): it never failed, because the plan had already validated those numbers"
+  ],
+  "engineFeedback": [
+    "Everything around the game came for free and worked headless: fixed 1/120 s steps, scenes with fades, input with rebinding and controller glyphs, the pause menu and settings, the boot screen, the chip synth, and game.advance for exact headless tests. The 3D pen (instanced toon parts with ink outlines) made code-drawn cars and props fast to write",
+    "Yes: Rapier's castShape returns normal2 in the cast shape's own frame (normal1 is the world one); the engine placed split-screen viewports from the bottom while three's WebGPURenderer takes them from the top; onDraw runs once per split-screen viewport and the extra cameras have no target; the 5x7 font lacks ·, ✓, ◀, ▶ and ¢; and I first built menu focus only in draw, which headless runs never call",
+    "The car and the track: a kinematic surface-following car model that holds loops at speed and drops off when slow, the block catalogue with its ribbon mesher and Rapier colliders, and the autopilot that bakes the medal times, drives the rivals and plays the attract mode",
+    "Owning the camera and the world layout: World3D is built around a level or a terrain with actors, so a block-built track floating over a terrain (with chasms 60 m deep), loop-safe camera poses, split-screen cameras and interpolation all had to be worked around through onDraw",
+    "E1 pen.frame (draw in any orientation), E2 camera poses with their own up and look-at (loops), E3 translucent ghost batches, E4 analog trigger values, E5 PlayStation glyphs by default with Xbox as the option, E6 TOON_BANDS exported, E7 a particle ground override, E8 extra font glyphs, E9 split-screen viewports placed from the top left (three's WebGPURenderer convention: stacked views were swapped); all listed in engine/CHANGES.md",
+    "A first-class custom track and camera API in World3D: a ribbon/track builder that supports loops and banking with its own colliders, and camera poses with an up vector, instead of the ball-vehicle road along a flat path"
+  ],
+  "promptFeedback": [
+    "Clear deliverables and rules (one test command that prints only failures, file names, the exit interview) plus a detailed plan with validated numbers, and permission to change the engine",
+    "The plan was written for another run (its file names carry a different model and date); TASK.md says it wins, which settled it. Whether the attract mode should also start on menu pages was clear only from the plan",
+    "The scope: nine modes, an editor, puzzles, online sessions, attract mode and Dev Mode in one build, and testing a WebGPU/WebGL game headlessly (software rendering runs the game slower than real time, so browser timings needed care)",
+    "Generate the plan with the run's own names, and give a priority order (what to cut first) so a build that runs short of time keeps the core"
+  ],
+  "aiHub": {
+    "name": "CRACKMANIA",
+    "tagline": "Crack the clock.",
+    "description": "Block-built stunt tracks, loops and canyon jumps against the clock: race, solve track puzzles, survive the Ghost Guild and build your own tracks.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "TrackMania (2003)",
+    "series": "TrackMania",
+    "players": "1–4",
+    "controls": "R2/W gas, L2/S brake, left stick/arrows steer, Circle/Enter respawn, Triangle/R restart",
+    "tags": [
+      "3d",
+      "arcade",
+      "vehicles",
+      "versus",
+      "retro",
+      "low-poly"
+    ]
+  }
+}

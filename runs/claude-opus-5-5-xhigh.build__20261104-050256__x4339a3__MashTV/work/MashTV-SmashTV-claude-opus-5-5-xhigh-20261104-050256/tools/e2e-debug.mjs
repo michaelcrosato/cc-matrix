@@ -1,0 +1,14 @@
+import { chromium } from 'playwright';
+import { pathToFileURL } from 'node:url';
+import { OUT } from './build.mjs';
+const url = pathToFileURL(new URL('../../' + OUT + '.html', import.meta.url).pathname).href;
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+await p.goto(url + '?d=1#room=1-1'); await p.waitForTimeout(2500);
+await p.keyboard.press('Escape'); await p.waitForTimeout(500);
+await p.click('.esh button:has-text("Dev mode")'); await p.waitForTimeout(400);
+const st = () => p.evaluate(() => ({ shell: MT.game.shell && MT.game.shell.screen, paused: MT.game.paused, menuPreset: MT.game.input.preset === MT.MASH_MENU, active: document.activeElement && (document.activeElement.tagName + '.' + document.activeElement.className), sel: MT.dev.sel[0], dev: MT.dev.isOpen(), held: [...MT.game.input.held] }));
+console.log('after click', JSON.stringify(await st()));
+await p.evaluate(() => { window.__kd = []; window.addEventListener('keydown', e => window.__kd.push(e.code + (e.defaultPrevented ? ':prevented' : '')), true); });
+await p.keyboard.down('ArrowDown'); await p.waitForTimeout(100); console.log('ArrowDown held', JSON.stringify(await st())); await p.keyboard.up('ArrowDown'); await p.waitForTimeout(100);
+console.log('keydowns seen', await p.evaluate(() => JSON.stringify(window.__kd)), JSON.stringify(await st()));
+await b.close();

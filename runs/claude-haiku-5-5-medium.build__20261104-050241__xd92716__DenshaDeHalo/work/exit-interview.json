@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:02:41",
+    "source": "Densha de Go! (Taito)",
+    "plan": "PLAN.md",
+    "genre": "Train driving simulation with arcade scoring",
+    "perspective": "First-person cab view (pseudo-3D), with chase and platform cameras, and a Halo Map for stage select",
+    "tech": "my-3D2dge v0.85.2 (full engine, handoff package) with a custom rail renderer; AI Hub session client 1.4.0; vanilla JavaScript; Node and Playwright 1.63.0 for tests",
+    "artDirection": "The engine's PS1-era pixel style; new code-drawn trains, cab, signals, stations and townscape",
+    "animation": "Code-tweened gloved call, crossing gates, speed needle, notch cells, judgment banners and the Stop Cam; Humanoid rigs in briefing portraits only",
+    "audio": "All procedural: Web Audio traction, rolling, wind and brake layers; chip sound effects; 12 departure melodies; gibberish voices by syllable synthesis",
+    "online": "AI Hub session, ghost mode, 2 to 4 players (Session Protocol 1); local two-player duel on one keyboard",
+    "testing": "One headless command (node test/run.mjs, 135 checks), Playwright browser checks, a mock hub contract, a scripted playthrough of every stage, and the real AI Hub harness (2 players, 4 players with latency and loss, host leaves)",
+    "research": "Read the engine handoff docs and the AI Hub protocol; no web research",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium via Playwright for the browser checks",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About twenty issues changed the code, from rail drawing and the autopilot to the timetable and the Halo Time start value.",
+    "About six were critical: the rail drew nothing; the autopilot got stuck in emergency braking; Halo Time started at zero; a permanent 25 km/h cap; strips were attached only to their first segment; parked trains left the blocks.",
+    "The most helpful were the stop-accuracy runs from several starting states, and the real AI Hub harness, which confirmed the hub contract.",
+    "The least helpful were the stub draw and the screenshot checks: they catch exceptions and layout, not how the game feels."
+  ],
+  "engineFeedback": [
+    "The fixed step with game.advance, the scene system, the pixel primitives, E.Dialog and E.Menu.",
+    "The road module needed a fork rather than a drop-in; the settings-group filter was not used; scene data for game.start was unclear; the standard Quit row is removed by setting menu.quit to false at runtime, which the docs do not state.",
+    "The rail renderer, the train model, the signal and stop logic, the autopilot and the dev sliders: all built here.",
+    "Nothing in the engine was changed. Dev Mode, the duel, the Stop Cam and the hub screens are the game's own code.",
+    "Nothing in the engine was changed. Dev Mode and the settings are the game's own screens.",
+    "A font with common UI symbols, and a documented settings-group filter for dev screens."
+  ],
+  "promptFeedback": [
+    "The plan with checkable numbers: the check values made the physics testable.",
+    "The scope (about fifty subsystems) against one session; the plan and TASK disagree on file layout in places; and the strict every-feature condition cannot be met by partial builds.",
+    "Getting an end-to-end game with tests in one session; several features had to be cut.",
+    "A priority order with a minimum to ship, a time budget per milestone, and a per-feature acceptance list that counts partial builds as open."
+  ],
+  "aiHub": {
+    "name": "Densha de Halo!",
+    "tagline": "Stop on the mark. Leave on the second.",
+    "description": "Drive the Halo Line, a loop railway around Akari City, from the first train at dawn to the last train at night: stop exactly on the mark, keep the timetable to the second, and point and call every signal. Race up to three friends on the four-track Parallel Run.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Densha de Go!",
+    "series": "Densha de Go!",
+    "players": "1–4",
+    "controls": "Lever W/S or L2/R2 · Call E/✕ · Horn Space/□ · ATS Q/△ · EB Backspace/L1",
+    "tags": [
+      "first-person",
+      "vehicles",
+      "arcade",
+      "retro",
+      "versus",
+      "story"
+    ]
+  }
+}

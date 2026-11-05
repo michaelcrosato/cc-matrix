@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:03:05",
+    "source": "Smash TV (Williams Electronics arcade game, 1990)",
+    "plan": "PLAN.md",
+    "genre": "Twin-stick arena shooter (arcade), 1-4 players local co-op",
+    "perspective": "Fixed three-quarter studio camera; overhead option in Settings",
+    "tech": "my-3D2dge engine v0.85.2 (github.com/michaelcrosato/my-3d2dge, dist/handoff, patched: P1 HOOKS export, P3 arcade initials and continue for every player, P4 audio bus getter); Node v24.22.1; Playwright 1.63.0 for checks; single HTML, no libraries",
+    "artDirection": "Retro-future TV studio: neon, chrome, marquee bulbs, sponsor logos, confetti; engine's PS1 look with HD humanoid rigs and custom painters",
+    "animation": "Engine rigs (Humanoid, Blob) with poses and moves; custom painters for disco ball, dolly tank, cable snake and bosses",
+    "audio": "All music, sound effects and voices synthesized in code (engine chip synth and notation; Animalese-style formant voices); no audio files",
+    "online": "AI Hub Session Protocol v1, client aihub-session 1.4.0 (vendor/hub/session.js, pasted unmodified as the first script in head), mode shared-world, 1-4 players; the Lightning Round: rooms L1, L2, L3 and Mashy, host-run, with snapshots at 15 a second; local co-op 1-4 players",
+    "testing": "Headless suites (npm test: core, input, contestant, weapons, economy, ratings, enemies, rooms, room-sweep, bosses, playthrough, ui, dev, attract, touch, audio, proof); AI Hub harness (vendor/hub/harness.html) passed for 2 players, 4 players with 150 ms latency, 5% loss and jitter, host leaving, and a server copy; browser checks in headless Chromium with real key presses",
+    "research": "Engine docs read: API.md, AI_GUIDE.md (standard features, frame order, testing), API-INDEX.md, kits/arcade.js, my-3d2dge.js source for the input, join, arcade and audio APIs. Smash TV written from general knowledge; no web research on the source.",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser unknown",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 10 real game problems were found and fixed by the checks and the bot runs: walkers spawned from doors that never came in (a room that could not clear); a separation push that could take a walker through a wall; Lance's TV wall placed above the arena, so its shots never landed; the Green Room never started; the continue countdown never ticked; the attract scene was never registered; a menu that ran off the bottom of the title; the About screen was empty; a missing audio track warned every time prime time began; and enemy randomness that was not seeded. Several more were test-side (stale worlds between checks, a bot aiming at the body instead of the arms).",
+    "Five of those would have stopped play: the walkers (a room never clears), the Lance wall (the fight cannot end), the continue countdown (the run hangs at the continue), the Green Room (the bonus never starts) and the attract mode (it cannot be reached).",
+    "The most helpful test was the bot playthrough of the whole left path through all three episodes, plus the boss and Green Room runs. It exercised the whole flow and found the stalls that per-function checks missed.",
+    "The least helpful test was the touch check, which only sets globals and reads one function, and the room sweep with god-mode bots, which shows that a room can be cleared but says nothing about whether it is fair."
+  ],
+  "engineFeedback": [
+    "The arcade module (scores, initials, continue, the attract clock) and the input presets: they gave the run its frame for free once the patches were in. The scene and script system (game.script with until and any) made the whole run one readable flow.",
+    "Yes. Arrows aiming while menus need them meant a hook into the input step that the engine did not export (patch P1). The arcade entry and continue read only player one (patch P3). The engine's audio.layer warns instead of returning quietly when a song lacks the track (I guarded the call). I also had to learn the overlay units (buffer pixels, about a third of a 1080p screen) by trial, and guessed the lobby's join behaviour from the source.",
+    "The room runner (waves, doors, exits, keys and the hazards), the enemy archetypes and the boss framework, the PlayStation and Xbox glyph icons (the 5x7 font has no button symbols), the reaction table, and the Animalese voices. The engine gave the drawing, rigs and loop; the game logic is mine.",
+    "The overlay units, which are buffer pixels, and the lack of a headless draw test: the drawing code can only be checked in a browser or by eye, while the rest is tested in a VM.",
+    "Patches P1, P3 and P4, listed in engine/PATCHES.md. Each one exists because the engine kept a value private or read only player one.",
+    "Export the input hook and the arcade's per-player input as defaults (so no patch is needed), and make audio.layer return quietly for a missing track."
+  ],
+  "promptFeedback": [
+    "The room data (the wave tables, the map and the rules per room) is detailed enough to build from directly, and the exit-interview shape is clear.",
+    "The size of the plan against one session: 18 rooms, 3 bosses, netcode and the AI Hub harness, 16 test suites and the browser checks. It was not clear which parts were required for this build and which were stretch goals, or whether the AI Hub integration is a must.",
+    "The AI Hub shared-world netcode (snapshots, claims, host authority, the hub harness) was the hardest part to scope, and I did not build it. The test suites across all of them, in one session, were the next hardest.",
+    "Split the plan into a first playable milestone (one episode, local co-op, the front end and the tests) and stretch milestones (episodes two and three, the Green Room, the AI Hub). Say which of the 16 suites are required for a first delivery."
+  ],
+  "aiHub": {
+    "name": "MASH TV",
+    "tagline": "Mash 'em! Cash 'em! Survive the show.",
+    "description": "A 1-4 player twin-stick arena shooter inside the deadliest game show on TV: blast through studio rooms of goons and robots, grab cash and absurd prizes, keep the ratings up and survive to the Season Finale.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Smash TV",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD/left stick move · mouse/right stick aim & fire · Space/L2 slide · E/R1 Showstopper · Q/L1 Showboat",
+    "tags": [
+      "arcade",
+      "co-op",
+      "top-down",
+      "comedy",
+      "boss fights"
+    ]
+  }
+}

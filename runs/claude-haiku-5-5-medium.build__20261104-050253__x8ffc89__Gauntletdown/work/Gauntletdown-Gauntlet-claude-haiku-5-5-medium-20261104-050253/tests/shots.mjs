@@ -1,0 +1,22 @@
+// Screenshots for a look review (not part of the test count): node tests/shots.mjs <html> <outdir>
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const [, , file, outArg] = process.argv;
+const out = resolve(outArg || 'shots'); mkdirSync(out, { recursive: true });
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+const errors = []; page.on('pageerror', e => errors.push(String(e))); page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+await page.goto(pathToFileURL(resolve(file)).href);
+const wait = ms => page.waitForTimeout(ms);
+const key = async (k, ms = 900) => { await page.keyboard.press(k); await wait(ms); };
+await wait(2500);
+await key('Enter'); await page.screenshot({ path: out + '/classes.png' });
+await key('Space'); await key('ArrowRight'); await key('Space'); await key('Enter', 2200);
+await page.screenshot({ path: out + '/play-2.png' });
+await key('Escape', 700); await page.screenshot({ path: out + '/pause.png' });
+await key('ArrowDown'); await key('Enter', 600); await page.screenshot({ path: out + '/howto.png' });
+await key('Escape', 600); await key('ArrowDown'); await key('ArrowDown'); await key('Enter', 700); await page.screenshot({ path: out + '/dev.png' });
+await browser.close();
+console.log('errors:', errors.length ? errors.slice(0, 1).map(e => e.slice(0, 600)) : 'none');

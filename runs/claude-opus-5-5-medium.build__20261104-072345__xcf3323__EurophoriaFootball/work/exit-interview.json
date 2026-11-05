@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:23:45",
+    "source": "European football (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports: 5-a-side football with a story-driven cup run, Kick-About, Penalties and Training",
+    "perspective": "TV-broadcast side-on camera raised 40 degrees and scrolling with play (a custom engine View), with Classic three-quarter and Aerial options; replays from a turned camera",
+    "tech": "my-3D2dge v0.85.2 (handoff package, two small engine changes listed in engine/CHANGES-ENGINE.md), AI Hub session client 1.4.0 pasted unmodified, plain JavaScript in one IIFE built from numbered fragments into one HTML file; Node 24 and Playwright 1.63 for tests and screenshots",
+    "artDirection": "my-3D2dge's native PS1-era pixel style: HD Humanoid rigs in club kits with hoops, stripes, halves, sashes and numbers; code-drawn stadiums with tiered crowds, LED sponsor boards, nets, floodlights and per-city skylines; crests, tabloids, a travel map, the trophy, the team bus and a trawler drawn in code",
+    "animation": "the engine's procedural Humanoid rig driven from each footballer's state: kick specs for passes, shots, volleys, pokes and slides, poses and expressions, the roll (flip) for launched players and dives, lying down along the dive direction for goalkeeper dives, celebrations built from poses and attack specs; no mocap clips",
+    "audio": "all in code: the engine's chip synth for SFX and 15 original songs (the Europhoria anthem and its variations), a WebAudio crowd engine (a band-passed noise bed that follows the crowd's mood, OOOHs, roars, boos, whistles, claps), sung team chants from formant voices, and Animalese-style babble voices for the commentators, the PA, the story characters and players; no audio files",
+    "online": "AI Hub Session Protocol v1, shared-world, 2-4 players: the game's own card (the tunnel), host-run match with input messages using cumulative press counters, 14 Hz snapshots and coalesced reliable events, client interpolation 100 ms behind, server mode, leave, time-up, finish with standings, stats and Player of the Match, and an in-session settings overlay",
+    "testing": "headless Node tests behind one command (node tools/test.mjs: unit, rules, content, ui, saves, attract, dev, determinism, playthrough, hubsim, lint, plus an AI balance soak), the AI Hub harness in Chromium for all four scenarios (tools/hubcheck.mjs), the engine's check tool and Playwright screenshots only for what a script can't check",
+    "research": "read the engine handoff README, API.md in full, parts of API-INDEX.md and the engine source (Dialog, Settings, Shell, Input halves, Humanoid torso and moves, Audio internals), the SPORTS kit, the template's test, and the AI Hub README; no web research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown cost and token count (no estimates available in the session); session time about 1 hour 25 minutes (07:23 to about 08:48)"
+  },
+  "testingFeedback": [
+    "About 18 real issues: a crowd throw-back that re-triggered forever (a soft lock), far too many red cards, own goals from lobbing to your own keeper and from a keeper standing behind his line, keepers not reading chips, passes that ignored ball friction and missed moving receivers, low AI pass completion and shot counts, a non-ASCII commentary line, an idle watcher that never fired headless, menu focus skipping disabled touch-only tiles, a training crash after the last drill step, a net collision that drew solid white blocks, a Save Duel that re-entered itself in a loop, commentary covering the set-piece prompts, an unreadable ball sprite, and an invincible-keeper cheat with holes.",
+    "Four were game breaking: the crowd throw-back soft lock, the training crash, the Save Duel loop, and goals counted after a keeper teleported behind his own line.",
+    "The scripted playthrough of the whole Cup Run (title, every story beat, five matches, the ending, then Kick-About, Penalties, Training, About and the album), with the AI Hub harness a close second: it proved the online flow in all four scenarios.",
+    "The lint scan for forbidden browser APIs: it mostly produced false positives (EF.prompt looked like prompt()) and never found a real problem."
+  ],
+  "engineFeedback": [
+    "The exact fixed-step headless mode: game.advance and input.tap made the whole game, including a two-copy online loopback, testable in Node in seconds; and the standard pause, settings, rebinding and full-screen features came for free.",
+    "Yes: TileMap walls used for goal nets render as solid boxes, scene changes fade so tests saw the old scene, input.tap only counts during a step, the boot runs asynchronously, and the camera zoom is the scene's start times setZoom times the player's, which took a few screenshots to get right.",
+    "The football itself: ball physics with posts, bar and nets, footballers with every action, goalkeepers, the team AI, the rules and set pieces, the referee, Euphoria and super strikes; plus a 10-foot UI kit, button glyphs, the crowd and babble audio and the hub netcode.",
+    "Football-specific animation on a rig with no whole-body tilt: keeper dives, bicycle kicks and diving headers had to be faked with the roll, lying down along a turned facing and height offsets.",
+    "Two changes: Dialog voices may be a function called per revealed letter (for babble voices), and the Humanoid torso paints kit patterns (hoops, stripes, halves, sash) and shirt numbers.",
+    "A whole-body tilt or rotation state for the Humanoid (sideways and forward falls at any angle), and a public audio bus API so games can route their own WebAudio through the master volume."
+  ],
+  "promptFeedback": [
+    "It is precise about the deliverable, the controller-first 10-foot UX, the attract mode, dev mode and the exit interview, and the plan it came with was deep enough to build from directly.",
+    "TASK.md asks to pick the title with a random number generator while STAGE.md says to use the plan's title (I used the plan's, which it had picked that way), and the plan's folder names carried another run's model and timestamp.",
+    "The scope: a feature-complete cup run with story, nine drills, penalties, local multiplayer, online shared-world netcode, attract mode and dev mode, all verified without playing by hand.",
+    "Give a prioritised must-have and nice-to-have list with a time budget, and say whether optional parts of the plan (mocap clips, every listed animation) may be simplified."
+  ],
+  "aiHub": {
+    "name": "Europhoria Football",
+    "tagline": "Over-the-top arcade football",
+    "description": "A broke seaside club rides its fans' euphoria through Europe's grandest cup: 5-a-side arcade football with super strikes, dives, VAR and a crowd that powers your team.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "European football",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD move, ✕/J pass, □/K shoot (hold), ○/L lob, R1/E skill, R2/Shift sprint, L1+R1/Space Europhoria",
+    "tags": ["arcade", "pixel art", "comedy", "versus", "co-op", "retro"]
+  }
+}

@@ -1,0 +1,17 @@
+import { chromium } from '../tools/node_modules/playwright/index.mjs'; import { resolve } from 'node:path'; import { pathToFileURL } from 'node:url';
+const b = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required', '--use-gl=swiftshader'] }); const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+const errs = []; p.on('pageerror', e => errs.push(String(e.stack || e).slice(0, 300))); p.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 200)); });
+await p.goto(pathToFileURL(resolve('../ThugbyTurbo-Rugby-claude-sonnet-5-5-medium-20261104-070002.html')).href); await p.waitForTimeout(1000);
+const adv = s => p.evaluate(s => { __thugby.game.advance(s); return 1; }, s), shot = async n => { await p.waitForTimeout(250); await p.screenshot({ path: '/tmp/s55_' + n + '.png' }); };
+await p.evaluate(() => __thugby.game.debug.go('about')); await adv(1); await shot('about');
+await p.evaluate(() => __thugby.game.debug.go('records')); await adv(1); await shot('records');
+await p.evaluate(() => __thugby.game.debug.go('cup')); await adv(1); await shot('cup');
+await p.evaluate(() => __thugby.game.debug.go('story', { cup: 0, stage: 'pre' })); await adv(1.5); await shot('story');
+await p.evaluate(() => __thugby.game.debug.go('training')); await adv(1); await shot('training');
+await p.evaluate(() => __thugby.game.debug.go('match', { mode: 'exh', home: 'hawks', away: 'dockers', venue: 'docks', players: 0, half: 120 })); await adv(1);
+await p.evaluate(() => { const s = __thugby.sim, S = s.S; S.phase = 'play'; S.sp = null; S.ball.st = 'loose'; const c = S.players[4]; s.place(c, 500, 384, 0); s.giveBall(c); S.hype[0] = 100; __thugby.game.input.lastDevice = 'gamepad'; __thugby.TT.settings.glyphs = 'playstation'; }); await adv(.6); await shot('ps');
+await p.evaluate(() => { __thugby.TT.settings.glyphs = 'xbox'; }); await adv(.3); await shot('xbox');
+await p.evaluate(() => { __thugby.game.debug.devPanel(true); }); await adv(.3); await shot('dev');
+await p.evaluate(() => { __thugby.game.debug.devPanel(false); const S = __thugby.sim.S; S.sp = null; __thugby.sim.S.hype[0] = 100; __thugby.sim.FORCE['GIVE ME THE BALL'](); __thugby.sim.FORCE['SCORE A TRY (ME)'](); }); await adv(1.2); await shot('try');
+await p.evaluate(() => { __thugby.game.debug.go('results', { mode: 'exh', sum: { score: [27, 14], win: 0, st: [{ tries: 4, bigHits: 7, metres: 212, poss: 55, convs: 2 }, { tries: 2, bigHits: 3, metres: 140, poss: 45 }], teams: ['hawks', 'dockers'], potm: 4, potmName: 'Deano Fly' }, again: { mode: 'exh', home: 'hawks', away: 'dockers', venue: 'docks', players: 0, half: 120 } }); }); await adv(1); await shot('results');
+console.log(errs.length ? errs.join('\n') : 'no errors'); await b.close();

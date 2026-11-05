@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core'; import { pathToFileURL } from 'node:url';
+const b = await chromium.launch({ executablePath: process.env.HOME + '/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome', args: ['--no-sandbox'] });
+const c = await b.newContext({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 });
+const p = await c.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto(pathToFileURL(process.argv[2]).href); await p.waitForTimeout(2500);
+console.log('touchOnly', await p.evaluate(() => BB.touchOnly()));
+await p.touchscreen.tap(400, 200); await p.waitForTimeout(500);
+await p.screenshot({ path: process.argv[3] + '/touch.png' });
+console.log('scene after tap', await p.evaluate(() => BB.game.sceneName));
+await p.waitForTimeout(11000); console.log('scene after 11s idle', await p.evaluate(() => BB.game.sceneName), 'errors', JSON.stringify(errs));
+await b.close();

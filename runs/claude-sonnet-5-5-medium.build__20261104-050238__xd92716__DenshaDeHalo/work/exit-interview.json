@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:02:38",
+    "source": "Densha de Go! (the train-driving simulation series): a notched master controller, stopping on a marker, a timetable kept to the second, ATS, point-and-call calls.",
+    "plan": "PLAN.md",
+    "genre": "Simulation (train driving with arcade scoring)",
+    "perspective": "First-person cab in pseudo-3D, with chase and front cameras and a side-view Stop Cam replay after every stop",
+    "tech": "my-3D2dge v0.85.2 (2D engine: game loop, input, menus, Shell pause/settings/controls, Dialog, Humanoid, chip audio, headless advance), plain JavaScript, a custom pseudo-3D rail renderer (src/30-render.js), AI Hub client session.js 1.4.0. Tests: Node 24 and Playwright 1.63 (Chromium).",
+    "artDirection": "The engine's native look: 427x240 low-resolution pixels, hue-shifted shading and the pixel font, with a hand-built segment-based pseudo-3D world (stations, strips, buildings, trains, catenary, fog, night lights).",
+    "animation": "The engine's Humanoid rig for the talking portraits, plus code-driven animation: the lever handle and needle, the pointing glove, wipers, rain, crowd sway, crossing gates, the Stop Cam replay.",
+    "audio": "All code: the engine chip synth for effects and songs, plus a Web Audio train soundscape (rumble, rails, wind, motor, brake squeal, horn, rain), station departure melodies and Animalese-style gibberish voices for every character.",
+    "online": "AI Hub Session Protocol v1, ghost mode: the Parallel Run for 1 to 4 players, with the other players shown as coloured ghost trains. Passes the hub harness.",
+    "testing": "Headless Node tests (124 checks: physics, ATS, signals, stops, the whole career played by the autopilot through the real scenes, attract mode, dev mode), a Playwright browser smoke test, and the AI Hub harness (1, 2 and 4 players, latency and loss, host leaves).",
+    "research": "Read the engine card (README, API.md, the road kit) and the AI Hub README, and followed PLAN.md. No web research; the source is described from general knowledge.",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser tests in headless Chromium, player browser unknown",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "How many issues did testing catch? About 9 real game issues.",
+    "How many were critical? 3: the train could freeze at a hair above 0 km/h and never be judged, a stop more than 80 m past the marker was never judged, and a finished shift left a flag set that hung the next one.",
+    "Most helpful test: the scripted career, where the autopilot drives all six stages through the real title, map, briefing, drive and results scenes.",
+    "Least helpful: screenshots from software-rendered headless Chromium for anything that depends on timing; they only show a frame."
+  ],
+  "engineFeedback": [
+    "What did you like most? Exact fixed steps with game.advance, so the whole game plays headless and deterministically, plus the free pause, settings and controls screens.",
+    "Did you get stuck or guess wrong? Input.tap() marks the device as touch, which tripped my touch-only gate in tests; and the pause-menu items need game.resume() themselves.",
+    "Most important thing to build yourself: the rail renderer (segments, platforms, strips, trains, catenary, fog, night) and the train physics, ATS and timetable.",
+    "Hardest part: the engine had no multi-track or rear-camera road module, so everything projected had to be written from scratch on top of the pixel primitives.",
+    "What did you change? Dialog voice can be a function (for gibberish speech); the glyph default is PlayStation; ChipAudio.bus() and noiseBuffer() for the game's own sound; and Options is ignored while Create is held in a hub session. See ENGINE-CHANGES.md.",
+    "One thing to change: a first-class pseudo-3D road/rail module with multiple tracks, long side objects and rear cameras."
+  ],
+  "promptFeedback": [
+    "What did you like most? A concrete plan with a clear core loop, and hard rules (no stubs, tests behind one command, the hub harness as a gate).",
+    "What was confusing? PLAN.md is very large and prescribes more than the TASK needs (a local duel, engine forks, rig poses), so triage was needed; and the title RNG step was already done by the plan.",
+    "Hardest thing: breadth. Menus, dev mode, attract mode, story, voices, hub and a new renderer all have to be finished in one session.",
+    "What would you change? Split the plan into must, should and could, and say which engine patches are optional."
+  ],
+  "aiHub": {
+    "name": "Densha de Halo!",
+    "tagline": "Hello by train. Stop on the mark.",
+    "description": "Drive the Halo Line ring railway: notch the lever, obey signals and ATS, point and call, and stop on the marker on the second. A short story, six shifts and an online Parallel Run.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Densha de Go!",
+    "series": "Densha de Go!",
+    "players": "1–4",
+    "controls": "Lever R2/L2 or W/S, neutral R1/N, emergency brake L1/Backspace, point and call Cross/E, horn Square/Space, ATS confirm Triangle/Q, view Circle/C. Mouse: wheel and cab buttons.",
+    "tags": [
+      "3d",
+      "first-person",
+      "retro",
+      "vehicles",
+      "arcade",
+      "story"
+    ]
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:07:52",
+    "source": "American football (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports (American football) with beat-'em-up hit feel and a light story campaign",
+    "perspective": "A sideline broadcast camera: the field runs left to right, seen from above the near sideline (the engine's 3/4 ground view, pitch 55 degrees), following the ball carrier, the kick and the replay",
+    "tech": "my-3D2dge v0.85.2 (handoff copy, modified: pixel-font glyphs for the PlayStation buttons, PlayStation as the default button symbols with an Xbox option, Dialog voice callback); AI Hub client session.js 1.4.0 (unmodified); plain JavaScript, Canvas 2D and Web Audio through the engine; no other libraries; Node 24 and Playwright 1.63.0 (Chromium) for tests",
+    "artDirection": "The engine's native style: HD Humanoid pixel-art rigs on a PS1-class 320x240 expanding screen, a field and stadium painted by code (stripes, yard lines, hash marks, logo, end zones), crowds and cheerleaders, stadium lights, snow, rain, sand and neon weather, particles, big comic banners",
+    "animation": "The engine's rig animation: Humanoid poses and E.MOVES (throw, bash, kick), driven by velocity and state; dives, knockdowns, celebrations, cheers and kneels. No motion-capture clips were used",
+    "audio": "All written in code: chip-style music (title, match, kick, halftime, story, win, lose), synthesized sound effects (whistle, hits, crowd roar, horn, lightning), and Animalese-style babble voices for the announcers and story characters",
+    "online": "AI Hub Session Protocol v1, mode parallel for 1-4 players: everyone plays the same seeded half against the CPU and reports a score; passes the hub's own harness check. Local play for 1-2 players",
+    "testing": "Headless scripts (game.advance, input.tap) with a scripted player: CPU vs CPU full games over several seeds, a whole exhibition, the whole Fiasco Cup, drills, attract mode, dev mode, 2 players, overtime, the hub round with a stubbed hub; a Chromium walk over every screen; the AI Hub harness. One command: npm test. No subagents",
+    "research": "Read the engine's API card and sports kit, the AI Hub README and the build plan; no web research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown (tested in Chromium via Playwright)",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About ten real defects. The CPU-vs-CPU runs showed the CPU quarterback never threw and the Hot Streak never ended; a collision of event field names, the hub ready() timer lost on a scene change, the touch-only notice cleared at once, missing font glyphs, and overlapping HUD pieces were found by tests and screenshots; balance (CPU passing too accurate, almost every tackle a Big Hit) came from the multi-game passing, tackling and scoring statistics.",
+    "Three: the quarterback never throwing (no passing game), the hub round never calling ready() (the round would have been void), and the Hot Streak never ending (every hit a Mega Hit).",
+    "The CPU-vs-CPU full-game simulation over several seeds, printing phase and event counts and passing, tackle and scoring statistics: it found the worst sim bugs in seconds and drove the balance changes. The Chromium walk with screenshots found every layout problem.",
+    "The data-sanity checks (play routes, team and stadium tables): they never failed. The first scripted human, who just ran straight, was also not very informative; it had to be helped with the dev score button to win the story."
+  ],
+  "engineFeedback": [
+    "HD Humanoid rigs that look like a real game with no art work, the exact fixed-step headless game.advance for tests, and the pause, settings, controls and full-screen screens that come free. Dialog with live portraits made the story scenes cheap.",
+    "Yes. game.go clears timers, so a game.after I set right after go() was lost. I guessed that setZoom had no lower limit: it is clamped at 0.5, which decides how much of a football field fits. E.store keeps nothing in a headless run, so I mirrored it in memory. Prompts for the PlayStation face buttons drew a question mark in the pixel font.",
+    "All of football: the match simulation (downs, clock, kicks, turnovers), the CPU players and play calling, the blocking and tackling rules, the Fiasco Meter and cards, the play-call screen with route diagrams, kick meter, replay recorder, commentary ticker with babble voices, the Dev panel, the attract mode and the hub round.",
+    "Framing a wide field with 40 to 60 pixel characters: the zoom floor of 0.5, the fixed pixel size of the HUD font, and no field or sports-pitch helper. Also keeping custom actions (a, b, x, y) working with the half-keyboard second player.",
+    "Added the glyphs for the PlayStation buttons to the 5x7 pixel font; made PlayStation the default button symbols with Xbox as the only other choice; let Dialog's voice be a function called for each typed letter (Animalese). I scaled the pause and settings screens for a TV with a stylesheet instead of changing the engine. I did not do the plan's gear hook, football helmet style, audio buses or Shell rows.",
+    "Let the camera zoom out below 0.5, and give the Shell a first-class 10-foot scale option so a TV at 10 feet needs no stylesheet."
+  ],
+  "promptFeedback": [
+    "The clear pillars (the play call and the snap, big plays that feel huge, spectacle, underdogs, couch to online), the TASK coverage table, the concrete tuning defaults and balance targets, and the build order with milestones. It made it easy to know what finished looks like.",
+    "How much was a must and how much a stretch. The plan asked for 7 per side, motion-capture clips, six engine changes, a shared-world hub session, replays from several angles and a long list of screens: far more than one session at medium effort can deliver, and the plan did not rank them.",
+    "Keeping the whole slice complete and coherent: a simulation, CPU players, a story, drills, a dev mode, an attract mode, a hub round, music and voices, all in code and all under a headless test.",
+    "Mark each item as must, should or stretch; shorten the plan (200 KB is hard to read whole); give the exit-interview and feedback questions in the same order in the plan and in the task; and say which hub mode is acceptable if the plan's own is too costly."
+  ],
+  "aiHub": {
+    "name": "AMERICAN FOOTBALL FIASCO",
+    "tagline": "99 losses. One field. Zero chill.",
+    "description": "Over-the-top arcade football: call a play, snap, then run, pass, juke and crush your way down the field with turbo, Big Hits, Hot Streaks and Fiasco Cards, with announcers who lose their minds. Story, practice, exhibition and a hub half.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "American football",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick: move. R2 or Shift: turbo. X/O/Square (J/K/L): throw, juke, stiff-arm, lateral, dive tackle. Triangle (I/E): Fiasco Card.",
+    "tags": [
+      "arcade",
+      "story",
+      "versus",
+      "pixel art",
+      "comedy",
+      "boss fights"
+    ]
+  }
+}

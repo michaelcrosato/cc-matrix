@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 01:31:40",
+    "source": "Killer7 (Grasshopper Manufacture / Capcom, 2005)",
+    "plan": "PLAN.md",
+    "genre": "On-rails action-adventure shooter: rail movement, stop-and-aim first-person scanning and shooting, persona-switch puzzles, boss fights",
+    "perspective": "Third-person cinematic rail cameras that hard-cut while moving; first person while aiming; a schematic top-down map in the pause menu",
+    "tech": "my-3D2dge v0.85.2 (the 2D engine with all its modules, patched) and its 3D module v0.85.2; three.js r182 (WebGPU renderer, WebGL 2 fallback) and Rapier 0.19.3 from the jsDelivr CDN; AI Hub session client 1.4.0; plain JavaScript in one HTML file; Node 24 and Playwright 1.63.0 (Chromium) for tests.",
+    "artDirection": "The engine's native style: a PS1-resolution 3D picture, characters as pixel-art rigs drawn on cards, ink outlines, and the 3D module's Comic cel filter where the device can draw it (it falls back to the clean picture by itself). Stark white snow, black shadows, saturated red for blood and focus. New hats, accessories, weapons and skis on the rigs; about sixty new shapes; pen-drawn machinery.",
+    "animation": "The engine's procedural rigs (gaits, poses, moves, expressions) with new hats, accessories, weapons and skis (engine patches); skiing crouch and tuck, quick turns, switch flurries, freezing and thawing, giggle-ups and melting; first-person weapon models with bob, sway, kick and a reload each.",
+    "audio": "All in code: songs in the engine's step notation with explore and danger layers (a hotel lounge, an oompah polka, a band whose tracks are its weak spots), chip-voice sound effects, a WebAudio laughter synth (four styles, positional, muffled behind walls), Animalese-style gibberish voices typed letter by letter, and wind and room-tone beds.",
+    "online": "AI Hub Session Protocol v1, ghost mode: Echo Run, the Black Run as a 1 to 4 player time trial with the others as echoes. On its own: solo Echo Run against your recorded best run.",
+    "testing": "One command, node tests/run.mjs: 188 checks in 7 suites. Node (in a vm, driven by game.advance and game.debug): content validation; every area, node and boss phase; the systems (rails, aim, weapons, the scan, Whiteouts, crits, personas, freezing, gates, healing, saves, story skipping, dev sliders, voices, determinism); attract mode for 190 s; solo Echo Run; the AI Hub flow against a stand-in hub; and a scripted playthrough where an honest bot plays the whole demo on Piste from the cold open to the credits. Browser (headless Chromium 1243, Playwright 1.63.0, file://, the CDN routed to local copies): boot, keyboard play, the pause menu, Skip scene, Dev Mode sliders, mouse hover and clicks on the title menu, About & Credits page by page against exit-interview.json, mouse picking of rail junctions, attract from idle, PlayStation and Xbox glyphs with a stand-in DualSense, mouse buttons named in prompts, the touch-only notice and its SETTINGS button, no audio files in the build; the AI Hub harness at 2 players, at 4 players with latency 150, jitter 50 and loss 5, and host-leave. Screenshot reviews of every area, set piece and screen.",
+    "research": "None beyond the provided plan, the engine's handoff documents (README, API card and index, AI guide, asset card, the 3D module's header and starter slices) and the AI Hub README.",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "Session time about 2 h 45 min (2026-11-04 01:31 to about 04:15). API cost and token counts: unknown."
+  },
+  "testingFeedback": [
+    "About forty during the build: the content validator caught a missing area; the bot's playthrough about fourteen (softlocks, boss balance, unreachable things); the system suites four; the browser suites and screenshot reviews about twenty (layout, cameras inside walls, input timing, state leaking between scenes, the hub's progress reports, and the About pages dropping into attract mode after 10 s of reading and redrawing every glyph each frame).",
+    "Nine: every shot flew 3 degrees high (the recoil kicked before the ray left); no results after Grau (target 0 read as false), which stranded the player; the Palais safe out of reach; two things at one stop with only the nearest selectable; Room 7 doors shut by Whiteouts 200 m away; the Avalaugh's warm spots buried inside its body, so it could not be beaten; the cel filter drawing black without a GPU; Escape opening the pause menu under open screens; and the hub's progress reports missing, which failed its check.",
+    "The scripted playthrough: an honest bot playing the whole demo through the same intents a player makes. It found every softlock and the boss balance problems.",
+    "Headless screenshots for judging the look: SwiftShader draws a few frames a second and renders post filters black, so the pictures said little about a real screen."
+  ],
+  "engineFeedback": [
+    "That the 2D engine and its 3D module are one engine: fixed steps, input with rebinding, the pause menu, settings, saves, the rigs and the music clock carried straight into a 3D game, and the rigs drawn as cards gave the characters a look for free.",
+    "Yes. The 3D module's post filters render black in headless Chromium without a GPU, so I added a probe that falls back to the clean picture; a block of one stairs character is one flight, not a step per tile; the Shell's theme font wants a family list, not a font shorthand; and a frame is capped at 50 ms, so under a slow GPU game time crawls and tests had to wait on state, not time.",
+    "The rail system and its camera director: rails, junctions, ski physics, lifts and jumps, and Killer7-style hard-cut shots generated for every stretch of rail and checked for line of sight.",
+    "Building a 3D game on a 2D-first API from documentation spread over several files, and keeping a deterministic sim apart from a presenter that cannot be read back.",
+    "Every change is marked // S7 PATCH: in my-3d2dge.js. Font glyphs for umlauts, accents, dashes and the PlayStation symbols the prompts need; PlayStation as the default button symbols; in an AI Hub session Options is ignored while Create is held; seven new Humanoid hats; head and body accessories (goggles, moustache, beard, cigar, grin, shades, pack, bandolier, badge, braces, camera); slit eyes; a visor that hides the face; seven new weapons (revolver, pistol, rifle, shotgun, ski poles, alphorn, launcher); skis; and one doc comment reworded. The 3D module is unchanged.",
+    "A rail-and-camera primitive for cinematic games (shots along a path with line-of-sight checks), and post filters that fall back by themselves where the GPU path fails."
+  ],
+  "promptFeedback": [
+    "Its clarity about the finished product: a complete vertical slice with dev tools, attract mode, multiplayer and controller-first UX, plus a detailed plan to build from.",
+    "The plan was written for another run's names, model and date, so file names had to follow TASK.md instead; and \"Online\" pointed to a multiplayer library while the source is a single-player game.",
+    "Building the whole plan in one go: ten areas, three bosses, seven playable characters, and every system around them.",
+    "Scope the plan to the time available, or name the features that matter most, and say whether headless screenshots are a reliable judge of the look."
+  ],
+  "aiHub": {
+    "name": "SKILLER7",
+    "tagline": "Seven Killers, One Mountain",
+    "description": "Seven killers share one body and one snowbound mountain. Ride the rails, stop, scan for the laughing invisible Whiteouts and shoot the warm spot.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Killer7",
+    "series": "",
+    "players": "1–4",
+    "controls": "Hold W/✕ to move, RMB/L2 aim, LMB/R2 shoot, Space/L1 scan, Q/R1 skill, Tab/L1 switch killer, E/△ interact",
+    "tags": [
+      "3d",
+      "story",
+      "first-person",
+      "third-person",
+      "boss fights",
+      "retro"
+    ]
+  }
+}

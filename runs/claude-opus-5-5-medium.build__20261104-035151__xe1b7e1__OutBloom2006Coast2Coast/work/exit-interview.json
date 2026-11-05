@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 03:51:51",
+    "source": "OutRun 2006: Coast 2 Coast (SEGA / Sumo Digital, 2006)",
+    "plan": "PLAN.md",
+    "genre": "Arcade road racing: an OutRun-style checkpoint racer with branching routes, plus a passenger-request layer (Love in Bloom) and a mission career (Coast 2 Coast Tour)",
+    "perspective": "Third-person chase camera on a pseudo-3D sprite-scaled road that forks (chase, high and bumper cameras); side-view vignettes for endings and the finale; an overhead stylised island map for the career",
+    "tech": "my-3D2dge v0.85.2 (handoff package, commit 4390a98) with six engine changes (analog triggers, the hub's Create + Options guard, a PlayStation glyph default, a richer chip synth, continuous sound loops, a 10-foot theme for the standard screens); plain JavaScript, Canvas 2D and Web Audio; the AI Hub session client 1.4.0 (verbatim); bundled into one HTML file by a Node build script; Playwright 1.63.0 for browser checks",
+    "artDirection": "The engine's native pixel art at 480x270 (expanding to any screen shape): a forking pseudo-3D road with 13 biome kits, about 60 code-drawn roadside pieces and landmarks, cars built from shaded 3D boxes, E.tones shading, a pixel-safe dithered bloom, lens flare, a night grade with emissive glows",
+    "animation": "The engine's Humanoid rigs (poses, expressions, portraits, breathing) for the cast; code-driven animation for cars (yaw, drift angle, full spins, suspension bounce, wheels, lights), occupants (hair and scarves streaming, arm poses), traffic (blinkers, lane changes, spins), request objects, scenery (turbines, waterfalls, neon), and screen particles",
+    "audio": "All in code: 11 original songs on the extended chip synth (Latin fusion, Balearic pop-funk, jazz shuffle, Eurobeat, city pop, acid jazz, a synth ballad, title, menu, results and credits themes) with a Full Bloom sparkle layer, 11 jingles, about 45 synthesised sound effects, per-car engine notes, tyre squeal, wind and ambience loops; voices are Animalese-style formant babble with moods",
+    "online": "AI Hub Session Protocol v1 in ghost mode (1-4 players): the game's own card, start sync on the hub clock, ghost cars sent 10 times a second, progress once a second, a time result at the finish and a score on time-up; local split-screen Versus for two",
+    "testing": "Headless suites behind one command (node tests/run.mjs: failures and a one-line count) driving the game through game.advance and scripted input, including bot playthroughs of all 16 routes; browser checks with Playwright (the bundle from file://, the engine's check tool, the AI Hub harness served on 127.0.0.1 with an OS-picked port, touch emulation) and screenshots",
+    "research": "None beyond the provided material: the engine's handoff docs (README, API card, index, road kit and module), the AI Hub README and harness, and the source facts in the plan's research notes; no new web research",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 25 real issues, plus a few mistakes in my own test setups. Scripts caught the bot steering the wrong way in drifts, rear-ending traffic and running out of time on every route, a drift that counter-steering could not end, two crashes in rival missions, request objects spaced too tightly for anyone to reach, a slider value off by floating point, and a hub message guard. Screenshots caught missing font glyphs, a windscreen drawn over the people, overblown night glows, oversized banners, cars filling the split screen, ending props hiding the characters and crash cushions in the middle of the road.",
+    "Three: every rival mission stopped with a TypeError at the first fork or at the finish (rivals had no fork-warning or split records), and every song lost its melody because the bar separators in the melodies were parsed as NaN notes.",
+    "The bot playthrough of all 16 routes to all 5 goals: it exposed the bot's traffic handling, set the clock and stage lengths, and is now the regression net for the whole game. The official AI Hub harness run on the bundle was a close second.",
+    "The engine checker's camera-view sweep (iso, three-quarter, top-down, brawler screenshots), which means nothing for a pseudo-3D road racer, and its look notes taken from a frame mid-transition."
+  ],
+  "engineFeedback": [
+    "Exact fixed-step headless play: game.advance with input.tap and hold drove the whole game (menus, races, attract mode, hub sessions) in Node with no browser, deterministically. The free pause, settings, rebinding and Humanoid rigs with live portraits saved a great deal.",
+    "Yes. The road module draws a single road, so forks meant writing my own renderer. Keyboard drop-in for player two needs a real canvas, so it cannot be tested headless. The pixel font has no middle dot, triangles, ellipsis, tick or shamrock; I only learned that from question marks in screenshots.",
+    "The forking pseudo-3D road: two branches with their own continuations into the next stages, per-side grounds and edges, tunnels and spans, and a seamless switch from one stage to the next. Then the car renderer that builds every car from shaded 3D boxes at any yaw.",
+    "Fitting a custom road into the engine's draw model (overlays, split-screen viewports, a Backdrop drawn through a stand-in renderer) while keeping it pixel-crisp, and tuning handling and audio by numbers and screenshots alone.",
+    "Six changes in my-3d2dge.js, each marked OutBloom E#: analog trigger values (input.analog) for progressive throttle and brake; Options ignored while Create is held in a hub session; a PlayStation glyph default with Xbox as the option; chords, accents, plucks, detune, lowpass and Latin percussion in the music synth; audio.loop for continuous engine, tyre and wind sounds; and a game theme, CSS and Help screen for the standard HTML menus so they read at TV distance.",
+    "Make the road module branch: junctions with two continuations, per-side grounds and roadside strips, built in. It is the one structure every OutRun-style game needs and the largest thing I had to build."
+  ],
+  "promptFeedback": [
+    "The definition of done is concrete and testable: one file, a dev mode with sliders and reset, attract mode after 10 seconds, the touch-only notice, PlayStation and Xbox glyphs, AI Hub conformance, and the exit interview. Paired with a detailed plan, it left little to guess.",
+    "The plan's scope (15 stages, 14 missions, 45 ending lines, 11 songs) set against a medium-effort run, and the plan's file names carrying another run's effort and timestamp. \"The mouse clicks things in the world\" is hard to place in a racing game.",
+    "Producing that much content (stages, music, voices, lines, endings) and tuning the feel of driving without hearing the sound or holding a pad.",
+    "Give a priority order for when time runs short, name the browser and hardware the game is judged on, and allow a way to check audio (even an automated loudness or spectrum check)."
+  ],
+  "aiHub": {
+    "name": "OutBloom 2006: Coast 2 Coast",
+    "tagline": "One day. One road. Every flower in bloom.",
+    "description": "An arcade road racer across the flowering island of Bellafiore: pick your route at every fork, drift the bends, slipstream the traffic and keep your demanding passenger happy before the sun sets.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "OutRun 2006: Coast 2 Coast",
+    "series": "OutRun",
+    "players": "1–4",
+    "controls": "Steer: stick/←→/A D · Gas: R2/✕/W · Brake: L2/□/S · Drift: ○/Space · Pause: Options/Esc",
+    "tags": [
+      "arcade",
+      "vehicles",
+      "pixel art",
+      "retro",
+      "comedy",
+      "versus"
+    ]
+  }
+}

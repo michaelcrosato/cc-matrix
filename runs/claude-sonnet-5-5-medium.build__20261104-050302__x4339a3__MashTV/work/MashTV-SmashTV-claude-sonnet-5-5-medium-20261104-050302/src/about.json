@@ -1,0 +1,58 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-04 05:03:02",
+  "source": "Smash TV (Williams Electronics arcade game, 1990)",
+  "plan": "PLAN.md",
+  "genre": "Twin-stick arena shooter (arcade), with co-op for 1-4 players and a route choice between rooms",
+  "perspective": "Fixed single-screen arena seen from a high three-quarter studio camera (a top-down camera is a Settings option)",
+  "tech": "my-3D2dge v0.85.2 full edition (4 small patches: HOOKS export, PlayStation/Xbox glyph setting, Arcade input per player, audio bus getter); AI Hub client aihub-session 1.4.0 inlined unmodified; plain JavaScript in one IIFE; Node v24.22.1 and Playwright 1.63.0 for the tests",
+  "artDirection": "A retro-future TV studio on the engine's native PS1-style look: HD Humanoid rigs, textured tile floors, neon, chrome, marquee bulbs, confetti instead of gore, canvas lighting on every scene, and new string sprites, painters and set dressing for every enemy, boss and prop",
+  "animation": "The engine's rig and pose system (gait, point, roll, hurt, die, cheer, hips, wave, bash and throw moves) plus new motion: the mime in a box, the brute's stomp and stun wobble, hop squash on the clapbots, the wheel's eased spin with pointer clicks, boss arm recoil and tread scroll, the Starmaker's mic-drop slam and the Network's channel flips",
+  "audio": "Everything is synthesized in code with the Web Audio API through the engine's audio bus: 8 original songs with layers (generated from seeded melodies and hand-written motifs), about 90 sound effects, Animalese-style formant voices for Lance, Penny, the Announcer, the Network and Mashy, and a synthesized crowd. No audio files.",
+  "online": "AI Hub Session Protocol v1, shared-world mode, 1-4 players (host, client and server copies; the Lightning Round); local co-op for 1-4 on one screen; no other network use",
+  "testing": "Headless only, no subagents: scripted suites on game.advance and game.debug (core, input, contestant, weapons, economy, ratings, enemies, rooms, a sweep of every room with god-mode bots, all three bosses, a scripted full playthrough with the Green Room ending, a losing run through CONTINUE and Game Over, UI, dev mode, attract mode, touch-only, audio, determinism), a fake-hub netcode loopback (latency, jitter, loss, rate limit, a server copy), the real AI Hub harness in 4 scenarios, and a Playwright browser pass with screenshots",
+  "research": "none: written from general knowledge of Smash TV (1990); every name, line, level, enemy, boss and tune is original",
+  "environment": "Claude Code CLI (headless); Linux (WSL2); browser unknown (tested in Playwright Chromium 1243 with SwiftShader)",
+  "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+  "usage": "unknown"
+ },
+ "testingFeedback": [
+  "About 12 real issues: the game failed to load at first (a module used the World class before it existed), the map card froze the second time it appeared (scene objects are shared, so a 'left' flag stayed set), the Green Room crashed on the first prize (no prize table for episode 4), room 2-2 had no key (the belt rule was never written), player names showed 'undefined' (an undefined option overwrote the default), the attract mode took a fade to exit, a layer warning on boss songs, storage not persisting headless, plus several test-setup slips and some HUD overlaps that screenshots showed.",
+  "3 critical or game-breaking: the load-order crash, the frozen map card (it would have stopped every run after room 2), and the Green Room prize crash.",
+  "The scripted whole-game playthrough with two god-mode bots, together with the all-rooms sweep: they walk every scene in order and found the stuck card and the crashes in minutes. The fake-hub loopback and then the real AI Hub harness were next, because the netcode had to be right the first time.",
+  "The pixel-variance 'draws a real frame' checks and the exact-number unit checks (fire rate within a margin, slide distance): they passed from the start and never caught anything the playthrough did not. Balance by bot also taught little: the bot clears rooms in 17-28 s, well under the 50-90 s target, because it aims perfectly."
+ ],
+ "engineFeedback": [
+  "The Humanoid rigs: dressed, posed and lit they look like a PS1 game with almost no art work, and every attack comes with a usable move (bash, throw). Also headless game.advance with exact steps, which made a scripted playthrough and a netcode loopback possible, and the standard pause menu, settings and Controls screen that came for free.",
+  "Yes, several times: Input.use() clears held keys, so switching the preset in the step a key goes down drops it; scene objects are reused, so state set in enter() leaks between visits; game.go() fades, so the scene changes a few steps later; game.after() timers die on a scene change; E.store does not persist headless; the 5x7 font has no middle dot or PlayStation symbols; Bullets.hit needs the team name you gave it.",
+  "The whole shared-world netcode (snapshots, interpolation, claims, client prediction for the own contestant), the UI kit with bulb-framed focus lists and glyph icons for PlayStation, Xbox, keys and mouse, the Babble formant voices and the song generator, the three-boss framework, the wave/room data format, the bot, dev mode and the attract director.",
+  "Keeping one fixed arena readable at any screen shape: fitting the zoom to the walls while tall bosses and the HUD need room above them, and keeping arrows as 'aim' in play but 'navigate' in menus on the same device, which needs a hook that swaps presets every step.",
+  "Four small patches in engine/PATCHES.md: P1 exports HOOKS so the input preset can be swapped each step; P2 makes the button-symbol setting default to PlayStation with an Xbox option applied to every player; P3 lets E.Arcade take initials from a chosen player's input and take the CONTINUE press from any player; P4 exposes the audio effects bus so voices obey volume and mute.",
+  "Per-player input presets that switch without clear(), with menu navigation as a separate layer. Keys held across a preset change are lost, and an arrow cannot be 'aim' for the game and 'move' for the menu without a hook."
+ ],
+ "promptFeedback": [
+  "The plan was a real blueprint: exact numbers for every weapon, enemy and room, a file layout, a message table for the netcode, a milestone order that put the risky netcode early, and a test table that said what each suite must prove. Having the names of engine APIs already checked saved a lot of guessing.",
+  "A few small clashes: Mashy's body armor is given two ways, the jumbotron is world-space in one section and a HUD element in another, 'the first player into an exit picks it' versus a team route, and the plan lists 18 hand-written rooms next to a 'medium effort' budget. TASK.md and PLAN.md agree on the big things.",
+  "Breadth. Three multi-phase bosses, nine enemy types, 18 rooms, four input devices, local co-op, a shared-world netcode that must pass a strict harness, a dev mode, an attract mode, and 10-foot UI, all checked only with headless tools and a few screenshots.",
+  "Mark which parts are must-have and which are polish, so the work can be cut by priority instead of by running out. Add the known engine gotchas (presets clearing held keys, scene reuse, store headless). Provide skeleton test files and the fake hub, since every builder writes them again."
+ ],
+ "aiHub": {
+  "name": "MASH TV",
+  "tagline": "Mash 'em! Cash 'em! Survive the show.",
+  "description": "A 1-4 player twin-stick arena shooter inside the deadliest game show on TV: blast through studio rooms of goons and robots, grab cash and absurd prizes, keep the ratings up and survive to the Season Finale.",
+  "type": "Game",
+  "genre": "Shooter",
+  "source": "Smash TV",
+  "series": "",
+  "players": "1–4",
+  "controls": "WASD/left stick move · mouse/right stick aim & fire · Space/L2 slide · E/R1 Showstopper · Q/L1 Showboat",
+  "tags": [
+   "arcade",
+   "co-op",
+   "top-down",
+   "pixel art",
+   "comedy",
+   "boss fights"
+  ]
+ }
+}

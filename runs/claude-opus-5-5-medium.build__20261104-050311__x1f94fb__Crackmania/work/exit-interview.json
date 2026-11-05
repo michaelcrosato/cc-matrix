@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:03:11",
+    "source": "TrackMania (2003, Nadeo)",
+    "plan": "PLAN.md",
+    "genre": "Arcade racing (time attack) and track-building puzzle",
+    "perspective": "Third-person chase camera (far, close, hood), orbiting editor camera, TV cameras in replays",
+    "tech": "my-3D2dge v0.85.2 (2D engine + 3D engine), three.js r182 (WebGPU / WebGL 2), Rapier 0.19.3, esbuild (build), Playwright (tests), Node 24",
+    "artDirection": "The engine's native low-res toon 3D with ink outlines, code-drawn pixel textures and pen-drawn props and cars",
+    "animation": "The engine's rigs, poses and portraits plus code-driven car, prop, camera and UI animation",
+    "audio": "Engine chip-synth songs and stings, a Web Audio car engine synth, Animalese-style gibberish voices",
+    "online": "AI Hub Session Protocol v1, ghost mode (3-minute time attack, others as ghosts)",
+    "testing": "Headless Node suites (turtle, blocks, physics, race, ghost, bot, campaign, editor, puzzle, survival, hotseat, split, ui, online with a fake hub, a scripted whole-game playthrough through the real menus) using game.advance and game.debug; Playwright checks of the built file from file:// (boot, WebGL 2, mode scenes, attract, touch-only gate); the AI Hub harness in 3 scenarios; screenshots for looks",
+    "research": "None during the build: used the research notes in PLAN.md (TrackMania 2003 modes, environments, cars, editor and medals); no web lookups",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 20: the racing line drove off the road; wall shape-casts tunnelled at block seams and killed speed; two tracks had jumps the cars could not make; road and base plate were coplanar for the wheel rays; canyon gaps had no hole; cached physics was freed under the title demo; scene name vs scene object; two temporal-dead-zone errors at boot and in the race; 4 AI Hub copies too slow to say hello; a focus/slider double-read of left and right; the split-screen HUD for player 2 and player 1 seeing no car (the pen empties after each viewport renders, so each viewport must draw its parts again); missing font glyphs; camera too close; hint box over the road; Enter skipping the intro also respawned; results and About layout bugs; the garage camera outside its room; a blank attract segment.",
+    "6: the boot-time and race-time temporal-dead-zone errors (game would not start or race crashed), freed physics crashing the title, cars falling through walls on elevated bends, jumps no car could clear on two finale tracks, and the AI Hub 4-player round failing its hello.",
+    "The bot suite: the autopilot driving all 15 tracks and 6 puzzle solutions at skill 1 with no respawns. It exposed the wall-collision, racing-line, coplanar-ground and jump-speed problems and then guarded every tuning change. A close second was the AI Hub harness, which caught the slow-hello failure.",
+    "The canvas-readback \"picture not blank\" check: reading pixels back from the WebGL canvas returned black under headless Chromium, so it reported a false failure until I measured the screenshot instead."
+  ],
+  "engineFeedback": [
+    "The 3D layer sits on the 2D engine, so one fixed-step loop, input with rebinding and glyphs, the pause menu, settings, boot screen, sound and headless game.advance all came for free; the pen with outlines made cars, props, gates and crowds fast to draw, and the whole engine loads in Node for tests.",
+    "Yes, a few times: game.scene is the scene object (the name is game.sceneName); game.go fades for 0.22 s so tests must wait; input.repeat reads once per step so two callers fight; overlays in a split screen are clipped but not translated, and world.pen empties after every viewport's render, so each viewport has to draw its parts again; the terrain starts at (0, 0) so the track grid needed an offset; and a second World3D drawn from another scene showed shadows but not its pen parts (I moved that segment into the environment world).",
+    "The track system and car: blocks with exact port frames, a ribbon mesher for render and collision geometry, our own Rapier query world, a surface-following car that holds loops at speed and drops off when slow, and the autopilot that drives every track (tests, medals, rivals, attract).",
+    "Getting stunt racing (loops, banks, jumps) onto an engine whose vehicle is a rolling ball: none of world.vehicle or world.track could do loops, so the road, physics queries, camera up vector and ghost rendering all had to be built or patched.",
+    "E1 pen.frame(f, r, u) for any orientation; E2 a camera pose with its own up vector; E3 translucent ghost batches; E4 analog trigger values (input.analog); E5 PlayStation glyphs by default with Xbox as the option; E6 exported TOON_BANDS and a lambert helper. All listed in engine/CHANGES.md.",
+    "Make split-screen overlays viewport-relative (or document it), and add a road/track primitive that supports arbitrary up vectors (loops and banks) with ray queries, so racing games do not need their own physics world."
+  ],
+  "promptFeedback": [
+    "Exact deliverables (file names, the exit-interview shape, the four report sections) and a detailed plan that had already de-risked the hard parts (bundling, the car model, the AI Hub protocol), plus clear rules for sharing the machine.",
+    "The plan and TASK.md disagree on names (the plan was written for another run: max effort, another date); TASK.md wins, but it took a moment to be sure. \"Usage\" asks for cost and tokens the model cannot see.",
+    "Scope: a TrackMania-style game with race, puzzle, survival, a track editor, hot seat, split screen, AI Hub online, replays, a garage, Dev Mode, attract mode and a 10-foot UI, all in one session and one file.",
+    "Rank the features (must / should / could) so a single session can make deliberate cuts, and give the agent its token and time usage so the Usage field can be answered."
+  ],
+  "aiHub": {
+    "name": "CRACKMANIA",
+    "tagline": "Crack the clock.",
+    "description": "Block-built stunt tracks, loops and canyon jumps against the clock: race for medals, solve track puzzles, survive the Ghost Guild and build your own tracks.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "TrackMania (2003)",
+    "series": "TrackMania",
+    "players": "1–4",
+    "controls": "R2/W gas, L2/S brake, left stick/arrows steer, Circle/Enter respawn, Triangle/R restart",
+    "tags": [
+      "3d",
+      "arcade",
+      "vehicles",
+      "versus",
+      "retro",
+      "low-poly"
+    ]
+  }
+}

@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+import { pathToFileURL } from 'node:url';
+const url = pathToFileURL('/home/micha/dev/cc-matrix/runs/claude-opus-5-5-xhigh.build__20261104-050256__x4339a3/work/MashTV-SmashTV-claude-opus-5-5-xhigh-20261104-050256/../MashTV-SmashTV-claude-opus-5-5-xhigh-20261104-050256.html').href;
+const b = await chromium.launch(); const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+await p.goto(url + '?x=1#room=3-5&players=2&bot=1&god=1'); await p.waitForTimeout(3500);
+await p.evaluate(() => { const w = MT.play.world; MT.lines.clear(); for (const [k, x, y] of [['goon', 80, 80], ['clapbot', 120, 70], ['popper', 160, 70], ['mime', 200, 70], ['disco', 240, 80], ['discoBig', 290, 90], ['heckler', 70, 150], ['hecklerKing', 110, 160], ['tank', 170, 170], ['snake', 250, 160], ['brute', 310, 170]]) { const e = w.spawnEnemy(k, x, y, { inside: true }); e.stunT = 99; } for (const c of w.contestants) c.botOpts = { noFire: true, hold: [184, 215] }; });
+await p.waitForTimeout(1500); await p.screenshot({ path: 'shots/enemies.png' });
+await p.evaluate(() => { const w = MT.play.world; for (const e of w.enemies) e.stunT = 0; MT.giveItem(w, w.contestants[0], 'laser'); MT.giveItem(w, w.contestants[1], 'records'); MT.giveItem(w, w.contestants[1], 'shield'); for (const c of w.contestants) c.botOpts = {}; });
+await p.waitForTimeout(2500); await p.screenshot({ path: 'shots/enemies2.png' });
+console.log(await p.evaluate(() => MT.game.errors.map(e => e.message)));
+await b.close();

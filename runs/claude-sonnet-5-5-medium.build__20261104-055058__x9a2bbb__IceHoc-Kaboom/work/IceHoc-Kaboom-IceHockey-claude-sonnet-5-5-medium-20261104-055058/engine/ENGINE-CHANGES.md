@@ -1,0 +1,6 @@
+# Engine changes (my-3D2dge v0.85.2, handoff package copy)
+1. **Font** (`G57`): added `✕ ○ □ △` (5x7) so PlayStation prompts draw on the canvas instead of `?`.
+2. **Gamepad poll**: while button 8 (Create) is held, button 9 (Options) is ignored. AI Hub reserves Create + Options. Harmless outside the hub.
+Not changed (done in the game instead): hockey sticks, pads, skates, jersey numbers and goalie masks are drawn by the game over the Humanoid rig with `r.queue`; the organ, brass and babble voices are synthesized by the game on `audio.ctx`.
+3. **Audio buses**: `audio.bus(name)` (`master`, `sfx`, `music`, `voice`, `crowd`) returns the Web Audio gain node; new `voice` and `crowd` buses are made in `_init`, routed to master, and scaled by `audio.voiceVolume` / `audio.crowdVolume` (× the Effects volume) in `applyVolume`. Why: the babble voices, goal horn, organ and crowd bed are synthesized by the game on `audio.ctx` and need their own volume settings.
+4. **Dialog voice hook**: if `talk.voice` (or the `voice` option) is a function, `E.Dialog` calls `voice(letterIndex, pageText, dialog)` for each newly shown letter instead of `sfx(voice)`. Why: each speaker babbles in their own Animalese-style voice.

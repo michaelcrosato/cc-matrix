@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+const p = await b.newPage({ viewport: { width: 960, height: 540 } });
+await p.goto('file://' + process.cwd() + '/../Crackmania-TrackMania2003-claude-opus-5-5-medium-20261104-050311.html');
+await p.waitForFunction(() => window.__crack && window.__crack.game, null, { timeout: 120000 }); await p.waitForTimeout(1500);
+await p.evaluate(() => { __crack.game.addPlayer({ keys: 'right' }); __crack.app.modes.splitRace('S2'); }); await p.waitForTimeout(2500);
+await p.keyboard.press('Enter'); await p.evaluate(() => { __crack.game.advance(6); const w = __crack.app.view.world; window.__log = []; w.cameras.forEach((c, i) => { const o = c.place.bind(c); c.place = (a, b) => { const r = o(a, b); window.__log.push([i, a, b, r.position.toArray().map(v => +v.toFixed(2)), r.fov.toFixed(1), r.aspect.toFixed(2)]); return r; }; }); }); await p.waitForTimeout(400);
+await p.waitForTimeout(300); console.log(JSON.stringify(await p.evaluate(() => window.__log.slice(-4)))); console.log(await p.evaluate(() => { const R = __crack.app.race, w = __crack.app.view.world; return JSON.stringify({ modes: R.players.map(P => P.cam.mode), cams: w.cameras.map(c => [c.mode, c.pose && [c.pose.x | 0, c.pose.y | 0, c.pose.z | 0], c.near, c.far]), vps: __crack.game.viewports.map(v => [v.i, v.x, v.y, v.w, v.h]) }); }));
+await p.screenshot({ path: 'check-output/split.png' });
+await b.close();

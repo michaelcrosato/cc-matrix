@@ -1,0 +1,28 @@
+// Screenshots for eyes (not assertions): node tests/shots.mjs [names...] -> shots/*.png at 1280x720 (or --size WxH)
+import { chromium } from 'playwright';
+import { mkdirSync } from 'node:fs';
+const root = new URL('..', import.meta.url).pathname, page0 = 'file://' + root + 'game/index.html';
+const args = process.argv.slice(2), sz = (args.find(a => /^\d+x\d+$/.test(a)) || '1280x720').split('x').map(Number), only = args.filter(a => !/^\d+x\d+$/.test(a));
+mkdirSync(root + 'shots', { recursive: true });
+const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
+const page = await browser.newPage({ viewport: { width: sz[0], height: sz[1] } });
+const errs = [];
+page.on('pageerror', e => errs.push(String(e.stack || e)));
+page.on('console', m => { if (m.type() === 'error' || (m.type() === 'warning' && m.text().startsWith('my-3D2dge'))) errs.push(m.text()); });
+await page.goto(page0); await page.waitForTimeout(1500);
+const ev = (f, a) => page.evaluate(f, a);
+const shot = async (n) => { if (only.length && !only.includes(n)) return; await page.screenshot({ path: root + 'shots/' + n + '.png' }); console.log('shot', n); };
+const play = async (classes, floor, sec = 1.5, setup) => { await ev(([c, f, s]) => { const g = My3D2dge.current; g.debug.start(c, { seed: 3 }); g.debug.gotoFloor(f, { card: false }); }, [classes, floor]); await page.waitForTimeout(400); if (setup) await ev(setup); await page.waitForTimeout(sec * 1000); };
+await shot('title');
+await ev(() => My3D2dge.current.go('select', { loop: 1 })); await page.waitForTimeout(900); await shot('select');
+await ev(() => My3D2dge.current.go('howto', {})); await page.waitForTimeout(600); await shot('howto');
+await ev(() => My3D2dge.current.go('about', {})); await page.waitForTimeout(600); await shot('about');
+await play(['berserker'], 0, 1.5); await shot('floor1');
+await play(['berserker', 'shieldmaiden', 'ranger', 'hexer'], 1, 2, () => { const g = My3D2dge.current; g.debug.CHEAT.god = true; for (let i = 0; i < 4; i++) g.debug.bot(i, true, true); }); await shot('floor2-four');
+await play(['hexer'], 4, 2, () => { const g = My3D2dge.current; g.debug.CHEAT.god = true; g.debug.bot(0, true, true); }); await shot('floor4');
+await play(['ranger'], 8, 2, () => { const g = My3D2dge.current; g.debug.CHEAT.god = true; g.debug.bot(0, true, true); }); await shot('floor7');
+await play(['berserker', 'ranger'], 10, 3.5, () => { const g = My3D2dge.current; g.debug.CHEAT.god = true; g.debug.bot(0, true, true); g.debug.bot(1, true, true); }); await shot('boss');
+await ev(() => { const g = My3D2dge.current; g.pause(); }); await page.waitForTimeout(500); await shot('pause');
+await ev(() => { const g = My3D2dge.current; g.resume(); g.debug.openDev(); g.debug.DEV.page = 3; }); await page.waitForTimeout(400); await shot('dev');
+console.log(errs.length ? 'ERRORS:\n' + [...new Set(errs)].slice(0, 12).join('\n') : 'no errors');
+await browser.close();

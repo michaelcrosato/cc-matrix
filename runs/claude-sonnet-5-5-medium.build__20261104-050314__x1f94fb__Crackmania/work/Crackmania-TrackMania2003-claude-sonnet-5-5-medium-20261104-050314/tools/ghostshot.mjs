@@ -1,0 +1,10 @@
+import { chromium } from 'playwright';
+import { fileURLToPath } from 'node:url';
+const FILE = fileURLToPath(new URL('..', import.meta.url)) + '../Crackmania-TrackMania2003-claude-sonnet-5-5-medium-20261104-050314.html';
+const b = await chromium.launch({ args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+const p = await (await b.newContext({ viewport: { width: 960, height: 540 } })).newPage();
+const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto('file://' + FILE + '?backend=webgl#race/D1'); await p.waitForTimeout(8000);
+await p.evaluate(() => { const X = window.__crack, S = X.S; S.noStory = true; const l = S.arena.course.line; S.profile.data.ghosts.D1 = { pts: l.map(q => [Math.round(q.x), Math.round(q.y), Math.round(q.z), Math.round(q.angle * 1000)]), splits: [] }; S.talk.cur = null; S.talk.q = []; S.startRace(S.def, { mode: 'race' }); });
+for (let i = 0; i < 4; i++) { await p.keyboard.press('Enter'); await p.waitForTimeout(400); } await p.waitForTimeout(11000); await p.keyboard.down('KeyW'); await p.waitForTimeout(500); await p.evaluate(() => { const S = window.__crack.S; S.best.pts = [[S.car.x + 260, S.car.y + 20, S.car.z, 0]]; }); await p.waitForTimeout(1200);
+console.log(await p.evaluate(() => { const S = window.__crack.S; return JSON.stringify([S.ghost && [S.ghost.x, S.ghost.y, S.ghost.z, S.ghost.visible, S.ghost.data.ghost], S.car.x, S.car.y, S.best && S.best.pts.length]); })); await p.screenshot({ path: 'check-output/ghost.png' }); console.log(errs); await b.close();

@@ -1,0 +1,10 @@
+import { chromium } from '../tools/node_modules/playwright-core/index.mjs';
+const url = process.argv[2];
+const browser = await chromium.launch({ executablePath: process.env.HOME + '/.cache/ms-playwright/chromium-1243/chrome-linux64/chrome', args: ['--no-sandbox'] });
+const page = await browser.newPage({ viewport: { width: 1200, height: 800 } });
+const errs = []; page.on('pageerror', e => errs.push(e.message));
+await page.goto(url);
+await page.waitForFunction(() => document.body.dataset.complete === 'true', null, { timeout: 150000 }).catch(e => console.log('timeout waiting'));
+const r = await page.evaluate(() => JSON.stringify(window.__hubCheck || null));
+console.log(r.slice(0, 3000)); console.log('pageerrors', JSON.stringify(errs.slice(0, 5)));
+await browser.close();

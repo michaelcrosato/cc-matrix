@@ -1,0 +1,20 @@
+import { boot, suite } from './lib.mjs';
+export default async () => {
+  const S = suite('core'), g = boot(), MT = g.MT;
+  S.check('tuning defaults', MT.TDEF.every(d => MT.T[d[0]] === d[2]));
+  MT.setTune('playerSpeed', 120, false); S.check('set a tune', MT.T.playerSpeed === 120);
+  MT.setTune('playerSpeed', 999, false); S.check('tunes clamp to their range', MT.T.playerSpeed === 160);
+  MT.resetTunes('playerSpeed'); S.check('reset one tune', MT.T.playerSpeed === 95);
+  MT.setTune('cashMul', 2); MT.T.cashMul = 1; MT.loadTunes(); S.check('tunes persist', MT.T.cashMul === 2); MT.resetTunes(); S.check('reset all', MT.tunesChanged().length === 0);
+  MT.seed(42); const a = [MT.R('spawn'), MT.R('ai')]; MT.seed(42); const b = [MT.R('spawn'), MT.R('ai')];
+  S.check('random streams are deterministic', a[0] === b[0] && a[1] === b[1]);
+  let got = 0; const off = MT.on('x', d => { got += d; }); MT.emit('x', 2); off(); MT.emit('x', 5); S.check('event bus on/emit/off', got === 2);
+  S.check('door cells', MT.AR.doorCells.N.length === 3 && MT.AR.doors.E.x === 360);
+  const [x, y] = MT.cell(0, 0); S.check('cell to world', x === 24 && y === 24); S.check('world to cell', MT.toCell(184, 120).join() === '10,6');
+  S.check('interior bounds', MT.inInterior(16, 16) && !MT.inInterior(10, 120));
+  S.check('every room has a valid shape', Object.values(MT.ROOMS).every(r => r.id && r.name && (r.waves || r.boss || r.survive || r.bonus)));
+  S.check('every exit leads to a room', Object.values(MT.ROOMS).every(r => Object.values(r.exits || {}).every(d => MT.ROOMS[d])));
+  S.check('9 golden keys in the episodes', ['1', '2', '3'].reduce((n, e) => n + MT.EPISODES[e].rooms.filter(id => MT.ROOMS[id].key).length, 0) === 9);
+  S.check('18 prizes', [1, 2, 3].reduce((n, e) => n + MT.PRIZES[e].length, 0) === 18);
+  return S;
+};

@@ -1,0 +1,12 @@
+import { boot } from './harness.mjs';
+const h = boot();
+const { O, game } = h;
+let res = null;
+O.flow = { quickMeet: id => ({ mode: 'single', seed: 7, events: [id], players: [], difficulty: 'Normal', medals: {}, yikes: {}, rival: 'TRB' }), eventDone: r => { res = r; } };
+O.meet = O.flow.quickMeet('sprint');
+game.start({ scenes: O.scenes, scene: 'ev:sprint' });
+game.advance(0.1);
+h.until(() => res, 60);
+console.log(h.errors());
+if (res) for (const r of res.rows) console.log(r.rank, r.nation, r.display, r.points, r.notes.join(','));
+else console.log('no result', O.Run.ctx.phase, O.Run.ctx.s && O.Run.ctx.s.phase);

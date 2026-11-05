@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:35:43",
+    "source": "European football (over the top arcade style)",
+    "plan": "PLAN.md, written by claude-opus-5-5 at max effort, in the work folder",
+    "genre": "Arcade sports: two-a-side football with a five-round cup run (the plan asks for five-a-side)",
+    "perspective": "Elevated three-quarter camera that follows the ball (the engine's threequarter view)",
+    "tech": "my-3D2dge v0.85.2 engine (sports kit as the base), plain JavaScript, one HTML file; Node v24.22.1 for the test; Python 3 with Playwright for the browser check (version unknown)",
+    "artDirection": "The engine's native low-resolution pixel style: sprite rigs in club colours, a stadium built from tiles, procedural crowd sprites, pixel title type",
+    "animation": "The engine's Humanoid rig and procedural Attack moves (kick and slide); no mocap clips",
+    "audio": "All made in code with the engine's audio: sound effects, a title and match loop, and an anthem loop; no audio files; no voices (commentary is on-screen text)",
+    "online": "none",
+    "testing": "Headless Node test (tools/test.mjs, 26 checks: a full CPU match, a cup run, Europhoria, the attract demo, the dev panel) and a headless Chromium check (tools/browser-check.py) for page errors and screenshots",
+    "research": "none beyond reading the plan, the engine's docs and its sports kit",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser: headless Chromium",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "Three failures in the first run, all fixed: the test's forced full time ignored the kickoff mode, and two taps in one step were read as one press (a test problem). Reading the code before the first run also found two bugs: the attract demo returned before stepping its match, and a flag was used as an object.",
+    "Two, both found in review before the first run: the attract demo never stepped its match, and the demo flag was used as an object, which would throw when the demo started. Both would have broken the game.",
+    "The full CPU match played headless to full time, with the scores and goal count checked. It exercises the physics, the AI, the clock and the result in one run.",
+    "The browser screenshots only confirm that the title and the match render without errors. They do not show gameplay, so they were the least useful check."
+  ],
+  "engineFeedback": [
+    "The sports kit was a working match with ball physics, kicks by the rig, E.arc lobs, menus and the radio dialog, so most of the match code could be kept.",
+    "Yes. The docs on the pause menu's items and the Dialog and Menu signatures had to be read from the kit and the engine source. The pause-menu dev entry was not checked in a browser.",
+    "The Euphoria meter and super strikes, the cup flow with its back pages, and the dev panel with saved sliders and reset. The kit had none of these.",
+    "Input: two presses in one step count as one press, and the engine's pressed() suppresses the second. Found only by a test.",
+    "None. No engine files were changed; the engine is the unmodified my-3D2dge.js.",
+    "A way to draw one frame in headless mode, so tests can check the drawing code without a browser. advance() draws only when the game is not headless."
+  ],
+  "promptFeedback": [
+    "The layered brief (STAGE, then TASK, then PLAN, with TASK winning on conflicts) and the exact exit-interview shape were clear.",
+    "The title rule conflicts: TASK asks for a title picked by a random number generator, while STAGE says to use the title the plan gives. The plan's scope (five-a-side, AI Hub multiplayer, mocap, a 34-section design) is far beyond one session, and the dev folder name in the plan carries another model's name.",
+    "Fitting the plan's scope into one session, and deciding honestly what to cut from the feature list.",
+    "Give an explicit scope floor for a session, say whether a partial build is acceptable, and name which document wins on feature cuts, not only on conflicts."
+  ],
+  "aiHub": {
+    "name": "Europhoria Football",
+    "tagline": "The broke seaside club's cup run",
+    "description": "A broke seaside club gets into the continent's biggest cup because of a typo. Two-a-side arcade football with a crowd that fills a power bar, Europhoria super strikes and a five-round cup run.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "European football",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick move · J pass · K shoot (hold) · L lob · E Europhoria; pad: stick, cross pass, square shoot, circle lob, R1 Europhoria",
+    "tags": ["sports", "arcade", "comedy", "versus", "pixel art"]
+  }
+}

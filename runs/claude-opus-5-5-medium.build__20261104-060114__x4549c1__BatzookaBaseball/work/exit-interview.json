@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 06:01:14",
+    "source": "Baseball (the sport), in the over-the-top arcade style",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports (baseball), with a slapstick brawler mini-game (the Rhubarb) and a short story Tour with light team upgrades",
+    "perspective": "Plate Cam: a Mode 7 pseudo-3D view from behind the catcher for every pitch and swing; Broadcast Cam: a three-quarter ground view of the park for play in the field (High and Isometric options); Moonshot Cam: a Mode 7 chase camera on home runs",
+    "tech": "my-3D2dge v0.85.2 handoff engine (the full engine with its Mode 7 module; five small changes listed in ENGINE-CHANGES.md); vanilla JavaScript in one IIFE built from 28 source files; AI Hub Session client 1.4.0 pasted unmodified; one self-contained HTML file with no CDN or network requests; Node 24 and Playwright 1.63.0 (Chromium) for the tests",
+    "artDirection": "The engine's native look: HD Humanoid rigs drawn as pixel art at res ps1 (expanded to fill the screen), six parks painted from code (mowing patterns, chalk, dirt, warning tracks, cornfields, a bay, lava, regolith, graveyards, neon), Backdrop skies, code-drawn ballpark props, crowds of about 900 fans per park, night lighting and particles",
+    "animation": "Built on the engine's native rig animation system, with new animations made for baseball: the batting stance, contact and power swings, the squared bunt, the pitcher's windup and delivery, fielders' throws, the catcher's crouch, diving catches, jumps and wall climbs to rob homers, feet-first slides, the home-run trot, umpire calls, celebrations, Rhubarb punch combos, shoves and tosses with knockdowns, and dancing and racing mascots (all shown in the Animation Gallery)",
+    "audio": "The engine's chip synth only: 14 original songs (a ballpark-organ tune per park with hype layers, title, menus, Tour map, Derby, Rhubarb, training, credits, hub card), 7 stings, 45 sound effects, and Animalese-style babble voices for 16 characters (one syllable per letter, with subtitles)",
+    "online": "AI Hub Session Protocol v1 in ghost mode for 1-4 players: an online Batzooka Derby round with the game's own card, ready with no key press, progress every second, one result, time-up handling, and other players shown as ghost batters and home-run comets; local multiplayer for 1-4 on one machine",
+    "testing": "Headless as allowed: one command (node tests/run.mjs, 106 checks across 13 suites, including a scripted playthrough of the Tour, all eight lessons, a four-player Exhibition, a hot-seat Derby and the About pages by an input-driven bot), seeded CPU-vs-CPU balance sims, the engine's check.mjs in Chromium, Playwright screenshots for the look, and the real AI Hub harness (2 players; 4 players with latency, jitter and loss; host leave) served on 127.0.0.1 with an OS-picked port",
+    "research": "Read the engine's API card, API index, AI guide and asset card, the sports and kart kits, the Mode 7 module's header, and the AI Hub README; no other research",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); browser unknown (tests ran in Playwright Chromium)",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "Cost and token counts unknown (no usage meter in the session); session time about 1 hour 20 minutes by the machine clock (06:01 to about 07:20)"
+  },
+  "testingFeedback": [
+    "About 28 issues: 12 code bugs (two syntax errors, two NaN pitch speeds that froze games, a crash when fielders were missing, a bunt flag that never reset, late swings being called strikes before they could connect, a pitch type with no aim, absurd home-run distances, a wrong deep link pairing a team with itself, a long commentary line, a story scene that skipped itself headless), a badly unbalanced first version (.600 batting average), and about 15 layout problems found in screenshots (overflowing menus, missing font glyphs, the catcher filling the Plate Cam, overlapping HUD pieces).",
+    "6 were game-breaking: the two syntax errors (nothing loaded), the two NaN pitches (the game froze mid-pitch), the crash on contact with no fielders set, and the late-swing bug (a swing inside the timing window but after the plate crossing could never make contact).",
+    "The seeded CPU-vs-CPU simulations: they found both NaN freezes and the stuck bunt flag, and gave the numbers (runs, K%, HR%, average) used to balance the game; second was the bot-played Derby, which exposed the late-swing ordering bug.",
+    "The engine's check.mjs sweep over the deep links: it reported no errors, but by then the headless suites and scenario screenshots had already covered the same pages, and its random key presses left the snapshots in odd states."
+  ],
+  "engineFeedback": [
+    "The Mode 7 module: a Plate Cam from behind the catcher, with the park's own floor, a turning Backdrop sky and rigs as distance-scaled billboards, took a few dozen lines. Close behind: headless fixed-step advance with input.tap and hold, which made bot-driven playthrough tests easy.",
+    "A few wrong guesses: menu.settings must be an array when the game is constructed (I passed a function); E.Dialog has no width or position option that fits a TV HUD, so I wrote my own radio box; a // comment I appended mid-line in the engine broke the build; promises from a mock in a headless test needed an await.",
+    "The baseball itself: a parametric pitch flight with a known plate crossing, the contact model (timing and reticle offset to spray, launch and exit speed), batted-ball physics with the fence, poles and foul territory, fielders assigned by intercept time with covers and throws, baserunners racing the ball, and the rules engine (forces, tags, tag-ups, the third-out rule, walk-offs, mercy, extra innings).",
+    "Drawing the ballpark's vertical parts in Mode 7: the fence, the foul walls and the stands had to be hand-projected quads gathered as billboards, because Mode 7 has a floor and billboards but no walls.",
+    "Five small changes, all marked BATZOOKA: a 'bat' weapon for Humanoid (rest pose, tip, HD and classic drawing); a 'mitt' option drawn on the glove hand; the glyphs ✕ ○ □ △ · ✓ ■ ● — added to the 5x7 font; the Button symbols setting defaulting to PlayStation with an Xbox choice; and a fix to my own broken comment.",
+    "A Mode 7 wall primitive (for example m7.quad or m7.wall) that projects and depth-sorts world-space polygons with the billboards, so stadium walls, stands and buildings need no hand-built quads."
+  ],
+  "promptFeedback": [
+    "The requirements are concrete and checkable: 10 seconds to the attract mode, dev sliders with a reset, PlayStation glyphs by default with an Xbox option, a touch-only card, and an online protocol with a real harness to pass.",
+    "PLAN.md's deliverable names (claude-opus-5-5-max with another timestamp) disagree with TASK.md's; TASK.md wins, so the files use TASK.md's names. It was also not clear how much of the plan's very large scope is required versus aspirational.",
+    "Scope: the plan describes six teams, six parks, a Tour with cutscenes, eight lessons, a Derby, the online round, attract and dev modes and mocap animation, all in one session; choosing what to build fully and testing all of it was the hard part.",
+    "Say which plan items are required and which are optional (or give a time budget), and keep the plan's file names in step with TASK.md's."
+  ],
+  "aiHub": {
+    "name": "Batzooka Baseball",
+    "tagline": "Swing for the moon. Literally.",
+    "description": "Over-the-top arcade baseball: fireball pitches, a rocket-powered bat, wall-climbing catches and bench-clearing rhubarbs on a barnstorming tour to save a cornfield ballpark. Online, it's a two-minute home-run derby against the ghosts of your friends.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Baseball (over-the-top arcade style)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD/mouse aim · ✕/Space/click swing · □/J/right-click power · R1/E Batzooka",
+    "tags": [
+      "arcade",
+      "comedy",
+      "versus",
+      "pixel art",
+      "boss fights",
+      "retro"
+    ]
+  }
+}

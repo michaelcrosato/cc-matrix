@@ -1,0 +1,12 @@
+import { open, waitStarted } from '../lib/browser.mjs';
+const { browser, page, errors } = await open('', { w: 960, h: 540 }); const ev = f => page.evaluate(f);
+await waitStarted(page); await page.waitForTimeout(800); await ev(() => S7.newGame()); await page.waitForTimeout(800);
+await ev(() => { S7.game.debug.skipCutscene(); S7.game.debug.teleport('00A', 'start'); S7.st.done['00A:card'] = true; S7.st.done['00A:tut_scan'] = true; S7.game.debug.skipCutscene(); });
+await ev(() => { window.__mv = []; document.addEventListener('mousemove', e => __mv.push([e.movementX, e.movementY]), true); });
+await page.mouse.move(480, 270); await page.mouse.click(480, 270, { button: 'right' }); await page.mouse.down({ button: 'right' }); await page.waitForTimeout(500);
+const locked = await ev(() => !!document.pointerLockElement); const m0 = await ev(() => S7.st.mode), y0 = await ev(() => S7.st.aim.yaw);
+await ev(() => { for (let i = 0; i < 10; i++) document.dispatchEvent(new MouseEvent('mousemove', { movementX: 40, movementY: -15, bubbles: true })); }); await page.waitForTimeout(300);
+const y1 = await ev(() => S7.st.aim.yaw); await page.mouse.up({ button: 'right' });
+console.log('events', JSON.stringify((await ev(() => __mv)).slice(-4)), 'camera.mouse', JSON.stringify(await ev(() => S7.pres.world.camera.mouse)));
+console.log(JSON.stringify({ locked, mode: m0, y0, y1, errors }));
+await browser.close();

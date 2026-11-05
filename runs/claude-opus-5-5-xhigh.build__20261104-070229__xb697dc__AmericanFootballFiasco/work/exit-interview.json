@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 07:02:29",
+    "source": "American football (over the top arcade style)",
+    "plan": "PLAN.md",
+    "genre": "Arcade sports (American football) with beat-'em-up hit feel and a story campaign",
+    "perspective": "Sideline broadcast camera (a custom 50-degree view) with Sky Cam and Blimp options, a Kick Cam behind the kicker, field-level, isometric and reverse replay angles",
+    "tech": "my-3D2dge v0.85.2 handoff engine (modified: see the Engine Changes page), AI Hub session client 1.4.0, the my-3D2dge mocap runtime with an 18-clip FIASCO set, Canvas 2D and Web Audio; Node 24 and Playwright 1.63.0 for tests",
+    "artDirection": "my-3D2dge native pixel art: HD Humanoid rigs in football gear (helmets with facemasks, shoulder pads, jersey numbers), painted fields with yard numbers and end zones, lit stadiums with crowds, weather and particles, 40 new shapes, team logos and cards drawn by code",
+    "animation": "my-3D2dge procedural rigs, E.MOVES attack timelines, joint post-processing (dives, tackles, launches, tucks), and 18 motion-capture clips (Quaternius, Mesh2Motion, CMU) for throws, stances, blocks, dances and cheers",
+    "audio": "All synthesized: 11 original songs with live layers and stings on the engine's chip synth, 40 sound effects, a crowd bed with reactions and chants, and a formant babble synth for Animalese and Simlish voices with 21 speaker profiles",
+    "online": "AI Hub Session Protocol v1, shared world, 1-4 players (host-authoritative with client prediction); local 1-4 players on one machine",
+    "testing": "Headless Node tests through game.advance and game.debug (one command: npm test), a fake AI Hub in Node with latency and loss, a Playwright check of the bundle in Chromium (DOM, keyboard, mouse, touch emulation, a simulated pad), the AI Hub harness, and screenshots; no subagents for review",
+    "research": "none beyond reading the engine handoff docs, the AI Hub README and the plan",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 35 game issues, plus 6 mistakes in the tests themselves. The headless suites, scripted playthroughs and bot-played drills found most. A browser check of the bundle (real DOM, keyboard, mouse, touch and a simulated pad) and screenshots found the rest: layout overlaps, a logo under the phone's corner buttons, text over 48 characters, missing font glyphs, and a night cutscene lit like noon.",
+    "7 game breaking: blockers never engaged (a case-sensitive /block/ check), the QB ran off before the handoff and got sacked, a pre-snap clamp teleported the safety into the backfield, a CPU kicker that never pressed the meter stalled the kickoff, opening a Dev cheat threw an error, Back in Dev mode recursed until the stack overflowed, and stale run intents moved players before the snap.",
+    "Two tied. The bot-played tryout drills plus the full story run (bots press the real inputs through every drill, then the story is autopiloted to the credits) found the safety teleport, the stiff-arm and hurdle bugs, and menus that could only be picked once drawn. The browser check of the final bundle found what headless runs could not: the Dev mode Back crash, and an unbound key not leaving the attract mode.",
+    "The replay determinism check. Its only failure was a mistake in the test itself (the wrong step size), never a bug in the game."
+  ],
+  "engineFeedback": [
+    "game.advance with no screen: the whole game (matches, drills, story, attract, a four-copy hub session) runs in Node, so the tests are fast and deterministic. Close behind: the HD Humanoid rigs with E.MOVES and mocap, and the Shell giving pause, settings and controls screens for free.",
+    "Yes. The TileMap floor bake is cached per view and scale, so a smoothly zooming broadcast camera re-baked the field every frame until I quantized the zoom and raised the cache size (E10). I also guessed smoothDamp's arguments wrong, missed that E.store needs localStorage (absent in Node), and built menu focus lists in draw, which headless runs never call.",
+    "The football itself: an athlete simulation with per-athlete intents, line blocking and shedding, routes and coverage, pass flight with catch, deflection and interception odds, tackling with pursuit angles, the rules (downs, clock, penalties, scoring) and the coach AI. Close second: shared-world netcode with client prediction on top of the hub's session.js.",
+    "Keeping 22 HD rigs, the crowd and a baked field at a steady frame rate with a camera that zooms and pans, and learning which systems are tied to draw (focus lists, light refresh, floor bakes) so the headless runs behave like the browser.",
+    "E1 PlayStation glyphs in both pixel fonts; E2 glyphs default to PlayStation with Xbox in Settings; E3 a gear hook in the HD rig's depth sort (pads, facemasks, numbers, the ball); E4 a football helmet hat; E5 a Dialog voice callback for Animalese; E6 audio buses for voices and crowd; E7 setting rows on any Shell screen, Dev groups hidden; E8 open Settings without pausing a shared world; E10 keep 14 baked floors, not 6. E11 renames an internal helper and rewords a comment, naming only. The 10-foot UI is a game stylesheet. Details in ENGINE-CHANGES.md.",
+    "Bake the floor once in world space and scale it at draw time, so the camera zoom never invalidates the cache."
+  ],
+  "promptFeedback": [
+    "How concrete it was. The plan names every play, card, chapter and engine change with where to find it, and the testing rule (one command, failures and a count only) kept the loop short.",
+    "Where TASK.md and PLAN.md overlap but differ (the reply sections, the 10-foot theme as an engine change or a stylesheet), which items in a 2,400-line plan are must-haves versus nice-to-haves, and the Usage field, since no cost or token figures are visible from inside the session.",
+    "Making the football play right: blocking, run lanes, pursuit and pass coverage balanced so runs, passes, sacks and turnovers all happen at sensible rates. Close behind: a shared-world session that stays in sync under latency and loss.",
+    "Split the plan into priority tiers (core loop first, then modes, then polish), say outright that a fake hub in Node is an acceptable stand-in for the harness, and either drop the Usage field or say where to read the figures."
+  ],
+  "aiHub": {
+    "name": "American Football Fiasco",
+    "tagline": "Over-the-top arcade football",
+    "description": "Lead the hopeless Tumbleweed Junction Fiascos through the Fiasco Cup: 7-on-7 arcade football with turbo, Big Hits, Hot Streaks, trick plays and mascots, for 1-4 players.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "American football",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD run · ✕/Space hike, dive, tackle · ✕○□ or 1-3/click throw · R2/Shift turbo",
+    "tags": [
+      "arcade",
+      "comedy",
+      "versus",
+      "co-op",
+      "story",
+      "retro"
+    ]
+  }
+}

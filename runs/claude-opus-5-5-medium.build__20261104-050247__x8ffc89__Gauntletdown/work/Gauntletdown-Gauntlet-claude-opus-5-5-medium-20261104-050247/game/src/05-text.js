@@ -1,0 +1,132 @@
+/* 05-text: every word the player reads. The Gaunt (the dungeon's own voice) speaks short, booming, darkly funny lines. */
+const LINES = {
+  start: 'THE GAUNTLET IS DOWN. COME AND GET IT.',
+  welcome: 'WELCOME, {C}.',
+  fading: '{C}, YOUR LIFE FORCE IS FADING.',
+  starving: '{C} IS STARVING!',
+  dying: '{C} IS ABOUT TO PERISH!',
+  eaten: '{C} HAS BEEN EATEN.',
+  rise: '{C} RISES AGAIN. HOW TIRESOME.',
+  tip_food: 'LIFE FORCE DRAINS WITH EVERY BREATH. EAT.',
+  tip_dontshoot: 'NEVER SHOOT THE SUPPER.',
+  shot_cider: '{C} SHOT THE CIDER!',
+  shot_feast: '{C} SHOT THE SUPPER!',
+  ate_stew: '{C} ATE THE STEW. A POOR CHOICE.',
+  glutton: '{C} EATS FOR FOUR.',
+  tip_stairs: 'THE STAIRS GO DOWN. THEY ALWAYS GO DOWN.',
+  tip_ghost: 'HUNGERGHOSTS. THEY HAVE NOT EATEN IN NINE CENTURIES.',
+  tip_generator: 'THAT URN BREEDS THEM. BREAK IT.',
+  tip_gnasher: 'GNASHERS. ALL TEETH, NO MANNERS.',
+  tip_melee: 'TOO CLOSE TO THROW? THEN HIT IT.',
+  tip_lobber: 'POT-LOBBERS THROW OVER WALLS. WATCH THE SHADOWS.',
+  tip_imp: 'CINDER IMPS. THEY COOK WHAT THEY SPIT ON.',
+  tip_fryar: 'THE FRYARS FADE. STRIKE WHEN THEY SHOW THEMSELVES.',
+  tip_snatcher: 'A SNATCHER! MIND YOUR POCKETS.',
+  stolen: '{C} HAS BEEN ROBBED!',
+  tithe_comes: 'THE TITHE HAS COME TO COLLECT.',
+  tithe_paid: 'THE TITHE IS PAID.',
+  tithe_slain: '{C} CHEATED THE TITHE!',
+  bell: '{C} IS ON THE MENU!',
+  bell_pass: 'NOW {C} IS ON THE MENU.',
+  tip_magic: 'MAGIC STRIKES ALL YOU CAN SEE. USE IT WISELY.',
+  shot_flask: '{C} SHOT THE MAGIC. MOSTLY WASTED.',
+  key_first: 'A KEY. HOW THOUGHTFUL.',
+  tip_door: 'A KEY OPENS A DOOR. ANY DOOR. ONCE.',
+  treasure_first: 'TREASURE! THE GAUNT KEEPS COUNT.',
+  special_ironbrew: 'IRON BREW. {C} FEELS STURDIER.',
+  special_ogreale: 'OGRE ALE. {C} HITS HARDER.',
+  special_quickshot: 'QUICKSHOT TONIC. {C} THROWS FASTER.',
+  special_hardshot: 'HARDSHOT DRAUGHT. {C} THROWS HARDER.',
+  special_witchwater: 'WITCHWATER. {C} CRACKLES WITH MAGIC.',
+  special_featherfoot: 'FEATHERFOOT CORDIAL. {C} STEPS LIGHTER.',
+  special_deeppockets: 'DEEP POCKETS. {C} CARRIES MORE.',
+  amulet_veil: 'THE VEIL. NOW YOU SEE {C}. NOW YOU DON\'T.',
+  amulet_ironskin: 'IRONSKIN. NOTHING BITES {C}. FOR NOW.',
+  amulet_stench: 'STENCH. EVEN GHOSTS GAG.',
+  amulet_ricochet: 'RICOCHET. MIND YOUR HEADS.',
+  amulet_rending: 'RENDING. NOTHING STOPS THOSE SHOTS.',
+  tip_trap: 'THAT PLATE WAS A TRAP. ENJOY.',
+  tip_tele: 'STEP ON THE RUNE. ARRIVE ELSEWHERE.',
+  tip_stun: 'STUN RUNES. DO NOT DAWDLE ON THEM.',
+  tip_field: 'THE FIELD HUMS. WAIT FOR THE QUIET.',
+  tip_spikes: 'THE FLOOR HAS TEETH TOO.',
+  tip_secret: 'THAT WALL WAS LYING.',
+  tip_cracked: 'CRACKED STONE. IT WANTS TO BREAK.',
+  ally_stun_on: 'FROM HERE ON, YOUR SHOTS STUN YOUR FRIENDS.',
+  ally_shot: '{C}, THAT WAS A FRIEND.',
+  impatient: 'THE GAUNT GROWS IMPATIENT.',
+  doors_open: 'ALL DOORS ARE NOW OPEN.',
+  walls_stairs: 'EVERY WALL IS NOW A STAIR.',
+  stairs: '{C} FOUND THE STAIRS.',
+  skip: '{C} TOOK THE SHORT WAY DOWN.',
+  hoard: 'A HOARD! {N} SECONDS. GRAB.',
+  hoard_shut: 'THE HOARD SLAMS SHUT.',
+  hoard_clear: '{C} TOOK THE LAST CRUMB.',
+  king_near: 'THE KING SMELLS YOU.',
+  king_intro: 'KING FAMISH WILL SEE YOU NOW.',
+  king_eating: 'HE IS EATING. SHOOT THE FOOD!',
+  king_rage: 'NO FOOD LEFT. NOW HE IS ANGRY.',
+  king_open: 'HIS RIBS ARE OPEN. AIM FOR THE GAUNTLET.',
+  king_dead: 'THE GAUNTLET IS DOWN. SO IS THE KING.',
+  gauntlet_taken: '{C} HOLDS THE IRON GAUNTLET.',
+  game_over: 'THE GAUNT IS FED.',
+  continue: 'RISE, OR BE SUPPER.',
+  high_score: 'NAME THYSELF, MORSEL.',
+  join: '{C} JOINS THE FEAST.',
+  floor_1: 'WELCOME TO THE GAUNT, MORSELS.',
+  floor_2: 'MIND THE ROOTS. THEY BITE.',
+  floor_3: 'SMOKED, SALTED, SERVED.',
+  floor_4: 'THE BONES HERE ARE WELL PICKED.',
+  floor_5: 'THE CHOIR SINGS WITH ITS TEETH.',
+  floor_6: 'HERE LIE KINGS, IN BRINE.',
+  floor_7: 'THE OVEN IS ALWAYS ON.',
+  floor_8: 'THE GATE OF GRISTLE. NO ONE CHEWS THROUGH.',
+  floor_9: 'DINNER IS SERVED.',
+  hoard_1: 'THE PANTRY HOARD. TAKE WHAT YOU CAN CARRY.',
+  hoard_2: 'THE RELIQUARY. THE DEAD WILL NOT MISS IT.',
+  descent2: 'THE GAUNT DIGS DEEPER. SO MUST YOU.'
+};
+// line keys that teach (played once per game, kept between games; Settings, Tips: Off silences them)
+const TIP_KEYS = new Set(Object.keys(LINES).filter(k => k.startsWith('tip_') || k === 'key_first' || k === 'treasure_first' || k === 'ally_stun_on'));
+
+const STORY = {
+  prologue: 'BENEATH THE TOWN OF HOLLOWMERE, A DUNGEON DIGS DOWN, AND DOWN, AND DOWN. THEY CALL IT THE GAUNT. AT ITS BOTTOM SITS KING FAMISH, WHO HAS EATEN FOR NINE HUNDRED YEARS AND IS STILL HUNGRY. EACH WINTER HE THROWS HIS IRON GAUNTLET DOWN THE PIT AND DARES THE HUNGRY TO FETCH IT. NO ONE HAS CLIMBED BACK UP. TONIGHT, FOUR FOOLS ANSWER. THE GAUNTLET IS DOWN.',
+  realm: {
+    larder: ['REALM I: THE LARDER', 'THE TOP OF THE GAUNT, WHERE THE KING KEEPS HIS SNACKS. YOU ARE THE SNACKS.'],
+    ossuary: ['REALM II: THE OSSUARY', 'BELOW THE LARDER LIE THE BONES OF THOSE WHO CAME BACK FOR SECONDS.'],
+    furnace: ['REALM III: THE FURNACE GUT', 'THE GAUNT\'S OWN BELLY. IT IS VERY HOT, AND IT IS DIGESTING.'],
+    banquet: ['THE BANQUET', 'THE TABLE IS SET. GUESS WHO IS DINNER.']
+  },
+  king: { intro: 'AH. DESSERT.', p2: 'SECOND HELPINGS!', p3: 'MORE! MORE! MORE!', dead: '...STILL... HUNGRY...' },
+  ending: 'THE KING FALLS. THE IRON GAUNTLET IS YOURS. YOU CLIMB FOR SEVEN DAYS, EATING EVERYTHING ON THE WAY UP. HOLLOWMERE THROWS A FEAST IN YOUR HONOUR. YOU ARE, OF COURSE, STILL HUNGRY.',
+  tag: 'THE GAUNT IS NOT DEAD. IT IS ONLY DIGESTING. DESCENT II AWAITS.',
+  descent2: 'THE GAUNT DIGS DEEPER. SO MUST YOU.'
+};
+
+// How to Play: one idea a page; {fire} etc. become the player's own keys or buttons
+const HOWTO = [
+  ['THE GAUNTLET IS DOWN', 'King Famish waits at the bottom of the Gaunt with his Iron Gauntlet. Fight down nine floors, take it back, and do not become dinner.', 'gauntlet'],
+  ['MOVE AND AIM', 'Move with {move}. Aim with {aim}. Your hero faces the way it walks when you are not aiming.', 'move'],
+  ['THROW AND STRIKE', 'Hold {fire} to throw. Up close it strikes in melee instead. Hold {plant} to stand your ground and turn while you throw.', 'fire'],
+  ['LIFE FORCE DRAINS', 'Your health falls by one every second. Eat roasts, loaves and cider. Never shoot the supper. Green stew is spoiled.', 'food'],
+  ['MAGIC', 'Press {magic} to drink a Blast Flask: it strikes every monster you can see. A shot flask is mostly wasted. The Tithe dies only to magic.', 'magic'],
+  ['KEYS, DOORS, STAIRS', 'A key opens one run of doors. Stand on the stairs to go down. Numbered stairs skip floors. Linger too long and the Gaunt opens the way itself.', 'stairs'],
+  ['GENERATORS', 'Urns, dens and hutches breed monsters until you break them. Wounded monsters shrink and weaken.', 'gens'],
+  ['FRIENDS', 'Up to four on one screen: {join} joins. Whoever takes the stairs gets the bonus. Everyone keeps their own score. Online through AI Hub sessions.', 'friends']
+];
+
+// About and Credits pages. Source Information and the three feedback sections match the chat reply and exit-interview.json.
+const ABOUT = {
+  credits: [
+    'GAUNTLETDOWN  version ' + VERSION,
+    'An original co-op dungeon crawl inspired by Gauntlet (Atari Games, 1985). An homage with no names, art, music or levels from it.',
+    'Built by Claude (claude-opus-5-5, reasoning effort medium) from PLAN.md, for Michael Crosato.',
+    'Engine: my-3D2dge v0.85.2 (MIT), patched: hand-held gear for the rigs.',
+    'Online: AI Hub Session Protocol v1, client 1.4.0, shared world.',
+    'All music, sound effects and voices are made in code. No audio files.'
+  ],
+  source: [],      // filled in 06-about.js
+  testing: [],
+  engine: [],
+  prompt: []
+};

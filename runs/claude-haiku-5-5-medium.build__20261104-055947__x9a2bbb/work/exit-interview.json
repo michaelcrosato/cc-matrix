@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 05:59:47",
+    "source": "ice hockey (over the top arcade style)",
+    "plan": "PLAN.md (the plan given with this build)",
+    "genre": "Sports: three-a-side arcade hockey with goalies, a Cup Run story, exhibition, practice and online sessions",
+    "perspective": "TV broadcast camera (threequarter, 2.5D) with an overhead view (V)",
+    "tech": "my-3D2dge engine v0.85.2 (handoff package), plain JavaScript; AI Hub client session.js 1.4.0 (verbatim); Node 24 for headless tests; Playwright 1.63.0 with Chromium for the browser and hub checks",
+    "artDirection": "The engine's PS1-era pixel art and humanoid rigs; hockey gear, rink, nets and crowd drawn in code",
+    "animation": "The engine's procedural humanoid rig and poses (skating, cheer, stagger, down, save)",
+    "audio": "All synthesized in code: chip sound effects, babble voices in Animalese style, one match song",
+    "online": "AI Hub shared-world session, 1 to 4 seats: the host's copy runs the match, the others send their input and show its snapshots",
+    "testing": "one command (tests/run.mjs): headless Node checks, a Chromium smoke test, and the AI Hub harness run as 1 to 4 copies with latency and loss",
+    "research": "none",
+    "environment": "Claude Code CLI (headless); Linux (WSL2); Chromium, headless, through Playwright",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "11 issues found in the game build. The online work added no failures: the hub harness passed all four rounds on the first run.",
+    "4 were game-breaking: a hang in an angle wrap, goalies going NaN from a duplicated data key (and an unset target), the net box blocking every goal, and a draw crash that only the browser run caught.",
+    "Most helpful: headless match runs that counted shots, saves, goals and goal-line crossings. They exposed the net and goalie bugs.",
+    "Least helpful: scene checks that only confirm the scene name. Headless runs skip drawing, so they passed while a draw crashed."
+  ],
+  "engineFeedback": [
+    "Most liked: the sports kit as a base, the TileMap with runtime cell changes (map.set for broken glass), and game.advance for headless play.",
+    "Stuck or guessed wrong: the pixel fonts had no PlayStation symbols; E.store needs localStorage (stubbed in the tests); the Dialog voice option and the mouse-aim call were taken from the docs and not fully verified.",
+    "Most important thing built myself: the rink's collision (a wall grid from the rounded rectangle), the puck and goal-line rules, and the skater and goalie AI.",
+    "Hardest: finding the right call in a 14,700-line engine file, and that headless runs skip drawing, so draw bugs need a browser.",
+    "Engine change: PlayStation symbols added to both pixel fonts (they drew as ?). Logged in ENGINE-CHANGES.md.",
+    "One change: run scene drawing in headless mode (or offer a draw-check mode) so screen code can be tested without a browser."
+  ],
+  "promptFeedback": [
+    "Liked most: the explicit rules (one test command, no subagents, file names and sections) and the plan's numbers.",
+    "Confusing: the title rule (TASK asks for 50 random titles, STAGE says use the plan's title), and a 1,500-line plan for a medium-effort build.",
+    "Hardest: fitting the full plan into one build (online play, seven drills, AI tuning without watching the play live).",
+    "Would change: name a minimum vertical slice and what can be cut, and say whether online play must work for the game to count as done."
+  ],
+  "aiHub": {
+    "name": "Ice Breakers",
+    "tagline": "Three a side. Goalies. Glass. KABOOM.",
+    "description": "Three-a-side arcade hockey with goalies, breakable glass, fights and KABOOM. A five-game Cup Run, exhibition, seven drills, and online sessions for 1 to 4 players.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "ice hockey",
+    "series": "",
+    "players": "1–4",
+    "controls": "Move: left stick or WASD; Pass: cross or J; Shoot: square or K (hold for slapshot); Deke: circle or L; Lob or gloves: triangle or I; Turbo: R2 or Shift",
+    "tags": [
+      "arcade",
+      "versus",
+      "co-op",
+      "pixel art",
+      "story"
+    ]
+  }
+}

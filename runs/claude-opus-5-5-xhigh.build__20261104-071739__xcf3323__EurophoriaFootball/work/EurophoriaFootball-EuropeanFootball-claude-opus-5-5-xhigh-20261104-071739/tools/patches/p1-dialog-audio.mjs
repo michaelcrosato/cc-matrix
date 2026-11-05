@@ -1,0 +1,11 @@
+export const patches = [
+['dialog voice fn',
+"    if (this.voice && Math.floor(this.shown) > prev && (this._blip++ % 2 === 0)) this.game.audio.sfx(this.voice);",
+"    // EF: a voice may be a function (ch, index, line): called once for each newly shown letter (babble voices); say(text, { voice }) sets it for that call\n    const vo = this._voice !== undefined ? this._voice : this.voice;\n    if (typeof vo === 'function') { const now = Math.floor(this.shown); if (now > prev) { const txt = this._page.join(''); for (let n = prev; n < now; n++) try { vo(txt[n] || ' ', n, txt); } catch (e) { this.game.fail('dialog voice', e); } } }\n    else if (vo && Math.floor(this.shown) > prev && (this._blip++ % 2 === 0)) this.game.audio.sfx(vo);"],
+['dialog say voice',
+"    this.name = o.name || null; this.onDone = o.onDone || null; this.choices = o.choices || null; this.onChoice = o.onChoice || null; this._blip = 0;",
+"    this.name = o.name || null; this.onDone = o.onDone || null; this.choices = o.choices || null; this.onChoice = o.onChoice || null; this._blip = 0;\n    this._voice = o.voice !== undefined ? o.voice : undefined;   // EF: a voice for this call only (the box's own comes back on the next say)"],
+['audio buses',
+"  /** true once the browser lets the game make sound */\n  get ready() {",
+"  /** EF: a named bus (a GainNode on the master, made on first use) whose volume follows game.settings[name] when that\n   *  setting is a number: the game's own voices and crowd. null with no sound (headless, blocked) */\n  bus(name) {\n    const c = this._init(); if (!c) return null; const B = this._buses || (this._buses = {});\n    let b = B[name]; if (!b) { b = B[name] = c.createGain(); b.connect(this._master); }\n    const s = this._game && this._game.settings, v = s && s[name]; if (typeof v === 'number') b.gain.value = v;\n    return b;\n  }\n  /** EF: the sound clock (the context's currentTime), or 0 with no sound */\n  now() { return this.ctx ? this.ctx.currentTime : 0; }\n  /** EF: the engine's noise buffer (a second of white noise), or null with no sound */\n  noiseBuffer() { this._init(); return this._noise || null; }\n  /** true once the browser lets the game make sound */\n  get ready() {"]
+];
