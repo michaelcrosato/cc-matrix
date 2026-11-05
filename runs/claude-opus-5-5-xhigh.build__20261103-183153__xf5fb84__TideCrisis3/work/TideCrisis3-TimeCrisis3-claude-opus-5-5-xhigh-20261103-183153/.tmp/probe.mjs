@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+process.env.TMPDIR = resolve('.tmp');
+const b = await chromium.launch();
+const file = 'file://' + resolve('../TideCrisis3-TimeCrisis3-claude-opus-5-5-xhigh-20261103-183153.html');
+const ctx = await b.newContext({ hasTouch: true, isMobile: true, viewport: { width: 915, height: 412 }, deviceScaleFactor: 2 });
+const p = await ctx.newPage(); const errs = []; p.on('pageerror', e => errs.push(e.message));
+await p.goto(file); await p.waitForFunction(() => window.TC && TC.game && TC.game.sceneName === 'title', null, { timeout: 30000 });
+await p.waitForTimeout(600);
+console.log(await p.evaluate(() => ({ coarse: matchMedia('(pointer: coarse)').matches, fine: matchMedia('(any-pointer: fine)').matches, touchOnly: TC.touchOnly(), gear: TC.scenes.title.gear, W: TC.game.screen.W, H: TC.game.screen.H, rect: (() => { const r = document.getElementById('screen').getBoundingClientRect(); return [r.left, r.top, r.width, r.height]; })() })));
+console.log(errs);
+await b.close();
