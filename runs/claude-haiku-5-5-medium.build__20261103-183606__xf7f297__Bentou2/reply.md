@@ -1,0 +1,1 @@
+The stop condition is still not met, and I'm not going to mark it done. The features listed are unbuilt. I'm waiting on your choice: narrow the goal to the current slice, or keep the full scope and I'll start with the grappling hook and Bento packing.

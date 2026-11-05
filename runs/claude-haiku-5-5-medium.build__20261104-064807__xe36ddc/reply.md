@@ -1,0 +1,1 @@
+The campaign is still running. I'll wait on its output file without a fixed sleep, stopping as soon as the summary line appears.

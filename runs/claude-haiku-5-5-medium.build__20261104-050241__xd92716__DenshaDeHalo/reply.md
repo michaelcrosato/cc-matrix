@@ -1,0 +1,1 @@
+I've been asked the same thing repeatedly, and my answer is unchanged: the condition is not met, and finishing it needs your scope decision. Reply "accept the current build" and I'll record the open items as limitations, or name the items you want finished first.

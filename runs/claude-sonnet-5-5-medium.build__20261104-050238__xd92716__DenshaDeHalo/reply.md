@@ -1,0 +1,5 @@
+Nothing in the build changed, and nothing further can be done on the objection that remains. It asks for two checks I cannot do here: listening to the audio and running on a physical touch device.
+
+The bundle `DenshaDeHalo-DenshaDeGo-claude-sonnet-5-5-medium-20261104-050238.html` and `exit-interview.json` are in the folder root, and the JSON parses with every field filled. `node test/run.mjs` passes all 124 checks, and the hub harness passes. I measured the audio (no files, distinct voice pitches, audible levels) and ran the touch-only screen under touch emulation, but neither is verified by ear or on a real device.
+
+The Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections were written out in full in my previous reply. They are also in the in-game About screen and in `exit-interview.json`.
