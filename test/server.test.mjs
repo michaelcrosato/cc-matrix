@@ -330,7 +330,7 @@ test('a running batch takes changes: limits, pause and ending a run, checked fir
 
   const r = await d2.api('/api/adjust', 'POST', { set: { concurrency: 1, perCli: '', budget: 0, timeout: 30, paused: true }, requeue: ['opus-low__a', 'not-running'] });
   assert.equal(r.status, 200, r.text);
-  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, resumeFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 }, held: {}, priority: [] });
+  assert.deepEqual({ ...r.json.state, spent: 0 }, { concurrency: 1, perCli: null, budget: null, timeout: 30, rerunFailed: false, resumeFailed: false, paused: true, overBudget: false, spent: 0, left: { claude: 1 }, held: {}, leftHeads: { 'opus-low': 1 }, heldHeads: {}, priority: [] });
   const s = await waitFor(async () => { const x = (await d2.api('/api/status?since=0')).json; return x.active.length === 1 ? x : null; });
   assert.ok(s.log.some((l) => l.startsWith('↺ opus-low__a requeued')), s.log.join('\n'));
   assert.ok(s.log.some((l) => l.startsWith('⚙ Parallel runs: 2 → 1')));
@@ -431,6 +431,24 @@ test('Priority from the page: Preview shows its order, Start sends it, a held CL
   assert.deepEqual([rows.length, rows.every((r) => r.status === 'ok')], [4, true]);
   assert.ok(Math.min(...at('codex')) > Math.max(...at('claude')), 'a held run started before the hold was lifted');
   assert.ok(done.log.some((l) => l === '⚙ Priority: none'), done.log.join('\n'));
+});
+
+test('Run → Monitor: the status says what each run going is, what is queued by model, and Codex\'s limits and credits from its newest log', async (t) => {
+  const s = sandbox({ dimensions: { testing: ['a', 'b', 'c'].map((id) => ({ id, text: `FAKE:sleep=4000 ${id}` })) },
+    agents: [{ id: 'opus', provider: 'claude', model: 'm', efforts: ['low'] }] });
+  // A Codex session log past its plan's limit, as Codex writes it: the week used up, and a credit balance.
+  const d = new Date(), pad = (n) => String(n).padStart(2, '0');
+  const dir = path.join(s.env.CODEX_HOME, 'sessions', String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'rollout-2026-11-05T10-00-00-abc.jsonl'), JSON.stringify({ type: 'event_msg', payload: { type: 'token_count',
+    rate_limits: { limit_id: 'codex', primary: { used_percent: 100, window_minutes: 10080, resets_at: 1793900989 } }, credits: { has_credits: true, unlimited: false, balance: '16511.5' } } }) + '\n');
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  assert.equal((await dd.api('/api/run', 'POST', { pick: ['opus:low'], only: { testing: ['a', 'b', 'c'] }, concurrency: 2 })).status, 200);
+  const st = await waitFor(async () => { const x = (await dd.api('/api/status')).json; return x.active.length === 2 && x.state?.leftHeads?.['opus-low'] === 1 ? x : null; });
+  assert.deepEqual(Object.values(st.activeInfo).map((i) => [i.agent, i.effort, i.testing]).sort(), [['opus', 'low', 'a'], ['opus', 'low', 'b']]);
+  assert.deepEqual([st.codex.balance, st.codex.windows[0].usedPct, st.codex.windows[0].minutes, st.creditsAtStart], [16511.5, 100, 10080, 16511.5]);
+  assert.equal((await dd.api('/api/stop', 'POST', {})).status, 200);
 });
 
 test('a queued batch runs from the config and prompt as they were when it was queued', async (t) => {

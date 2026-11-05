@@ -88,6 +88,52 @@ function refused(req) {
   return null;
 }
 
+// ---------------------------------------------------------- Run → Monitor
+// What each run going now is: its model, effort, stage and variants, from the unfinished.json its runner wrote as it
+// started (base). Read once per run.
+const activeCache = new Map();
+function activeInfo(ids) {
+  const out = {};
+  for (const id of ids) {
+    if (!activeCache.has(id)) { const b = readJSON(path.join(OUT, id, 'unfinished.json'), null)?.base; if (b) { const { chain, ...rest } = b; activeCache.set(id, rest); } }
+    if (activeCache.has(id)) out[id] = activeCache.get(id);
+  }
+  if (activeCache.size > 200) for (const k of [...activeCache.keys()]) if (!ids.includes(k)) activeCache.delete(k);
+  return out;
+}
+// Codex's plan limits and credit balance as its newest session log has them (~/.codex/sessions; the runner reads the
+// same logs, see codexLogs): past its plan's limit, Codex spends credits, which no run's result records. Read at most
+// every 30 s, from the end of the newest few logs.
+let codexRead = { at: 0, v: null };
+function readTail(file, bytes) {
+  const fd = fs.openSync(file, 'r');
+  try { const size = fs.fstatSync(fd).size, n = Math.min(bytes, size), buf = Buffer.alloc(n); fs.readSync(fd, buf, 0, n, size - n); return buf.toString('utf8'); }
+  finally { fs.closeSync(fd); }
+}
+function codexLimits(fresh = false) {
+  if (!fresh && Date.now() - codexRead.at < 30000) return codexRead.v;
+  codexRead.at = Date.now();
+  try {
+    const root = path.join(process.env.CODEX_HOME || path.join(HOME, '.codex'), 'sessions'), files = [], pad = (n) => String(n).padStart(2, '0');
+    for (let i = 0; i < 3; i++) {
+      const d = new Date(Date.now() - i * 864e5), dir = path.join(root, String(d.getFullYear()), pad(d.getMonth() + 1), pad(d.getDate()));
+      for (const f of fs.existsSync(dir) ? fs.readdirSync(dir) : []) if (f.endsWith('.jsonl')) files.push({ f: path.join(dir, f), t: fs.statSync(path.join(dir, f)).mtimeMs });
+    }
+    for (const { f, t } of files.sort((a, b) => b.t - a.t).slice(0, 5)) {
+      const text = readTail(f, 512 * 1024);
+      const c = [...text.matchAll(/"credits":(\{[^{}]*\})/g)].at(-1), l = [...text.matchAll(/"rate_limits":(\{(?:[^{}]|\{[^{}]*\})*\})/g)].at(-1);
+      if (!c && !l) continue;
+      const credits = c ? JSON.parse(c[1]) : null, limits = l ? JSON.parse(l[1]) : null;
+      const win = (k) => limits?.[k] && { usedPct: limits[k].used_percent ?? null, minutes: limits[k].window_minutes ?? null, resetsAt: limits[k].resets_at ? limits[k].resets_at * 1000 : null };
+      codexRead.v = { at: new Date(t).toISOString(), balance: credits?.balance != null ? +credits.balance : null, hasCredits: credits?.has_credits ?? null,
+        unlimited: credits?.unlimited ?? null, plan: limits?.plan_type ?? null, windows: ['primary', 'secondary'].map(win).filter(Boolean) };
+      return codexRead.v;
+    }
+    codexRead.v = null;
+  } catch { codexRead.v = null; }
+  return codexRead.v;
+}
+
 // ------------------------------------------------------------------- CLIs
 // What the Setup tab shows per CLI: version, the models it offers (with the effort levels
 // each takes) and the global instruction files it loads into every run. Checked in the
@@ -275,14 +321,15 @@ const note = (line) => { run.log.push(line); if (run.log.length > 3000) run.log.
 const tellBatch = (b, msg) => { if (b.child) b.child.stdin.write(JSON.stringify(msg) + '\n'); };
 // What the page shows for the running batches together: the shared limits, spend and the runs left per CLI.
 function sessionState() {
-  const l = run.limits ?? {}, left = {}, held = {};
+  const l = run.limits ?? {}, left = {}, held = {}, leftHeads = {}, heldHeads = {};
+  const add = (to, from) => { for (const [k, n] of Object.entries(from ?? {})) to[k] = (to[k] ?? 0) + n; };
   for (const b of live()) {
-    for (const [p, n] of Object.entries(b.state?.left ?? {})) left[p] = (left[p] ?? 0) + n;
-    for (const [p, n] of Object.entries(b.state?.held ?? {})) held[p] = (held[p] ?? 0) + n; // of those, on hold (Priority)
+    add(left, b.state?.left); add(held, b.state?.held); // of those, on hold (Priority)
+    add(leftHeads, b.state?.leftHeads); add(heldHeads, b.state?.heldHeads); // the same by model, effort and stage
   }
   return { concurrency: l.concurrency ?? null, perCli: l.perCli === Infinity ? null : l.perCli ?? null, budget: l.budget === Infinity ? null : l.budget ?? null,
     timeout: l.timeout || null, rerunFailed: !!l.rerunFailed, resumeFailed: !!l.resumeFailed, paused: !!l.paused, overBudget: run.overBudget, spent: spentNow(), left,
-    held, priority: l.priority ?? [] };
+    held, leftHeads, heldHeads, priority: l.priority ?? [] };
 }
 const shortPicks = (ps) => { const l = (ps ?? []).map((p) => String(p).replace(':', ' · ')); return l.length > 4 ? `${l.slice(0, 3).join(', ')} +${l.length - 3} more` : l.join(', '); };
 const describe = (sel) => sel.stages && typeof sel.stages === 'object'
@@ -496,6 +543,7 @@ function startSession(s) {
   batches.length = 0; waiting.length = 0; lastGrant = -Infinity;
   const c = readJSON(CONFIG, {});
   Object.assign(run, { log: [], startedAt: new Date().toISOString(), finishedAt: null, exitCode: null, settings: s, overBudget: false, stopping: false,
+    creditsAtStart: codexLimits(true)?.balance ?? null,
     gapMs: Math.max(0, +(c.startGap ?? 3) || 0) * 1000, spentBefore: 0, suspended: null,
     limits: { concurrency: Math.max(1, Math.floor(+s.concurrency) || 1), perCli: +s.perCli >= 1 ? Math.floor(+s.perCli) : Infinity,
       budget: +s.budget > 0 ? +s.budget : Infinity, timeout: +s.timeout > 0 ? +s.timeout : 0, paused: false,
@@ -576,7 +624,7 @@ function saveSession(now = false) {
   if (!run.limits || !(running() || run.suspended)) return;
   const L = run.limits, fin = (v) => v === Infinity ? null : v;
   const s = { savedAt: new Date().toISOString(), why: run.suspended, startedAt: run.startedAt, settings: run.settings, gapMs: run.gapMs,
-    limits: { ...L, perCli: fin(L.perCli), budget: fin(L.budget) }, spent: spentNow(),
+    limits: { ...L, perCli: fin(L.perCli), budget: fin(L.budget) }, spent: spentNow(), creditsAtStart: run.creditsAtStart ?? null,
     // done: ended (finished, or taken out of the queue) before the dashboard was; the others are picked up.
     batches: [...batches.map((b) => ({ n: b.n, sel: b.sel, dir: b.dir && path.basename(b.dir), queuedAt: b.queuedAt, startedAt: b.startedAt, finished: b.finished,
       done: b.ended || (!b.child && !b.cut) })), ...waiting.map((w) => ({ n: w.n, sel: w.sel, dir: path.basename(w.dir), queuedAt: w.queuedAt,
@@ -637,7 +685,7 @@ function resumeSession() {
   fs.rmSync(STOP, { force: true });
   batches.length = 0; waiting.length = 0; lastGrant = -Infinity;
   Object.assign(run, { log: [...(s.log ?? [])], startedAt: s.startedAt, finishedAt: null, exitCode: null, settings: s.settings, overBudget: false, stopping: false,
-    suspended: null, gapMs: s.gapMs ?? 3000, spentBefore: s.spent ?? 0,
+    suspended: null, gapMs: s.gapMs ?? 3000, spentBefore: s.spent ?? 0, creditsAtStart: s.creditsAtStart ?? null,
     limits: { concurrency: Math.max(1, Math.floor(+L.concurrency) || 1), perCli: L.perCli ?? Infinity, budget: L.budget ?? Infinity, timeout: L.timeout || 0,
       paused: !!L.paused, rerunFailed: !!L.rerunFailed, resumeFailed: !!L.resumeFailed, priority: savedPriority(L.priority) } });
   const cut = cutOffRuns(), on = cut.filter((c) => c.carriesOn).length;
@@ -1115,6 +1163,7 @@ const server = http.createServer(async (req, res) => {
         startedAt: run.startedAt, finishedAt: run.finishedAt, exitCode: run.exitCode, active: [...act.keys()], activeSince: Object.fromEntries(act),
         finished: batches.reduce((n, b) => n + b.finished, 0), planned: run.startedAt ? batches.reduce((n, b) => n + (b.planned ?? 0), 0) : null,
         settings: run.settings, state: run.limits ? sessionState() : null, batches: batchList(), logTotal: run.log.length,
+        activeInfo: activeInfo([...act.keys()]), codex: codexLimits(), creditsAtStart: run.creditsAtStart ?? null,
         log: run.log.slice(Math.max(0, Math.min(since, run.log.length))), updating, rev: revs(),
         restarting: restarting ? 'now' : restartPending ? 'idle' : null, saved: running() ? null : savedInfo(), cut: cutOffRuns(),
         ...(known === String(smokesRev) ? {} : { smokes }) }); // the tests only when they changed

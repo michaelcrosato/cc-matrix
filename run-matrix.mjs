@@ -2219,16 +2219,18 @@ function sayState(force) {
   if (!args.control) return;
   // left: the runs still to start, per CLI; leftModels: the same per model of each CLI, which the dashboard needs to
   // know how many slots a batch can really use under Max per model (see nextGrant).
-  // held: of those, the ones on hold (Priority), which hold no slots either.
-  const fin = (v) => v === Infinity ? null : v, left = {}, leftModels = {}, held = {};
+  // held: of those, the ones on hold (Priority), which hold no slots either. leftHeads and heldHeads: the same by model,
+  // effort and stage (a run's head, as its folder starts: opus-xhigh.build), for Run → Monitor's table by model.
+  const fin = (v) => v === Infinity ? null : v, left = {}, leftModels = {}, held = {}, leftHeads = {}, heldHeads = {};
   for (const r of pending) if (!isDone(r)) {
     const p = r.agent.provider;
     left[p] = (left[p] ?? 0) + 1;
-    if (isHeld(r)) { held[p] = (held[p] ?? 0) + 1; continue; }
+    if (isHeld(r)) { held[p] = (held[p] ?? 0) + 1; heldHeads[r.head] = (heldHeads[r.head] ?? 0) + 1; continue; }
+    leftHeads[r.head] = (leftHeads[r.head] ?? 0) + 1;
     const m = (leftModels[p] ??= {}); m[r.agent.model] = (m[r.agent.model] ?? 0) + 1;
   }
   const s = JSON.stringify({ concurrency: args.concurrency, perCli: fin(args.perCli), budget: fin(args.budget), timeout: args.timeout || null,
-    rerunFailed: args.rerunFailed, resumeFailed: args.resumeFailed, paused, overBudget, spent, left, leftModels, held, priority });
+    rerunFailed: args.rerunFailed, resumeFailed: args.resumeFailed, paused, overBudget, spent, left, leftModels, held, leftHeads, heldHeads, priority });
   if (s !== lastState || force) { lastState = s; console.log('@state ' + s); }
 }
 
