@@ -15,8 +15,7 @@
       "model": "claude-sonnet-5-5",
       "efforts": [
         "medium"
-      ],
-      "timeout": 180
+      ]
     },
     {
       "id": "claude-haiku-5-5",
@@ -26,6 +25,46 @@
         "medium"
       ],
       "timeout": 180
+    },
+    {
+      "id": "gpt-6.1-terra",
+      "provider": "codex",
+      "model": "gpt-6.1-terra",
+      "efforts": [
+        "max"
+      ]
+    },
+    {
+      "id": "gpt-6.1-sol",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "efforts": [
+        "max"
+      ]
+    },
+    {
+      "id": "gemini-4-argon",
+      "provider": "agy",
+      "model": "gemini-4-argon",
+      "efforts": [
+        "high"
+      ]
+    },
+    {
+      "id": "grok",
+      "provider": "grok",
+      "model": "grok-4.7",
+      "efforts": [
+        "xhigh"
+      ]
+    },
+    {
+      "id": "muse-wonder-1.0",
+      "provider": "muse",
+      "model": "muse-wonder-1.0",
+      "efforts": [
+        "max"
+      ]
     }
   ],
   "dimensions": {
@@ -43,16 +82,12 @@
         "text": "Far Cry 2"
       },
       {
-        "id": "HackGUVol3Redemption",
-        "text": ".hack//G.U. Vol. 3: Redemption"
+        "id": "Diablo3",
+        "text": "Diablo 3"
       },
       {
         "id": "ResidentEvil4",
         "text": "Resident Evil 4"
-      },
-      {
-        "id": "FatalFrame",
-        "text": "Fatal Frame"
       },
       {
         "id": "AnimalCrossingCityFolk",
@@ -115,8 +150,8 @@
         "text": "Build on https://github.com/michaelcrosato/my-3dge#make-a-game-with-my-3dge, in the engine's full workspace. The engine stays read-only, as the AGENTS.md it gives your game says: add whatever systems, art assets and animations the game needs on top of it. The rest of the tech stack is your choice."
       },
       {
-        "id": "tech-v4",
-        "text": "Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Web Audio, Gamepad API; The rest of the tech stack is yours to choose."
+        "id": "tech-v5",
+        "text": "Use Three.js R180, WEBGPU, use a stylized cel-shaded / ink filter, rapier 0.19.3 for physics, Web Audio, Gamepad API; The rest of the tech stack is yours to choose."
       }
     ],
     "artDirection": [
@@ -148,7 +183,7 @@
     "workspace": [
       {
         "id": "ws-sub-v3",
-        "text": "Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.",
+        "text": "Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port. ",
         "olderRuns": true
       }
     ],
@@ -262,7 +297,7 @@
       "models": [
         "claude-opus-5-5:max"
       ],
-      "text": "You are the game director. TASK.md is the CEO's brief. Write PLAN.md: the plan other AI agents will build the game from, without you. Leave the game's title to them: each builder picks its own, as TASK.md says. Leave out TASK.md's file and folder names too, since each builder's TASK.md has its own; write paths relative to the dev folder.\n\nThen review the prompt you were given (TASK.md and these instructions): save planner-exit-interview.json in this folder, a JSON list of {\"question\", \"answer\"}, one for each of these questions:\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?",
+      "text": "You are the game director. TASK.md is the CEO's brief. Write PLAN.md: the plan other AI agents will build the game from, without you. Leave the game's title to them: each builder picks its own, as TASK.md says. Leave out TASK.md's file and folder names too, since each builder's TASK.md has its own; write paths relative to the dev folder.\n\nThen review the prompt you were given (TASK.md and these instructions): save planner-exit-interview.json in this folder, a JSON list of {\"question\", \"answer\"}, one for each of these questions:\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt? ",
       "goal": "PLAN.md covers everything TASK.md asks for.",
       "game": false
     },
@@ -271,9 +306,14 @@
       "models": [
         "claude-opus-5-5:xhigh",
         "claude-opus-5-5:medium",
-        "claude-sonnet-5-5:medium"
+        "claude-sonnet-5-5:medium",
+        "gemini-4-argon:high",
+        "grok:xhigh",
+        "muse-wonder-1.0:max",
+        "gpt-6.1-sol:max",
+        "gpt-6.1-terra:max"
       ],
-      "text": "Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md, which is filled in for you. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted.",
+      "text": "Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md, which is filled in for you. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted. ",
       "goal": "Everything in PLAN.md that can be done on this computer is done, and everything TASK.md asks you to hand in is in this folder."
     }
   ],
@@ -300,6 +340,9 @@
     "grok": "grok",
     "agy": "agy",
     "muse": "muse"
+  },
+  "perModel": {
+    "codex": 3
   },
   "folderName": {
     "fields": [],

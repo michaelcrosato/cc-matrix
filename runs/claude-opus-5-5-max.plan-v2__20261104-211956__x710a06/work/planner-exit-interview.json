@@ -1,0 +1,18 @@
+[
+  {
+    "question": "What did you like most about this prompt?",
+    "answer": "The 'This computer' section. It says what is installed, what is missing and which stand-ins to use, so I could test real risks instead of guessing about the machine. I also liked that performance is explicitly out of scope, which removes a whole class of trade-offs from the design, and that every requirement is concrete enough to map to a line in the plan (10 seconds to attract, music at 10%, the exact touch-only message)."
+  },
+  {
+    "question": "What was confusing?",
+    "answer": "Three things. (1) 'Follow [the hub] for multiplayer integration into ai-hub as well as for the game on its own.' It could mean the game must simply still run alone outside a session, or that it needs its own network multiplayer outside the hub. The protocol offers no relay for that. After reading the hub's conformance script I took the first meaning, and added solo play with AI partners. (2) The brief asks for an original game, but also wants the source's world and characters captured and a title that riffs on its name. I resolved that by keeping genre and mechanics and replacing every name, character, place, creature and joke, but the line between the two isn't stated. (3) STAGE.md says to leave out TASK.md's file and folder names. I wasn't sure whether the exit-interview file name counted, so I left that out too and referred to it by description."
+  },
+  {
+    "question": "What was the hardest thing to do?",
+    "answer": "Separating real risks from my own mistakes while testing the hub. The first harness run hung, and I blamed the shared main thread, but the actual cause was my script waiting on Python's block-buffered server output. The next runs failed with a Rust panic, and I blamed iframe removal, until the timeline showed the crash came first. The browser log then traced it to the Chromium flags. Besides that, it was hard to size a five-chapter game for a builder of unknown strength while keeping the plan complete but readable. That is why it has a strict build order, an explicit cut list and a never-cut list."
+  },
+  {
+    "question": "What would you change in this prompt?",
+    "answer": "(1) Fix the Chromium flags in the computer notes. --enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader kills the GPU channel once 3 or more WebGPU copies share a browser, which fails the hub check with what looks like a game bug. Adding --use-vulkan=swiftshader --use-angle=swiftshader passed every scenario I ran. (2) Change the server example to python3 -u -m http.server, because without -u the port line never reaches a script reading a pipe. (3) Say in one sentence what 'the game on its own' means for multiplayer. (4) Mention the hub's solo check, which needs a visibly drawn screen after about 7 seconds, because software WebGPU can stay blank for longer. (5) Give a target length instead of 'long enough', and tell the planner which model will build the plan, so scope can be sized to it. (6) Say whether planners may clone and build the engine and where scratch files belong. I did it in a temporary folder and removed it afterwards, and it was the most valuable thing I did."
+  }
+]
