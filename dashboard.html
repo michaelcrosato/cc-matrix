@@ -2228,32 +2228,58 @@ function byModelCard(hb) {
     h('div', { class: 'only-phone mlist' }, phone));
 }
 
-// The runs going now, longest first: what each is, how long it has run against its setup's usual time, and its output.
+// What a run going is, from the status; a server that hasn't been restarted since the page got this (the page updates on a
+// reload, the server only on Restart) doesn't say, so each run's unfinished.json is read once instead.
+const runInfoRead = {};
+function runInfo(id) {
+  if (status.activeInfo) return status.activeInfo[id] ?? {};
+  if (!(id in runInfoRead)) {
+    runInfoRead[id] = {};
+    fetch(runUrl(`${id}/unfinished.json`)).then((r) => r.json()).then((u) => { const { chain, ...rest } = u.base ?? {}; runInfoRead[id] = { ...rest, steps: chain?.length ?? null }; if (tab === 'running') renderRunning(); }).catch(() => {});
+  }
+  return runInfoRead[id];
+}
+// A variant by its text when that's a name (Far Cry 2), else its short name.
+const variantName = (d, id) => { const t = cfg.dimensions[d]?.find((v) => v.id === id)?.text?.trim(); return t && t.length <= 40 ? t : id; };
+// Where a run is in the chain, counted as the tabs are: a build is Stage 3, of 3 if nothing comes after it. Without its
+// batch's picks from the server, the stages that have models now.
+function stageOfRun(i, stage) {
+  if (!stage) return null;
+  const ss = cfg.stages ?? [], at = ss.findIndex((x) => x.id === stage), steps = i.steps ?? (at >= 0 ? at + 1 : null);
+  if (!steps) return null;
+  return `Stage ${steps + 1} of ${Math.max(steps, i.totalSteps ?? ss.findLastIndex((x) => (x.models ?? []).some(validPick)) + 1) + 1}`;
+}
+// The runs going now, longest first: what each is, where it is in its stages, how long it has run against its setup's usual
+// time, and its output.
 function runningCard(hb) {
   const st = status, ctl = st.running && st.state && !st.stopping, act = [...(hb?.active ?? [])].sort((a, b) => b.mins - a.mins);
   if (!act.length) return null;
-  const info = (id) => st.activeInfo?.[id] ?? {};
-  const dims = Object.keys(cfg.dimensions).filter((d) => new Set(act.map((a) => info(a.id)[d]).filter((v) => v != null)).size > 1);
+  const rows = act.map((a) => { const p = headParts(a.id.split('__')[0]), i = runInfo(a.id);
+    return { ...a, p, i, source: i.source != null ? variantName('source', i.source) : null, title: i.title ?? null, stage: stageOfRun(i, p.stage) }; });
+  const has = (k) => rows.some((r) => r[k]);
+  // The other variants, where they differ between the runs going.
+  const dims = Object.keys(cfg.dimensions).filter((d) => d !== 'source' && new Set(rows.map((r) => r.i[d]).filter((v) => v != null)).size > 1);
   return h('div', { class: 'card', key: 'running' },
     h('div', { class: 'row' }, h('h2', { class: 'grow' }, `Running now · ${act.length}`), h('span', { class: 'muted', style: 'font-size:12.5px' }, 'longest first')),
-    h('div', { class: 'only-phone mlist' }, act.map((a) => {
-      const p = headParts(a.id.split('__')[0]), i = info(a.id);
-      return h('div', { class: 'mrow' + (a.slow ? ' slow' : ''), key: a.id },
-        h('div', { class: 'row', style: 'gap:2px 6px' }, h('span', { class: 'grow', title: a.id }, headLabel(p)),
-          h('a', { class: 'icon', href: runUrl(`${a.id}/agent.out`), target: '_blank', rel: 'noopener', title: 'What its CLI has printed so far' }, 'out'),
-          ctl ? [h('button', { class: 'icon', title: 'End it now and start it over later in this batch', onclick: () => endActive(a.id, 'requeue') }, '↻'),
-            h('button', { class: 'icon', title: 'End it now and leave it out of this batch (it runs next time)', onclick: () => endActive(a.id, 'drop') }, '✕')] : null),
-        h('div', { class: 'muted', style: 'font-size:12.5px' }, [...dims.map((d) => i[d] ?? '—'), `started ${fmtHM(st.activeSince?.[a.id])}`,
-          h('span', { class: a.slow ? 'warn' : '' }, `${a.slow ? '⚠ ' : ''}running ${fmtMin(a.mins)}${a.usual ? ` (usually ~${fmtMin(a.usual)})` : ''}`)].flatMap((v, k) => k ? [' · ', v] : [v])));
-    })),
+    h('div', { class: 'only-phone mlist' }, rows.map((a) => h('div', { class: 'mrow' + (a.slow ? ' slow' : ''), key: a.id },
+      h('div', { class: 'row', style: 'gap:2px 6px' }, h('span', { class: 'grow', title: a.id }, headLabel({ ...a.p, stage: null })),
+        h('a', { class: 'icon', href: runUrl(`${a.id}/agent.out`), target: '_blank', rel: 'noopener', title: 'What its CLI has printed so far' }, 'out'),
+        ctl ? [h('button', { class: 'icon', title: 'End it now and start it over later in this batch', onclick: () => endActive(a.id, 'requeue') }, '↻'),
+          h('button', { class: 'icon', title: 'End it now and leave it out of this batch (it runs next time)', onclick: () => endActive(a.id, 'drop') }, '✕')] : null),
+      a.source || a.title ? h('div', {}, a.source, a.source && a.title ? h('span', { class: 'muted' }, ' → ') : null, a.title ? h('strong', {}, a.title) : null) : null,
+      h('div', { class: 'muted', style: 'font-size:12.5px' }, [...dims.map((d) => a.i[d] ?? '—'), a.stage ? `${a.stage} · ${a.p.stage}` : a.p.stage, `started ${fmtHM(st.activeSince?.[a.id])}`,
+        h('span', { class: a.slow ? 'warn' : '' }, `${a.slow ? '⚠ ' : ''}running ${fmtMin(a.mins)}${a.usual ? ` (usually ~${fmtMin(a.usual)})` : ''}`)].filter(Boolean).flatMap((v, k) => k ? [' · ', v] : [v]))))),
     h('div', { class: 'scroll hide-phone' }, h('table', { class: 'monitor' },
-      h('thead', {}, h('tr', {}, ['Run', ...(dims.length ? [dims.join(' · ')] : []), 'Started', 'Running', 'Usually', '', ''].map((t, i, all) =>
+      h('thead', {}, h('tr', {}, ['Run', has('source') ? 'Source' : null, has('title') ? 'Game title' : null, dims.length ? dims.join(' · ') : null, has('stage') ? 'Stage' : null, 'Started', 'Running', 'Usually', '', ''].filter((t) => t != null).map((t) =>
         h('th', { class: ['Started', 'Running', 'Usually'].includes(t) ? 'num' : '' }, t)))),
-      h('tbody', {}, act.map((a) => {
-        const p = headParts(a.id.split('__')[0]), i = info(a.id), frac = a.usual ? Math.min(1, a.mins / (2 * a.usual)) : null;
+      h('tbody', {}, rows.map((a) => {
+        const frac = a.usual ? Math.min(1, a.mins / (2 * a.usual)) : null;
         return h('tr', { key: a.id, class: a.slow ? 'slow' : null },
-          h('td', { title: a.id }, headLabel(p)),
-          dims.length ? h('td', { class: 'muted' }, dims.map((d) => i[d] ?? '—').join(' · ')) : null,
+          h('td', { class: 'mname', title: a.id }, headLabel({ ...a.p, stage: null })),
+          has('source') ? h('td', {}, a.source ?? '—') : null,
+          has('title') ? h('td', {}, a.title ? h('strong', {}, a.title) : h('span', { class: 'muted', title: a.p.stage && (cfg.stages ?? []).find((x) => x.id === a.p.stage)?.game === false ? 'This stage makes no game' : 'Its agent hasn\'t named its game yet' }, '—')) : null,
+          dims.length ? h('td', { class: 'muted' }, dims.map((d) => a.i[d] ?? '—').join(' · ')) : null,
+          has('stage') ? h('td', { style: 'white-space:nowrap' }, a.stage ?? '', a.p.stage ? h('span', { class: 'muted' }, `${a.stage ? ' · ' : ''}${a.p.stage}`) : null) : null,
           h('td', { class: 'num' }, fmtHM(st.activeSince?.[a.id])),
           h('td', { class: 'num' + (a.slow ? ' warn' : '') }, `${a.slow ? '⚠ ' : ''}${fmtMin(a.mins)}`),
           h('td', { class: 'num muted' }, a.usual ? `~${fmtMin(a.usual)}` : '—'),

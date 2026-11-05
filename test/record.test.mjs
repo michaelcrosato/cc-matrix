@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { sandbox, cleanup, runner, result, dashboard, ROOT } from './helpers.mjs';
-import { displayModel, hubFields, parseInterview, readRecord, renameInRecord, stampHtml, unstamped } from '../run-record.mjs';
+import { titleWords, displayModel, hubFields, parseInterview, readRecord, renameInRecord, stampHtml, unstamped } from '../run-record.mjs';
 
 const RECORD = path.join(ROOT, 'run-record.mjs');
 const runIds = (sb, out = sb.out) => fs.readdirSync(out).filter((d) => fs.existsSync(path.join(out, d, 'result.json')));
@@ -254,4 +254,17 @@ test('the dashboard\'s run history comes back from the games alone (run-record.m
     assert.deepEqual(await rows(b), await rows(a));
     assert.deepEqual((await b.api('/api/template')).json.history, (await a.api('/api/template')).json.history);
   } finally { await a.stop(); await b.stop(); }
+});
+
+test('a game\'s title comes out of its file or folder name, from how agents really name them', () => {
+  const words = (name, model, effort, sources) => titleWords(name, { model, effort, sources }).join(' ');
+  const terra = ['gpt-6.1-terra', 'max'];
+  assert.equal(words('Wobble Grove-Wii Fit-gpt-6.1-terra-max-20261105-001542', ...terra, ['Wii Fit', 'wii-fit']), 'Wobble Grove');
+  assert.equal(words('Trauma Center: The Healing Hand-Trauma Center: Second Opinion-gpt-6.1-terra-max-20261105-013709.html', ...terra, ['Trauma Center: Second Opinion']), 'Trauma Center: The Healing Hand');
+  assert.equal(words('Far-Cry-The-Heat-Far-Cry-2-gpt-6.1-terra-max-20261105-084743', ...terra, ['Far Cry 2', 'FarCry2']), 'Far Cry The Heat');
+  assert.equal(words('Far Cry, Hot Skies-Far Cry 2-gpt-6.1-terra-max-20261105-073704', ...terra, [undefined, 'FarCry2']), 'Far Cry, Hot Skies');
+  assert.equal(words('TeeterFit-WiiFit-claude-opus-5-5-xhigh-20261105-015601', 'claude-opus-5-5', 'xhigh', ['Wii Fit', 'wii-fit']), 'TeeterFit');
+  // A name that leaves out the effort, or that's only the source and the model, says what it can.
+  assert.equal(words('Bloom-Wii Fit-claude-opus-5-5-20261105-0156', 'claude-opus-5-5', 'xhigh', ['Wii Fit']), 'Bloom');
+  assert.equal(words('Wii Fit-claude-opus-5-5-xhigh-20261105-015601', 'claude-opus-5-5', 'xhigh', ['Wii Fit']), '');
 });

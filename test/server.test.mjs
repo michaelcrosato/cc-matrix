@@ -451,6 +451,27 @@ test('Running: the status says what each run going is, what is queued by model, 
   assert.equal((await dd.api('/api/stop', 'POST', {})).status, 200);
 });
 
+test('Running: a run in stages says which stage it is on of how many, and its game\'s title once its agent has named it', async (t) => {
+  const s = sandbox({ template: 'SOURCE: {{source}}\nTesting: {{testing}}\n', dimensions: { source: [{ id: 'wii', text: 'Wii Fit' }], testing: [{ id: 'a', text: 'a' }] },
+    agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }], folderName: { fields: [], date: true },
+    stages: [{ id: 'plan', text: 'Plan it. FAKE:plan', game: false }, { id: 'build', text: 'Build it. FAKE:sleep=25000' }, { id: 'content', text: 'Add to it.' }] });
+  const dd = await dashboard(s);
+  t.after(async () => { await dd.stop(); cleanup(s); });
+  // Three stages in the config, and the batch picks the first two: it ends at the build.
+  assert.equal((await dd.api('/api/run', 'POST', { stages: { plan: ['opus:low'], build: ['opus:low'] }, only: { source: ['wii'], testing: ['a'] }, concurrency: 1 })).status, 200);
+  const going = await waitFor(async () => { const x = (await dd.api('/api/status')).json; return x.active.find((id) => id.includes('.build')) ? x : null; }, 15000);
+  const id = going.active[0], info = going.activeInfo[id];
+  assert.deepEqual([info.stage, info.source, info.steps, info.totalSteps], ['build', 'wii', 2, 2]);
+  assert.ok(!('chain' in info));
+  // As an agent names its game early on: its folder, GameTitle-SOURCE-model-effort-stamp. The title's words stay as it wrote them.
+  const stamp = id.match(/__(\d{8}-\d{6})/)[1];
+  fs.writeFileSync(path.join(s.out, id, 'work', 'notes-for-later.md'), 'not a game');
+  fs.mkdirSync(path.join(s.out, id, 'work', `Wobble Grove: Rebalanced-Wii Fit-claude-opus-5-5-low-${stamp}`));
+  const named = await waitFor(async () => (await dd.api('/api/status')).json.activeInfo[id]?.title ?? null, 15000);
+  assert.equal(named, 'Wobble Grove: Rebalanced');
+  assert.equal((await dd.api('/api/stop', 'POST', {})).status, 200);
+});
+
 test('a queued batch runs from the config and prompt as they were when it was queued', async (t) => {
   const s = sandbox({ dimensions: { testing: [{ id: 'long', text: 'FAKE:sleep=1500 long' }, { id: 'v', text: 'old text' }] },
     agents: [{ id: 'opus', provider: 'claude', model: 'claude-opus-5-5', efforts: ['low'] }] });
