@@ -1,0 +1,50 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "The Wire (HBO, 2002-2008), created by David Simon; kept as gritty and real as the show",
+    "genre": "Surveillance and stealth investigation, with a case-board puzzle, a wiretap listening game and a foot chase",
+    "perspective": "The engine's three-quarter view (pitch 55) as the main view; the player can switch to isometric or top-down at any time",
+    "tech": "my-3D2dge v0.85.1 (full engine edition, one file, no dependencies); AI Hub Session Protocol v1 client 1.3.0 (session.js); plain JavaScript bundled into one HTML file by a Node build script",
+    "artDirection": "The engine's native retro-modern pixel look: 320x240 base expanded to any screen, HD Humanoid rigs, TileMap rowhouses with per-pixel painted brick, formstone, boarded vacants and graffiti, objects as data (cars, dumpster, couch, payphone, desks, reel decks), canvas lighting with street lamps, rain at night",
+    "animation": "The engine's procedural Humanoid rigs driven by velocity and poses, the Mover for the player (sprint, sneak, vault), scene transitions and tweens; no frame lists",
+    "audio": "Code-written chip-synth music (title blues, corner boom-bap, night, wire room, chase, office, ending), code-written sound effects (shutter, whistle, pager, ram, siren, cuffs), and gibberish Simlish-style voices with a pitch and timbre per speaker, blipped as the text types",
+    "online": "AI Hub Session Protocol v1, ghost mode: each player runs their own seeded 3-minute surveillance shift, the other detectives show as ghosts with names and scores, and progress and score results go to the hub. Local 1-2 player drop-in outside the hub",
+    "testing": "Headless Node tests (a full five-tape playthrough with 49 checks, 52 system checks, a 16-scene smoke test); Playwright screenshots in Chromium, Firefox and WebKit; viewport-matrix on 24 phone, tablet and desktop configurations; the AI Hub harness with 1, 2 and 4 players, latency, jitter, loss and host-leave",
+    "research": "None beyond the engine and hub documentation; details of the show from memory",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "28 issues, found by the headless playthrough and system tests, the browser screenshots and the viewport matrix. The AI Hub harness passed on its first run.",
+    "5 critical: a boot step that crashed the start, a runner whose stash spot was inside a wall (the corner stalled forever), a dialog carried into the next scene that froze it, the shift mode triggering story events, and a sale timer left over from the tail that meant later sessions had no sales.",
+    "The scripted headless playthrough of all five tapes. It drives the real scenes through game.advance and game.debug, and it found every soft-lock in the story chain.",
+    "The viewport matrix: 24 of 24 clean on the first run, because the engine's expand mode already fits every screen. It only caught a toast overlapping the objective box on narrow screens."
+  ],
+  "engineFeedback": [
+    "The standard features are already built: the pause menu, rebinding, button glyphs per device, settings that save, fixed-step determinism, and a headless mode where the same game runs in Node for tests.",
+    "Several guesses: whether an intent object passed to Mover.update uses ground or screen directions (ground), what a face painter returns for the base colour (null), that objects as data are written facing south (my cars came out sideways at first), and that TileMap.bounds needs a view object, not a view name.",
+    "The surveillance layer: a camera viewfinder in world space that works with the mouse, a stick and the keys; the sale cycle that photos are judged against; and the lookouts' suspicion with blending.",
+    "Working with a 1.2 MB engine through its index, without seeing pixels quickly. The per-pixel wall painter's signature also takes time to learn.",
+    "The loosely checked option objects on draw calls: a typo in an option key is silently ignored.",
+    "Ship PlayStation and Xbox button symbols as font glyphs, so prompts drawn with E.font can show them without custom drawing."
+  ],
+  "promptFeedback": [
+    "It is specific about the player's experience (a 10-foot UI, glyphs that follow the last device, an attract mode, the touch-only notice) and leaves the genre and design open.",
+    "'Follow the hub for multiplayer integration into ai-hub as well as for the game on its own' can be read as hub only, or as hub plus local multiplayer. I did both.",
+    "Fitting the show's slow, procedural texture (paperwork, waiting, minimization) into mechanics that are still fun in a short demo.",
+    "A real DualSense on a real TV at ten feet, to judge text size and glyph readability with human eyes."
+  ],
+  "aiHub": {
+    "name": "REWIRED",
+    "tagline": "Walk the corner. Build the board. Work the wire.",
+    "description": "An original surveillance game in the spirit of The Wire: blend in on a West Baltimore corner, photograph hand-to-hands, pin evidence to a case board and minimize calls on a wiretap. In a hub round, everyone works the same corner for one shift.",
+    "type": "Game",
+    "genre": "Stealth",
+    "source": "The Wire",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick or WASD to move, L2 or right mouse to raise the camera, R2 or left click for a photo, Circle or C to crouch, Cross or E to interact",
+    "tags": ["story", "stealth", "pixel art", "crime", "three-quarter", "co-op"]
+  }
+}

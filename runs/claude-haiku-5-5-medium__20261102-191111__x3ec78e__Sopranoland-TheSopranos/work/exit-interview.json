@@ -1,0 +1,56 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 19:11",
+    "source": "The Sopranos (1999-2007)",
+    "genre": "Third-person action-adventure with dialogue choices and a stress meter",
+    "perspective": "Third-person. Three-quarter view by default; top-down and isometric views are switchable with V or the right stick press",
+    "tech": "my-3D2dge engine v0.85.1 (handoff build, inlined in one HTML file), AI Hub Session Protocol v1 client 1.3.0 (inlined unmodified), vanilla JavaScript, Node 24 for the headless tests, Playwright Chromium for browser checks",
+    "artDirection": "Engine-native: pixel-art 3D skeleton characters in an SNES-size buffer with expand, a dusk and night New Jersey town, lit streets and props",
+    "animation": "Engine-native: Humanoid rigs with E.MOVES attacks, E.Combo for the bat, E.Attack timing, Mover for walking, climbing and rolling; procedural poses from the bodies' motion",
+    "audio": "Music and sound effects written in code (engine chip synth, custom tracks); voices are gibberish Animalese blips, one pitch set per speaker. No audio files",
+    "online": "AI Hub ghost mode: each copy sends its player's place and progress through the hub, and shows the other players' ghosts in the same zone. Result on the last chapter or on time-up",
+    "testing": "Headless Node suite (97 checks across scenes, attract demo, map, talk, combat, pickups, stress, chapters, settings, saves, touch-only, hub session and a full keyboard-and-mouse playthrough); the AI Hub harness with 2 players and with 4 players at 150 ms latency, 50 ms jitter, 5% loss; Chromium screenshots and a WebKit viewport matrix",
+    "research": "Read the engine's API card, its API index, its AI guide recipes and the AI Hub protocol README, all on GitHub. No web search",
+    "environment": "Claude Code CLI (headless); Linux (WSL2 Ubuntu); browser: Chromium and WebKit through Playwright",
+    "model": "Anthropic, claude-haiku-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "About 10 issues were caught in total: 6 real game bugs, found by the suite, the attract run and the browser draw; the rest were test-side mistakes (stale targets, a missing await, too-early asserts). Final count after fixes: 97 of 97 passing.",
+    "3. Game-breaking: a Foe method named step collided with the engine's Body step counter, so the world threw on the first update; a flagstone texture call without options crashed the first draw; a map.center return shape (an array, not an object) left the hero at null. Each stopped play outright.",
+    "The attract-mode run: a full simulated demo from the title to Ma's door, with the AI picking talk answers and fighting. It caught the Body name clash, a dialogue loop that never reached the choices, and an attract demo that dropped into the player's end screen. Most useful.",
+    "The one-off checks that only assert no error in a long step loop. They pass even when a feature is silently dead (the headless draw is skipped in Node), so they told me little on their own. Least useful; a browser run of draw code caught the crash that Node could not see."
+  ],
+  "engineFeedback": [
+    "The control and camera work: the Mover, the Dialog and Bullets gave a working third-person core in an afternoon's code, and the view cycle, settings, pause menu and saves came for free.",
+    "Yes. map.center returns an array, not {x, y}; E.tex.flagstone needs a palette; Body already has a step field, so a method named step breaks it. I guessed each one from a stack trace.",
+    "The Foe class and its step/attack loop, the world's chapters, the attract AI, the hub ghosts and the About pages. The engine supplies the parts; the game's rules are mine.",
+    "The conversation runner: Dialog's page and choice flow (choices appear only on the last page, and confirm on the last page closes the box and calls onChoice and then onDone). The engine's helpers covered rendering, not the story flow. Also: the hub's connect promise resolves on a later turn, so the headless tests had to await it before they could see the round.",
+    "I'd remove the undocumented Body.step counter (or rename it to something that cannot collide with a game's own method). Its name is the most common verb in game code, and the failure looks like a broken world rather than a naming clash.",
+    "Make the tex helpers and map.center state their defaults and return shapes in the API card, and let flagstone take a default palette. Both cost real time."
+  ],
+  "promptFeedback": [
+    "The concrete done-list, with the harness and link to the hub's protocol. It gave a checklist I could test against, and the exit interview shape left no guesswork.",
+    "The overlap of 'Do not read files outside what you need' with the need to read the engine's docs (about 300 KB of them). The two Done conditions also ask for a file at the root and the html in the folder: I wrote both where they are named, but the root-or-subfolder split took a re-read.",
+    "The full playthrough and automated tests for every system within one session. The scope is large for a single pass, so most of the effort went into the test harness, and the visual polish came last.",
+    "A browser test that plays the whole game with the real keyboard and mouse, with a draw pass in each chapter, and screenshots compared against a reference. That would have caught the draw crash before the Chromium run."
+  ],
+  "aiHub": {
+    "name": "SOPRANOLAND",
+    "tagline": "Sunday gravy is on the table.",
+    "description": "Run the town of Bellmore Point for Ma: collect from the shops, sit down with Big Lou, see Dr. Vashti, take the Pappalardo yard from Gus and get home before the Feds do.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "The Sopranos (1999-2007)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Move: left stick or WASD. Bat: X or J or left click. Pistol: LT or Q or middle click. Guard: LB or K or right click. Roll: RB or L. Talk: Y or E. Jump: A or Space. Camera: R3 or V",
+    "tags": [
+      "third-person",
+      "comedy",
+      "boss fights",
+      "exploration",
+      "story"
+    ]
+  }
+}

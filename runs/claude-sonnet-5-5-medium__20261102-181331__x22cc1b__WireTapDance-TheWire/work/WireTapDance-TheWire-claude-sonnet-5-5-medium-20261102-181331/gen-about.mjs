@@ -1,0 +1,46 @@
+// one source for the in-game About screen and exit-interview.json
+import { writeFileSync } from 'node:fs';
+const si = {
+  date: '2026-11-02 18:13', source: 'The Wire (2002-2008), kept gritty and real: an original spiritual successor, original characters and a fictional East Side district',
+  genre: 'Investigative stealth-adventure with mini-games (surveillance, informant, wiretap, foot chase, interrogation)', perspective: 'Three-quarter top-down (engine native), switchable to isometric and top-down with V / R3',
+  tech: 'my-3D2dge v0.85.1 handoff engine (one file, no dependencies, patched only to add stick-axis inversion), plain JavaScript, AI Hub session client 1.3.0 (parallel mode); bundled to a single html file',
+  artDirection: 'Engine-native HD puppet characters in pixel-art 3/4 view, procedural brick rowhouses and low-rises, rain, night lighting and lamp pools, HTML HUD in a muted gold-on-charcoal theme',
+  animation: 'Engine-native procedural Humanoid rigs (IK gait, poses, expressions, E.MOVES tackle) and tweened HUD; no sprite sheets or imported clips',
+  audio: 'All synthesized in code: five chip-synth songs (title, stealth, chase, box, report), sound effects, and Animalese-style gibberish voices with a different pitch and wave per speaker; no files',
+  online: 'AI Hub Session Protocol v1, parallel mode, 1-4 players, each plays their own copy and reports a case score; passes the hub harness. Outside a hub it is single player',
+  testing: 'Headless engine tests (63 system checks plus a 23-check full playthrough) run with exact fixed steps; Playwright browser runs for visuals, mouse, attract mode and a real-time demo; AI Hub harness; WebKit viewport matrix. No real gamepad or real iOS Safari was available: controllers were mocked',
+  research: 'Read the engine API card and AI Hub protocol only. The show is known from knowledge; no web research',
+  environment: 'Claude Code CLI (headless); Linux; browser unknown (Chromium and WebKit via Playwright used for testing)',
+  model: 'Anthropic, claude-sonnet-5-5, reasoning effort medium',
+  usage: 'unknown (cost and token counts are not exposed to the session); session time about 30 minutes'
+};
+const testing = [
+  'About 12 real issues: dropped arrest script, key sharing between confirm and interact/tackle, same-frame interact retrigger, overlay left open, attract pilot stalling behind a screen, blocked alley, stale screen on restart, invalid color, missing glyph, overflowing panel, photo line-of-sight ignoring crouch, unreachable photo range.',
+  'Four were game breaking: the dropped arrest script (case stuck mid-chase), the attract pilot stalling at the interview, the van restarting forever, and the fully blocked chase alley.',
+  'The headless full playthrough with real input actions: it found most logic bugs in seconds, and doubled as the proof that every stage connects.',
+  'The mobile viewport matrix: the game is controller/keyboard only, so phone layouts say little beyond the layout being sane.'
+];
+const engine = [
+  'Characters that animate and look finished from rigs alone, and the Shell HUD/menus/settings/rebinding that come free.',
+  'Slightly: assumed Dialog and key-bound actions were independent (confirm and interact share Space), and that a TileMap legend accepts every character.',
+  'Stick-axis inversion in settings (patched into the input poll), the attract-mode pilot, and the interview/wire/listening mini-games.',
+  'Knowing what is exposed on game.input and Settings (undocumented fields like padMove, _specs) without reading source.',
+  'The standard menu being fixed: I wanted my own settings group names and glyph options and had to edit spec objects.',
+  'Make custom settings first-class with apply hooks that cover gamepad axes, so inversion needs no patch.'
+];
+const prompt = [
+  'Clear, structured requirements: a checklist that is directly testable (attract mode, glyphs, inversion, touch message, hub).',
+  'The Source Information block and exit-interview schema are asked for twice in different forms, and Testing/Engine/Prompt questions sit separately from the final reply rules.',
+  'Making one coherent, fun game of a TV drama in a single sitting, with 10-foot UI, hub rules and polish all at once.',
+  'A real gamepad run, with a DualSense, to confirm the stick-inversion issue and PlayStation glyphs on hardware.'
+];
+const ai = { name: 'Wire Tap Dance', tagline: 'Nobody gets convicted by a feeling', description: 'A gritty detective game inspired by The Wire: photograph a drug crew from cover, pay an informant, tap a payphone, run down a runner and break him in the box. Build a case a prosecutor can carry.', type: 'Game', genre: 'Stealth', source: 'The Wire', series: '', players: '1-4', controls: 'Stick or WASD move, R2 or Shift sprint, Circle or C crouch, L2 or Q camera, Cross or E interact, Square or J tackle, Triangle or Tab case file, R3 or V change view', tags: ['3d', 'story', 'stealth', 'top-down', 'low-poly', 'exploration'] };
+const json = { sourceInformation: si, testingFeedback: testing, engineFeedback: engine, promptFeedback: prompt, aiHub: ai };
+writeFileSync('../exit-interview.json', JSON.stringify(json, null, 2));
+const label = { date: 'Date', source: 'Source', genre: 'Genre', perspective: 'Perspective', tech: 'Tech', artDirection: 'Art Direction', animation: 'Animation', audio: 'Audio', online: 'Online', testing: 'Testing', research: 'Research', environment: 'Environment', model: 'Model', usage: 'Usage' };
+const secs = [['Source Information', Object.entries(si).map(([k, v]) => label[k] + ': ' + v).join('\n')]];
+const qs = (n, a, q) => [n, a.map((x, i) => q[i] + '\n' + x).join('\n\n')];
+secs.push(qs('Testing Feedback', testing, ['Issues caught', 'Game breaking', 'Most helpful test', 'Least helpful test']));
+secs.push(qs('Engine Feedback', engine, ['Liked most', 'Stuck or guessed wrong', 'Had to build myself', 'Hardest part', 'Overhaul', 'Change one thing']));
+secs.push(qs('Prompt Feedback', prompt, ['Liked most', 'Confusing', 'Hardest', 'One test I would run']));
+writeFileSync('src/70-about.js', 'const ABOUT_SECTIONS = ' + JSON.stringify(secs) + ';\n');

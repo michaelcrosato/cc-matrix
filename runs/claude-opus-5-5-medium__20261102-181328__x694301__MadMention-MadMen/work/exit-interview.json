@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "Mad Men (2007-2015), the AMC television drama created by Matthew Weiner",
+    "genre": "Narrative adventure / office life sim with a card-and-timing pitch battle",
+    "perspective": "Three-quarter top-down (engine threequarter view), switchable to isometric and top-down in the office",
+    "tech": "my-3D2dge v0.85.1 (full engine from the handoff package), plain JavaScript, AI Hub session client 1.3.0 (protocol 1); bundled into one HTML file with a small Node script",
+    "artDirection": "Engine-native retro-modern pixel art: PS1-era resolution, shaded HD Humanoid rigs, furniture as data shapes, canvas lighting, in a mid-century palette of walnut, teal, mustard and orange",
+    "animation": "Engine-native procedural Humanoid rigs (walk cycles, idle breathing, poses, expressions, live dialog portraits) plus engine scripts and tweens",
+    "audio": "Code-written jazz loops on the engine chip synth (title, office bossa, pitch, closer, evening ballad, win and lose stings), synthesized sound effects, and Simlish gibberish voices pitched per character",
+    "online": "AI Hub Session Protocol v1 in ghost mode (1-4 players: seeded deal, shared positions shown as ghosts, progress and results); local 2-4 player hot-seat Pitch-Off offline",
+    "testing": "Headless Chromium via Playwright (scripted play-throughs, faked DualSense gamepad), WebKit iPhone emulation for the touch-only gate, AI Hub harness automatic runs (2 players; 4 players with latency, jitter and loss; host-leave), viewport-matrix across 24 device/engine combinations; no real phone, real controller or real iOS Safari",
+    "research": "None online beyond the engine and AI Hub documentation; the source drawn from general knowledge",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown"
+  },
+  "testingFeedback": [
+    "13 issues: a mouse hint overflowed its box; AIHub.ready() never sent because a game.after() timer was cleared by the scene change; the touch-only gate never showed; leaving the attract demo during a pitch left the game stuck on the pitch screen; keys outside the bindings did not end the attract demo; Enter both chose a card and skipped the creative meeting; the pitch could be won with one card; the projector screen was out of frame; prompts overlapped; the objection box overflowed; a name label stayed over dialog; a bad material name; floors too busy.",
+    "3 critical: the AI Hub round never starting (ready never sent), touch-only devices getting a menu they could not use, and the attract demo leaving the game stuck on the pitch screen when exited mid-pitch.",
+    "The AI Hub harness in automatic mode, and a 28-item per-feature checklist script run against the final bundle (campaign, Pitch-Off with 2, 3 and 4 players, controller settings, attract mode, touch-only gate).",
+    "The viewport-matrix run of the title screen across 24 devices: all clean, it found nothing."
+  ],
+  "engineFeedback": [
+    "Shapes as data (a whole 1964 office from a few lines per desk), the Dialog box with live portraits and choices, and coroutine scripts on game time, which made the pitch sequence easy to write.",
+    "Yes: game.after() timers are cleared by game.go(), so a ready() scheduled that way never fired; and input.lastDevice defaults to keyboard, so it cannot be used to detect a touch-only device. Also Enter is bound to both start and confirm, which caused a double action.",
+    "The pitch system: the card battle against objections, the delivery timing meter, the hold-and-release closer with projector slides, plus the attract-mode bot and the AI Hub ghost layer.",
+    "Controller prompts: input.label() returns PlayStation symbols the pixel font cannot draw, so every button glyph had to be hand drawn.",
+    "The overlapping default bindings of the menu actions (Enter as both start and confirm, Escape as both pause and cancel).",
+    "A built-in prompt widget that draws the right glyph (PlayStation shapes, Xbox letters, key caps, mouse) for the last device used."
+  ],
+  "promptFeedback": [
+    "The freedom to choose the genre, which let Mad Men become a game about talking, drinking and pitching rather than a forced action game.",
+    "The multiplayer line: AI Hub integration plus multiplayer for the game on its own was ambiguous; I read the second as local hot seat.",
+    "Fitting attract mode, local versus, AI Hub sessions and a three-day story with endings into one polished vertical slice.",
+    "A real DualSense on a real TV at ten feet, to judge text size, glyphs and pacing as the prompt intends."
+  ],
+  "aiHub": {
+    "name": "Mad Mention",
+    "tagline": "Win the room. Hold the pause.",
+    "description": "Walk a 1964 Madison Avenue agency gathering ideas before two o'clock, then pitch them to the client: answer each objection with the right appeal and deliver your tagline on the beat.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Mad Men",
+    "series": "",
+    "players": "1–4",
+    "controls": "Stick/WASD walk, Cross/E talk, Triangle/Tab ideas, Square/V view; in the pitch pick an idea and press on the gold",
+    "tags": [
+      "2d",
+      "story",
+      "comedy",
+      "versus",
+      "pixel art",
+      "retro"
+    ]
+  }
+}

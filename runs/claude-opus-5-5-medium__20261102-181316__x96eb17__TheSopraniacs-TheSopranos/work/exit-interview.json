@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "The Sopranos (HBO, 1999-2007), created by David Chase",
+    "genre": "Action-adventure crime brawler in a small open town: story chapters, melee combos, a pistol, driving, dialogue choices, a stress/panic meter and FBI heat (light stealth)",
+    "perspective": "Three-quarter top-down (the engine's native threequarter view); the player can switch to isometric or top-down at any time (V / R3)",
+    "tech": "my-3D2dge v0.85.1 (full engine, handoff package, single file); AI Hub session client 1.3.0 (Session Protocol v1); vanilla JavaScript, HTML5 canvas 2D, Web Audio; modules bundled into one HTML file with Node 24; tested with Playwright 1.63",
+    "artDirection": "Engine-native code-drawn pixel art at PS1 resolution (320x240, expanded to fill any screen): HD Humanoid rigs dressed per character, textured TileMap walls and floors, library props and shapes, canvas lighting, rain, neon signs; plus custom turned-box cars and furniture drawn in every view",
+    "animation": "Engine-native skeletal Humanoid rigs posed from velocity every step, E.MOVES attacks (jab, cross, hook, uppercut, haymaker, plunge stomp, roundhouse, bash, elbow), knock-downs and get-ups, Blob ducks and a pig, scripted cutscenes (game.script), tweens and particles",
+    "audio": "Code-written chip music (11 original tracker songs, including 3 jukebox songs the player picks), synthesized sound effects (punches, gunshots, horn, quacks, diner bell, cash), and Animalese-style gibberish voices with a pitch and timbre per character",
+    "online": "AI Hub Session Protocol v1, ghost mode, 1-4 players: a timed Collection Run on every copy with the other players shown as translucent ghosts, progress and result reporting. On its own: local 2-player drop-in co-op (player 2 is Chrissy), no network",
+    "testing": "Headless Node test of the whole story and the Collection Run (fixed-step game.advance, scripted input; all checks pass); Playwright screenshots in Chromium 1280x720 and WebKit iPhone 15 (touch-only screen, attract mode); viewport-matrix on 23 phone, tablet and desktop viewports in Chromium, WebKit and Firefox (all clean); a feature check with an emulated DualSense (stick movement, both invert toggles, PlayStation and Xbox prompts drawn on screen, prompts switching to keys and mouse buttons, the stomp); mouse hover focusing a door over the nearer SUV prompt, and a click entering it; touch-only notice and attract mode on Chromium (Pixel 7) and WebKit (iPhone 15) profiles, with a tap returning to the title; ghosts visible on screen on every copy in a live hub round (all pass); AI Hub harness with 2 players, 4 players at 150 ms latency, 50 ms jitter and 5% loss, and host-leave (all PASS). No real gamepad, TV or iOS Safari",
+    "research": "None on the web. I read the engine's handoff docs (README, API card, parts of the index, the template and the brawler kit) and the AI Hub protocol README; the show's details come from memory",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "Cost and token totals are unknown: this session has no usage meter. Session time was about 50 minutes (18:13 to about 19:07)"
+  },
+  "testingFeedback": [
+    "16 issues. The title screen crashed when the town updated without a hero. Fight waves never advanced because their timer was never counted down. The diner's booth step was never set. A pending fight was dropped on a scene change. Attract mode left the camera in the isometric view. The finale's state leaked into the Collection Run and cut it to black. Tony could not get out of the SUV while it reversed. The touch-only screen never showed, because the engine starts with the keyboard as the last device. The notice box overflowed on narrow phones. Talk prompts showed during fights. The job log text overlapped its Close prompt. The attract mode's title covered the HUD. The SUV prompt radius was too small. A gamepad's right-stick aim was used as a world direction without converting it from screen space. Hovering the mouse never counted as using the mouse, because the engine only switches to the mouse on a click, so hover focus and mouse-button prompts didn't work until a click. The mouse could only pick things within 40 units, too short to click things in the world, so it now reaches 64.",
+    "4 were critical or game-breaking. The title crash broke attract mode. The fight waves never advancing blocked chapter 4. The missing booth step blocked the finale. The finale leaking into the Collection Run ended runs early.",
+    "The headless Node test (test.mjs). It plays the whole story through game.debug: the paper, ducks, the car, therapy, breathing, the pork store, three collections, the alley fight, Ma, the yard waves, Ralphie, the diner, the cut to black, then the Collection Run. It caught every blocking bug in seconds.",
+    "Setting the stress straight to 100 for a panic screenshot. That skips addStress(), so no panic attack ever started and the picture only showed the RAGE bar."
+  ],
+  "engineFeedback": [
+    "The standard features came for free: pause, settings, rebinding, controller symbols, save slots, full screen and the boot screen. On top of that, the Humanoid rigs with E.MOVES and the exact fixed-step headless mode made the story testable in Node.",
+    "Yes. I assumed the 5x7 font had check marks, middle dots and a down triangle; it doesn't. I assumed input.lastDevice would tell me a touch-only device; it starts as 'keyboard' and only switches to the mouse on a click. I assumed a script could wait on a promise; it can't (I switched to E.until). I didn't expect braking in E.Car to turn into reversing, or game.after timers to be cleared by a scene change.",
+    "A turned-box renderer (obox) that draws cars, the FBI van, the garbage truck, booths, counters and the jukebox correctly in every view. Close behind: the controller prompt badges (PlayStation shapes, Xbox letters, key caps, mouse buttons), because the pixel font has no button symbols.",
+    "The amount of documentation: one card to read whole and a 190 KB index. It was hard to know which props and library shapes exist, and what each option accepts, without grepping the engine's source.",
+    "Dialog voices. One sound-effect name per box can't do per-speaker gibberish, so I turned the engine's voice off and wrote my own syllable blips with a pitch and timbre per speaker.",
+    "Built-in canvas prompt glyphs: input.glyph(action) drawing PlayStation, Xbox, keyboard and mouse badges, plus a real 'has keyboard, mouse or pad' capability flag, so a touch-only check is one line."
+  ],
+  "promptFeedback": [
+    "It names the systems it wants as a checklist (attract mode, 10-foot UI, glyph switching, inverted-axis toggles, touch-only screen, hub multiplayer) and leaves the creative design open. The exit interview makes the result easy to audit.",
+    "'Follow the hub for multiplayer integration into ai-hub as well as for the game on its own' was unclear: on its own, should the game be online, or is local co-op enough? I chose local co-op. The file name pattern doesn't say how to write a title with spaces or punctuation (I used TheSopraniacs-TheSopranos).",
+    "Scope. A feature-complete vertical slice with five story chapters, combat, driving, a heat and stealth system, a stress and panic system, saves, an attract mode and a hub ghost mode in one session. Also, writing dialogue that sounds like the show without copying it.",
+    "A real DualSense on a TV at 10 feet, including a controller that reports its axes inverted. It would check the glyphs, the readability and the invert toggles on hardware rather than in emulation. Real iOS Safari would come second."
+  ],
+  "aiHub": {
+    "name": "The Sopraniacs",
+    "tagline": "Stress. Therapy. Envelopes. Ducks.",
+    "description": "A North Jersey crime-family action adventure. Collect envelopes, brawl with the New York crew, dodge the FBI van, keep your panic attacks in check, then get the family to the diner for onion rings. In AI Hub sessions, race other players to grab the most cash in a three-minute Collection Run.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "The Sopranos",
+    "series": "The Sopranos",
+    "players": "1–4",
+    "controls": "Move: stick/WASD; Punch: Square/J/click; Haymaker: Triangle/K; Roll: Circle/Space; Pistol: R2/L/right-click; Use, car: Cross/E; Breathe: L2/Q",
+    "tags": [
+      "3d",
+      "top-down",
+      "story",
+      "comedy",
+      "vehicles",
+      "boss fights"
+    ]
+  }
+}

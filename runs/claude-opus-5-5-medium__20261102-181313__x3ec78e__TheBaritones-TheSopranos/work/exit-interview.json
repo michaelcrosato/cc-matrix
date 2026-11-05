@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-02 18:13",
+    "source": "The Sopranos (HBO, 1999-2007), as an original spiritual successor: no characters, lines or music from it",
+    "genre": "Action-adventure crime brawler with a chaptered story, therapy-session dialogue choices, driving and minigames",
+    "perspective": "Three-quarter overhead (the engine's threequarter view), switchable to top-down and isometric with V or R3",
+    "tech": "my-3D2dge v0.85.1 (full engine, inlined; its drive module, E.Shell, E.Dialog, E.Bullets, Humanoid rigs); AI Hub session client 1.3.0 (protocol v1); plain JavaScript in one HTML file",
+    "artDirection": "The engine's native retro-modern pixel art: PS1 resolution expanded to fill the screen, HD-shaded skeleton characters, materials on walls and floors, props, night lighting, rain and snow",
+    "animation": "The engine's procedural rigs: E.MOVES punches and kicks with wind-ups, poses (guard, block, kneel, die), rolls, hit-stop, smears and particles",
+    "audio": "Code-written chip music (title, town, night, fight, boss, Pine Barrens, office, jukebox) and engine-synth sound effects; gibberish Simlish-style voices pitched per speaker",
+    "online": "AI Hub sessions in ghost mode for 1-4 players: a three-minute Collection round, other players shown as ghosts, cash reported as the score",
+    "testing": "Headless Node tests of every system and a full story playthrough on three choice paths; Playwright browser tests in Chromium, Firefox and WebKit (keyboard, mouse, simulated gamepad with invert toggles, touch-only phone); a 24-viewport matrix; the AI Hub harness (2 players; 4 players with latency, jitter and loss; host-leave)",
+    "research": "The my-3D2dge handoff package (API card, API index, kits, asset card) and the AI Hub session protocol README; nothing else",
+    "environment": "Claude Code CLI (headless); Linux; browser unknown",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "unknown cost and tokens (no meter in this session); session time about 55 minutes"
+  },
+  "testingFeedback": [
+    "Thirteen game issues, plus six mistakes in my own tests. The game issues: foes and allies walked in straight lines, so a goon and Sal could get stuck on opposite sides of a building; the scripted panic attack never fired (stress drained to 99.9 before the check), Carmine's surrender never set the flag that ends the boss fight, the AI Hub ready() call sat on a game timer that the scene change cleared, you couldn't get out of a reversing car, moving the mouse didn't switch the prompts to the mouse, touch-only phones weren't detected in WebKit and Firefox, the pixel font had no middle dot, the therapy clock sat under the corner buttons, the moon sat under the phone menu button, banners covered fights, the SUV looked like a fridge, and Donna couldn't be clicked.",
+    "Four would have broken the game: the panic attack that never fired (it soft-locks chapter one), Carmine's surrender (it soft-locks the finale), the straight-line enemies who could get stuck behind a building (they stall a wave), and the missing ready() (AI Hub rounds never start).",
+    "The headless full-story playthrough: a bot plays New Story through the credits with real input taps, on three different choice paths. It found both soft-locks and the pathfinding bug.",
+    "The viewport matrix: 24 clean screenshots of the title with no overflow and no errors. It's reassuring, but the game draws on one canvas, so it couldn't find much."
+  ],
+  "engineFeedback": [
+    "Characters with no art files: HD Humanoid rigs, E.MOVES punches and kicks with real wind-ups, and hitFx gave the brawling a good feel almost for free. The standard pause, settings, rebinding and save screens meant I spent no time on menus.",
+    "Yes, a few times. game.after timers are cleared on a scene change, and that ate the AI Hub ready() call. A mouse move doesn't set input.lastDevice to 'mouse' (only a button does). The pixel font has no middle dot. And I guessed facing and pose values for seated characters ('crouch' stands in for sitting).",
+    "The story layer: chapters as steps with check functions, a conversation queue with choices that branch, gibberish voices per speaker, and the two minigames. Also cars drawn from their heading and the gamepad axis inversion.",
+    "Its size: the API card, the index and the kits are a lot to take in, and the answer is often one line in a 190 KB index. Some behaviour, like timers dying with the scene and the device switching, only shows when you test.",
+    "I'd overhaul input.lastDevice: it should count mouse movement and stick movement, so prompts follow the device without a game wrapping input.tick.",
+    "Built-in axis inversion for both sticks (not just invert aim Y), plus a sit pose and a car or vehicle draw helper for ground views."
+  ],
+  "promptFeedback": [
+    "Clear, testable requirements (attract after 10 s, glyph families, the invert toggles, touch-only behaviour) and the freedom to pick a genre and a voice for the source.",
+    "How Multiplayer should work 'for the game on its own': I read it as local drop-in co-op plus the same Collection round the hub runs. 'Every feature in TASK.md' overlaps with the source's 'all mechanics', which leaves the scope open.",
+    "Fitting a whole vertical slice into one session: the story with branching choices, a boss, a car, two minigames, local and online multiplayer, and the attract mode, all tested.",
+    "A long real-hardware session with a DualSense on a TV, to judge the 10-foot readability and how the controller feels. Automation can only fake the pad."
+  ],
+  "aiHub": {
+    "name": "The Baritones",
+    "tagline": "A family. A business. A lot of feelings.",
+    "description": "A North Jersey crime boss with panic attacks makes his rounds, brawls the Falsettis, drives, shoots, and talks it out with his therapist. Story mode, local co-op, and a three-minute cash-collection round for up to four players.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "The Sopranos",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD/stick move, J/Square punch, K/Triangle kick, Q/R2 shoot, L/L1 block, Space/Circle roll, E/Cross talk and drive",
+    "tags": [
+      "3d",
+      "top-down",
+      "story",
+      "comedy",
+      "vehicles",
+      "boss fights"
+    ]
+  }
+}

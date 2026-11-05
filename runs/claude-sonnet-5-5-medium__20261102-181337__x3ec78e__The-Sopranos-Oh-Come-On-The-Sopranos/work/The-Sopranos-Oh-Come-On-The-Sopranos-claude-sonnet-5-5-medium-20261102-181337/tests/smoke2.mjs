@@ -1,0 +1,11 @@
+import { load, check, finish } from './lib.mjs';
+const { game, G, I, E } = load('#play/street');
+game.advance(1);
+check('street plays', game.sceneName === 'play', game.sceneName);
+const s = G.PLAY.state();
+console.log('hero', s.hero.x, s.hero.y, 'foes', s.foes.length, 'wave', s.wave);
+I.hold('right'); game.advance(4); I.hold('right', false);
+console.log('hero after walk', G.PLAY.state().hero.x, 'foes', G.PLAY.state().foes.length);
+I.tap('attack'); game.advance(1);
+console.log(game.errors.map(e => e.message + '\n' + e.stack).join('\n---\n'));
+finish(game);

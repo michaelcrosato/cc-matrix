@@ -1,0 +1,10 @@
+import { load } from './harness.mjs';
+const t = load();
+const { game, I, dbg, snap } = t;
+console.log('after load', JSON.stringify(snap()));
+game.advance(.5);
+console.log('title', JSON.stringify(snap()), game.errors.map(e => e.message));
+I.tap('confirm'); game.advance(.3);
+console.log('after confirm', JSON.stringify(snap()), game.errors.map(e => e.message));
+game.advance(2);
+console.log(JSON.stringify(snap()), game.errors.map(e => e.message + ' ' + (e.stack||'').split('\n').slice(0,3).join('|')));
