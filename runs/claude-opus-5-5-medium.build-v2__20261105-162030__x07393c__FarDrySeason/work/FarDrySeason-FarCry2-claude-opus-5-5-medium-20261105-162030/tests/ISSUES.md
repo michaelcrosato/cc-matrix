@@ -1,0 +1,51 @@
+# Issues testing caught (one line each; CRITICAL = game breaking)
+- FogNode: `top: -60` in groundFog gave inverted smoothstep edges, tinting everything 55% at any distance (screenshot). Not critical.
+- Viewmodel gun rigs sat behind the near plane: no gun visible (screenshot). CRITICAL.
+- dev_startMission during attract left attract running (screenshot). Not critical.
+- A menu press stayed queued and skipped the first mission's opening (bot). Not critical.
+- KeyF (melee) and Triangle (next weapon) swallowed the FINISH IT press at a downed friend (bot). CRITICAL.
+- A soldier burned to death inside its own brain tick, then moved with no body: a crash (bot, M6). CRITICAL.
+- Grass fire never died and ate the whole map (19,000 cells) by M9 (bot's status line). CRITICAL for the plot. Fires now tire after about 200 m unless relit; the crop doesn't.
+- M8's ride never ended: the runner only ran end() for 'script' steps, so you stayed on the train through M9 (bot). CRITICAL.
+- Esc in a menu closed it and opened the pause menu in the same frame (systems). Not critical.
+- Link round never started: the start event fired before the round listened (link suite). CRITICAL.
+- Standing in the driving seat you looked into the opaque windscreen block: nothing visible ahead (screenshot). CRITICAL.
+- Subtitles were drawn behind stacked prompts (screenshot). Not critical.
+- Charge and bottle counts overlapped the ammo count (screenshot). Not critical.
+- Tap to throw vs hold to plant: a held press threw a bottle and burned the pump before any charge (bot). Not critical.
+- Blasts skipped anything already on a fuse, so a charge couldn't kill a pump that had caught (bot). Not critical.
+- The runner kept talk state between steps, so a later talk step finished itself (bot). CRITICAL.
+- Passive GET OUT prompt counted as a real prompt and blocked leaving the truck (bot). CRITICAL.
+- Four software-rendered copies took too long to say ready; the hub check failed until ready moved to the end of setup (hub suite). CRITICAL for sessions.
+- The gun's truce-zone lowering also tipped the held map and dash away at Mile Forty (screenshot). CRITICAL for the first mission's map.
+- Surgery scenes and tools sat below the frame (screenshot). Not critical.
+- On foot, a click on the map was swallowed by the gun's press handling; the waypoint never set (review of input code). CRITICAL for the map.
+- A save made right after M7 could never start M8: auto missions weren't resumed on load (review of the save flow). CRITICAL.
+- Triangle on the map changed weapon instead of zooming (review of input code). Not critical.
+- A client's melee hit its local puppets instead of asking the host (review of netcode). Not critical.
+- Tool sleeves tilted up through the camera and filled the view in surgery (screenshot). CRITICAL for the surgery scenes.
+- The hub card's countdown was clipped at the right edge (screenshot). Not critical.
+- In a narrow hub frame the game's card clipped its text and hid READY behind MORE TIME; subtitles clipped too (screenshot in the real harness). CRITICAL for sessions on odd screens.
+- Pliers and knife were hidden behind the hand in surgery (screenshot). Not critical.
+- Knife scene's hand and blade sat below the frame; the lighter's flame was hidden behind the hand (screenshot). Not critical.
+- Audit against PLAN.md: rocket soldiers absent, tracker unavailable in rounds, M7/M8/End under 8 lines, no shells in M8, distant gun variants and wood steps unused, patrols didn't chase, dodge didn't move, clients saw no gunfire (review). Not critical.
+- Taking Dov's plan in M4 left a second convoy driving; found by testing every alternate plan (systems). CRITICAL for that path.
+- The dislocated finger was too small to see change across the snap (screenshots before and after). Not critical.
+- The Credits and Results screens showed no button prompt (every-screen test). Not critical.
+- About and Credits drew every body line wrongly: a plain string has a built-in .big method, which the page code took for a heading (found by extending the Done checklist; never screenshotted before). CRITICAL: the brief marks this screen as critical.
+- The mounted MG could never overheat: its barrel cooled faster than firing heated it, even with the trigger held (requirement-by-requirement suite). Not critical, but a plan mechanic that did not exist.
+- A tapped jump rose 0.68 m instead of the plan's 1.3 m, because releasing the button cut it short, so low walls needed a held jump (requirement-by-requirement suite). Not critical.
+- Automatic guns fired slower than the weapon table: the fire timer rounded up to whole frames, 8.6 shots a second for the MG's 10 (requirement-by-requirement suite). Not critical.
+- The steering wheel covered the lower middle of the raised map in the truck (screenshot). Not critical.
+- Small text on the map was garbled, because the texture was shown below 1:1 and nearest sampling dropped rows of the font; the map is now drawn at about 1:1 (screenshot). Not critical, but the map's labels were unreadable at 10 feet.
+- The rescue drag, M0 ride, M9 scene and endings used a home-made scene player, where the plan says to use the engine's Timeline, and the audit had waved this through (reading the plan's wording again). Not critical: same effect on screen, but not what the plan asked for.
+- The M9 table scene was almost black at night in the storm, so the player could not read the arc that is the story's reveal; it now has a lamp (screenshot, never shot before). Not critical, but it hid the twist.
+- In the driving seat the arms turned rigidly around the wheel's centre with it, like spokes, rather than reaching for the rim; they are now solved with twoBoneIK (reading the plan's animation base list again). Not critical.
+- Splitting the About page into its own file left the Credits screen without its text and crashed the end of the game (scripted playthrough and the every-screen test). CRITICAL if shipped; caught before hand-in.
+- Attract beats cut with no transition: the code called a screenReveal function that never existed, hidden by optional chaining; beats now join with the plan's cover('dither') and reveal (checking every optional call against its definition). Not critical.
+- Fort Clement used a home-made wall where the plan names the library's stone-wall and battlement, and the chair and shovel it lists were never placed (checking every name in the plan against the source). Not critical.
+- Pathfinding treated long walls as filled squares and ignored their rotation, so the whole inside of Fort Clement was closed to soldiers' routes (reading the size table during the wall change). Not critical: soldiers there stood guard or moved directly.
+- 57 subtitle lines ran past the plan's 60 characters; long sentences now split across lines in sequence (reading the plan's prose against the game). Not critical.
+- Nothing lit grass from the mounted MG's tracers, Harrow never offered tablets at M9, and the map had no hand torch at night (reading the plan's prose against the game). Not critical.
+- Sounds behind walls were not muffled, though the plan asks for it (reading the plan's prose against the game). Not critical.
+- In M6 the partner could be hurt before the scripted wind turn and bleed out, skipping the forced Syrette or Finish It moment entirely (scripted playthrough, on a route whose timing happened to change). CRITICAL for that path: the plan's never-cut choice was lost.

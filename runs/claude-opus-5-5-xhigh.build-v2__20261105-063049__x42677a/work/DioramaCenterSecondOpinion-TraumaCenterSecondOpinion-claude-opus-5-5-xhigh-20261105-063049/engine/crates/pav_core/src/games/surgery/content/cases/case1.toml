@@ -1,0 +1,262 @@
+name = "Routine"
+surgeon = "mara"
+plate = "abdomen"
+ring = ["scalpel", "forceps", "suture", "suction", "laser", "gel", "scanner", "iv"]
+timer = 270
+drain = 0.75
+par = 24000
+patient = "Rosalind Pike"
+life = "Harbour pilot. Has never once run a ship aground, and mentions it."
+diagnosis = "Acute appendicitis. Routine, the board says, underlined twice."
+fate = "Rosalind Pike was back on the pilot boat in a fortnight, complaining about the tea."
+fate_lost = "The harbour flew its flags low for Rosalind Pike, and the ships came in slower."
+before = "case1_before"
+after = "case1_after"
+guided = true
+
+[[phase]]
+name = "Open"
+objective = "Scalpel. Follow the dashed line, one stroke."
+[[phase.spawn]]
+kind = "incision"
+at = [0, 0]
+pts = [[-4.8, -0.5], [-2, -0.8], [1, -0.4], [4.8, -0.7]]
+[[phase.event]]
+at_time = 0.2
+say = ["bashir", "Scalpel, Doctor. One stroke. Stay on the line."]
+
+[[phase]]
+name = "Polyps"
+objective = "Laser the polyps. Let go when the ring is nearly full."
+plate = "bowel"
+checkpoint = true
+[[phase.spawn]]
+kind = "polyp"
+at = [-6, -1.6]
+[[phase.spawn]]
+kind = "polyp"
+at = [-4.8, -0.9]
+r = 0.34
+[[phase.spawn]]
+kind = "polyp"
+at = [-1.2, 1.1]
+[[phase.spawn]]
+kind = "polyp"
+at = [0.2, 2.2]
+r = 0.34
+[[phase.spawn]]
+kind = "polyp"
+at = [3.6, -1.8]
+[[phase.spawn]]
+kind = "polyp"
+at = [5, -0.7]
+r = 0.36
+[[phase.event]]
+at_time = 0.3
+say = ["bashir", "Laser. Hold it on one. Eighty to a hundred on the ring, then let go."]
+
+[[phase]]
+name = "More Polyps"
+objective = "There are always more polyps. Laser them, clear the field."
+[[phase.spawn]]
+kind = "polyp"
+at = [-6.4, 1.6]
+r = 0.42
+[[phase.spawn]]
+kind = "polyp"
+at = [-3.6, 2.5]
+r = 0.34
+[[phase.spawn]]
+kind = "polyp"
+at = [-2.4, -2.4]
+r = 0.42
+[[phase.spawn]]
+kind = "polyp"
+at = [-0.6, -1.2]
+r = 0.34
+[[phase.spawn]]
+kind = "polyp"
+at = [2.8, 2.4]
+r = 0.42
+[[phase.spawn]]
+kind = "polyp"
+at = [4.6, 1.2]
+r = 0.34
+[[phase.spawn]]
+kind = "polyp"
+at = [6.6, -2]
+r = 0.42
+[[phase.spawn]]
+kind = "pool"
+at = [-5, -1.2]
+r = 1
+[[phase.spawn]]
+kind = "pool"
+at = [1, -2.6]
+r = 0.9
+[[phase.spawn]]
+kind = "burn"
+at = [5, -2.6]
+r = 0.8
+[[phase.event]]
+at_time = 0.3
+say = ["bashir", "Clean. Again. And there, Doctor. And there."]
+
+[[phase]]
+name = "Appendix"
+objective = "Gel the inflammation, then lift the appendix out."
+[[phase.spawn]]
+kind = "burn"
+at = [1.8, 0.4]
+r = 1.2
+tag = "inflammation"
+[[phase.spawn]]
+kind = "foreign"
+at = [1.8, 0.4]
+axis = -70
+r = 0.5
+tag = "cyst"
+[[phase.spawn]]
+kind = "pool"
+at = [-3, 2.3]
+r = 1
+[[phase.event]]
+at_time = 0.3
+say = ["voss", "Dr. Quill. The appendix is the part that is not supposed to be on fire."]
+
+[[phase]]
+name = "Adhesions"
+objective = "Old scar bands. One stroke each. Laser what they were hiding."
+checkpoint = true
+[[phase.spawn]]
+kind = "incision"
+at = [-4.6, -2.1]
+pts = [[-6.2, -2.6], [-4.6, -2.1], [-3, -1.6]]
+[[phase.spawn]]
+kind = "incision"
+at = [0.1, 2.2]
+pts = [[-1.6, 2.6], [0.1, 2.2], [1.8, 1.8]]
+[[phase.spawn]]
+kind = "incision"
+at = [4.6, -1.9]
+pts = [[3, -2.4], [4.6, -1.9], [6.2, -1.4]]
+[[phase.spawn]]
+kind = "polyp"
+at = [-5.2, 0.8]
+[[phase.spawn]]
+kind = "polyp"
+at = [0.4, -1.2]
+r = 0.36
+[[phase.spawn]]
+kind = "polyp"
+at = [5, 1.2]
+[[phase.event]]
+at_time = 0.4
+say = ["voss", "Slower, Doctor. Nobody was ever promoted for a fast adhesion."]
+
+[[phase]]
+name = "Complication"
+objective = "The artery! Stitch the bleeder. IV Push if the vitals fall."
+checkpoint = true
+[[phase.spawn]]
+kind = "bleeder"
+at = [-1, 0.4]
+axis = 30
+[[phase.spawn]]
+kind = "pool"
+at = [-1.4, 1.1]
+r = 1.3
+[[phase.spawn]]
+kind = "laceration"
+at = [3.2, 2.1]
+pts = [[2.2, 1.7], [3.4, 2.3], [4.6, 2]]
+[[phase.event]]
+at_time = 0.1
+say = ["teddy", "That's arterial! That's a lot of arterial! Pressure's dropping, guys!"]
+banner = "AN ARTERY LET GO"
+shake = 1
+cue = "alarm"
+[[phase.event]]
+at_time = 1.8
+say = ["bashir", "Three quick crossings on the bleeder. IV Push for the numbers. Green band, then let go."]
+
+[[phase]]
+name = "Second Bleed"
+objective = "That's not the same artery. Stitch it, clear it, IV if you must."
+checkpoint = true
+[[phase.spawn]]
+kind = "bleeder"
+at = [3.4, -1.2]
+axis = 40
+[[phase.spawn]]
+kind = "laceration"
+at = [-4.6, 1.8]
+pts = [[-5.6, 1.5], [-4.6, 2.1], [-3.6, 1.5]]
+[[phase.spawn]]
+kind = "laceration"
+at = [0.2, -2.6]
+pts = [[-0.8, -2.9], [0.2, -2.3], [1.2, -2.9]]
+[[phase.spawn]]
+kind = "pool"
+at = [-1.6, 1.2]
+r = 0.9
+[[phase.spawn]]
+kind = "pool"
+at = [5.2, 1.6]
+r = 0.8
+[[phase.spawn]]
+kind = "foreign"
+at = [-6, -1.2]
+axis = 200
+tag = "splinter"
+[[phase.spawn]]
+kind = "foreign"
+at = [1.8, 2.6]
+axis = 60
+tag = "splinter"
+[[phase.event]]
+at_time = 0.3
+say = ["teddy", "That's two. Nobody said two. Is there a leaflet for two?"]
+[[phase.event]]
+remaining = 2
+say = ["bashir", "Nearly, Doctor. The gallery has stopped writing."]
+
+[[phase]]
+name = "Tidy Up"
+objective = "Gel, suction and suture. The gallery is taking notes."
+[[phase.spawn]]
+kind = "laceration"
+at = [0, 0]
+pts = [[-6, -1.4], [-5, -1.9], [-3.8, -1.5]]
+[[phase.spawn]]
+kind = "laceration"
+at = [0, 0]
+pts = [[1.8, -2.2], [3, -2.7], [4.4, -2.3]]
+[[phase.spawn]]
+kind = "burn"
+at = [-3.2, 1.6]
+r = 0.9
+[[phase.spawn]]
+kind = "burn"
+at = [4.2, 1.4]
+r = 0.8
+[[phase.spawn]]
+kind = "pool"
+at = [0, 2.6]
+r = 1.2
+[[phase.event]]
+at_time = 0.4
+say = ["voss", "You are still here, Doctor. So, I notice, is the patient. Continue."]
+
+[[phase]]
+name = "Close"
+objective = "Close the skin, then dress it."
+plate = "abdomen"
+[[phase.spawn]]
+kind = "laceration"
+at = [0, 0]
+pts = [[-4.8, -0.5], [-2, -0.8], [1, -0.4], [4.8, -0.7]]
+[[phase.spawn]]
+kind = "closure"
+at = [0, 1.4]
+pts = [[-5, 1.5], [-1, 1.2], [3, 1.5], [5, 1.3]]

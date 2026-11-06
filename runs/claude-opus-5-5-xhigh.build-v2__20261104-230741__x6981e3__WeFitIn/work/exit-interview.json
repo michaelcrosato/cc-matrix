@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 23:07:41",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Fitness and balance minigame collection inside a light life-sim week (sports)",
+    "perspective": "Isometric on the island; fixed front-on for class activities; other fixed views per activity (behind, side-on, top-down-ish)",
+    "tech": "Pixel Engine 0.46.0 (riftlight engine kit) with three.js r186 and Rapier as bundled in it; esbuild 0.28.2 for packaging; vanilla JavaScript modules",
+    "artDirection": "The engine's native pixel look (toon materials, 16-colour palette), with new models written as data for a spotless white island made of giant gym equipment",
+    "animation": "Engine ClipDefs with THREE.AnimationMixer, plus scrubbed reps, Squash, SpringChain and additive lean layers",
+    "audio": "Engine Song and SoundDef data plus a Web Audio formant voice: all code, no files. Gibberish voices per speaker. Music 10% by default",
+    "online": "AI Hub Session Protocol v1, ghost mode, own card, 1-4 players; Family Hour is local on one screen",
+    "testing": "Headless Node playthroughs with bots, plus scripts playing through real keys, stick and mouse, one test command; Chromium, Firefox and WebKit with Playwright on file://; gamepad stub, phone profile, OfflineAudioContext and AnalyserNode checks; the hub harness; screenshots at 1920x1080 only for what a script cannot judge. No subagents for review",
+    "research": "Read GUIDE.md, ASSETS.md and the hub README whole, searched API.md and the type files, and read the engine bundle for its font table and audio fields. No web research. The director's plan included engine and hub research and spikes",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 80. Scripts caught about 30 (a crash, a dead activity, ghost messages that never reached other players, a save field lost on reload, a click that could not jump, hoops dropping before Go, and balance). Screenshots caught about 40 that scripts could not see (avatars vanishing, rolling vitamins sinking through the tray, a runner hidden behind the scenery, a dial hiding Ounce, prompts under dialogue). A line-by-line audit against the plan caught the rest (the 12 px safe margin, sample lines not verbatim, menus over the row limit, no Timeline in the ending, Tray cups that were not triggers, classmates missing from Coconut Header, no stars round a dazed head, a Heron whose ring drifted instead of pushing you).",
+    "Eight. Step Class avatars vanished from a bad ease name. Avatars folded into heaps from a lean that added up every frame. Vitamin Tray scored 0 for everyone because resting bodies slept through gravity changes. Step Class crashed on a mat colour. Online, ghosts never received their messages. Pier Jump could not be jumped with a mouse. Clicking on the island walked to the wrong place. Rolling vitamins sank through the tray floor, so Vitamin Tray looked empty.",
+    "Scripts that play every activity through real keys, a real stick and a real mouse. Bots skip the input layer, so only these could find that a mouse could not jump at Pier Jump. Next came the bot sweep, which found a crash and gave every balance number, and the 1920x1080 contact sheets, which had to be taken in the middle of play: opening frames hid three bugs.",
+    "The WebKit and Firefox runs. Neither has WebGPU on this machine, so they only prove that the failure message shows."
+  ],
+  "engineFeedback": [
+    "Headless in Node. The same game code, physics and mixers ran a full seven-day playthrough with bots in about a minute, so I could test the real game constantly. Models as data with checkModel came second.",
+    "Yes. A ClipDef key takes its own ease names (in, out), not the tween names, and outQuad baked NaN with validateClip and analyzeClip both silent: avatars vanished only when the clip played. I also hung a script awaiting a scene change in manual time, and lost Tray to Rapier bodies sleeping through a gravity change.",
+    "The Dot and its driver seam: one lean model that a person, a pad, a bot or a ghost can all drive, used by every activity, attract, the tests and online. Close behind, the HUD kit: mixed-case text, discs, rings, menus and prompts.",
+    "The HUD is only rects, text and sprites, with no circles or alpha. Dials are drawn as scanlines, and menu dimming borrows the transition uniform. Also, pads are merged into one, so Family Hour reads navigator.getGamepads itself.",
+    "none",
+    "Make validateClip reject an unknown ease name. It would have saved the worst bug of the run, and it is a small change."
+  ],
+  "promptFeedback": [
+    "The verified recipes in the plan. Knowing which numbers and calls were already proven meant I could spend the effort on the game, and the bot table let me check the core feel at once.",
+    "Coconut Header is listed for lane staging with classmates on side mats, but also gets a wider lane when solo; I kept both by standing the classmates back and out of its way. Bias values such as +.10 have no stated unit; I treated them as stick lean, multiplied by authority. The keyboard and mouse rows of the time-in-ring table do not say who is playing, so I had to fit that player to the rows.",
+    "Keeping every screen readable at 480x270 with pad, keys and mouse all working, while a dozen activities share one HUD. Composition took several rounds of screenshots.",
+    "Say whether Header solo has classmates, give the unit for bias, and say how the keyboard and mouse rows were measured. Ask for contact sheets of every screen, taken mid-play, as a step, and say that tests must play through the real input as well as with bots, since those two caught more than I expected."
+  ],
+  "aiHub": {
+    "name": "We Fit In",
+    "tagline": "Keep the dot in the circle.",
+    "description": "A week at a spotless wellness island run by a small, polite, deeply judgmental bathroom scale. Your whole body is one dot. Keep it in the circle.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "Wii Fit",
+    "players": "1–4",
+    "controls": "Left stick, WASD or mouse: lean. R2, Space or click: breathe. L1/R1, F/J or mouse buttons: step.",
+    "tags": [
+      "pixel art",
+      "comedy",
+      "versus",
+      "arcade",
+      "3d",
+      "story"
+    ]
+  }
+}

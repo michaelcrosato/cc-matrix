@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 16:20:30",
+    "source": "Far Cry 2",
+    "plan": "PLAN.md",
+    "genre": "Open-world first-person shooter with survival pressure and systemic fire",
+    "perspective": "First person on foot, at the wheel and in scenes; optional chase camera in vehicles",
+    "tech": "Pixel Engine 0.46.0 (riftlight kit), three.js r186, Rapier 0.20, WebGPU, JavaScript modules bundled with esbuild 0.28 into one HTML file; AI Hub session client 1.4.0",
+    "artDirection": "The engine's native 3D-as-pixel-art at 480x270, toon materials, 16-colour palette; about 90 new models as data, plus library props",
+    "animation": "The engine's ClipDef system, compileClips and AnimationMixer; hero clips reused, new people clips, a hands rig with surgery scenes; Ragdoll on death; procedural sway",
+    "audio": "All in code: SoundDef effects, Song music (7 pieces, music 10% by default), Animalese-style gibberish voices, spatial ambience. No audio files",
+    "online": "AI Hub Session Protocol v1, shared-world, 1 to 4 players; on its own: solo with AI mercs and two windows on one computer",
+    "testing": "Headless Node suites, scripted playthrough, Playwright Chromium on file://, a stand-in gamepad, a phone profile, the hub harness; one command; few screenshots",
+    "research": "None beyond the plan, the engine kit's docs and the hub's README",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "50 logged in tests/ISSUES.md, most of them by the scripted playthrough and the systems suite, a few only by looking at screenshots.",
+    "19. Among them: no gun visible at all, the windscreen blocking the whole view from the driving seat, a crash when a soldier burned to death in the middle of their own AI update, the M8 ride never ending, FINISH IT eaten by the melee key, and grass fire eating the entire map.",
+    "The bot that plays M0 through both endings with real keys. It found step-order, input-conflict and state bugs no unit test would have, and it runs in Node in a couple of minutes.",
+    "Screenshots of menus: they cost about three minutes each on this shared machine and the state checks had already proved what they showed. Screenshots of the world, on the other hand, were essential."
+  ],
+  "engineFeedback": [
+    "Engine.headless. The same game, physics and all, in Node with no GPU, booted in about a second. Models and sounds as checked data came close behind.",
+    "Guessed wrong on rowOf and around, which take other arguments than I assumed, and on model ids that clash with the library. Took the groundFog setting from the plan: a negative top inverts its smoothstep and tints everything, which I found by reading its source.",
+    "The fire grid and everything hung on it: terrain scars, flora swaps, grass blades, soldiers panicking, tanks going up, the map in ink. Then the action layer and the mission runner.",
+    "It is shaped for a platformer. A first-person open world means replacing the rig step, the pad map and the pointer lock logic. And a press queued in a menu stays alive for 150 ms and leaks into play unless you clear it.",
+    "none",
+    "A real first-person controller preset with no reserved keys, pad codes kept apart from keyboard codes, and an instanced model helper. And fix groundFog for a top below the camera."
+  ],
+  "promptFeedback": [
+    "The plan decided almost everything and said what it had verified, so I could build instead of deciding. Its traps table saved hours. The build order and cut order made the size manageable.",
+    "The plan calls a line verified that turned out wrong for the look (the fog setting). The kit says modules do not load from file:// while the plan rightly says the bundle does. And the brief asks for file naming by GameTitle and SOURCE without saying how to treat spaces.",
+    "Keeping one sim working as host, client and headless server at once, and judging the look at a frame every few seconds on a shared machine. I could not play it by hand at speed, so game feel and balance are the least proven part.",
+    "Allow a real-time playtest budget, or say plainly that feel is judged later. Ask for a smaller world or fewer missions if polish matters more than breadth: this scope spreads effort thin. Keep the plan, the traps table and the one test command."
+  ],
+  "aiHub": {
+    "name": "Far Dry Season",
+    "tagline": "The grass burns whoever lit it",
+    "description": "A first-person war-zone survival shooter in a dying plateau country: guns rust, trucks stall, fever keeps a timetable and grass fire goes where the wind says. A contract story with two endings, plus a four-player Cash Run in a burning mine.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Far Cry 2",
+    "series": "Far Cry",
+    "players": "1–4",
+    "controls": "Stick or WASD move, R2 or mouse fire, Square or E use, D-pad Up or M raises the map",
+    "tags": [
+      "first-person",
+      "pixel art",
+      "co-op",
+      "versus",
+      "vehicles",
+      "story"
+    ]
+  }
+}

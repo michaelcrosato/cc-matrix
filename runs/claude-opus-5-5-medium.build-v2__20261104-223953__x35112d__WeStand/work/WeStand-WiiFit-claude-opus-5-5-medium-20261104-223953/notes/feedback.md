@@ -1,0 +1,16 @@
+# Issues found by testing (running count)
+- Browser: all sets drew at once; 0.4 fps in software (performance, not game-breaking). Fixed with a stage box.
+- Browser: taps shorter than a frame were lost on menu keys (would have been a real bug at low frame rates).
+- Browser: a touch's click was lost because the pointer goes in the same frame (touch-only Settings unreachable: critical for that device).
+- Hover needed a moving pointer on its first move.
+- Core: 13 props failed to load (wrong category/keys), so gulls were magenta markers. Found by screenshot, then locked by a test.
+- Core: Paddle bot under 2 stars; Step Party careless play scored 400 (spam); both tuned.
+- Browser: a second menu key tap was lost when no frame saw the key up in between (low frame rates).
+- Hub: all checks passed the first time they ran on a real build; no game fault found there.
+- Core: my speakers-differ test compared left and right of the same frame, so it could never pass; a test fault, not a game fault. Rewritten to measure pitch period.
+- Core: a pav_ui test dropped egui textures unpainted; a test fault, fixed. The page is unchanged by it.
+- Audit against the plan, not a test: Pip was 2 lines short of 80 (my lint said 40), and the Sleep and Wake clips and two sounds were never used. Fixed; the lint now says 80.
+- Audit round 2: single step did nothing from the pause menu (real bug), no turntable, palms not swaying, LFO and focus bounce missing, 85 notes, intro unskippable; tests added for rewind, step, prompts by device, Xbox.
+- Browser under load: two fixed sleeps in my tests failed on slow frames (test fault); polled now.
+- Sheets (plan 9 and 16, done late): coach lines overflowed their plate, pools could overlap, "1 crabs", the Lighthouse's arm hid behind the head. Fixed.
+- Re-reading the plan's numbers: Morning Lap took 41 s against about 90, the Morning Check about 47 s against about 70, Tray Trek paid 180 a glass. Fixed; timings and feel targets now have tests.

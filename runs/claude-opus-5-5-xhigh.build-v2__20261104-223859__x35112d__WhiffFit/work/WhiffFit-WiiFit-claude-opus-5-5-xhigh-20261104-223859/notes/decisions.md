@@ -1,0 +1,22 @@
+# Decisions the plan left open
+- Title: Whiff Fit, one of 50 brainstormed, picked with Python's `secrets`.
+- Sets have no `[camera]`: every camera comes from cues, because a room camera applied in the same frame as a cue overrode it.
+- All game logic runs in `Game::pre`; `post` only filters the character's own Land/Jump/Splash events, since events place figures by hand.
+- One water zone per set (three for the channel), not one per tile: `merge_zones` per tile and grid per zone cost 98% of the frame.
+- Frames show only the current set (`World.only_current`), and rewind history is off in the game (the test turns it on).
+- The Commodore is a body on a mooring post and two wings, rotated in code, on the island and all four lagoon sets. His post is part of the body prop, because he has to stand on something.
+- Judges are gull props on a raft holding scorecard props; the numbers themselves are UI, big enough for 10 feet.
+- Tray Trek's glasses keep sliding until tilted back (no spring to the centre), so idle input loses them. Score 180 per glass plus 100 no-spill (plan said 200 plus a bonus, capped at 1000).
+- Breath Bloom's ring only counts while the breath is near the guide; Tempo Squats only credits reps you went down for; otherwise doing nothing earned a star.
+- Morning Lap ends itself at 130 s so an idle player isn't stuck; Paddle Slalom likewise at 110 s.
+- The wardrobe opens only from the island (it needs the camera and the figure); the mat at the pier and the Schedule both start the Big Stand.
+- Sleep needs the day's goal; repeats always bank one minute, so nobody is ever stuck.
+- Settings gains a Back row on touch-only devices, since a finger has no Back button.
+- Tests run with `?fast=1` (no shadows or ripples): on a shared software-rendered machine the page otherwise ran under 2 ticks a second.
+- Attract's 10-second timer runs on the title, the pre-game menus and Settings over them, but not on About or How to Play: those are pages to read, and a demo starting mid-sentence would be rude.
+- In a session the page says ready at its first status, or 12 s after connecting once the canvas exists, whichever is first. The plan's block waited only for the status; on a software renderer under heavy load a copy could spend over 20 s (once over 200 s) inside `popErrorScope` while pipelines compiled, and the protocol sits such a player out. The game joins the round at its first frame.
+- Attract adds Breath Bloom and Tempo Squats to section 12's list, because section 5 gives every event an attract segment.
+- The Schedule's carousel slides only when the focus would leave the three cards in view, rather than keeping the focus centred: a centred one moves the card under a still mouse pointer.
+- Step Party's chart has 125 notes in 24 bars (plan: about 100). The bot, the human-like player and the balance table all read it at that density, so it stayed.
+- Plank Standoff's stars count seconds (25, 40, 55); every other event uses the common 400, 650, 850. Both come from the plan, and its score stays seconds out of 60.
+- A page's boot data also carries the touch and test switches the page needs, beyond the plan's block.

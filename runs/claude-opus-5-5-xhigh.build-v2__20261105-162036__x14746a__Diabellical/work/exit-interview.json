@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 16:20:36",
+    "source": "Diablo 3",
+    "plan": "PLAN.md",
+    "genre": "Co-op action RPG (hack-and-slash)",
+    "perspective": "Fixed 3/4 isometric, orthographic",
+    "tech": "Pixel Engine 0.46.0 (with three.js r186 and Rapier inside), JavaScript modules bundled with esbuild 0.28, WebGPU, Web Audio, AI Hub session client 1.4.0",
+    "artDirection": "The engine's native pixel-art toon style and palette, with new models for heroes, NPCs, monsters, bosses and key props; the library for generic props",
+    "animation": "The engine's clip system on its hero rig, new clips, and procedural legs, springs and squash",
+    "audio": "All in code: chiptune songs, synthesised effects, Animalese-style babble for voices, music at 10% by default",
+    "online": "AI Hub Session Protocol v1, shared-world, up to 4; couch co-op on its own",
+    "testing": "Headless scripts that play the game and check its state, a scripted whole-game playthrough, one command, screenshots only for what a script can't check, no subagents or workflows to review",
+    "research": "None beyond the plan: PLAN.md's own notes on the source were used and no further research was done",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "26. Each one is a line in tests/ISSUES.md: 17 from the scripted tests and 9 from screenshot runs.",
+    "10. They include The Way Home spawning inside a wall (a Knell Run with no exit), the Bursar's Foreclosure walls locking a hero out of the fight, blinks through walls, a missing door to the Drowned Pantry, heroes stuck in walls, and a physics panic in long sessions.",
+    "The whole-game playthrough, once per class, played by a bot through the real menus. It found the stuck heroes, the missing Pantry door and a Knell Run left alive in town, none of which a unit test would have reached. Its sibling, The Last Bell run, found the walled-in exit on the final pass.",
+    "The tuning check that defaults round-trip and every slider has a home. It never caught anything, because that code hardly changed after it was written."
+  ],
+  "engineFeedback": [
+    "The headless engine. Engine.headless and engine.step let one test file play the entire campaign through the real game object with no browser, in about a minute per class. Second place goes to models and clips as plain data: every hero, monster and boss here is data the engine's own checker can lint.",
+    "Yes, a few times. Rapier panicked with 'wasm unreachable' deep into long sessions, traced to Breakables, and I never reproduced it in isolation, so I replaced those shatters with my own ballistic chunks rather than guess further. Trail produced NaN vertices when given two identical points, which took a NaN scan of the scene to find. I also guessed wrong about the gaitClip lift parameter, which made feet slip until the clip analyser pointed at it.",
+    "The sim and netcode split: a deterministic plain-JS world (heroes, monsters, skills as data, loot, quests, Knell runs) that a bot, couch seats, and a hub host all drive the same way, with a compact state stream for hub clients. Close behind: the immediate-mode 10-foot menu system with focus, glyph prompts and mouse hover on the engine's pixel HUD.",
+    "Fitting an RPG's words into a HUD only 430 to 480 art pixels wide with one font and no alpha. Item names, skill text and toasts all fight for the same few pixels, and the HUD draws straight over everything. Debugging through the bundled engine was the second hardest part, because errors surface as minified frames.",
+    "none",
+    "Make Breakables and Trail survive bad input: skip degenerate points and retire debris safely, so a long session cannot panic the physics world. A close second is real layering with translucency in the HUD."
+  ],
+  "promptFeedback": [
+    "It says exactly what done means and how it will be checked: the single file, the exit interview shape, the attract rule, the touch rule, and one test command. The plan's verified engine facts meant I could trust details instead of rediscovering them.",
+    "Mostly small things: the plan and TASK.md both speak to testing and hand-ins, so I had to remember that TASK.md wins. 'Use screenshots only for what a script can't check' sits beside the plan's 'look at every screenshot', which took a moment to reconcile.",
+    "Scope. Three classes with skill runes, loot, a campaign with bosses, an endgame, couch and online co-op, attract, dev tools and a full shell all have to work together, and each one multiplies the test surface. Keeping online clients in agreement with the host while the sim kept changing was the hardest single thread.",
+    "Add a short priority list for what to cut first if time runs short, and name the HUD's real width up front so text budgets are planned from the start. Otherwise I would keep it as it is."
+  ],
+  "aiHub": {
+    "name": "Diabellical",
+    "tagline": "The bell is cracked. The dead are up. So are you.",
+    "description": "A gothic hack-and-slash for 1 to 4 players: smash hordes as a Bellwarden, Lamplighter or Sexton, hunt loot that rings like church bells, and silence a furious walled-up saint.",
+    "type": "Game",
+    "genre": "RPG",
+    "source": "Diablo 3",
+    "series": "Diablo",
+    "players": "1–4",
+    "controls": "Stick or WASD or click to move · Cross or click to attack · face buttons, R1, R2 or right click, 1-4 for skills · L2 or Space to dodge",
+    "tags": [
+      "3d",
+      "co-op",
+      "pixel art",
+      "fantasy",
+      "boss fights",
+      "top-down"
+    ]
+  }
+}

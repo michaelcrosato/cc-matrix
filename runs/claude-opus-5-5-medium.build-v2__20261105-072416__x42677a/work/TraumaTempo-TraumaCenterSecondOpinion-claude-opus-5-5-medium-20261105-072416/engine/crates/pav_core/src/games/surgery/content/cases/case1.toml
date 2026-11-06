@@ -1,0 +1,117 @@
+# Fields: docs in ../README.md. Coordinates: x -9..9, z -4..4.2. Angles in degrees.
+name = "Routine"
+surgeon = "mara"
+plate = "abdomen"
+timer = 270.0
+par = 38300.0
+patient = "Rosalind Pike"
+life = "Harbour pilot. Has never once run aground."
+diagnosis = "Acute appendicitis. Nothing about this is unusual."
+fate = "Rosalind Pike will take the morning tide within the week."
+before = "case1_before"
+after = "case1_after"
+gift = "none"
+music = "or"
+
+[[phase]]
+name = "incision"
+now = "SCALPEL. Follow the dashed line in one stroke."
+guide = true
+checkpoint = true
+spawn = [{ kind = "incision", a = [-3.8, 0.8], b = [3.8, 0.6], c = [0.0, -0.3] }]
+say = [
+  { who = "bashir", text = "Scalpel. One stroke, Doctor. The gallery is watching.", at = 0.3 },
+  { who = "voss", text = "Adequate is the floor, Doctor Quill. Do try to clear it.", at = 4.5 },
+]
+
+[[phase]]
+name = "polyps"
+stagger = 4.0
+repeat = 2
+now = "LASER each polyp. Let go when the ring is nearly full."
+guide = true
+reveal_plate = "bowel"
+spawn = [
+  { kind = "polyp", a = [-3.4, -1.3] },
+  { kind = "polyp", a = [-1.6, -2.2] },
+  { kind = "polyp", a = [1.2, -1.5] },
+  { kind = "polyp", a = [3.6, -2.3] },
+  { kind = "polyp", a = [2.6, 1.2] },
+]
+say = [
+  { who = "teddy", text = "Polyps. Festive. Nobody ordered those.", at = 1.0 },
+  { who = "bashir", text = "Laser. Hold it until the ring fills. Release at the top, not after.", at = 4.0 },
+]
+
+[[phase]]
+name = "more_polyps"
+stagger = 4.5
+repeat = 2
+now = "More of them behind the fold. LASER."
+spawn = [
+  { kind = "polyp", a = [-4.8, 1.6], r = 0.45 },
+  { kind = "polyp", a = [-2.6, 2.4], r = 0.45 },
+  { kind = "polyp", a = [0.2, 2.1], r = 0.45 },
+  { kind = "polyp", a = [5.0, -0.2], r = 0.45 },
+  { kind = "patch", a = [-0.6, -0.4], r = 1.0 },
+]
+say = [{ who = "voss", text = "The ring, Doctor. Top of the ring. You are not toasting a muffin.", at = 0.5 }]
+
+[[phase]]
+name = "iv"
+stagger = 4.0
+repeat = 2
+now = "VITALS FALLING. IV PUSH: hold, release in the green."
+guide = true
+checkpoint = true
+spawn = [
+  { kind = "lacer", a = [-5.0, 1.5], b = [-2.4, 2.2] },
+  { kind = "pool", a = [-3.8, 2.4], r = 1.0 },
+]
+trigger = [{ at_time = 0.5, vitals_hit = 42.0, say = [{ who = "teddy", text = "Pressure's sagging. IV port, top-left of your ring. Hold, watch the band, let go.", at = 0.0 }] }]
+
+[[phase]]
+name = "appendix"
+stagger = 7.0
+repeat = 1
+now = "Pull the appendix free with the FORCEPS."
+guide = true
+spawn = [
+  { kind = "incision", a = [1.2, -0.8], b = [3.8, 0.8], c = [2.8, -0.6] },
+  { kind = "object", a = [2.4, 0.4], ang = -60.0, sub = 4, r = 0.7 },
+]
+say = [{ who = "bashir", text = "Open the mesentery. Then the appendix. Mind the artery.", at = 0.3 }]
+
+[[phase]]
+name = "inflamed"
+stagger = 6.0
+repeat = 2
+now = "GEL the inflamed bed. Close the small tears."
+spawn = [
+  { kind = "patch", a = [2.4, 0.4], r = 1.3 },
+  { kind = "lacer", a = [-4.2, -1.8], b = [-1.6, -1.2] },
+  { kind = "lacer", a = [0.4, 2.2], b = [3.2, 2.6] },
+]
+say = [{ who = "teddy", text = "See? Routine. I don't know why everyone's so tense. I'm tense. Why am I tense?", at = 0.5 }]
+
+[[phase]]
+name = "artery"
+stagger = 4.0
+repeat = 2
+now = "An ARTERY let go! SUTURE the bleeder. Three fast crossings."
+checkpoint = true
+banner = "COMPLICATION"
+spawn = [
+  { kind = "bleeder", a = [0.2, 1.0], ang = 20.0 },
+  { kind = "pool", a = [1.2, 1.6], r = 0.9 },
+]
+say = [
+  { who = "teddy", text = "Whoa. Whoa, whoa. That's not a drip, that's a fountain!", at = 0.2 },
+  { who = "bashir", text = "Bleeder, Doctor. Suture. Three crossings. Fast.", at = 2.0 },
+  { who = "voss", text = "Yes, Doctor Quill. They do that.", at = 6.0 },
+]
+
+[[phase]]
+name = "close"
+now = "Close her. One long DRESSING."
+spawn = [{ kind = "closure", a = [-4.5, 0.6], b = [4.5, 0.2], c = [0.0, -0.5] }]

@@ -1,0 +1,52 @@
+const SK = ['sharp', 'average', 'clumsy'];
+const avg = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+export default async function ({ T, openPage, getBrowser }) {
+  const b = await getBrowser(); const page = await openPage(b);
+  const run = (id, skill, opts = {}, tier = 0, seed = 1) => page.evaluate(([i, s, o, t, sd]) => { __TEST__.seed(sd); const r = __TEST__.runEvent(i, { tier: t, skills: [s], opts: o }); return r; }, [id, skill, opts, tier, seed]);
+  const table = {};
+  const IDS = ['poses', 'cairn', 'stillWater', 'logReps', 'plank', 'tug', 'stepClass', 'plates', 'islandLoop', 'fruitHat', 'roomService', 'springboard'];
+  for (const id of IDS) {
+    table[id] = {};
+    for (const s of SK) { const forms = [], fall = []; for (let seed = 1; seed <= 3; seed++) { const r = await run(id, s, {}, 0, seed * 37); forms.push(r.res[0].form); fall.push(r.res[0].falls); } table[id][s] = avg(forms); T.note(`${id.padEnd(12)} ${s.padEnd(8)} form ${avg(forms).toFixed(0).padStart(3)} falls ${avg(fall).toFixed(1)}`); }
+    const f = table[id];
+    T.ok(f.sharp >= 85, `balance: ${id} sharp ${f.sharp.toFixed(0)} below Exemplary`);
+    T.ok(f.clumsy >= 40, `balance: ${id} clumsy ${f.clumsy.toFixed(0)} below Adequate`);
+    T.ok(f.average >= 40, `balance: ${id} average ${f.average.toFixed(0)} below Adequate`);
+    T.ok(f.sharp >= f.clumsy - 2, `balance: ${id} clumsy beats sharp`);
+  }
+  const park = await run('poses', 'sharp', { botMode: 'park' }); T.ok(park.res[0].form < 85, `poses: a parked stick scored ${park.res[0].form.toFixed(0)}, should stay below Exemplary`);
+  // Parking on the target must never earn Exemplary, breathing in time or not; correcting by hand must.
+  for (const tier of [0, 1, 2]) { const r = await page.evaluate((t) => { const P = __TEST__.EVENTS.poses.prototype, orig = P.botInput; const out = { breath: [], none: [] }; P.botInput = function (i) { const l = this.lanes[i]; return { x: l.zone.x, z: l.zone.z, breath: (this.t % 8) < 4 }; }; for (let s = 1; s <= 4; s++) { __TEST__.seed(s * 53); out.breath.push(__TEST__.runEvent('poses', { tier: t, skills: ['sharp'] }).res[0].form); } P.botInput = orig; for (let s = 1; s <= 4; s++) { __TEST__.seed(s * 53); out.none.push(__TEST__.runEvent('poses', { tier: t, skills: ['sharp'], opts: { botMode: 'park' } }).res[0].form); } return out; }, tier); T.ok(Math.max(...r.breath) < 85, `poses T${tier + 1}: parked and breathing reached ${Math.max(...r.breath).toFixed(0)}`); T.ok(Math.max(...r.none) < 85, `poses T${tier + 1}: parked reached ${Math.max(...r.none).toFixed(0)}`); }
+  const bank7 = await run('fruitHat', 'sharp', { bankAt: 7 }); T.eq(bank7.res[0].falls, 0, 'fruitHat sharp banking at 7 falls');
+  const never = await run('fruitHat', 'sharp', { bankAt: 99 }); T.ok(never.res[0].falls >= 1, `fruitHat never banking should fall, got ${never.res[0].falls}`);
+  const pl = await page.evaluate(() => { const o = {}; for (const s of ['sharp', 'clumsy']) { __TEST__.seed(5); const r = __TEST__.runEvent('plates', { skills: [s] }); o[s] = r.res[0].raw; } return o; });
+  T.ok(pl.sharp - pl.clumsy >= .15, `plates must separate the bots: ${pl.sharp.toFixed(2)} vs ${pl.clumsy.toFixed(2)}`);
+  // Tug of Peace: how far to lean is the game. A stick at .85 is safe and wins; full stick sits you down.
+  const TUG = (tier, skill, stick) => page.evaluate(([t, s, st]) => { const E = __TEST__.EVENTS.tug.prototype, orig = E.botInput; E.botInput = function (i, tt, sk, dt) { const r = orig.call(this, i, tt, sk, dt), l = this.lanes[i]; const [x, z] = l.brain.correct(dt, l, 0, st, false, .5); return { ...r, x, z }; }; __TEST__.seed(29); const R = __TEST__.runEvent('tug', { tier: t, skills: [s] }); E.botInput = orig; const p = R.res[0].big.split('-').map(Number); return { won: p[0] > p[1], falls: R.res[0].falls }; }, [tier, skill, stick]);
+  for (const tier of [1, 2]) for (const s of SK) { const safe = await TUG(tier, s, .85); T.ok(safe.won && safe.falls <= 1, `tug T${tier + 1} ${s} at .85 should be safe and win: ${JSON.stringify(safe)}`); }
+  for (const tier of [1, 2]) { const greedy = await TUG(tier, 'sharp', 1); T.ok(greedy.falls >= 3, `tug T${tier + 1} full stick should sit you down: ${JSON.stringify(greedy)}`); }
+  for (const [tier, want] of [[0, [100, 89, 82]], [1, [89, 86, 74]], [2, [79, 76, 66]]]) { const got = []; for (const s of SK) { let v = 0; for (let d = 1; d <= 3; d++) { v += (await run('plates', s, {}, tier, d * 37)).res[0].raw; } got.push(v / 3 * 100); } got.forEach((g, i) => T.ok(Math.abs(g - want[i]) <= 10, `plates T${tier + 1} ${SK[i]} share ${g.toFixed(0)}, plan ${want[i]}`)); }
+  const tg = await run('tug', 'average'); T.ok(tg.res[0].form >= 70, `tug T1 must be winnable, got form ${tg.res[0].form}`);
+  for (let i = 0; i < 4; i++) { const rr = await page.evaluate((seed) => { __TEST__.seed(seed * 91); return __TEST__.runEvent('raft', { skills: ['sharp', 'average', 'average', 'clumsy'] }); }, i + 1); T.ok(rr.done && rr.maxRound <= 90, `raft round lasted ${rr.maxRound}`); }
+  const lr = table.logReps.clumsy; T.ok(lr <= 70, `logReps clumsy ${lr.toFixed(0)} above 70`);
+  const rs = await run('roomService', 'sharp'); T.eq(rs.res[0].big, 5, 'roomService T1 glasses');
+  const synced = await run('cairn', 'average', {}, 1), un = await run('cairn', 'average', { botMode: 'nobreath' }, 1); T.ok(synced.res[0].form > un.res[0].form, `cairn T2: breath ${synced.res[0].form.toFixed(0)} should beat none ${un.res[0].form.toFixed(0)}`);
+  const ci = await page.evaluate(() => { const g = __TEST__.g, out = {}; for (const s of ['sharp', 'average', 'clumsy']) { g.clearMode(); const ev = g.startEventMode(g.CheckInCls, { tests: ['standStill', 'leanMatch', 'stepTime', 'quickLean', 'oneFoot'] }, [{ kind: 'bot', skill: s }]); ev.count = .01; let t = 0; while (ev.phase !== 'done' && t < 200) { g.fixed(1 / 120); g.frame(1 / 120); t += 1 / 120; } out[s] = ev.results; g.clearMode(); } return out; });
+  T.note(JSON.stringify(ci)); T.ok(ci.sharp.find(r => r.id === 'leanMatch').score > .3, 'lean match sharp above .3');
+
+  // On keys: a bot pressing real keys through the real input path. The ring stays where you leave it.
+  const KEYBOT = (id, skill, seed) => page.evaluate(([i, sk, sd]) => { __TEST__.seed(sd); const g = __TEST__.g; g.ui.closeAll(); g.scripts.clear(); g.clearMode(); g.speech.clear(); g.testBotSkill = null; g.input.keys.clear(); g.input.ringX = 0; g.input.ringZ = 0;
+    const ev = g.startEventMode(__TEST__.EVENTS[i], { tier: 0 }, [{ kind: 'local', name: 'K', colour: '#E8443A' }]); ev.count = .01; ev.opts.botGain = 0; /* steering by keys you watch the ring, not the dot: no fast corrections */ g.input.setDevice('kbm'); g.input.pointerActive = false;
+    const send = (type, code) => window.dispatchEvent(new KeyboardEvent(type, { code })); const held = new Set(); const hold = (code, on) => { if (on && !held.has(code)) { held.add(code); send('keydown', code); } else if (!on && held.has(code)) { held.delete(code); send('keyup', code); } };
+    const lane = ev.lanes[0]; let t = 0; const dt = 1 / 120; const rEdge = { hop: false, flail: false }; const tol = .05;
+    while (ev.phase !== 'done' && t < 400) { const b = ev.phase === 'play' ? (ev.botPad(0, sk, dt) || {}) : {}; const [wx, wz] = [b.x || 0, b.z || 0], rx = g.input.ringX, rz = g.input.ringZ; hold('KeyD', wx - rx > tol); hold('KeyA', rx - wx > tol); hold('KeyS', wz - rz > tol); hold('KeyW', rz - wz > tol); hold('KeyQ', (b.lf || 0) > .5); hold('KeyE', (b.rf || 0) > .5); hold('ShiftLeft', !!b.breath); rEdge.hopT = (rEdge.hopT || 0) - dt; if (b.hop && rEdge.hopT <= 0) { rEdge.hopT = .25; send('keydown', 'Space'); send('keyup', 'Space'); } if (b.flail && !rEdge.flail) { send('keydown', 'KeyF'); send('keyup', 'KeyF'); } rEdge.flail = !!b.flail; g.fixed(dt); t += dt; if (Math.round(t * 120) % 4 === 0) g.frame(dt * 4); }
+    for (const c of [...held]) hold(c, false); const r = ev.laneResult(0); const out = { form: r.form, falls: lane.falls, big: r.big, done: ev.phase === 'done' }; g.clearMode(); return out; }, [id, skill, seed]);
+  for (const id of ['poses', 'stillWater', 'fruitHat', 'roomService', 'cairn', 'stepClass']) { const res = {}; for (const s of SK) res[s] = await KEYBOT(id, s, 41); T.note(`keys ${id.padEnd(12)} ${SK.map(s => `${s} ${res[s].form.toFixed(0)} (${res[s].falls})`).join('  ')}`); T.ok(res.sharp.done, `keys ${id} finishes`); T.ok(res.sharp.form >= 40 && res.average.form >= 40 && res.clumsy.form >= 40, `keys ${id}: playable on keys ${SK.map(s => res[s].form.toFixed(0))}`); }
+  const rs2 = await KEYBOT('roomService', 'sharp', 41); T.ok(rs2.big >= 4, `keys: Room Service T1 delivers ${rs2.big}`);
+  const fh2 = await KEYBOT('fruitHat', 'sharp', 41); T.eq(fh2.falls, 0, 'keys: Fruit Hat sharp bot does not fall');
+  // Plate Spinners on keys: tapping A and D. Sharp must beat clumsy by 15 points of share, as on the stick.
+  const PK = (skill) => page.evaluate((sk) => { __TEST__.seed(77); const g = __TEST__.g; g.ui.closeAll(); g.clearMode(); const ev = g.startEventMode(__TEST__.EVENTS.plates, { tier: 0 }, [{ kind: 'local', name: 'K' }]); ev.count = .01; g.input.setDevice('kbm'); const S = { sharp: [.12, .3], average: [.28, .8], clumsy: [.5, 1.4] }[sk]; const BAND = { L: 4.25, M: 7.25, S: 10.25 }; const l = ev.lanes[0]; let t = 0, next = 0, k = 0, target = null, think = 0, seed = 11; const rnd = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; }; const dt = 1 / 120; while (ev.phase !== 'done' && t < 80) { think -= dt; if (think <= 0) { think = S[0] + .1; if (!target || target.dead > 0 || target.energy > .85) { let low = null; for (const p of l.plates || []) if (p.dead <= 0 && (!low || p.energy < low.energy)) low = p; target = low; } } if (target && t >= next) { const w = BAND[target.kind] + Math.sin(t * 2.1) * S[1]; next = t + Math.PI / Math.max(.5, w); const code = (k++ % 2) ? 'KeyD' : 'KeyA'; window.dispatchEvent(new KeyboardEvent('keydown', { code })); window.dispatchEvent(new KeyboardEvent('keyup', { code })); } g.fixed(dt); t += dt; } const share = l.score; g.clearMode(); return share; }, skill);
+  const ps = { sharp: await PK('sharp'), average: await PK('average'), clumsy: await PK('clumsy') }; T.note(`keys plates ${JSON.stringify(ps)}`); T.ok(ps.sharp - ps.clumsy >= .15, `keys plates must separate the bots by 15 points: ${JSON.stringify(ps)}`);
+  T.ok(!page.errors.length, `balance page errors: ${page.errors.slice(0, 2).join(' | ')}`);
+  await page.context().close();
+}

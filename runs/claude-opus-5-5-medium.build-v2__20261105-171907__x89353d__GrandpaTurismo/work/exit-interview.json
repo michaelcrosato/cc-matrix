@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 17:19:07",
+    "source": "Gran Turismo 3: A-Spec",
+    "plan": "PLAN.md",
+    "genre": "Racing simulation with a career, tuning and car collecting",
+    "perspective": "Third-person chase camera (near and far), bonnet view, television cameras in replays; menus on a 3D diorama from a slow three-quarter camera",
+    "tech": "Pixel Engine 0.46.0 as it ships (three.js r186 WebGPU, Rapier), plain JavaScript modules, esbuild 0.28.2 to one HTML, AI Hub session client 1.4.0 unmodified. No CDN at runtime. A four-wheel car model written in plain JS from the plan, not the engine's Vehicle.",
+    "artDirection": "The engine's native pixel look: low-poly toon meshes in the 16-colour palette, pixel outlines, 480x270. 14 original cars as side-profile data, six dressed circuits, a peninsula diorama, sets for every menu.",
+    "animation": "The engine's rig, ClipDef and compileClips, with ten new clips (pit crew, marshal, examiner, dealer, mechanic, podium, crowd), plus procedural car body motion, wheels, turntables, dyno, car wash, Timeline scenes for the podium and prize reveal, cloth flags.",
+    "audio": "All in code, no files. A Web Audio engine synth per car (firing frequency from rpm and cylinders, turbo whistle, overrun crackle), tyre, wind, kerb and gravel noise, synthesised effects, eight original chiptune songs as Song data with music at 10% by default, Animalese-style gibberish voices for four speakers with subtitles.",
+    "online": "AI Hub session protocol v1 in ghost mode (1-4 players, own card, others drawn as ghost cars). On its own: Couch Duel, split screen for two on one device, and pass-the-pad time trial. No other network use.",
+    "testing": "Headless tools and scripts allowed, one command printing failures and a one-line count, a scripted playthrough of the whole game, screenshots only for what a script cannot check, no subagents or workflows to debate, review, judge or audit. Stand-ins used: pad stubs, Playwright touch profile, Web Audio render and analyser, software WebGPU in Chromium, hub harness on an OS-picked 127.0.0.1 port. No real pad, TV, listener or human driver; WebKit has no WebGPU here, so it could not be run.",
+    "research": "None on the web. I read the kit's GUIDE.md and ASSETS.md, parts of API.md, the hub README and the plan.",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "33, listed one by one from this session, not counting bugs in the test scripts themselves. 12 of the 33 were seen only in screenshots (overlapping text, low contrast, a replay camera behind a grandstand). A further 12 missing details were not caught by any test: I found them by re-reading the plan against the code near the end. Examples: rolling starts never went green, AI never pitted because of that, a pause menu that opened and closed in one frame, the idle timer counting frames instead of seconds, attract mode unable to exit during a load, all AI cars the same paint, the start gantry turned 90 degrees across the road, a tyre wear spiral on the banked track, prizes too low to afford the cars the events asked for.",
+    "5: a name clash that stopped the race scene loading, a model id clash that stopped the game booting, rolling starts that held every race at 90 km/h, attract mode that could not be left during a load, and a wear spiral that made fast cars unable to finish on Saltline.",
+    "The whole-game playthrough bot. It found the money and balance problems and the wear spiral, the kind of thing no single-screen test shows, and it now finishes the career with no dev tools on day 29.",
+    "The spec-sheet check of 0-100 and top speed. The code came from the plan and it never failed, so it only confirmed what the lap regression already showed."
+  ],
+  "engineFeedback": [
+    "Engine.headless. The real game code ran in Node with the same scenes and menus, so a bot could play the whole career in minutes. The pixel look also makes plain low-poly data look good with very little work.",
+    "Yes. Naming a field setup on a game object overwrote the setup hook and gave only 'e.setup is not a function'. A game's model id clashing with a library id throws at import. I also guessed 'sawtooth' for a wave, but the engine's name is 'saw'. Errors print the one-line minified engine source, so I needed a small wrapper to read a stack.",
+    "The car model and race simulation (from the plan), then the 10-foot UI: focus, prompts and glyphs through one immediate-mode layer over the HUD, for pad, keyboard, mouse and touch.",
+    "Input outside the engine's model. Analog triggers and several pads are not exposed, so I polled pads myself, sent them through input.send, and latched commands once a frame across fixedUpdate and update. Software WebGPU at 10-15 fps also made browser tests slow and timing-sensitive.",
+    "none",
+    "Expose analog gamepad state per pad (triggers, axes, pad index) through Input, so racing games and split screen do not need their own polling and command latching."
+  ],
+  "promptFeedback": [
+    "The honest structure: a detailed plan with proven facts and tested code, and a brief that spells out what to hand in and how to test. The rule of one test command that prints only failures saved a lot of noise.",
+    "Very little. The plan says the play bot uses skill 1.0, but aiDrive overdrives tuned cars at that pace, so I ran it at 0.97. The hub:players meta (1-2) and the exit interview's players field (1-4) count different things, which the plan does explain.",
+    "Balance without a human. Pace, prices and medals could only be judged by a bot, so how the handling feels on a real pad is still unproven. Keeping 12 tests, 22 races and every set-piece working together was the largest single job.",
+    "Allow a slightly longer list of proven AI behaviour for tuned cars, and say up front how good a human the balance should assume, because that number decides every pace range."
+  ],
+  "aiHub": {
+    "name": "Grandpa Turismo",
+    "tagline": "A patient driving life.",
+    "description": "You arrive on the Halcyon Peninsula with 15,000 credits, no licence and an appetite. Fourteen cars, twelve tests, eight events and a great deal of oil, in chunky pixels.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "Gran Turismo 3: A-Spec",
+    "series": "Gran Turismo",
+    "players": "1–4",
+    "controls": "Stick or WASD to steer, R2 or W to go, L2 or S to brake",
+    "tags": ["3d", "pixel art", "vehicles", "retro", "third-person", "versus"]
+  }
+}

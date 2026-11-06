@@ -1,0 +1,65 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-05 05:40:07",
+  "source": "Trauma Center: Second Opinion (Atlus, Wii, 2006)",
+  "plan": "PLAN.md",
+  "genre": "Surgical action game, with story scenes and a small walkable ward",
+  "perspective": "First-person top-down on the operative field; front-on portrait stages for story; three-quarter view for the ward and cinematics; side view for the title",
+  "tech": "my-3D2dge v0.89.1 (the full engine, with two small patches: the touch notice sits low so the attract reel shows above it, and a mouse move always sets the last device), AI Hub session client 1.4.0, plain JavaScript, Web Audio, one self-contained HTML file, no CDN",
+  "artDirection": "The engine's pixel look at PS1 level: per-pixel wet tissue through hand-picked ramps with ordered dithering, flat-shaded bust portraits, painted stages, all by code; a few store props (Kenney, KayKit, CC0) for generic furniture",
+  "animation": "The engine's Humanoid rigs and continuous-value animation, with new poses (scrub-in, gurney push, instrument pass, leaning over the table, knitting, shouting), a surgical cap, a mask and held objects; procedural organs, parasites and instruments; coroutine cinematics",
+  "audio": "All in code on Web Audio: synthesized effects, a parasite choir on the effects bus, Animalese-style gibberish voices with formants per character, songs in the engine's notation with music at 10% by default",
+  "online": "AI Hub Session Protocol v1, shared world, 1 to 4 players, with the game's own card; couch co-op on its own (pads, keyboard halves, AI colleagues)",
+  "testing": "Headless tools and scripts that play the game and check its state, including a scripted playthrough of the whole game, behind one command that prints only failures and a one-line count; screenshots only for what a script cannot check; no subagents or workflows to debate, review, judge or audit",
+  "research": "The plan's own research was used (Wikipedia and a retrospective essay, as PLAN.md reports). No further research was done in this build.",
+  "environment": "Claude Code CLI (headless); Linux",
+  "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+  "usage": "added on import"
+ },
+ "testingFeedback": [
+  "22, logged in notes/feedback.md as they were caught: 15 by scripts that play the game (one of those a bug in the test itself), 7 by looking at screenshots.",
+  "7 would have been game breaking: a syringe tutorial that never cleared, a Code Blue that could not fire, a phase that soft-locked if a nest died early, a boss that could not be finished, a skipped cinematic hanging the campaign, an endless rewind loop in the finale, and a ward where the hero spawned stuck.",
+  "The scripted full playthrough, New Game to credits through the real scenes with the bot's cheats off. A close second: driving Case 1 with real mouse events in a browser, which proved the hands work end to end.",
+  "The view-cycling part of the engine's check tool: this game fixes its view per scene, so it only confirmed nothing. Its look note about the difficulty screen's color count was useful, though."
+ ],
+ "engineFeedback": [
+  "The exact fixed step with game.advance and input.tap: the whole game runs headless in seconds, the same every time. Pause, settings, rebinding, glyphs and the TV shell came free and just worked.",
+  "Yes, a few times. E.shade's amount is signed, and I guessed it the wrong way. input.lastDevice stays keyboard on a mouse move. A front wall hides a room until it has cut: true. Calling story.resume() inside its own event is silently lost.",
+  "The operation sim: one JSON-safe state with eight tool gestures, strains, rewinds and checkpoints, plus the per-pixel tissue painter and the bot that plays through the real cursor path. None of that is an engine feature, and all of it is the game.",
+  "Moving between views and scenes mid-story for cinematics: the view, camera bounds, lights and scene-scoped scripts each reset by different rules, and it took a hook on scene enter to make it tidy.",
+  "Two patches. The touch notice sits low on the screen instead of covering it, so the attract reel shows above it (the plan's Appendix E). A mouse move now sets lastDevice to mouse from keyboard too, because hover must move the focus from the first move.",
+  "Make story.resume() safe to call from inside the story's own event handler, or warn when it is ignored. It failed silently and hung the campaign."
+ ],
+ "promptFeedback": [
+  "The plan's verified facts and exact numbers: the reference painters, the Hub skeleton and the harness runner saved rediscovery, and every tool's gesture came with numbers I could test.",
+  "How to write GameTitle in a file name when the title has a colon and spaces: I used the compact form, TraumaBenderSecondOpinion. Also the plan's fact 7 on mouse devices, which only holds after a pad was used.",
+  "Judging how the hands feel with no person to play: scripts and a bot can prove a stroke lands, not that it is fun. Case balance for real people is an estimate from bot runs.",
+  "Allow one human playtest pass, or give a target for how much slower than a bot a first-time player is. Also state the file-name form for titles with punctuation."
+ ],
+ "aiHub": {
+  "name": "Trauma Bender: Second Opinion",
+  "tagline": "Don't let it go quiet",
+  "description": "A rookie surgeon and a deadpan nurse race to save patients from a parasite that sings, in a hospital soap opera played with eight surgical tools. Alone, on one couch, or with up to four surgeons in a Hub session.",
+  "type": "Game",
+  "genre": "Simulation",
+  "source": "Trauma Center: Second Opinion",
+  "series": "Trauma Center",
+  "players": "1–4",
+  "controls": "Aim: right stick or mouse. Use tool: R2 or click. Pick tool: left stick or 1-8. Gift: Triangle or F",
+  "tags": [
+   "2d",
+   "pixel art",
+   "story",
+   "co-op",
+   "boss fights",
+   "comedy"
+  ]
+ },
+ "credits": [
+  "Trauma Bender: Second Opinion is an original work inspired by Trauma Center: Second Opinion, and is unaffiliated with it or its makers. Its story, characters, art, music and operations are its own.",
+  "Built on my-3D2dge v0.89.1 by Michael Crosato (MIT License). AI Hub Session Protocol v1, client 1.4.0.",
+  "Store props: Kenney Furniture Kit (kenney.nl), CC0 1.0. KayKit Furniture Bits (kaylousberg.com), CC0 1.0.",
+  "Everything else, every picture, song, sound and voice, is drawn or synthesized by code. There are no image or audio files.",
+  "Not a medical training tool. Please do not."
+ ]
+}

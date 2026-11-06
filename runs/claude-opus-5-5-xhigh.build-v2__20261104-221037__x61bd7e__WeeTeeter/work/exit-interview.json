@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:10:37",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Sports and fitness minigame collection inside a light life-sim routine",
+    "perspective": "Per activity: 2.5D fixed (brawler view) in the studios, three-quarter on the island, Mode 7 behind the skier, pseudo-3D road behind the runner, a steep view of the tray, side view on the laundry line",
+    "tech": "my-3D2dge full engine v0.89.0 (Mode 7, road, physics and rhythm modules, Mocap with a cut clip set), AI Hub session client 1.4.0, plain JavaScript in a single HTML file",
+    "artDirection": "The engine's native look: 3D skeleton puppets drawn as crisp pixel art at ps1 resolution, moved into bright daylight. New art in code: Tare, Gerald, wooden mannequin joints, the Plate, rooms, tray, laundry, gates",
+    "animation": "The engine's Humanoid rigs driven by motion capture (Mesh2Motion, Quaternius, CMU), with a hand-posed body layer (side lunge, hula, step-up, rope walk) and a wobble layer on top",
+    "audio": "All written in code with no files: 14 original songs and 5 jingles in step notation with music at 10% by default, about 30 synthesized sound effects, and Animalese-style gibberish voices made letter by letter through a band-pass filter",
+    "online": "AI Hub session in ghost mode (1 to 4 players, the Morning Class round) and local Class for 2 to 4 on one screen; no other network",
+    "testing": "As the brief allowed: headless scripts that play the game and check its state, including a scripted playthrough of the whole game, behind one command that prints only failures and a count; a modelled person on each device path; one-device walkthroughs of a whole first day with a stand-in pad, real keys and a real pointer; touch profiles and audio probes; the AI Hub harness; screenshots only for what a script cannot judge; no subagents or workflows",
+    "research": "None beyond the plan, the engine's documents and the hub protocol README",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 60. 25 came from the scripted tests: for example the attract timer that never fired, a mouse that could not lean, a results screen that swallowed the story's next press, a jog list that skipped its water cups, tray gaps that left no way through, a rope bot that stopped jumping a peg after one trip, Laundry Line on keys, which a modelled person could not finish, two Dev sliders that were not live, two melodies that shared a phrase with the engine's songbook, a pause counter that never counted, a Candle line nobody could reach, and plan lines that were written down but never spoken, such as Gerald's and \"Leaving early?\". The rest came from screenshots and from reading the finished game against the plan's prose: overlapping HUD, a towel across the face, poses that turned when bent over, signs hidden by roofs or crossed by lamps, Tare saying \"Let's call it 71\" at Spine Age 60, a credit for asset sets the game never loaded, and Cards that ran to four sentences.",
+    "4: attract mode never started, the mouse could not lean for player 1, the story could stall on the results screen, and Laundry Line could not be finished on a keyboard.",
+    "The scripted playthrough of the whole game with real taps and bots, run once with a good bot and once with a passive player. A close second: a modelled person playing every activity through the real keyboard, mouse and stick paths, which found the keyboard rope. Two late audits also earned their keep: every number in the plan, and a test that records everything the game actually says in play and fails if a group of lines stays silent. Reading the plan's prose once more at the very end still found things the number checks could not.",
+    "The Firefox and WebKit smoke tests. They passed the first time and have not caught anything yet, though they cost little."
+  ],
+  "engineFeedback": [
+    "The exact fixed step and the headless draw: a whole five-day story plays in Node in minutes with the same results every time. After that, how much is already there: rigs with real motion capture, Mode 7, the road, rhythm, physics, and pause, settings and rebinding I did not have to write.",
+    "Three wrong guesses. game.hook passes only dt, not (game, dt), which made an idle timer NaN. input.player is undefined until game.players has been read. And rig.spin is not trustworthy for a bent-over clip, so I read one heading from the hips for held poses.",
+    "The Lean: one balance model with an intent layer that makes a stick, keys and a mouse each native, then the activity runtime on top that hosts a run in a session, Class, attract, the Games and a hub round.",
+    "Reading a rig correctly in several views and facings at low resolution, and keeping a 10-foot HUD legible with a 5x7 font at 427 x 240. E.Rhythm also reads game.input directly, so per-player Class needed a proxy game object.",
+    "The Dialog's hard-coded dark text shadow now follows talk.shadow in 3 places, and its box shadows follow it too, because the shadows smeared on a white box. Nothing else.",
+    "A stable heading for bent-over poses in Mocap.drive, read from the hips, so a held Down Dog does not turn when its chest has no heading to trust."
+  ],
+  "promptFeedback": [
+    "The plan's tested recipes and verbatim lines. The tone was already there, and the numbers marked as tested were right: the balance table reproduced almost exactly on the first run.",
+    "Space is both Effort and Jump on the Laundry Line, so I moved keyboard walking to W and mouse jumping to the right button. The plan says keys at 2.2/s score the same as a stick, but on the rope my modelled person fell constantly, so keys there move faster and the rope is a little kinder to them. The file name also does not say how to write a SOURCE with a space, so I used WiiFit. The plan was tested on engine v0.88.0 and the handoff is v0.89.0, which caused no trouble.",
+    "Tuning twelve activities without being able to feel them. Bots can hold a star band, but only judgment says whether a thumb will enjoy it.",
+    "Resolve the Space conflict in the input table, recheck the keyboard claim on the rope, say how to write a SOURCE with spaces in the file name, and add a short list of the feelings to check by hand for whoever can play it."
+  ],
+  "aiHub": {
+    "name": "Wee Teeter",
+    "tagline": "Gently, or not at all",
+    "description": "A gentle, deadpan five-day stay at a wellness retreat: twelve short exercises driven by one analog skill, a needy talking scale and two serene wooden instructors.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "",
+    "players": "1–4",
+    "controls": "Lean with the left stick, WASD or the mouse; breathe with R2, Space or left click; confirm with Cross, Enter or click",
+    "tags": [
+      "pixel art",
+      "comedy",
+      "versus",
+      "arcade",
+      "story",
+      "2d"
+    ]
+  }
+}

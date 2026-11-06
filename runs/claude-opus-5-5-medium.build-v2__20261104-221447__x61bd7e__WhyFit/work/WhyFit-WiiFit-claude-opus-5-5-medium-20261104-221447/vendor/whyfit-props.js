@@ -1,0 +1,38 @@
+/* whyfit: a set of my-3D2dge's asset store (written by tools/asset-*.mjs; entries may be edited by hand).
+ * Kenney and KayKit (CC0)
+ * 6 shapes, 20 materials, 0 sprites. docs/ASSETS.md is the format; docs/ASSET-IMPORT.md how it was made.
+ * "sources" records each download (its url, date, sha256 and license); an entry's src names its download, orig the file in
+ * it, and fit how close it is: a shape's silhouette IoU at game scale (mean and worst view) and color dE.
+ * Load it with E.addAssets(window.ASSETS['whyfit']): its ids become 'whyfit:id'. */
+(window.ASSETS = window.ASSETS || {})['whyfit'] = { set: 'whyfit', format: 1, credit: 'Kenney and KayKit (CC0)',
+sources: {'kaykit-furniture-bits':{label:'KayKit Furniture Bits',origin:'Kay Lousberg (kaylousberg.com), KayKit-Furniture-Bits-1.0',license:'CC0 1.0',url:'https://github.com/KayKit-Game-Assets/KayKit-Furniture-Bits-1.0',commit:'96d5930a8dbdb363409bbc2d3341718b00e17c9c',fetched:'2026-10-14',licenseHash:'cd675f2adc31eb5f',dir:'KayKit-Furniture-Bits-1.0',scale:0.75},'kenney-nature':{label:'Kenney Nature Kit',origin:'Kenney (kenney.nl), nature-kit',license:'CC0 1.0',url:'https://kenney.nl/media/pages/assets/nature-kit/37ac38a37b-1677698939/kenney_nature-kit.zip',page:'https://kenney.nl/assets/nature-kit',fetched:'2026-10-14',sha256:'fa7974a0d342bfe63c38664ba9f8ec1a4aab8ea25f099bdc56870e33588c4d9d',licenseHash:'cb96b75e3560ac78',dir:'nature-kit',scale:2.2,factors:'srgb'},'kenney-holiday':{label:'Kenney Holiday Kit',origin:'Kenney (kenney.nl), holiday-kit',license:'CC0 1.0',url:'https://kenney.nl/media/pages/assets/holiday-kit/3976a6496a-1733923970/kenney_holiday-kit.zip',page:'https://kenney.nl/assets/holiday-kit',fetched:'2026-10-14',sha256:'fde4d514d7297388d98058e8933ff614e071886f7ce57f9aea4b00d7698dd769',licenseHash:'6010f677d95f3ab7',dir:'holiday-kit',scale:1,factors:'srgb'},'kenney-graveyard':{label:'Kenney Graveyard Kit',origin:'Kenney (kenney.nl), graveyard-kit',license:'CC0 1.0',url:'https://kenney.nl/media/pages/assets/graveyard-kit/ba8d4b4517-1760691807/kenney_graveyard-kit_5.0.zip',page:'https://kenney.nl/assets/graveyard-kit',fetched:'2026-10-14',sha256:'1a93613f2e5675f3310acf49ec9ef13ae7adeb756ac3b205bfb6cc9311a81062',licenseHash:'a48e274258386c6b',dir:'graveyard-kit',scale:2,factors:'srgb'}},
+materials: {
+'clay-c': '#b2582e glaze',
+'clay-b': '#d97034 glaze',
+shrub: '#60b24e foliage size=3',
+'shrub-d': '#3ea559 foliage size=3',
+'shrub-e': '#84c046 foliage size=3',
+'shrub-b': '#54b367 foliage size=3',
+'shrub-c': '#96c850 foliage size=3',
+needles: '#389c82 foliage size=3',
+'shrub-i': '#47a976 foliage size=3',
+'straw-b': '#c2d854 foliage size=3',
+'clay-b-2': '#ff8e62 planks bw=3',
+'clay-b-3': '#c4714e planks bw=3',
+steel: '#a5adcf metal',
+snow: '#dae0e3 cloth',
+'ice-b': '#72b4db cloth',
+glazed: '#5189c4 cloth',
+oak: '#965540 planks bw=3',
+'shrub-2': '#42ac7c metal',
+gold: '#ffc044 none',
+'steel-2': '#99a0c0 speck'},
+shapes: {
+'cactus-medium-a': {about:'leafy green succulent in a round terracotta pot',tags:'plant decoration house',mats:{a:'clay-c',b:'clay-b',d:'shrub',e:'shrub-d',f:'shrub-e'},parts:[['lathe','a',[0,0,0.3],[[0,0],[3.9,0],[4.5,2.9],[5,3.1],[5,3.4],[0,3.4]]],['lathe','b',[0,0,3.8],[[0,0],[5,0],[5.5,0.6],[5,1],[0,1]]],['box','d',[1,-1.5,3],[4,3,6]],['box','d',[1,-3.5,4],[2,1,5]],['box','d',[1,0.5,4],[4,1,5]],['box','d',[-1.5,-2,5],[1,2,4]],['box','d',[3.5,-2,6],[1,2,3]],['ball','f',[1,-1.7,8.5],2.2,{sz:0.64}],['box','e',[-2.5,-0.5,3],[3,3,5]],['box','e',[-2.5,-2.5,5],[1,1,3]],['box','f',[2,2.5,5],[4,3,3]],['box','d',[2,0.5,6],[4,1,1]],['ball','f',[-1,1.8,5],0.9,{sz:1.17}],['box','d',[-1.3,1.7,3.3],[2.5,1.7,2.5]],['box','d',[-0.8,2.9,3.3],[1.7,0.8,2.5]],['box','e',[-0.3,-3,6.5],[0.5,0.5,1.1]]],src:'kaykit-furniture-bits',orig:'addons/kaykit_furniture_bits/Assets/gltf/cactus_medium_A.gltf',fit:{iou:0.87,worst:0.84,dE:5}},
+'cactus-medium-b': {about:'bushy green succulent in a terracotta pot',tags:'plant decoration house',mats:{a:'clay-b',b:'shrub-b',c:'shrub',e:'shrub-c',f:'needles',g:'shrub-i',h:'straw-b'},parts:[['lathe','a',[0,0,0],[[0,0],[3.8,0],[4.5,3.3],[5,3.3],[5.5,4],[5,5],[0,5]]],['box','b',[1,-1.5,3],[4,3,5]],['box','b',[1,-3.5,4],[2,1,4]],['box','b',[1,0.5,4],[4,1,4]],['box','b',[-1.5,-2,5],[1,2,3]],['box','b',[3.5,-2,6],[1,2,2]],['box','c',[-2.5,-0.5,3],[3,3,5]],['box','c',[-2.5,-2.5,5],[1,1,3]],['box','e',[1,-1.5,7],[2,5,3]],['box','e',[-1,-2,7],[2,2,2]],['box','e',[3,-2,7],[2,2,2]],['box','e',[-0.5,0,7],[1,2,3]],['box','e',[2.5,0,7],[1,2,3]],['box','e',[-0.5,-2,9],[1,2,1]],['box','e',[2.5,-2,9],[1,2,1]],['box','c',[-1,-1.9,7],[1.9,1.9,1.9]],['box','c',[2.9,-1.9,7],[1.9,1.9,1.9]],['box','b',[2,2.5,5],[4,3,3]],['box','g',[2,0.5,6],[4,1,1]],['cyl','b',[-1,1.8,4],0.9,1.3,{r2:1}],['lathe','c',[-1,1.8,5],[[0,0],[1,0],[0.9,0.5],[0.7,0.8],[0,0.9]]],['box','h',[1.5,-2.4,9],[0.6,1.2,1.2]],['box','h',[0,-2.1,9],[1.2,0.6,1.2]],['box','h',[1.5,-0.9,9],[1.8,0.6,1.2]],['box','h',[0.6,-0.3,9],[1.2,0.6,1.2]],['box','h',[2.1,-0.3,9],[0.6,0.6,1.2]],['box','h',[0.9,-2.1,9.5],[0.6,1.8,0.6]],['box','h',[2.1,-1.8,9.5],[0.6,1.2,0.6]],['box','h',[0,-1.5,9.5],[1.2,0.6,0.6]],['box','h',[1.5,-1.5,9.5],[0.6,0.6,0.6]],['box','f',[-0.3,-3,6.5],[0.5,0.5,1.1]]],src:'kaykit-furniture-bits',orig:'addons/kaykit_furniture_bits/Assets/gltf/cactus_medium_B.gltf',fit:{iou:0.82,worst:0.8,dE:5}},
+'pot-large': {about:'wide low wooden planter tub',tags:'container garden farm',mats:{a:'clay-b-2'},parts:[['lathe','a',[0,0,0],[[0,0],[7,0],[8,3.2],[10,3.2],[10,7],[0,7]]]],src:'kenney-nature',orig:'Models/GLTF format/pot_large.glb',fit:{iou:0.86,worst:0.83,dE:0}},
+bench: {about:'wooden slat bench on grey metal legs',tags:'furniture town park winter',mats:{a:'clay-b-3',b:'steel'},parts:[['prism','a',[0,0,0],[[-2,6],[-2.5,6],[-4,10.5],[-4,11.5],[-3,11.5],[-1.2,7],[-1,6]],18,{axis:'x'}],['box','a',[0,1.1,4.5],[18,5.5,1]],['mirror','x',['box','b',[6.5,-3.5,0],[3,3,2]]],['mirror','x',['box','b',[6.5,4.5,0],[3,3,1]]],['mirror','x',['box','b',[6.5,3.5,1],[3,3,4]]],['mirror','x',['box','b',[6.5,-1,2],[3,6,3]]],['mirror','x',['box','b',[6.5,-2.5,5],[3,3,1]]],['mirror','x',['box','b',[6.5,-3.5,6],[3,3,3]]],['mirror','x',['box','b',[6.5,-4,9],[3,2,2]]],['mirror','x',['box','b',[6.5,-5,11],[3,2,1]]]],src:'kenney-holiday',orig:'Models/GLB format/bench.glb',fit:{iou:0.8,worst:0.73,dE:4}},
+'bed-double-a': {about:'brown wood double bed, white sheets, blue blanket',tags:'furniture bedroom house inn',mats:{a:'snow',b:'ice-b',c:'glazed',d:'oak'},parts:[['prism','a',[0,0,0],[[-14,1.2],[-14.5,6],[-13,6],[-12.5,9],[-4.5,9],[-3.9,6],[-1.4,6],[-1.4,1.2]],36,{axis:'x'}],['prism','b',[0,7,0],[[-18,1.6],[-18,7],[19,6.5],[19,1.6],[0.4,3.6]],21.5,{axis:'y'}],['prism','c',[0,0,0],[[-3.1,1],[-3.6,6.5],[-2.1,5],[1.4,6.5],[1.4,5],[6.5,4],[18.5,5.5],[18,1]],37,{axis:'x'}],['box','d',[0,-15.5,1.2],[28.5,2.4,7]],['mirror','x',['box','d',[15.5,-16,0],[3.6,3.6,12]]],['box','d',[0,-15.5,10],[28.5,2.4,1.2]],['mirror','x',['box','d',[15.5,15.5,0],[3.6,3.6,2.5]]]],src:'kaykit-furniture-bits',orig:'addons/kaykit_furniture_bits/Assets/gltf/bed_double_A.gltf',fit:{iou:0.94,worst:0.93,dE:5}},
+'lantern-glass': {about:'small green iron lantern, glowing yellow glass',tags:'light graveyard',mats:{a:'shrub-2',b:'gold',c:'steel-2'},parts:[['box','b',[0,0,1.6],[5,5,5.5]],['box','a',[0,0,7],[7.5,7.5,1.6]],['box','a',[0,0,0],[7.5,7.5,1.6]],['prism','a',[0,0,8.5],[[-0.4,-2.8],[-2.5,-2.3],[-2.8,-0.5],[-2.5,2.3],[0,2.9],[2.3,2.5],[2.9,0.1],[2.5,-2.3]],1.6],['mirror','x',['cyl','a',[2,2,1.6],1.1,5.5]],['mirror','x',['cyl','a',[2,-2,1.6],1.1,5.5]],['cyl','c',[0,-0.8,11],1.6,1.6,{rot:[-90,0,0]}]],src:'kenney-graveyard',orig:'Models/GLB format/lantern-glass.glb',fit:{iou:0.9,worst:0.86,dE:4}}},
+sprites: {
+}};

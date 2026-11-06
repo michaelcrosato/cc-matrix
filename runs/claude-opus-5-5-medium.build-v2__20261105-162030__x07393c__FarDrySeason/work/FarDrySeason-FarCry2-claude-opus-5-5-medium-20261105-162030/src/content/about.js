@@ -1,0 +1,41 @@
+// About and Credits. The brief marks this as critical; the same text goes in the exit interview and the final reply.
+export const ABOUT = {
+  source: [
+    ['DATE', '2026-11-05 16:20:30'],
+    ['SOURCE', 'Far Cry 2'],
+    ['PLAN', 'PLAN.md'],
+    ['GENRE', 'Open-world first-person shooter with survival pressure and systemic fire'],
+    ['PERSPECTIVE', 'First person on foot, at the wheel and in scenes; optional chase camera in vehicles'],
+    ['TECH', 'Pixel Engine 0.46.0 (riftlight kit), three.js r186, Rapier 0.20, WebGPU, JavaScript modules bundled with esbuild 0.28 into one HTML file; AI Hub session client 1.4.0'],
+    ['ART DIRECTION', "The engine's native 3D-as-pixel-art at 480x270, toon materials, 16-colour palette; about 90 new models as data, plus library props"],
+    ['ANIMATION', "The engine's ClipDef system, compileClips and AnimationMixer; hero clips reused, new people clips, a hands rig with surgery scenes; Ragdoll on death; procedural sway"],
+    ['AUDIO', 'All in code: SoundDef effects, Song music (7 pieces, music 10% by default), Animalese-style gibberish voices, spatial ambience. No audio files'],
+    ['ONLINE', 'AI Hub Session Protocol v1, shared-world, 1 to 4 players; on its own: solo with AI mercs and two windows on one computer'],
+    ['TESTING', 'Headless Node suites, scripted playthrough, Playwright Chromium on file://, a stand-in gamepad, a phone profile, the hub harness; one command; few screenshots'],
+    ['RESEARCH', "None beyond the plan, the engine kit's docs and the hub's README"],
+    ['ENVIRONMENT', 'Claude Code CLI (headless); Linux'],
+    ['MODEL', 'Anthropic, claude-opus-5-5, reasoning effort medium'],
+    ['USAGE', 'added on import'],
+  ],
+  testing: [
+    ['HOW MANY ISSUES DID TESTING CATCH?', '50 logged in tests/ISSUES.md, most of them by the scripted playthrough and the systems suite, a few only by looking at screenshots.'],
+    ['HOW MANY WOULD BE CONSIDERED CRITICAL ISSUES / GAME BREAKING?', '19. Among them: no gun visible at all, the windscreen blocking the whole view from the driving seat, a crash when a soldier burned to death in the middle of their own AI update, the M8 ride never ending, FINISH IT eaten by the melee key, and grass fire eating the entire map.'],
+    ['WHAT WAS THE MOST HELPFUL TEST YOU RAN?', 'The bot that plays M0 through both endings with real keys. It found step-order, input-conflict and state bugs no unit test would have, and it runs in Node in a couple of minutes.'],
+    ['WHAT WAS THE LEAST HELPFUL TEST YOU RAN?', 'Screenshots of menus: they cost about three minutes each on this shared machine and the state checks had already proved what they showed. Screenshots of the world, on the other hand, were essential.'],
+  ],
+  engine: [
+    ['WHAT DID YOU LIKE MOST ABOUT THE ENGINE?', 'Engine.headless. The same game, physics and all, in Node with no GPU, booted in about a second. Models and sounds as checked data came close behind.'],
+    ['DID YOU GET STUCK OR GUESS WRONG?', 'Guessed wrong on rowOf and around, which take other arguments than I assumed, and on model ids that clash with the library. Took the groundFog setting from the plan: a negative top inverts its smoothstep and tints everything, which I found by reading its source.'],
+    ['WHAT WAS THE MOST IMPORTANT THING YOU HAD TO BUILD YOURSELF?', 'The fire grid and everything hung on it: terrain scars, flora swaps, grass blades, soldiers panicking, tanks going up, the map in ink. Then the action layer and the mission runner.'],
+    ['WHAT WAS THE HARDEST PART ABOUT USING THE ENGINE?', 'It is shaped for a platformer. A first-person open world means replacing the rig step, the pad map and the pointer lock logic. And a press queued in a menu stays alive for 150 ms and leaks into play unless you clear it.'],
+    ['WHAT DID YOU CHANGE IN THE ENGINE, AND WHY? (NONE IF NOTHING)', 'none'],
+    ['IF YOU COULD CHANGE ONE THING ABOUT THE ENGINE, WHAT WOULD IT BE?', 'A real first-person controller preset with no reserved keys, pad codes kept apart from keyboard codes, and an instanced model helper. And fix groundFog for a top below the camera.'],
+  ],
+  prompt: [
+    ['WHAT DID YOU LIKE MOST ABOUT THIS PROMPT?', 'The plan decided almost everything and said what it had verified, so I could build instead of deciding. Its traps table saved hours. The build order and cut order made the size manageable.'],
+    ['WHAT WAS CONFUSING?', 'The plan calls a line verified that turned out wrong for the look (the fog setting). The kit says modules do not load from file:// while the plan rightly says the bundle does. And the brief asks for file naming by GameTitle and SOURCE without saying how to treat spaces.'],
+    ['WHAT WAS THE HARDEST THING TO DO?', 'Keeping one sim working as host, client and headless server at once, and judging the look at a frame every few seconds on a shared machine. I could not play it by hand at speed, so game feel and balance are the least proven part.'],
+    ['WHAT WOULD YOU CHANGE IN THIS PROMPT?', 'Allow a real-time playtest budget, or say plainly that feel is judged later. Ask for a smaller world or fewer missions if polish matters more than breadth: this scope spreads effort thin. Keep the plan, the traps table and the one test command.'],
+  ],
+  credits: ['PIXEL ENGINE (MIT)', 'THREE.JS (MIT)', 'RAPIER (APACHE-2.0)', 'THE AI HUB SESSION CLIENT', '', 'INSPIRED BY FAR CRY 2; NOT AFFILIATED.', '', 'WRITTEN AND BUILT BY CLAUDE (ANTHROPIC).'],
+};

@@ -1,0 +1,8 @@
+// Starting everything: assets, the debug handle, deep links (#hub, #act/stork/1, #day/3, #ending), boot, the hub wrapper.
+E.addAssets(window.ASSETS.whyfit);
+game.debug = { snapshot() { const sc = game.scene || {}, ctx = sc.ctx, st = G.state, c = ctx && ctx.local; return { scene: game.sceneName, phase: sc.phase, activity: ctx && ctx.id, tier: ctx && ctx.tier, day: st && st.day, session: st && st.session, pct: c && c.pct, stars: c && c.stars, minutes: st && st.minutes, spineAge: st && st.age, lean: c && c.bal ? [c.bal.px, c.bal.py] : null, source: G.source(game.input), attract: G.Attract.on, music: game.settings.music }; } };
+const link = () => { const h = (typeof location !== 'undefined' && location.hash || '').slice(1), p = h.split('/'); if (p[0] === 'act' && G.acts[p[1]]) { G.ensureMember(); return ['act_' + p[1], { mode: 'free', tier: +p[2] || 0, from: 'island' }]; } if (p[0] === 'day') { const st = G.ensureMember(); st.day = +p[1] || 1; return ['island']; } if (p[0] === 'hub') { G.ensureMember(); return ['island']; } if (p[0] === 'ending') { G.ensureMember(); return ['ending']; } if (G.scenes[p[0]]) { G.ensureMember(); return [p[0]]; } return ['title']; };
+const first = G.inSession ? ['round'] : link();
+game.start({ scenes: G.scenes, scene: first[0], data: first[1], boot: { title: 'WHY FIT', steps: [['Zeroing the scale', () => {}], ['Sanding the instructors', () => {}], ['Counting the ducks', () => {}], ['Telling the hippo', () => {}]], messages: ['Zeroing the scale', 'Sanding the instructors', 'Counting the ducks', 'Telling the hippo'], accent: '#2cc6e6' } });
+G.started = true;
+if (G.inSession) G.connectHub();

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 08:20:30",
+    "source": "Trauma Center: Second Opinion",
+    "plan": "PLAN.md",
+    "genre": "Surgical action with visual-novel medical drama",
+    "perspective": "First-person surgeon's-eye fixed close-up on a 3D operating field; talking-head close-ups and 3/4 room shots in story scenes",
+    "tech": "Pixel Engine 0.46.0 (riftlight engine kit, WebGPU, three.js r186, Rapier inside it); plain JavaScript modules bundled with esbuild into one HTML file; AI Hub session client 1.4.0; tests in Node and Playwright 1.63.0",
+    "artDirection": "The engine's native low-poly 3D rendered as pixel art, outlines on tools and creatures, none on tissue; a hand-built tissue canvas per arena; new models for instruments, hands, strains, busts, figures and sets; Kenney furniture recoloured for generic props",
+    "animation": "The engine's system: HERO_CLIPS on custom rigs through compileClips and a three.js mixer for full-body figures, plus SpringChain, Squash, LegStepper and twoBoneIK for strains; pivot-based bust faces with emotion poses and mouths on syllables; procedural tool motion",
+    "audio": "All in code: original chiptune songs as engine Song data with a bar-line music director, SoundDef sound effects, and Animalese-style gibberish voices from formant-synthesised syllables; music at 10% by default",
+    "online": "AI Hub Session Protocol v1 in shared-world mode, 1 to 4 seats, host-authoritative with snapshots; couch co-op on one TV with no network outside a session",
+    "testing": "Headless tools allowed: one command (node tests/run.mjs) printing failures and a count; Node sim tests, a scripted whole-game bot playthrough, content lint, Playwright browser tests from file://, the hub harness, a balance report, and screenshots only for what scripts cannot judge. No subagents or workflows used to review.",
+    "research": "This plan's planner read the source's Wikipedia page, the hub's protocol and the engine kit, and ran engine spikes. During the build I read the kit's GUIDE, ASSETS, parts of API and CHANGELOG, and the hub README and harness.",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 30. Sim and bot runs found 6 (Op 4 fragments that never surfaced, a dressing stage the bot could not finish, shared bot memory breaking determinism, and the Code Blue and Pile-Up cases). Browser tests found 2 (a model palette crash at boot, menu presses lost at low frame rates). Content lint found 1. Screenshots found about 21 (a mirrored hand pose, the wheel under the comm strip, unreadable banners, eyes that looked wrong when shut, rain too thick, caps hidden by hair).",
+    "Two: Op 4 could not be finished because hidden fragments never surfaced, and the title screen crashed at boot on a bad palette re-bind.",
+    "The whole-game bot runs: every op at several skills on several seeds. They found the stuck stages and made balance measurable. No human has played it, so human difficulty is unmeasured.",
+    "A first Web Audio check that only proved my own test oscillator worked. I replaced it with an analyser tapped on the real output during a voice line."
+  ],
+  "engineFeedback": [
+    "The HUD plus looks: a real pixel picture for almost no code, crisp text at every resolution. The Song and SoundDef data formats made all-code audio pleasant.",
+    "Yes. buildModel throws when a build re-binds a palette slot the model lacks, which I learned on the title screen. Polling isDown lost short key presses at low frame rates, so menus read wasPressed too. HERO_CLIPS on a custom rig worked first time.",
+    "The tissue canvas: a per-arena painted base plus a per-frame repaint from sim state on a displaced plane. It is the look of the game and the engine has nothing like it.",
+    "Reading each pad separately with analog triggers: the engine merges pads and has no triggers, so I polled every pad myself and stopped them pressing keys. Software WebGPU at 3 to 6 fps also made browser tests slow to trust.",
+    "none",
+    "A first-party way to read each pad separately with analog triggers, because a controller-first game needs it and everyone otherwise writes it themselves."
+  ],
+  "promptFeedback": [
+    "The plan was specific where it mattered and marked what it had verified, so I could trust numbers like the camera, the look and the build recipe instead of rediscovering them.",
+    "The plan's verified hand pose had the instrument and the forearm on opposite sides, which took a screenshot to catch. I also had to guess whether GameTitle in the file name means the subtitle too; I included it.",
+    "Keeping the bosses honest for the bot, the rewind and the network at once, because every strain has to be plain data with many jobs. Judging feel without playing it at real speed was the other.",
+    "I would state a target play length per op measured against a person, not a bot, since a bot cannot say how long a person will take. My first run time is untested against the 80 minutes in the plan."
+  ],
+  "aiHub": {
+    "name": "Trauma Central: Second Stitch",
+    "tagline": "The truth, stat.",
+    "description": "A rain-soaked surgical drama in pixel art: precise instruments against the clock, a terrifying nurse in your ear, and a cure that is worse than any disease. Up to four surgeons in Consult.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Trauma Center: Second Opinion",
+    "series": "Trauma Center",
+    "players": "1–4",
+    "controls": "Stick or mouse moves the instrument; R2 or left click uses it; right stick or 1-8 picks a tool; L2 or Space is the gift.",
+    "tags": [
+      "3d",
+      "pixel art",
+      "story",
+      "co-op",
+      "boss fights",
+      "comedy"
+    ]
+  }
+}

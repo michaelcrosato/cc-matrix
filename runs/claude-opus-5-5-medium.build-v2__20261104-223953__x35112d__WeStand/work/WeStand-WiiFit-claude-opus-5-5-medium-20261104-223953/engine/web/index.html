@@ -1,0 +1,640 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="ghost">
+<meta name="hub:session-minutes" content="3">
+<meta name="hub:session-goal" content="Highest total across three balance events wins">
+<meta name="hub:session-howto" content="Lean: stick, WASD or mouse. Act: Cross, Space or click">
+<meta name="hub:webgpu" content="required">
+<script id="about-data" type="application/json">{
+ "sourceInformation": {
+  "date": "2026-11-04 22:39:53",
+  "source": "Wii Fit",
+  "plan": "PLAN.md",
+  "genre": "Sports mini-game anthology with a light life-sim frame (daily ritual, unlocks, wardrobe)",
+  "perspective": "Third person, a camera per activity: 3/4 follow on the island, mirror view for exercises, chase for the lap, paddle and pier, high 3/4 for the raft, side view for the dives",
+  "tech": "Pavilion engine from Shardfall (commit 49ef2ba, changed for this game), Rust 1.98.1, WebAssembly and WebGPU (wgpu), egui 0.36 for the UI, rapier3d 0.36, cpal for audio; packed to one HTML file; AI Hub client session.js from lib/hub",
+  "artDirection": "The engine's cel-shaded rounded primitives and big-headed toy figures, taken high-key and pastel; 36 new hand-written props, nine sets, a set of painter-drawn UI and glyphs; Fredoka and Nunito fonts",
+  "animation": "The engine's procedural puppet with motion clips on top; 23 new hand-keyed clips (poses, squat, tuck, flop and more), plus library clips (Mesh2Motion, CMU, Quaternius); whole-body tilt added to the puppet; clips scrubbed by gameplay",
+  "audio": "All in code, no audio files: a sample-accurate sequencer with six original songs, 38 synthesized sounds and stingers, and Animalese-style formant gibberish with nine voices. Music defaults to 10%",
+  "online": "AI Hub session, mode ghost, 1 to 4 players (the Inter-Resort Medley); on its own, Play Together hot-seat and Yesterday You ghosts",
+  "testing": "Headless scripts behind tests/run.sh: cargo tests that play the whole game by bot, Playwright browser checks on file:// (keyboard, mouse, stubbed pad, phone and tablet profiles, WebKit fallback, audio buffers), the hub harness at 2 to 4 players with bad network and host leaving, and screenshots for composition. No subagents or review workflows",
+  "research": "None beyond the plan, which already reflected a short web search; read the engine's docs and the hub's README",
+  "environment": "Claude Code CLI (headless); Linux",
+  "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+  "usage": "added on import"
+ },
+ "testingFeedback": [
+  "About 20 real issues, plus several balance numbers tuned against the score table. They were: 13 props failing to load, the bot under 2 stars in Paddle Slalom, stray steps scoring in Step Party, every set drawing at once, three input faults at low frame rates (short taps, repeated taps, first hover), a lost touch click, wrong rect units on high-density screens, the path hidden under the lawn, the gazebo's columns blocking the view, the raft dipping into the water, menu text overlaps found in screenshots, and Dev Mode single step doing nothing from the pause menu, found by reading the plan against the code, plus coach lines overflowing their plate, overlapping tide pools, a wrong plural and a hidden arm in one pose, found in the plan's 1080p and motion sheets.",
+  "One: the touch click, which made Settings unreachable on touch-only devices. Nothing else stopped the game, and the full bot playthrough passed the first time it ran. I cannot say how it feels to a person, because nobody played it.",
+  "The browser keyboard stay, from New Stay through the Morning Check, save, reload and Continue: it found an input fault the small checks had missed. The score table of bot, idle and careless input for each event was the most useful for balance.",
+  "Waiting on the first browser timing assertions with fixed sleeps. Under software rendering they failed for reasons of frame rate, not the game, until I rewrote them to poll."
+ ],
+ "engineFeedback": [
+  "That everything runs headless: a whole game played by bot in cargo test, and pav capture and pav repl for looking at any frame. Rooms as data, and props as readable JSON, were quick to write.",
+  "Yes. I guessed prop categories and a sway key in prop files and the failures only logged, leaving magenta markers, so a test had to find them. I also underestimated the CPU cost of water, which simulates up to 160 by 160 cells per zone every frame, and had to read the view code to find it. Camera cues have a base-camera rule that did not suit a game with many sets, so I went around them.",
+  "A complete UI layer: a list of drawn items written by the sim, drawn by egui, with focus, sliders, glyphs and pointer reports. Then the sequencer and voices in the synth.",
+  "Many sets on one sim. It works, but nothing culls by set, water is per zone and costly, and the room, camera and view changes each have their own rules to learn. App.rs is also a long frame function with the demo's chrome woven through it.",
+  "Added input fields and buttons, a frozen hook, an extras hook (status, UI frame, camera, focus, extra figures, stage box), a game-driven camera, whole-body tilt with a pivot, a Handle attachment, BigSplash, Wake and Burst effects, Sfx, Syllable and Music events, audio buses with a sequencer, formant voices and a sample clock, a smaller water grid (160 to 64 cells), more tick catch-up (8 to 30 ticks a frame), and a fit layout and fonts in the app and UI.",
+  "A built-in menu and HUD item layer usable from a game's own code, with pad, keyboard and pointer focus already solved. Every controller-first game on this engine needs it."
+ ],
+ "promptFeedback": [
+  "The plan's verified facts: the page script that passed the harness, the Rust and JS link, the traps with software rendering and fonts. They saved real time, and the numbered build order kept a large job in order.",
+  "A little: the plan names music at 10% as linear gain and the Options plus Create rule, which were clear; what was less clear was how much fidelity a hub ghost needs. The score formulas for Breath Bloom and Tempo Squats gave idle play a star, against the plan's own rule, so I changed them and noted it.",
+  "Judging feel with no player. Every event passes numeric checks, but whether a ring streak feels good or Tray Trek is fair to a person can only be estimated from numbers and frames.",
+  "Add one line saying how the browser tests should treat software rendering once a game has a large scene, since the 60 ticks a second measured for a small scene does not hold. I would also ask for a short human-style input model in the tests, so difficulty can be estimated without a person."
+ ],
+ "aiHub": {
+  "name": "We Stand",
+  "tagline": "A wellness resort you did not enter",
+  "description": "A balance-and-wellness comedy on a resort staffed by talking gym equipment. Lean, breathe and stand through eleven events and five days; checkout requires a Balance Age of 40 or better.",
+  "type": "Game",
+  "genre": "Sports",
+  "source": "Wii Fit",
+  "series": "Wii Fit",
+  "players": "1–4",
+  "controls": "Lean with the left stick, WASD or mouse; Cross, Space or click to act; L1/R1, Q/E or mouse buttons to step",
+  "tags": [
+   "3d",
+   "third-person",
+   "comedy",
+   "sports",
+   "versus",
+   "low-poly"
+  ]
+ }
+}</script>
+<script>
+(() => {
+  const boot = window.__gameBoot = { scene: null, seed: null, today: Math.floor(Date.now() / 86400000),
+                                     about: document.getElementById('about-data')?.textContent ?? '' };
+  if (!window.AIHub || !AIHub.active) return;
+  const hub = window.__hub = { go: false, ended: false, players: [], me: 0, ghosts: {} };
+  boot.scene = 'fit/medley';
+  boot.seed = Number((/[?&]aihub-seed=(\d+)/.exec(location.search) || [])[1] || 1);
+  AIHub.connect({ mode: 'ghost', seats: [1, 4] }).then((info) => {
+    if (!info) { location.replace(location.pathname); return; }   // no hub after all
+    if (!navigator.gpu) { AIHub.fail('This game needs WebGPU'); return; }
+    hub.me = info.me; hub.players = info.players;
+    // Before the first status arrives, report a zero: the hub must always hear a number.
+    const status = () => { try { return JSON.parse(window.__gameStatus || 'null')?.hub ?? null; } catch { return null; } };
+    const waitReady = () => (window.__gameStatus ? AIHub.ready() : setTimeout(waitReady, 50));
+    waitReady();
+    let reported = false;
+    const report = () => { if (reported) return; reported = true; const s = status(); AIHub.result({ score: s?.score ?? 0, stats: s?.stats ?? {} }); };
+    setInterval(() => {
+      if (AIHub.time() < 0 || hub.ended) return;
+      hub.go = true;
+      const s = status();
+      AIHub.progress({ score: s?.score ?? 0, label: s?.label ?? 'Warming up' });
+      if (!reported) AIHub.send(s?.ghost ?? { area: -1 }, { reliable: false });
+      if (s?.done) report();
+    }, 100);
+    AIHub.on('message', (data, from) => { hub.ghosts[from] = data; });
+    AIHub.on('leave', ({ id }) => { delete hub.ghosts[id]; });
+    AIHub.on('time-up', report);
+    AIHub.on('end', () => { hub.ended = true; });
+  });
+})();
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>We Stand — A wellness resort you did not enter</title>
+<meta name="description" content="A balance-and-wellness comedy on a resort staffed by talking gym equipment. Lean, breathe, stand. Checkout requires a Balance Age of 40 or better.">
+<meta name="theme-color" content="#46bec8">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='15' fill='%237cc8ee'/%3E%3Ccircle cx='11' cy='14' r='2.2' fill='%23263e54'/%3E%3Ccircle cx='21' cy='14' r='2.2' fill='%23263e54'/%3E%3C/svg%3E">
+<style>
+  /* The page is the game: no scrolling, zooming, text selection, callouts or tap flashes. */
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #d6eef6; overscroll-behavior: none;
+               touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+               -webkit-tap-highlight-color: transparent; }
+  canvas { display: block; width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+           outline: none; touch-action: none; }
+  #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+         font: 22px system-ui, sans-serif; color: #263e54; text-align: center; padding: 24px; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="msg" role="status" aria-live="polite">Loading We Stand…</div>
+<script type="module">
+  const name = 'We Stand';
+  const msg = document.getElementById('msg');
+  if (!navigator.gpu) {
+    // A touch device without WebGPU cannot run the game at all, so this says both things.
+    const touchOnly = matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
+    const lines = [`${name} needs WebGPU.`, document.createElement('br'),
+      'Use a recent Chrome, Edge or Safari (iOS 26 or later) with hardware acceleration enabled.'];
+    if (touchOnly) lines.unshift('Controller or keyboard required.', document.createElement('br'));
+    msg.replaceChildren(...lines);
+  } else {
+    // The game hides this message once its canvas exists, and takes keyboard focus.
+    new MutationObserver((_, obs) => {
+      const c = document.querySelector('canvas');
+      if (c) { c.setAttribute('aria-label', `${name} game`); msg.remove(); c.focus(); obs.disconnect(); }
+    }).observe(document.body, { childList: true });
+    // Right-click is Back here, so the browser's menu stays out of the way.
+    addEventListener('contextmenu', (e) => e.preventDefault());
+    try {
+      if (window.loadGame) await window.loadGame();
+      else await (await import('./shardfall.js')).default();
+    } catch (error) {
+      console.error(`${name} failed to load:`, error);
+      msg.textContent = `${name} could not load. Please reload the page. If it still fails, check that WebGPU and hardware acceleration are enabled.`;
+      document.body.append(msg);
+    }
+  }
+</script>
+</body>
+</html>

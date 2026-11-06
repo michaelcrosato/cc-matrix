@@ -1,0 +1,142 @@
+/**
+ * @file Levels as registry entries (PLAN.md WP 2.2, §6.6, §6.9): the registry kind `level`, so a scene names its level
+ * by id (`defineScene('box:room', { level: 'level:room', … })`, engine/sim/scene.ts) and `x describe level` lists
+ * them. `defineLevel(id, { text, file })` registers a level's text after checking it compiles; `getLevel(id)` compiles
+ * the registered text (engine/world/level/compile.ts) and returns the plain data.
+ *
+ * Where the text comes from is the caller's business: a page imports a level file with Vite's `?raw`, and a test or a
+ * tool reads it. The entry keeps the text, never the compiled data, so the registry stays small and `getLevel`
+ * reflects the legend of the registry it reads. Its `materials` swap the materials its meshes' recipes name for a
+ * game's own (WP 7.8: the box draws the hall's flagstones with its floor bake), its `rooms` give a storeyed level's
+ * rooms floors of their own (WP 13.14), and its `recipes` draw its glyphs and parts with a game's own recipes (WP
+ * 13.18: the playground's house in siding and shingles), and its `doors` names the prop its scene hangs in its door
+ * openings, which their frames meet (WP 13.36); only the view reads them (engine/app/view.ts, and each of a site's
+ * structures, engine/gfx/stageSite.ts), so they never reach the sim or the hash.
+ *
+ * Invariants: an entry's text compiles against its registry's legend when it is defined (`CORE_BAD_SPEC` naming each
+ * structural problem otherwise), so define a level's own glyphs first. `getLevel` compiles afresh on each call, a
+ * pure function of the entry and the legend (no cache, no module state), so equal calls give equal data.
+ *
+ * @example
+ * import { createRegistry } from '../../core/registry';
+ * const reg = createRegistry();
+ * defineLevel('level:cell', { text: '#####\n#@..#\n#####\n', file: 'cell.txt' }, reg);
+ * getLevel('level:cell', reg).spawns.map((spawn) => spawn.id); // ['spawn:hero']
+ * reg.describe('level').ids; // ['level:cell']
+ * @see engine/world/level/level.test.ts
+ */
+import { registry as sharedRegistry, type Entry, type Registry } from '../../core/registry';
+import type { Schema, SpecOf } from '../../core/schema';
+import { compileLevel } from './compile';
+import type { CompiledLevel } from './types';
+import { checkLevel } from './validate';
+
+/** The fields of a `level` entry. */
+export const LEVEL_FIELDS = {
+  text: {
+    type: 'string',
+    required: true,
+    description:
+      "The level's text: optional front matter, then the map (engine/world/level/parse.ts gives the format).",
+  },
+  file: {
+    type: 'string',
+    default: '',
+    description: 'The file the text came from (labs/box/levels/room.txt), for messages; the id stands in when empty.',
+  },
+  materials: {
+    type: 'object',
+    default: {},
+    description:
+      "Material swaps for drawing it, presentation only: a material id its meshes' recipes name → the game's material drawn instead ({ 'material:flagstone': 'material:hallFloor' }).",
+  },
+  rooms: {
+    type: 'object',
+    default: {},
+    description:
+      "A level written as storeys: each room's floor material for drawing it, presentation only, by room name ({ kitchen: 'material:tiles' }).",
+  },
+  recipes: {
+    type: 'object',
+    default: {},
+    description:
+      "Mesh recipes for drawing it, presentation only: a recipe its glyphs name that the engine lacks, or one of the engine's drawn otherwise in this level, as engine/gfx/level/recipes.ts writes them ({ roof: { shape: 'roof', materials: ['material:shingles', 'material:wood'], castShadow: true, receiveShadow: true } }).",
+  },
+  doors: {
+    type: 'string',
+    default: '',
+    description:
+      "A level written as storeys: the prop its scene hangs in the door openings it fits (engine/sim/doors.ts addLevelDoors hangs 'prop:door'), which their frames are drawn to meet, presentation only; '' for none, plain frames (engine/world/level/doorways.ts).",
+  },
+} as const satisfies Schema;
+
+/** The problems with a level entry's `recipes`: each a recipe as engine/gfx/level/recipes.ts writes one. */
+function recipeProblems(recipes: Record<string, unknown>): string[] {
+  return Object.entries(recipes).flatMap(([name, value]) => {
+    const recipe = (value ?? {}) as Record<string, unknown>;
+    const materials = recipe.materials as unknown[] | undefined;
+    const ok =
+      typeof recipe.shape === 'string' &&
+      Array.isArray(materials) &&
+      materials.length > 0 &&
+      materials.every((id) => typeof id === 'string') &&
+      typeof recipe.castShadow === 'boolean' &&
+      typeof recipe.receiveShadow === 'boolean';
+    return ok ? [] : [`recipes["${name}"] must be { shape, materials: [material ids], castShadow, receiveShadow }`];
+  });
+}
+
+/** A `level` entry: a level's text and where it came from. */
+export type LevelEntry = Entry<typeof LEVEL_FIELDS>;
+
+/** Declares the kind `level` on `registry` unless it has it. */
+function levelKind(registry: Registry): void {
+  if (registry.kinds().includes('level')) return;
+  registry.defineKind('level', {
+    description:
+      'Levels: a level text (front matter and a map in legend characters) that compileLevel turns into data.',
+    fields: LEVEL_FIELDS,
+    defineWith: "defineLevel('<id>', { text, file, materials, rooms, recipes, doors })",
+    check: (entry) => {
+      const level = entry as LevelEntry;
+      const { problems } = checkLevel(level.text, { file: level.file || level.id, registry });
+      const swaps = Object.entries(level.materials as Record<string, unknown>)
+        .filter(([, to]) => typeof to !== 'string')
+        .map(([from]) => `materials["${from}"] must be a material id (a string)`);
+      const rooms = Object.entries(level.rooms as Record<string, unknown>)
+        .filter(([, to]) => typeof to !== 'string')
+        .map(([room]) => `rooms["${room}"] must be a material id (a string)`);
+      const recipes = recipeProblems(level.recipes as Record<string, unknown>);
+      return [...problems.map((problem) => problem.message), ...swaps, ...rooms, ...recipes];
+    },
+  });
+}
+levelKind(sharedRegistry);
+
+/**
+ * Registers a level on `registry` (the shared one by default) after checking its text compiles against that
+ * registry's legend; returns the entry. Throws `CORE_BAD_SPEC` naming each structural problem at its line and column,
+ * `CORE_DUPLICATE_ID` when defined twice.
+ */
+export function defineLevel(
+  id: string,
+  spec: SpecOf<typeof LEVEL_FIELDS>,
+  registry: Registry = sharedRegistry,
+): LevelEntry {
+  levelKind(registry);
+  return registry.def('level', id, spec as unknown as Record<string, unknown>) as unknown as LevelEntry;
+}
+
+/**
+ * The level `id` of `registry` (the shared one by default), compiled: its name is the id without `level:`. Throws
+ * `CORE_NO_ENTRY` naming the closest ids for a missing one.
+ */
+export function getLevel(id: string, registry: Registry = sharedRegistry): CompiledLevel {
+  levelKind(registry);
+  const entry = registry.get('level', id) as LevelEntry;
+  return compileLevel(entry.text, {
+    file: entry.file || entry.id,
+    name: entry.id.replace(/^level:/, ''),
+    registry,
+  });
+}

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 06:13:00",
+    "source": "Trauma Center: Second Opinion (Atlus, Wii, 2006)",
+    "plan": "PLAN.md",
+    "genre": "Surgical action game, with story scenes and a small walkable ward",
+    "perspective": "First-person top-down on the operative field; front-on portrait stages for story; three-quarter view for the ward and cinematics; side view for the title",
+    "tech": "my-3D2dge v0.89.1 (handoff package, full engine, one patch: the touch notice), AI Hub session client 1.4.0, plain JavaScript, Web Audio, Node and Playwright 1.63 for tests",
+    "artDirection": "The engine's pixel look at PS1 level: per-pixel wet tissue through hand-picked ramps with ordered dithering, flat-shaded bust portraits and painted stages, all by code; new hospital shapes as data; asset store for three generic furniture props (Kenney, CC0)",
+    "animation": "The engine's Humanoid rigs and continuous-value animation, with new poses (scrub-in, gurney push, leaning over the table, passing an instrument, knitting) and a surgical cap; procedural organs, parasites and instruments",
+    "audio": "All in code on Web Audio: synthesized effects, a parasite choir, Animalese-style gibberish voices per character, songs in the engine's notation with music at 10% by default",
+    "online": "AI Hub Session Protocol v1, shared world, 1 to 4 players; couch co-op and AI colleagues on its own",
+    "testing": "Headless scripts that play the game and check state, including a scripted playthrough of the whole game, behind one command printing only failures and a count; screenshots only for what a script can't check; no subagents or workflows to debate, review, judge or audit",
+    "research": "None beyond the plan's own (Wikipedia and a Retro XP essay, read for the plan)",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "43 issues: 32 from bugs the scripted tests and bot runs caught and layout and art problems in screenshots, and 11 more from line-by-line audits of the plan, which are now tested where a script can.",
+    "6 would have been game breaking, such as a syntax error of mine that stopped the page loading, a Tremolo softlock when half doses never reached the crack, a retractor hold that crashed Grand Rounds, and a scene field that crashed on re-entry.",
+    "The bot playing each case to its end, and the scripted full playthrough built on it: it found every softlock. A slower first-timer bot was next best: it showed the cases were too short and the swarm too deadly.",
+    "The cross-browser run: three browsers playing with no errors never caught anything, though it was worth having as a guard."
+  ],
+  "engineFeedback": [
+    "Exact fixed steps with headless advance: the whole game plays in Node in seconds, so the sim could be tested long before anything was drawn. The standard pause, settings, rebinding and prompts also saved a great deal of work.",
+    "Yes, a few times. A scene field named view is read as an engine option, which crashed on re-entry. Humanoid.hat takes one object, not the canvas signature I guessed. Both were in the index; I hadn't looked.",
+    "The sim itself: one JSON-safe state with the eight tool gestures, rewind, checkpoints and network mirroring all resting on it. The tissue painter from the plan carries the look, but the operation is all game code.",
+    "Knowing what the engine already has: API.md is dense, and the answer is often one line in a 200 KB index. Keeping E.Dialog's and E.Story's flow in step with my own stage and portraits also took care.",
+    "One patch: the touch notice in Game.prototype._needSync no longer covers the screen, so the attract reel shows above it, and its Settings button keeps pointer events. TASK.md wants the attract running on touch-only devices.",
+    "A scene option that clashes with a scene's own field name should warn at definition, not fail on the second entry."
+  ],
+  "promptFeedback": [
+    "The plan is unusually concrete: verified engine facts, reference code that ran on this computer, and a clear rule for what wins when documents disagree. Almost nothing had to be rediscovered.",
+    "TASK.md says one exit interview shape and the plan repeats it, which was clear. The less clear part was the plan's folder layout against its own size: a few files were sensibly merged, and nothing says whether that is acceptable.",
+    "Scope: eleven cases, six strains, both gifts, a ward, a Hub mode and an attract reel for one builder. Getting the feel right is the hardest part to check, because nobody can actually hold a controller here; I could only test the numbers and read screenshots.",
+    "Ask for less content and more hours of feel: a human or a recorded hand on the stick is what this game most lacks. Say explicitly that hand feel can only be checked by bot here, so it is reported as untested by a person."
+  ],
+  "aiHub": {
+    "name": "Second Scalpel",
+    "tagline": "Don't let it go quiet",
+    "description": "A rookie surgeon and a deadpan nurse race to save patients from a parasite that sings, in a hospital soap opera played with eight surgical tools. Alone, on one couch, or with up to four surgeons in a Hub session.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Trauma Center: Second Opinion",
+    "series": "Trauma Center",
+    "players": "1–4",
+    "controls": "Aim: right stick or mouse. Use tool: R2 or click. Pick tool: left stick or 1-8. Gift: Triangle or F",
+    "tags": [
+      "2d",
+      "pixel art",
+      "story",
+      "co-op",
+      "boss fights",
+      "comedy"
+    ]
+  }
+}

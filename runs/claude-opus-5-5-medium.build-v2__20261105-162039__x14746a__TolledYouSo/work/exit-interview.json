@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 16:20:39",
+    "source": "Diablo 3",
+    "plan": "PLAN.md",
+    "genre": "Co-op action RPG (hack-and-slash)",
+    "perspective": "Fixed 3/4 isometric, orthographic",
+    "tech": "Pixel Engine 0.46.0 (with three.js r186 and Rapier inside), JavaScript modules bundled with esbuild 0.28.2, WebGPU, Web Audio, AI Hub session client 1.4.0",
+    "artDirection": "The engine's native pixel-art toon style and palette, with new models for heroes, NPCs, monsters, bosses and key props; the library for generic props",
+    "animation": "The engine's clip system on its hero rig, new clips, and procedural legs, springs and squash",
+    "audio": "All in code: chiptune songs, synthesised effects, Animalese-style babble for voices, music at 10% by default",
+    "online": "AI Hub Session Protocol v1, shared-world, up to 4; couch co-op on its own",
+    "testing": "Headless scripts that play the game and check its state, a scripted whole-game playthrough for each class, browser tests on software WebGPU with stub pads, touch profiles and Web Audio levels, the hub harness in five variants, one command that prints failures and a count, screenshots only for what a script cannot check, no subagents or workflows to review",
+    "research": "PLAN.md, the engine kit's guides and the AI Hub protocol README; no other research",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "28 issues, logged one line each in tests/ISSUES.md.",
+    "16 of the 28 were critical: softlocks, unreachable maps, a physics crash and controls that froze a pad player.",
+    "The whole-game playthrough through the real game in Engine.headless. It found the NaN animation poses, the Rapier crash and the arena stalls that no unit test would have reached, and it runs all three classes plus The Last Bell in about four minutes.",
+    "The three-size layout test found least: almost all its first failures were HUD text under opaque menus, which was one small fix."
+  ],
+  "engineFeedback": [
+    "Engine.headless. The real game, with menus, view and physics, runs thousands of frames a second in Node from one file, so a full campaign is a normal test. Models as checked data were a close second.",
+    "Yes. Clip keys with an ease compiled to NaN tracks on my rig, though the plan listed that form as verified; I do not know the exact cause and used linear keys. I also guessed wrong on wave 'sawtooth' (it is 'saw') and on NavGrid taking ox and oz (it takes origin).",
+    "The split between a pure simulation and a view fed by events. One world for solo, couch, bots and network came from it, and so did every fast test.",
+    "Diagnosing Rapier's wasm panic. A NaN pose or a long run of Breakables ended in a bare 'unreachable' inside step, with nothing pointing at the cause. I never found why Breakables triggered it; replacing them with cosmetic chunks stopped it.",
+    "none",
+    "Have compileClips and Ragdoll throw on non-finite values, naming the clip or joint, instead of passing NaN into the physics world."
+  ],
+  "promptFeedback": [
+    "The plan's verified facts and its coverage table. Knowing the pause method, the flags and the wall rule up front saved hours, and every requirement came with a way to prove it.",
+    "Little. The file name pattern left the source's spacing open, so I wrote Diablo3. The plan's 3-minute softlock rule also sits awkwardly with a Malison fight allowed 5 minutes, so I counted boss damage as progress.",
+    "Scope. Holding 24 skills with 72 Tones, three bosses, couch play, netcode and every screen working together, while keeping the bot able to finish the game after each change.",
+    "Separate the pacing target from the bot's time: a perfect bot takes about 15 sim minutes where a person is expected to take 60, so the only automated timing check is an upper limit. A playtest-style pacing measure would be worth asking for."
+  ],
+  "aiHub": {
+    "name": "Tolled You So",
+    "tagline": "The bell is cracked. The dead are up. So are you.",
+    "description": "A gothic hack-and-slash for 1 to 4 players: smash hordes as a Bellwarden, Lamplighter or Sexton, hunt loot that rings like church bells, and silence a furious walled-up saint.",
+    "type": "Game",
+    "genre": "RPG",
+    "source": "Diablo 3",
+    "series": "Diablo",
+    "players": "1–4",
+    "controls": "Stick or WASD or click to move · Cross or click to attack · face buttons, R1, R2 or right click, 1-4 for skills · L2 or Space to dodge",
+    "tags": [
+      "3d",
+      "co-op",
+      "pixel art",
+      "fantasy",
+      "boss fights",
+      "top-down"
+    ]
+  }
+}

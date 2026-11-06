@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:14:47",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Sports and fitness minigame collection inside a light life-sim routine",
+    "perspective": "Chosen per activity: 2.5D brawler view for the studio activities, three-quarter follow camera on the island, Mode 7 behind the skier, pseudo-3D road behind the runner, a steep custom view of the tray, side view on the laundry line",
+    "tech": "my-3D2dge engine v0.89.0 (full engine, with its mode7, road, physics and rhythm modules), its Mocap player and a cut set of 23 clips, AI Hub session client 1.4.0, plain JavaScript on one global, bundled by a small Node script. No other libraries.",
+    "artDirection": "The engine's native look, 3D skeleton puppets drawn as crisp pixel art at about 427 by 240, moved into bright daylight. Hand-drawn Tare, Gerald, the Plate, mats, hoops, trays, gates and laundry; a few CC0 store props.",
+    "animation": "The engine's Humanoid rigs driven by real motion capture, including yoga takes, with a hand-posed IK layer for side lunges, hula and step-ups, a wobble about the feet driven by the player's lean, and spring squash on Tare.",
+    "audio": "All from code with no audio files: 13 original songs in the engine's chip synth, music at 10% by default, a click on the effects bus so the beat survives that volume, about 28 synthesized effects, and Animalese-style gibberish voices made one oscillator per letter.",
+    "online": "AI Hub session protocol v1 in ghost mode for 1 to 4 players (Morning Class, with ghosts and the game's own card). Local Class for 2 to 4 on one screen. No other network.",
+    "testing": "Headless scripts and browsers on this computer: one command, node tests/run.mjs, covering rules, browser and hub groups, including modelled players on every activity through the real keyboard and mouse code; the hub harness at its five settings; screenshots for looks. Controller, touch, second player and sound were checked through stand-ins, not real hardware or real ears.",
+    "research": "Read the engine's handoff docs and kits and the AI Hub protocol README. No other research; the plan's recipes were followed.",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 24. Laundry Line too hard for the average bot, its passive run outlasting the test guard, Tray Service over too quickly, the Rail's three stars out of reach, the hub round sending no ghost data, a mouse and keyboard source race, holding Space taking the lean away from the mouse, Hoop Hips scoring far lower on keys than on the mouse, a dark pause menu from a theme that never applied, a sky change that turned Coastal Jog's horizon into cliffs, Player 1 off the screen in Class, the player missing from Tare's Day, and a street lamp on the island's spawn point, plus several layout overlaps found in screenshots. Nobody played it by hand, so feel on a real controller is untested.",
+    "1. The hub round sent nothing during the harness's auto run, which would have kept the game out of AI Hub sessions.",
+    "The bot sweep over every activity and tier against the star targets. It found every balance problem in one table and made tuning a matter of minutes.",
+    "The determinism checks. They passed the first time and never failed; the engine's fixed step already guarantees them. The most surprising lesson was the opposite: looking at every screen found bugs that 900 passing checks did not."
+  ],
+  "engineFeedback": [
+    "Real motion capture playing on pixel-art rigs, and the headless game.advance. A whole five-day playthrough runs without a browser, with real taps, drawn on a stand-in.",
+    "Yes. I guessed that the Shell was not yet made when my theme call ran, and a guard silently skipped the theme until a screenshot showed the dark menu. I also guessed a Backdrop sea layer would stay at the horizon; it filled the sky.",
+    "The Lean: the balance model, the shared intent object that devices and bots both fill, and the Plate. Also the session flow that lets one scene serve story, Class, attract and the hub round.",
+    "Layering my own wobble and hand poses over mocap, where each clip turns the rig by its own heading. The plan's recipes solved it; without them it would have taken a long time. Telling keyboard from mouse also needs game-side work.",
+    "One patch: E.Dialog's three hard-coded near-black text shadows now read this.shadow, because they smeared on a white dialog box. Nothing else.",
+    "Let input.lastDevice report mouse movement, so games do not need their own comparison to decide which device a prompt should show."
+  ],
+  "promptFeedback": [
+    "The balance of freedom and a tested plan: every recipe marked as tested worked, so effort went into the game and not into the engine's traps.",
+    "The plan names engine v0.88.0 and the fetched handoff is v0.89.0, so the Dialog patch's line numbers differed slightly. 'Done' also has to be judged without a person playing it.",
+    "Judging feel with nobody to play it. Bots can prove a balance band, but not whether a lean feels good on a real stick.",
+    "Add a short note on how to report what could not be felt or heard here, since the brief asks for a complete, polished game that no one on this computer can actually hold."
+  ],
+  "aiHub": {
+    "name": "Why Fit",
+    "tagline": "A five-day stay. You know why.",
+    "description": "A gentle, deadpan comedy about a five-day stay at a wellness retreat, where one skill, your balance, drives twelve short activities. A needy talking scale and two serene wooden instructors see you through.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "",
+    "players": "1–4",
+    "controls": "Lean with the left stick, WASD or the mouse; breathe and exert with R2, Space or left click; confirm with Cross, Enter or a click.",
+    "tags": [
+      "pixel art",
+      "comedy",
+      "versus",
+      "arcade",
+      "story",
+      "2d"
+    ]
+  }
+}

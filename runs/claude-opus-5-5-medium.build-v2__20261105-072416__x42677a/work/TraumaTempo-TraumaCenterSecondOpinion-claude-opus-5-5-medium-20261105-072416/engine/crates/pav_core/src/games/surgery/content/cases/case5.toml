@@ -1,0 +1,93 @@
+# Fields: docs in ../README.md. Coordinates: x -9..9, z -4..4.2. Angles in degrees.
+name = "Second Opinion"
+surgeon = "pet"
+plate = "femur"
+timer = 360.0
+par = 86800.0
+patient = "Lucjan Bazyli"
+life = "Longshoreman. Fell forty feet, got up, and complained about the noise."
+diagnosis = "Shattered femur. Three free fragments. Marrow findings to follow."
+fate = "Lucjan Bazyli will limp, and will tell everyone it was a much higher fall."
+before = "case5_before"
+after = "case5_after"
+gift = "echo"
+gift_locked = true
+music = "tense"
+base_drain = 1.1
+
+[[phase]]
+name = "open"
+now = "SCALPEL. Open along the bone."
+checkpoint = true
+spawn = [{ kind = "incision", a = [-5.5, 2.3], b = [5.5, 2.5], c = [0.0, 2.8] }]
+say = [
+  { who = "pet", text = "I have buried better surgeons than you, and I liked them less. Scalpel.", at = 0.4 },
+  { who = "bashir", text = "That's the tremor, Doctor Nwosu. Your right hand.", at = 5.0 },
+  { who = "pet", text = "I know where my right hand is, young man. Hold the Precision and mind your tray.", at = 8.0 },
+]
+
+[[phase]]
+name = "bones"
+stagger = 9.0
+repeat = 2
+now = "FORCEPS: carry each fragment home. Turn it to fit. Wire it with the SUTURE."
+checkpoint = true
+guide = true
+spawn = [
+  { kind = "bone", a = [-5.5, -2.6], b = [-3.2, 0.0], ang = 55.0, drain = 1.1 },
+  { kind = "bone", a = [0.4, -3.0], b = [0.0, 0.0], ang = -70.0, drain = 1.1 },
+  { kind = "bone", a = [5.5, -2.4], b = [3.2, 0.0], ang = 40.0, drain = 1.1 },
+]
+say = [
+  { who = "bashir", text = "It snaps in when it's close and square. Then two turns of wire.", at = 1.0 },
+  { who = "pet", text = "L1 and R1, wheel on a mouse. It's a femur, not a Rubik's cube.", at = 6.0 },
+]
+
+[[phase]]
+name = "bones2"
+stagger = 9.0
+repeat = 2
+now = "Two more fragments, smaller. Carry them home, wire them."
+spawn = [
+  { kind = "bone", a = [-4.5, 2.6], b = [-1.6, 0.0], ang = -50.0, r = 0.7, drain = 1.1 },
+  { kind = "bone", a = [4.8, 2.8], b = [1.6, 0.0], ang = 65.0, r = 0.7, drain = 1.1 },
+]
+say = [{ who = "pet", text = "Square it, I said. Thirty years ago I'd have done this in the dark, in a lift, in Lagos. I did.", at = 0.5 }]
+
+[[phase]]
+name = "cysts"
+stagger = 1.5
+repeat = 5
+now = "Cysts in the marrow. LASER, and let the hands do it."
+checkpoint = true
+spawn = [
+  { kind = "polyp", a = [-5.5, 0.1], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [-4.2, 0.9], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [-1.2, -1.0], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [1.4, 1.1], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [2.4, -1.3], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [4.2, 1.2], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [5.6, -0.4], r = 0.45, drain = 0.9 },
+  { kind = "polyp", a = [0.0, 2.0], r = 0.45, drain = 0.9 },
+]
+trigger = [{ at_time = 1.0, gift_full = true, banner = "THE ECHO", cue = "echo", say = [
+  { who = "bashir", text = "Doctor Nwosu... there were two of you.", at = 0.0 },
+] }]
+say = [{ who = "pet", text = "There were always two of me, young man. One of them retired.", at = 4.5 }]
+
+[[phase]]
+name = "wash"
+stagger = 2.4
+repeat = 5
+now = "Clear the field."
+spawn = [
+  { kind = "pool", a = [-3.0, 2.0], r = 1.2 },
+  { kind = "pool", a = [3.4, -2.2], r = 1.1 },
+  { kind = "lacer", a = [-1.0, -2.8], b = [1.8, -2.4] },
+  { kind = "patch", a = [3.0, 2.2], r = 1.0 },
+]
+
+[[phase]]
+name = "close"
+now = "DRESSING. Steady, now."
+spawn = [{ kind = "closure", a = [-5.5, 2.3], b = [5.5, 2.5], c = [0.0, 2.8] }]

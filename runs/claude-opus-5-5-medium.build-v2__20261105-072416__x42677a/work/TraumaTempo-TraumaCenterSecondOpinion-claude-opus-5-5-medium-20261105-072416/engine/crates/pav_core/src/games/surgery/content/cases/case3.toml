@@ -1,0 +1,91 @@
+# Fields: docs in ../README.md. Coordinates: x -9..9, z -4..4.2. Angles in degrees.
+name = "Something Moved"
+surgeon = "mara"
+plate = "liver"
+timer = 360.0
+par = 68800.0
+patient = "Ines Calloway"
+life = "Courier for the Vane Foundation. Carries sealed envelopes and doesn't ask."
+diagnosis = "Benign hepatic mass, four centimetres. Elective. Unremarkable."
+fate = "Ines Calloway will never be told what was in her liver. She will keep the scar and stop carrying envelopes."
+before = "case3_before"
+after = "case3_after"
+gift = "hush"
+gift_locked = true
+music = "or"
+base_drain = 0.0
+
+[[phase]]
+name = "open"
+stagger = 6.0
+repeat = 2
+now = "SCALPEL. Open the capsule along the line. LASER the small growths."
+checkpoint = true
+guide = true
+spawn = [
+  { kind = "incision", a = [-4.2, -2.2], b = [4.2, -2.4], c = [0.0, -3.2] },
+  { kind = "polyp", a = [-4.2, 1.8] },
+  { kind = "polyp", a = [3.8, 2.2] },
+  { kind = "polyp", a = [4.8, -0.8] },
+]
+say = [{ who = "bashir", text = "Good evening, Doctor. Your good coat is in the locker. It has a canape in the pocket.", at = 0.5 }]
+
+[[phase]]
+name = "tumor"
+now = "Ring the mass with the SCALPEL, lift it, GEL the bed."
+checkpoint = true
+guide = true
+spawn = [{ kind = "tumor", a = [0.0, 0.1], r = 1.5, ang = -80.0 }]
+say = [
+  { who = "bashir", text = "A benign mass. Ring it, Doctor. Forceps. Lift. Gel. Home by two.", at = 0.5 },
+  { who = "teddy", text = "Gala's still going upstairs. There's a string quartet. You can hear it through the vents.", at = 7.0 },
+]
+
+[[phase]]
+name = "moved"
+now = "It moved."
+linger = 2.0
+meter = 3
+banner = "SOMETHING MOVED"
+say = [
+  { who = "mara", text = "It moved.", at = 0.2 },
+  { who = "bashir", text = "Masses don't move.", at = 1.4 },
+  { who = "mara", text = "Bashir. It moved.", at = 2.6 },
+]
+trigger = [{ at_time = 0.1, cue = "sting" }]
+
+[[phase]]
+name = "introit"
+now = "SCANNER finds it. LASER it at rest. FORCEPS when the shell pops."
+checkpoint = true
+strain = "introit"
+params = { rounds = 5 }
+say = [
+  { who = "teddy", text = "Guys? The ECG just went into three-four time. That's a waltz. Hearts aren't in a time signature. Hearts aren't allowed.", at = 0.5 },
+  { who = "bashir", text = "It steps every third beat. When it's still, Doctor.", at = 7.0 },
+]
+
+[[phase]]
+name = "wounds"
+repeat = 3
+now = "It's over. Close what it left behind."
+meter = 4
+spawn = [{ kind = "lacer", a = [-2.0, 2.0], b = [1.0, 2.6] }]
+say = [{ who = "teddy", text = "It's four-four. It's four-four again. I would like to go home now.", at = 0.5 }]
+
+[[phase]]
+name = "wash"
+stagger = 5.0
+repeat = 3
+now = "Clear the field. All of it. Then we never speak of this."
+spawn = [
+  { kind = "pool", a = [-3.4, -1.6], r = 1.2 },
+  { kind = "pool", a = [3.2, 1.8], r = 1.1 },
+  { kind = "burn", a = [0.4, -1.6], r = 1.0 },
+  { kind = "lacer", a = [2.0, -2.4], b = [4.8, -1.6] },
+]
+
+[[phase]]
+name = "close"
+now = "DRESSING. Then wash your hands."
+spawn = [{ kind = "closure", a = [-4.0, 0.2], b = [4.0, 0.2], c = [0.0, -1.0] }]

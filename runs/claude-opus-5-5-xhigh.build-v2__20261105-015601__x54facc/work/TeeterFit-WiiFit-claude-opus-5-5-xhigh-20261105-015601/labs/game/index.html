@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#bfe9ff" />
+    <link rel="icon" href="data:," />
+    <title>Teeter Fit</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #bfe9ff;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        outline: none;
+        touch-action: none;
+      }
+      #msg {
+        position: fixed;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2vh;
+        align-items: center;
+        justify-content: center;
+        padding: 5vh;
+        font:
+          600 3.4vh ui-rounded,
+          'SF Pro Rounded',
+          'Segoe UI Rounded',
+          system-ui,
+          sans-serif;
+        color: #3a4a55;
+        text-align: center;
+        pointer-events: none;
+      }
+      #msg b {
+        font-size: 8vh;
+        letter-spacing: 0.02em;
+      }
+      #msg[hidden] {
+        display: none;
+      }
+    </style>
+    <script>
+      window.__engine = { ready: false, errors: [] };
+      function gameFailed(message) {
+        if (!window.__engine || typeof window.__engine.help === 'function') return;
+        window.__engine.errors.push({
+          code: 'APP_START',
+          message: 'the page failed to start: ' + message,
+          fix: 'the console names the cause',
+        });
+        var msg = document.getElementById('msg');
+        if (msg) msg.innerHTML = '<b>Teeter Fit</b><span>Something went sideways while loading. Please reload.</span>';
+      }
+      addEventListener('error', function (event) {
+        gameFailed(event.message || 'a script failed');
+      });
+      addEventListener('unhandledrejection', function (event) {
+        gameFailed(String((event.reason && event.reason.message) || event.reason));
+      });
+    </script>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="msg" role="status" aria-live="polite"><b>Teeter Fit</b><span>Calibrating…</span></div>
+    <script type="module" src="./main.ts" onerror="gameFailed('main.ts did not load')"></script>
+  </body>
+</html>

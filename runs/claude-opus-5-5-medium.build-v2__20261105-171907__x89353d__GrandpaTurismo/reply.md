@@ -1,0 +1,1 @@
+Nothing has changed since my last message, and I'm not taking any further action. The hook itself now says every "Before you stop" item that can be done here has evidence. What's left needs a person, so only you can close it, either by playing the game or by running `/goal clear`.
