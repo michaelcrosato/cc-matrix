@@ -90,13 +90,14 @@ function rust() {
 
 // Playwright: the Python package and the browsers it has downloaded; with the browsers started, each one's version,
 // whether it has WebGL (and how it renders) and WebGPU. WebGPU is only there on a secure page, so the probe opens a
-// file:// one (a blank page never has it). Chromium without WebGPU is asked again with check-game.py's WEBGPU flags,
-// the ones WebGPU engines need here (in software, on SwiftShader; checked on shardfall, riftlight and my-3dge).
+// file:// one (a blank page never has it). Chromium without WebGPU is asked again with check-game.py's WEBGPU_PICTURE
+// flags, the ones that run a WebGPU game here and show its picture (in software, on SwiftShader; checked on a game from
+// each engine). Finding an adapter proves little: with fewer flags there is one, but the device is lost as a game starts.
 const PROBE = String.raw`
 import json, shutil, tempfile
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-WEBGPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgpu-adapter=swiftshader']
+WEBGPU = ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgpu-adapter=swiftshader', '--use-vulkan=swiftshader', '--use-angle=swiftshader']
 JS = r"""async () => { const c = document.createElement('canvas'), g = c.getContext('webgl2') || c.getContext('webgl');
   const d = g && g.getExtension('WEBGL_debug_renderer_info');
   let gpu = null;
@@ -148,7 +149,8 @@ function browsers() {
   const gpu = probe && Object.values(probe).some((x) => x.webgpu);
   lines.push(`Playwright ${py ? `${py} for Python (from playwright.sync_api import sync_playwright)` : '(no Python package)'}, with ${each.join(', ') || 'no browsers'} already downloaded`
     + `${probe && !gpu ? '; no WebGPU' : ''}. Phone and tablet device profiles are built in.`);
-  if (gpu) lines.push('WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game\'s state instead.');
+  const flagged = probe && Object.values(probe).some((x) => x.webgpuFlags);
+  if (gpu) lines.push(`WebGPU only works on a secure page: file:// or http://127.0.0.1.${flagged ? ' Use those flags only for WebGPU games: with fewer, the device is lost as the game starts or its 3D picture comes out blank in a screenshot, and on a page that doesn\'t use WebGPU they can slow a screenshot past 30 s.' : ''}`);
   lines.push(nodeGlobal ? 'Playwright for Node is installed globally.'
     : `For Node, \`npm install playwright${py ? `@${py}` : ''}\` in your folder${py ? ' uses the browsers already downloaded; another version downloads its own' : ''}.`);
   if (process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE) lines.push(`Playwright runs here with PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE} (already set for runs): this OS isn't one it supports by name.`);

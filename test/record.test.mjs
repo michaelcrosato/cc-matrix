@@ -215,6 +215,20 @@ test('--rename-variant files the runs that used an earlier text under a name of 
     { schema: 1, testing: 'b', variants: { testing: { id: 'b', text: 't' } } });
 });
 
+test('a stage run without TASK.md: its record holds its stage\'s text as the prompt, and a rebuild doesn\'t invent a TASK.md', (t) => {
+  const sb = sandbox({ template: EXIT_TEMPLATE, dimensions: exitDims([{ id: 'a', text: 'Alpha' }]), agents: [opus(['low'])],
+    stages: [{ id: 'build', text: 'Build it and save exit-interview.json.', goal: 'it is built' }] });
+  t.after(() => cleanup(sb));
+  assert.equal(runner(sb, ['--stage', 'build=opus:low']).status, 0);
+  const [id] = runIds(sb), rec = recordOf(sb, id), games = path.join(sb.dir, 'games'), out = path.join(sb.dir, 'rebuilt');
+  assert.equal(read(path.join(sb.out, id), 'work/TASK.md'), null);
+  assert.deepEqual([rec.prompt.text, rec.prompt.stageText], ['Build it and save exit-interview.json.\n', 'Build it and save exit-interview.json.\n']);
+  fs.mkdirSync(games); fs.copyFileSync(path.join(sb.out, result(sb, id).entry), path.join(games, 'game.html'));
+  assert.equal(spawnSync(process.execPath, [RECORD, 'rebuild', games, '--out', out], { encoding: 'utf8' }).status, 0);
+  assert.equal(read(path.join(out, id), 'work/TASK.md'), null);
+  assert.equal(read(path.join(out, id), 'work/STAGE.md'), 'Build it and save exit-interview.json.\n');
+});
+
 test('the dashboard\'s run history comes back from the games alone (run-record.mjs rebuild)', async (t) => {
   const sb = sandbox({ template: EXIT_TEMPLATE, dimensions: exitDims([{ id: 'a', text: 'Alpha' }, { id: 'b', text: 'Beta FAKE:saypath' }]),
     stages: [{ id: 'build', text: 'Build what TASK.md asks.', goal: 'it is built' }, { id: 'content', text: 'Add content to what TASK.md describes.' }],

@@ -591,21 +591,26 @@ const STAGE_VARS = {
   parentAgent: 'that run\'s name in Models',
   chain: 'every step so far (plan: claude-opus-5-5 max → build: claude-opus-5-5 xhigh)',
 };
-// "Add plan → build → content": the stages as they were last used (Nov 4 2026, simple on purpose: add detail once runs
-// show it's needed), and a content pass in the same style.
+// "Add plan → build → content": the stages as they were last used (Nov 6 2026, simple on purpose: add detail once runs
+// show it's needed), and a content pass in the same style. A builder has only PLAN.md and its own text (see namesBrief
+// in run-matrix.mjs), so the build's text carries the prompt's sections that are each builder's own.
 const DEFAULT_STAGES = [
   { id: 'plan', game: false,
-    text: 'You are the game director. TASK.md is the CEO\'s brief. Write PLAN.md: the plan other AI agents will build the game from, without you. Leave the game\'s title to them: each builder picks its own, as TASK.md says. Leave out TASK.md\'s file and folder names too, since each builder\'s TASK.md has its own; write paths relative to the dev folder.\n\n'
+    text: 'You are the game director. TASK.md is the CEO\'s brief. Write PLAN.md: the plan other AI agents will build the game from, without you. PLAN.md is all they get from this stage, not TASK.md, so put everything they need in it, with its links. They get their own instructions for the game\'s title, file and folder names, this computer and the exit interview, so leave those to them and write paths relative to the dev folder.\n\n'
       + 'Then review the prompt you were given (TASK.md and these instructions): save planner-exit-interview.json in this folder, a JSON list of {"question", "answer"}, one for each of these questions:\n'
       + '- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?',
-    goal: 'PLAN.md covers everything TASK.md asks for.' },
+    goal: 'PLAN.md covers everything TASK.md asks for, apart from the game\'s title, file and folder names, this computer and the exit interview.' },
   { id: 'build',
-    text: 'Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md, which is filled in for you. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted.',
-    goal: 'Everything in PLAN.md that can be done on this computer is done, and everything TASK.md asks you to hand in is in this folder.' },
+    text: 'Build the game PLAN.md describes. PLAN.md and these instructions are all you get. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted.',
+    goal: 'Everything in PLAN.md that can be done on this computer is done, and everything STAGE.md asks you to hand in is in this folder.' },
   { id: 'content',
     text: 'Add content and polish to the game in this folder: more of what PLAN.md and TASK.md ask for, and fixes for anything broken. Keep its title, engine and architecture. Take your file names and what to hand in from TASK.md, which is filled in for you, but keep the game\'s title.',
     goal: 'Nothing that worked before is broken, what you added works, and everything TASK.md asks you to hand in is in this folder.' },
 ];
+// What a builder has beyond PLAN.md: the prompt's sections that are each builder's own, those this config has.
+const BUILD_OWN = [['source', 'SOURCE: {{source}}'], ['gameTitle', 'Game Title: {{gameTitle}}'], ['package', 'Package: {{package}}'], ['workspace', 'Working Environment and deliverable:\n{{workspace}}'],
+  ['testing', 'Testing: {{testing}}'], ['spend', 'Effort: {{spend}}'], ['machine', '## This computer\n{{machine}}'], ['sourceInfo', '## Source Information\n{{sourceInfo}}'],
+  ['testingFeedback', 'Testing Feedback\n\n{{testingFeedback}}'], ['engineFeedback', 'Engine Feedback\n\n{{engineFeedback}}'], ['promptFeedback', 'Prompt Feedback\n\n{{promptFeedback}}']];
 // The pins a config starts with (see pinsOf), per field name. Most fields get "use the source", "your choice" and,
 // where the engine has a say, "use the engine"; a text already run here is word for word the same, so picking it keeps
 // that variant's name and its runs count.
@@ -1331,6 +1336,7 @@ const editStages = (fn) => { cfg.stages ??= []; fn(cfg.stages); if (!cfg.stages.
 function fillStages(l, i) {
   while (l.length <= i) {
     const d = structuredClone(DEFAULT_STAGES[l.length]);
+    if (d.id === 'build') d.text = [d.text, ...BUILD_OWN.filter(([k]) => (k === 'machine' ? tmpl.includes('{{machine}}') : cfg.dimensions?.[k])).map(([, s]) => s)].join('\n\n');
     l.push(d); edits.set(d, { id: d.id, text: null, goal: null }); renameStage(d, stageNameFor(d));
   }
 }
@@ -1373,7 +1379,7 @@ function stageBox(i, { movable }) {
     h('label', { class: 'boxlabel', for: `stage-${i}-text` }, h('strong', {}, 'Instructions'),
       h('span', { class: 'muted' }, ' — what the agent is told to do: its message, or STAGE.md in its folder when the stage has a goal')),
     h('textarea', { class: 'fit', id: `stage-${i}-text`, rows: Math.min(10, Math.max(3, Math.ceil((x.text || '').length / 120))), value: x.text ?? '', 'aria-label': `${x.id} text`,
-      placeholder: 'What this stage\'s runs are asked to do. TASK.md, the prompt from Stage 1 filled for the run, is in their folder.', oninput: (e) => typed(() => { x.text = e.target.value; }) }),
+      placeholder: 'What this stage\'s runs are asked to do. Name TASK.md here or in Done when and it\'s in their folder: the prompt from Stage 1, filled for the run.', oninput: (e) => typed(() => { x.text = e.target.value; }) }),
     h('label', { class: 'boxlabel', for: `stage-${i}-goal` }, h('strong', {}, 'Done when (/goal)'),
       h('span', { class: 'muted' }, ' — what Claude Code checks each time the agent tries to stop. Codex never gets it')),
     h('textarea', { class: 'fit', id: `stage-${i}-goal`, rows: 2, value: x.goal ?? '', 'aria-label': `${x.id} goal`,
@@ -1433,7 +1439,7 @@ const stagesHow = () => h('details', { style: 'margin-top:6px' }, h('summary', {
     + 'again and add content with Sonnet. Each stage is one of those sessions.'),
   h('ul', { class: 'sub', style: 'margin:0; padding-left:20px' },
     h('li', {}, 'What a stage\'s model is told is its text; when it\'s done, optionally, its goal (sent as /goal).'),
-    h('li', {}, 'Every session finds TASK.md in its folder: the prompt from Stage 1, filled for its own model, so its file name and Source Information name that model.'),
+    h('li', {}, 'A session finds TASK.md in its folder if its stage\'s text or goal names it: the prompt from Stage 1, filled for its own model, so its file name and Source Information name that model. Otherwise it has only its stage\'s text and what the stage before left, and placeholders like {{package}} or {{machine}} put any of the prompt\'s sections in that text.'),
     h('li', {}, 'A stage after the first starts in a copy of the folder of the session before it (without node_modules and .git): a build sees PLAN.md, a content pass sees the game.'),
     h('li', {}, 'Each stage has its models (from ', tabLink('clis', 'CLIs → Models'), ', at any effort they take): every one of them runs the stage on every session of the stage before, so the stages branch. The Run tab ticks which of them to queue.'),
     h('li', {}, 'A stage with no models stops the chain there: leave Stage X empty to stop after the build. Results filters and groups by stage and by the run each one continues from.'),

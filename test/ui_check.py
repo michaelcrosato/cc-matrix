@@ -269,7 +269,7 @@ try:
         check('the rail shows the whole chain: briefs, each stage\'s models and sessions per brief', all(x in r for x in ['Stage 1 Prompt', '4 briefs', 'Stage 2 Plan plan 1 model · 1 per brief', 'Stage 3 Build build 2 models · 2 per brief', 'Stage X Extra content 2 per brief']), r)
         page.locator('#tab-build').get_by_text('How stages work').click(); page.wait_for_timeout(200)
         how = page.locator('#tab-build').inner_text()
-        check('How stages work folds out, with what a stage\'s text can use', 'Every session finds TASK.md' in how and '{{parentModel}}' in how, how[:300])
+        check('How stages work folds out, with what a stage\'s text can use', 'A session finds TASK.md' in how and '{{parentModel}}' in how, how[:300])
         # Run: in stages by default once there are stages, each stage's row leading back to its tab, and Checks saying there are unsaved edits
         page.locator('button[data-tab="run"]').click(); page.wait_for_selector('#tab-run.on .runbar'); page.wait_for_timeout(300)
         run = page.locator('#tab-run').inner_text()
