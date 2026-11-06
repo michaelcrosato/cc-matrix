@@ -1,0 +1,4176 @@
+content/mission.js:175:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    173 │ 	for (const [k, w] of Object.entries(m.waypoints || {}))
+    174 │ 		if (![w.x, w.y].every(Number.isFinite))
+  > 175 │ 			errors.push("Invalid waypoint " + k);
+        │ 			            ^^^^^^^^^^^^^^^^^^^^^^^
+    176 │ 	if (!(m.deadline >= 120 && m.deadline <= 900))
+    177 │ 		errors.push("Deadline must be 120–900 seconds");
+  
+  i Unsafe fix: Use a template literal.
+  
+    173 173 │     for (const [k, w] of Object.entries(m.waypoints || {}))
+    174 174 │       if (![w.x, w.y].every(Number.isFinite))
+    175     │ - → → → errors.push("Invalid·waypoint·"·+·k);
+        175 │ + → → → errors.push(`Invalid·waypoint·${k}`);
+    176 176 │     if (!(m.deadline >= 120 && m.deadline <= 900))
+    177 177 │       errors.push("Deadline must be 120–900 seconds");
+  
+
+content/mission.js:172:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    170 │ 			t.hp <= 0
+    171 │ 		)
+  > 172 │ 			errors.push("Invalid target " + t.id);
+        │ 			            ^^^^^^^^^^^^^^^^^^^^^^^^
+    173 │ 	for (const [k, w] of Object.entries(m.waypoints || {}))
+    174 │ 		if (![w.x, w.y].every(Number.isFinite))
+  
+  i Unsafe fix: Use a template literal.
+  
+    170 170 │         t.hp <= 0
+    171 171 │       )
+    172     │ - → → → errors.push("Invalid·target·"·+·t.id);
+        172 │ + → → → errors.push(`Invalid·target·${t.id}`);
+    173 173 │     for (const [k, w] of Object.entries(m.waypoints || {}))
+    174 174 │       if (![w.x, w.y].every(Number.isFinite))
+  
+
+src/app.js:233:29 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    231 │ 	if (id == null || online.ended) return false;
+    232 │ 	if (cmd.type !== "controls" && cmd.type !== "aim")
+  > 233 │ 		cmd = { ...cmd, actionId: "local-" + ++actionNo };
+        │ 		                          ^^^^^^^^^^^^^^^^^^^^^
+    234 │ 	if (online.active) return online.command(cmd);
+    235 │ 	return sim.command(id, cmd);
+  
+  i Unsafe fix: Use a template literal.
+  
+    231 231 │     if (id == null || online.ended) return false;
+    232 232 │     if (cmd.type !== "controls" && cmd.type !== "aim")
+    233     │ - → → cmd·=·{·...cmd,·actionId:·"local-"·+·++actionNo·};
+        233 │ + → → cmd·=·{·...cmd,·actionId:·`local-${++actionNo}`·};
+    234 234 │     if (online.active) return online.command(cmd);
+    235 235 │     return sim.command(id, cmd);
+  
+
+src/app.js:286:21 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    284 │ 	ui.dev.debug = false;
+    285 │ 	for (const [key, value] of Object.entries(sim.balance)) {
+  > 286 │ 		if (game.settings["dev_" + key] !== undefined)
+        │ 		                  ^^^^^^^^^^^^
+    287 │ 			sim.balance[key] = game.settings["dev_" + key];
+    288 │ 	}
+  
+  i Unsafe fix: Use a template literal.
+  
+    284 284 │     ui.dev.debug = false;
+    285 285 │     for (const [key, value] of Object.entries(sim.balance)) {
+    286     │ - → → if·(game.settings["dev_"·+·key]·!==·undefined)
+        286 │ + → → if·(game.settings[`dev_${key}`]·!==·undefined)
+    287 287 │         sim.balance[key] = game.settings["dev_" + key];
+    288 288 │     }
+  
+
+src/app.js:287:37 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    285 │ 	for (const [key, value] of Object.entries(sim.balance)) {
+    286 │ 		if (game.settings["dev_" + key] !== undefined)
+  > 287 │ 			sim.balance[key] = game.settings["dev_" + key];
+        │ 			                                 ^^^^^^^^^^^^
+    288 │ 	}
+    289 │ 	if (
+  
+  i Unsafe fix: Use a template literal.
+  
+    285 285 │     for (const [key, value] of Object.entries(sim.balance)) {
+    286 286 │       if (game.settings["dev_" + key] !== undefined)
+    287     │ - → → → sim.balance[key]·=·game.settings["dev_"·+·key];
+        287 │ + → → → sim.balance[key]·=·game.settings[`dev_${key}`];
+    288 288 │     }
+    289 289 │     if (
+  
+
+src/app.js:291:52 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    289 │ 	if (
+    290 │ 		Object.keys(sim.balance).some(
+  > 291 │ 			(k) => sim.balance[k] !== game.settings.default("dev_" + k),
+        │ 			                                                ^^^^^^^^^^
+    292 │ 		)
+    293 │ 	)
+  
+  i Unsafe fix: Use a template literal.
+  
+    289 289 │     if (
+    290 290 │       Object.keys(sim.balance).some(
+    291     │ - → → → (k)·=>·sim.balance[k]·!==·game.settings.default("dev_"·+·k),
+        291 │ + → → → (k)·=>·sim.balance[k]·!==·game.settings.default(`dev_${k}`),
+    292 292 │       )
+    293 293 │     )
+  
+
+src/sim.js:227:18 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    225 │ 		this.state.players.push({
+    226 │ 			id,
+  > 227 │ 			name: name || "CREW " + id,
+        │ 			              ^^^^^^^^^^^^
+    228 │ 			station: "nose",
+    229 │ 			aim: { yaw: 0, pitch: 0 },
+  
+  i Unsafe fix: Use a template literal.
+  
+     225  225 │       this.state.players.push({
+     226  226 │         id,
+     227      │ - → → → name:·name·||·"CREW·"·+·id,
+          227 │ + → → → name:·name·||·`CREW·${id}`,
+     228  228 │         station: "nose",
+     229  229 │         aim: { yaw: 0, pitch: 0 },
+  
+
+src/sim.js:99:43 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+     97 │ 		const pp = players.map((p, i) => ({
+     98 │ 			id: typeof p === "object" ? p.id : p,
+   > 99 │ 			name: typeof p === "object" ? p.name : "CREW " + (i + 1),
+        │ 			                                       ^^^^^^^^^^^^^^^^^
+    100 │ 			station: i ? "nose" : "pilot",
+    101 │ 			aim: { yaw: 0, pitch: 0 },
+  
+  i Unsafe fix: Use a template literal.
+  
+      97   97 │       const pp = players.map((p, i) => ({
+      98   98 │         id: typeof p === "object" ? p.id : p,
+      99      │ - → → → name:·typeof·p·===·"object"·?·p.name·:·"CREW·"·+·(i·+·1),
+           99 │ + → → → name:·typeof·p·===·"object"·?·p.name·:·`CREW·${i·+·1}`,
+     100  100 │         station: i ? "nose" : "pilot",
+     101  101 │         aim: { yaw: 0, pitch: 0 },
+  
+
+src/sim.js:281:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    279 │ 		}
+    280 │ 		if (c.actionId !== undefined) {
+  > 281 │ 			const key = id + ":" + c.actionId;
+        │ 			            ^^^^^^^^^^^^^^^^^^^^^
+    282 │ 			if (this.seen.has(key)) return false;
+    283 │ 			this.seen.add(key);
+  
+  i Unsafe fix: Use a template literal.
+  
+     279  279 │       }
+     280  280 │       if (c.actionId !== undefined) {
+     281      │ - → → → const·key·=·id·+·":"·+·c.actionId;
+          281 │ + → → → const·key·=·`${id}:${c.actionId}`;
+     282  282 │         if (this.seen.has(key)) return false;
+     283  283 │         this.seen.add(key);
+  
+
+src/sim.js:419:28 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    417 │ 					: "Abort acknowledged. A live crew can fly again.",
+    418 │ 			);
+  > 419 │ 		} else this.say("pilot", "Course set: " + r.label + ".");
+        │ 		                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    420 │ 		this.emit("route", { target: s.route.target, x: r.x, y: r.y });
+    421 │ 		return true;
+  
+  i Unsafe fix: Use a template literal.
+  
+     417  417 │             : "Abort acknowledged. A live crew can fly again.",
+     418  418 │         );
+     419      │ - → → }·else·this.say("pilot",·"Course·set:·"·+·r.label·+·".");
+          419 │ + → → }·else·this.say("pilot",·`Course·set:·${r.label}.`);
+     420  420 │       this.emit("route", { target: s.route.target, x: r.x, y: r.y });
+     421  421 │       return true;
+  
+
+src/sim.js:570:5 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    568 │ 			this.say(
+    569 │ 				"gunner",
+  > 570 │ 				k.toUpperCase() + " mount jammed. Use another bearing or evade.",
+        │ 				^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    571 │ 				true,
+    572 │ 			);
+  
+  i Unsafe fix: Use a template literal.
+  
+     568  568 │         this.say(
+     569  569 │           "gunner",
+     570      │ - → → → → k.toUpperCase()·+·"·mount·jammed.·Use·another·bearing·or·evade.",
+          570 │ + → → → → `${k.toUpperCase()}·mount·jammed.·Use·another·bearing·or·evade.`,
+     571  571 │           true,
+     572  572 │         );
+  
+
+src/sim.js:991:39 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    989 │ 										true,
+    990 │ 									);
+  > 991 │ 								} else this.say("bombardier", t.label + " destroyed.");
+        │ 								                              ^^^^^^^^^^^^^^^^^^^^^^^
+    992 │ 							}
+    993 │ 						}
+  
+  i Unsafe fix: Use a template literal.
+  
+     989  989 │                       true,
+     990  990 │                     );
+     991      │ - → → → → → → → → }·else·this.say("bombardier",·t.label·+·"·destroyed.");
+          991 │ + → → → → → → → → }·else·this.say("bombardier",·`${t.label}·destroyed.`);
+     992  992 │                 }
+     993  993 │               }
+  
+
+src/ui.js:80:10 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    78 │ 		for (const [key, label, min, max, step, unit] of TUNING)
+    79 │ 			this.game.settings.define({
+  > 80 │ 				key: "dev_" + key,
+       │ 				     ^^^^^^^^^^^^
+    81 │ 				label,
+    82 │ 				type: "slider",
+  
+  i Unsafe fix: Use a template literal.
+  
+      78   78 │       for (const [key, label, min, max, step, unit] of TUNING)
+      79   79 │         this.game.settings.define({
+      80      │ - → → → → key:·"dev_"·+·key,
+           80 │ + → → → → key:·`dev_${key}`,
+      81   81 │           label,
+      82   82 │           type: "slider",
+  
+
+src/ui.js:251:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    249 │ 				],
+    250 │ 				[
+  > 251 │ 					"Payload: " + LOADOUTS[this.setup.loadout].name,
+        │ 					^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    252 │ 					() => {
+    253 │ 						const a = Object.keys(LOADOUTS),
+  
+  i Unsafe fix: Use a template literal.
+  
+     249  249 │           ],
+     250  250 │           [
+     251      │ - → → → → → "Payload:·"·+·LOADOUTS[this.setup.loadout].name,
+          251 │ + → → → → → `Payload:·${LOADOUTS[this.setup.loadout].name}`,
+     252  252 │             () => {
+     253  253 │               const a = Object.keys(LOADOUTS),
+  
+
+src/ui.js:260:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    258 │ 				],
+    259 │ 				[
+  > 260 │ 					"Skill: " + DIFFICULTIES[this.setup.difficulty].name,
+        │ 					^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    261 │ 					() => {
+    262 │ 						const a = Object.keys(DIFFICULTIES);
+  
+  i Unsafe fix: Use a template literal.
+  
+     258  258 │           ],
+     259  259 │           [
+     260      │ - → → → → → "Skill:·"·+·DIFFICULTIES[this.setup.difficulty].name,
+          260 │ + → → → → → `Skill:·${DIFFICULTIES[this.setup.difficulty].name}`,
+     261  261 │             () => {
+     262  262 │               const a = Object.keys(DIFFICULTIES);
+  
+
+src/ui.js:288:1007 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    286 │ 			harbor = [kx(340000), ky(18000)],
+    287 │ 			dog = [kx(140000), ky(-66000)];
+  > 288 │ ...d="M${home}L${this.setup.route === "dogleg" ? dog + "L" : ""}${harbor}" fill="none" stroke="#ebbd6c"...
+        │                                                  ^^^^^^^^^
+    289 │  ${Object.entries(MISSION.waypoints)
+    290 │ 		.map(([id, t]) => {
+  
+  i Unsafe fix: Use a template literal.
+  
+     286  286 │         harbor = [kx(340000), ky(18000)],
+     287  287 │         dog = [kx(140000), ky(-66000)];
+     288      │ - ...="M${home}L${this.setup.route·===·"dogleg"·?·dog·+·"L"·:·""}${harbor}"·fill="none"·stroke="#ebbd6c"·...
+          288 │ + ...h·d="M${home}L${this.setup.route·===·"dogleg"·?·`${dog}L`·:·""}${harbor}"·fill="none"·stroke="#ebbd6...
+     289  289 │    ${Object.entries(MISSION.waypoints)
+     290  290 │       .map(([id, t]) => {
+  
+
+src/ui.js:347:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    345 │ 			actions: [
+    346 │ 				{
+  > 347 │ 					label: "Fly to " + MISSION.waypoints[this.preview].label,
+        │ 					       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    348 │ 					disabled: s.commandOwner !== this.menuOwner,
+    349 │ 					fn: () => {
+  
+  i Unsafe fix: Use a template literal.
+  
+     345  345 │         actions: [
+     346  346 │           {
+     347      │ - → → → → → label:·"Fly·to·"·+·MISSION.waypoints[this.preview].label,
+          347 │ + → → → → → label:·`Fly·to·${MISSION.waypoints[this.preview].label}`,
+     348  348 │             disabled: s.commandOwner !== this.menuOwner,
+     349  349 │             fn: () => {
+  
+
+src/ui.js:411:10 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    409 │ 						: this.sim.state.owners[station] === id
+    410 │ 							? " · YOU"
+  > 411 │ 							: " · P" + this.sim.state.owners[station]),
+        │ 							  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    412 │ 				() => {
+    413 │ 					const busy =
+  
+  i Unsafe fix: Use a template literal.
+  
+     409  409 │               : this.sim.state.owners[station] === id
+     410  410 │                 ? " · YOU"
+     411      │ - → → → → → → → :·"···P"·+·this.sim.state.owners[station]),
+          411 │ + → → → → → → → :·`···P${this.sim.state.owners[station]}`),
+     412  412 │           () => {
+     413  413 │             const busy =
+  
+
+src/ui.js:546:28 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    544 │ 			title: "Test the whole aircraft",
+    545 │ 			text: "Changes are live. Every tool marks this sortie as a test run. Controller: up/down selects, left/right adjusts sliders.",
+  > 546 │ 			rows: TUNING.map((t) => "dev_" + t[0]),
+        │ 			                        ^^^^^^^^^^^^^
+    547 │ 			actions: [
+    548 │ 				[
+  
+  i Unsafe fix: Use a template literal.
+  
+     544  544 │         title: "Test the whole aircraft",
+     545  545 │         text: "Changes are live. Every tool marks this sortie as a test run. Controller: up/down selects, left/right adjusts sliders.",
+     546      │ - → → → rows:·TUNING.map((t)·=>·"dev_"·+·t[0]),
+          546 │ + → → → rows:·TUNING.map((t)·=>·`dev_${t[0]}`),
+     547  547 │         actions: [
+     548  548 │           [
+  
+
+src/ui.js:552:31 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    550 │ 					() => {
+    551 │ 						for (const [k, v] of Object.entries(DEFAULT_BALANCE)) {
+  > 552 │ 							this.game.settings.set("dev_" + k, v);
+        │ 							                       ^^^^^^^^^^
+    553 │ 							this.sim.balance[k] = v;
+    554 │ 						}
+  
+  i Unsafe fix: Use a template literal.
+  
+     550  550 │             () => {
+     551  551 │               for (const [k, v] of Object.entries(DEFAULT_BALANCE)) {
+     552      │ - → → → → → → → this.game.settings.set("dev_"·+·k,·v);
+          552 │ + → → → → → → → this.game.settings.set(`dev_${k}`,·v);
+     553  553 │                 this.sim.balance[k] = v;
+     554  554 │               }
+  
+
+src/ui.js:571:5 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    569 │ 		const buttons = [
+    570 │ 			[
+  > 571 │ 				"Invulnerable: " + (this.sim.state.invulnerable ? "ON" : "OFF"),
+        │ 				^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    572 │ 				() => this.sim.dev("invulnerable", !this.sim.state.invulnerable),
+    573 │ 			],
+  
+  i Unsafe fix: Use a template literal.
+  
+     569  569 │       const buttons = [
+     570  570 │         [
+     571      │ - → → → → "Invulnerable:·"·+·(this.sim.state.invulnerable·?·"ON"·:·"OFF"),
+          571 │ + → → → → `Invulnerable:·${this.sim.state.invulnerable·?·"ON"·:·"OFF"}`,
+     572  572 │           () => this.sim.dev("invulnerable", !this.sim.state.invulnerable),
+     573  573 │         ],
+  
+
+src/ui.js:575:5 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    573 │ 			],
+    574 │ 			[
+  > 575 │ 				"Infinite stores: " + (this.sim.state.infinite ? "ON" : "OFF"),
+        │ 				^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    576 │ 				() => this.sim.dev("infinite", !this.sim.state.infinite),
+    577 │ 			],
+  
+  i Unsafe fix: Use a template literal.
+  
+     573  573 │         ],
+     574  574 │         [
+     575      │ - → → → → "Infinite·stores:·"·+·(this.sim.state.infinite·?·"ON"·:·"OFF"),
+          575 │ + → → → → `Infinite·stores:·${this.sim.state.infinite·?·"ON"·:·"OFF"}`,
+     576  576 │           () => this.sim.dev("infinite", !this.sim.state.infinite),
+     577  577 │         ],
+  
+
+src/ui.js:579:5 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    577 │ 			],
+    578 │ 			[
+  > 579 │ 				"Free camera: " + (this.dev.freeCamera ? "ON" : "OFF"),
+        │ 				^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    580 │ 				() => (this.dev.freeCamera = !this.dev.freeCamera),
+    581 │ 			],
+  
+  i Unsafe fix: Use a template literal.
+  
+     577  577 │         ],
+     578  578 │         [
+     579      │ - → → → → "Free·camera:·"·+·(this.dev.freeCamera·?·"ON"·:·"OFF"),
+          579 │ + → → → → `Free·camera:·${this.dev.freeCamera·?·"ON"·:·"OFF"}`,
+     580  580 │           () => (this.dev.freeCamera = !this.dev.freeCamera),
+     581  581 │         ],
+  
+
+src/ui.js:598:5 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    596 │ 			["Repair all systems", () => this.sim.dev("repair")],
+    597 │ 			[
+  > 598 │ 				"Pause / step: " + (this.dev.paused ? "FROZEN" : "RUNNING"),
+        │ 				^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    599 │ 				() => {
+    600 │ 					this.dev.paused = !this.dev.paused;
+  
+  i Unsafe fix: Use a template literal.
+  
+     596  596 │         ["Repair all systems", () => this.sim.dev("repair")],
+     597  597 │         [
+     598      │ - → → → → "Pause·/·step:·"·+·(this.dev.paused·?·"FROZEN"·:·"RUNNING"),
+          598 │ + → → → → `Pause·/·step:·${this.dev.paused·?·"FROZEN"·:·"RUNNING"}`,
+     599  599 │           () => {
+     600  600 │             this.dev.paused = !this.dev.paused;
+  
+
+src/ui.js:849:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    847 │ 				[r.score.toLocaleString(), "TOTAL SCORE"],
+    848 │ 				[r.stats.kills, "FIGHTERS DOWN"],
+  > 849 │ 				[r.stats.accuracy + "%", "BOMB ACCURACY"],
+        │ 				 ^^^^^^^^^^^^^^^^^^^^^^
+    850 │ 				[minutes(r.stats.duration), "FLIGHT TIME"],
+    851 │ 				[r.stats.fuel + "%", "FUEL REMAINING"],
+  
+  i Unsafe fix: Use a template literal.
+  
+     847  847 │           [r.score.toLocaleString(), "TOTAL SCORE"],
+     848  848 │           [r.stats.kills, "FIGHTERS DOWN"],
+     849      │ - → → → → [r.stats.accuracy·+·"%",·"BOMB·ACCURACY"],
+          849 │ + → → → → [`${r.stats.accuracy}%`,·"BOMB·ACCURACY"],
+     850  850 │           [minutes(r.stats.duration), "FLIGHT TIME"],
+     851  851 │           [r.stats.fuel + "%", "FUEL REMAINING"],
+  
+
+src/ui.js:851:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    849 │ 				[r.stats.accuracy + "%", "BOMB ACCURACY"],
+    850 │ 				[minutes(r.stats.duration), "FLIGHT TIME"],
+  > 851 │ 				[r.stats.fuel + "%", "FUEL REMAINING"],
+        │ 				 ^^^^^^^^^^^^^^^^^^
+    852 │ 				[r.stats.returnBonus, "RETURN BONUS"],
+    853 │ 			],
+  
+  i Unsafe fix: Use a template literal.
+  
+     849  849 │           [r.stats.accuracy + "%", "BOMB ACCURACY"],
+     850  850 │           [minutes(r.stats.duration), "FLIGHT TIME"],
+     851      │ - → → → → [r.stats.fuel·+·"%",·"FUEL·REMAINING"],
+          851 │ + → → → → [`${r.stats.fuel}%`,·"FUEL·REMAINING"],
+     852  852 │           [r.stats.returnBonus, "RETURN BONUS"],
+     853  853 │         ],
+  
+
+src/ui.js:857:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    855 │ 				["Primary destroyed", r.stats.primary],
+    856 │ 				["Crew recovered", r.stats.returned],
+  > 857 │ 				["Damage −" + r.stats.damagePenalty, r.stats.damagePenalty === 0],
+        │ 				 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    858 │ 				["Wasted bombs −" + r.stats.wastedPenalty, r.stats.wastedPenalty === 0],
+    859 │ 			],
+  
+  i Unsafe fix: Use a template literal.
+  
+     855  855 │           ["Primary destroyed", r.stats.primary],
+     856  856 │           ["Crew recovered", r.stats.returned],
+     857      │ - → → → → ["Damage·−"·+·r.stats.damagePenalty,·r.stats.damagePenalty·===·0],
+          857 │ + → → → → [`Damage·−${r.stats.damagePenalty}`,·r.stats.damagePenalty·===·0],
+     858  858 │           ["Wasted bombs −" + r.stats.wastedPenalty, r.stats.wastedPenalty === 0],
+     859  859 │         ],
+  
+
+src/ui.js:858:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    856 │ 				["Crew recovered", r.stats.returned],
+    857 │ 				["Damage −" + r.stats.damagePenalty, r.stats.damagePenalty === 0],
+  > 858 │ 				["Wasted bombs −" + r.stats.wastedPenalty, r.stats.wastedPenalty === 0],
+        │ 				 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    859 │ 			],
+    860 │ 			actions: [
+  
+  i Unsafe fix: Use a template literal.
+  
+     856  856 │           ["Crew recovered", r.stats.returned],
+     857  857 │           ["Damage −" + r.stats.damagePenalty, r.stats.damagePenalty === 0],
+     858      │ - → → → → ["Wasted·bombs·−"·+·r.stats.wastedPenalty,·r.stats.wastedPenalty·===·0],
+          858 │ + → → → → [`Wasted·bombs·−${r.stats.wastedPenalty}`,·r.stats.wastedPenalty·===·0],
+     859  859 │         ],
+     860  860 │         actions: [
+  
+
+src/ui.js:911:35 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    909 │ 				gun = s.mounts[p.station],
+    910 │ 				status = gun
+  > 911 │ 					? `${gun.jammed ? "JAMMED" : gun.ammo + " ROUNDS"} · ${Math.round(((p.aim.yaw || 0) * 180) / Math.PI)}° TRAVERSE`
+        │ 					                             ^^^^^^^^^^^^^^^^^^^^
+    912 │ 					: p.station === "bombs"
+    913 │ 						? `${s.bombsLeft} BOMBS · SALVO ${s.salvo} · ${a.doors > 0.85 ? "DOORS OPEN" : "DOORS MOVING"}`
+  
+  i Unsafe fix: Use a template literal.
+  
+     909  909 │           gun = s.mounts[p.station],
+     910  910 │           status = gun
+     911      │ - → → → → → ?·`${gun.jammed·?·"JAMMED"·:·gun.ammo·+·"·ROUNDS"}···${Math.round(((p.aim.yaw·||·0)·*·180)·/·Math.PI)}°·TRAVERSE`
+          911 │ + → → → → → ?·`${gun.jammed·?·"JAMMED"·:·`${gun.ammo}·ROUNDS`}···${Math.round(((p.aim.yaw·||·0)·*·180)·/·Math.PI)}°·TRAVERSE`
+     912  912 │             : p.station === "bombs"
+     913  913 │               ? `${s.bombsLeft} BOMBS · SALVO ${s.salvo} · ${a.doors > 0.85 ? "DOORS OPEN" : "DOORS MOVING"}`
+  
+
+src/ui.js:920:80 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    918 │ 					? `${k("fire")} Release &nbsp; ${k("doors")} Doors &nbsp; ${k("salvo")} Salvo`
+    919 │ 					: `${k("up")} ${k("left")} ${k("down")} ${k("right")} Fly &nbsp; ${k("hold")} Hold &nbsp; ${k("throttleUp")} / ${k("throttleDown")} Power`;
+  > 920 │ ... "p2" : ""}"><div class="mini">${split ? "P" + p.id + " / " : ""}${esc(p.name || "AIRCREW")} · ${s.c...
+        │                                             ^^^^^^^^^^^^^^^^^^
+    921 │ 			if (gun) html += `<div class="reticle ${i ? "p2" : ""}"></div>`;
+    922 │ 		});
+  
+  i Unsafe fix: Use a template literal.
+  
+     918  918 │             ? `${k("fire")} Release &nbsp; ${k("doors")} Doors &nbsp; ${k("salvo")} Salvo`
+     919  919 │             : `${k("up")} ${k("left")} ${k("down")} ${k("right")} Fly &nbsp; ${k("hold")} Hold &nbsp; ${k("throttleUp")} / ${k("throttleDown")} Power`;
+     920      │ - ...{i·?·"p2"·:·""}"><div·class="mini">${split·?·"P"·+·p.id·+·"·/·"·:·""}${esc(p.name·||·"AIRCREW")}···$...
+          920 │ + ...d·${i·?·"p2"·:·""}"><div·class="mini">${split·?·`P${p.id}·/·`·:·""}${esc(p.name·||·"AIRCREW")}···${s...
+     921  921 │         if (gun) html += `<div class="reticle ${i ? "p2" : ""}"></div>`;
+     922  922 │       });
+  
+
+src/ui.js:920:820 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    918 │ 					? `${k("fire")} Release &nbsp; ${k("doors")} Doors &nbsp; ${k("salvo")} Salvo`
+    919 │ 					: `${k("up")} ${k("left")} ${k("down")} ${k("right")} Fly &nbsp; ${k("hold")} Hold &nbsp; ${k("throttleUp")} / ${k("throttleDown")} Power`;
+  > 920 │ ...trong>${p.station === "bombs" ? s.prediction.time.toFixed(1) + " SEC" : Math.round(a.z / U) + " M"}<...
+        │                                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    921 │ 			if (gun) html += `<div class="reticle ${i ? "p2" : ""}"></div>`;
+    922 │ 		});
+  
+  i Unsafe fix: Use a template literal.
+  
+     918  918 │             ? `${k("fire")} Release &nbsp; ${k("doors")} Doors &nbsp; ${k("salvo")} Salvo`
+     919  919 │             : `${k("up")} ${k("left")} ${k("down")} ${k("right")} Fly &nbsp; ${k("hold")} Hold &nbsp; ${k("throttleUp")} / ${k("throttleDown")} Power`;
+     920      │ - ...ation·===·"bombs"·?·s.prediction.time.toFixed(1)·+·"·SEC"·:·Math.round(a.z·/·U)·+·"·M"}</strong><sma...
+          920 │ + ...PEED"}</label><strong>${p.station·===·"bombs"·?·`${s.prediction.time.toFixed(1)}·SEC`·:·Math.round(a...
+     921  921 │         if (gun) html += `<div class="reticle ${i ? "p2" : ""}"></div>`;
+     922  922 │       });
+  
+
+src/ui.js:920:860 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    918 │ 					? `${k("fire")} Release &nbsp; ${k("doors")} Doors &nbsp; ${k("salvo")} Salvo`
+    919 │ 					: `${k("up")} ${k("left")} ${k("down")} ${k("right")} Fly &nbsp; ${k("hold")} Hold &nbsp; ${k("throttleUp")} / ${k("throttleDown")} Power`;
+  > 920 │ ...rediction.time.toFixed(1) + " SEC" : Math.round(a.z / U) + " M"}</strong><small>${Math.round((a.spee...
+        │                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    921 │ 			if (gun) html += `<div class="reticle ${i ? "p2" : ""}"></div>`;
+    922 │ 		});
+  
+  i Unsafe fix: Use a template literal.
+  
+     918  918 │             ? `${k("fire")} Release &nbsp; ${k("doors")} Doors &nbsp; ${k("salvo")} Salvo`
+     919  919 │             : `${k("up")} ${k("left")} ${k("down")} ${k("right")} Fly &nbsp; ${k("hold")} Hold &nbsp; ${k("throttleUp")} / ${k("throttleDown")} Power`;
+     920      │ - ...n.time.toFixed(1)·+·"·SEC"·:·Math.round(a.z·/·U)·+·"·M"}</strong><small>${Math.round((a.speed·/·U)·*...
+          920 │ + ...ombs"·?·s.prediction.time.toFixed(1)·+·"·SEC"·:·`${Math.round(a.z·/·U)}·M`}</strong><small>${Math.ro...
+     921  921 │         if (gun) html += `<div class="reticle ${i ? "p2" : ""}"></div>`;
+     922  922 │       });
+  
+
+src/ui.js:937:244 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    935 │ 					) / U,
+    936 │ 				ready = dist < 110;
+  > 937 │ ...: ready ? "RELEASE WINDOW" : "IMPACT OFFSET " + Math.round(dist) + " M"}</strong><small>${primary ?·...
+        │                                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    938 │ 		}
+    939 │ 		if (s.lastImpact && s.t - s.lastImpact.at < 7)
+  
+  i Unsafe fix: Use a template literal.
+  
+     935  935 │             ) / U,
+     936  936 │           ready = dist < 110;
+     937      │ - ...PACT·REFERENCE"·:·ready·?·"RELEASE·WINDOW"·:·"IMPACT·OFFSET·"·+·Math.round(dist)·+·"·M"}</strong><sm...
+          937 │ + ...·IMPACT·REFERENCE"·:·ready·?·"RELEASE·WINDOW"·:·`IMPACT·OFFSET·${Math.round(dist)}·M`}</strong><smal...
+     938  938 │       }
+     939  939 │       if (s.lastImpact && s.t - s.lastImpact.at < 7)
+  
+
+tools/build.mjs:70:40 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    68 │ <script>${escaped(engine)}</script><script>${escaped(app)}</script></body></html>`;
+    69 │ fs.writeFileSync(path.join(root, "game.html"), html);
+  > 70 │ fs.writeFileSync(path.join(root, "..", identity.slug + ".html"), html);
+       │                                        ^^^^^^^^^^^^^^^^^^^^^^^
+    71 │ if (!process.argv.includes("--quiet"))
+    72 │ 	console.log(
+  
+  i Unsafe fix: Use a template literal.
+  
+    68 68 │   <script>${escaped(engine)}</script><script>${escaped(app)}</script></body></html>`;
+    69 69 │   fs.writeFileSync(path.join(root, "game.html"), html);
+    70    │ - fs.writeFileSync(path.join(root,·"..",·identity.slug·+·".html"),·html);
+       70 │ + fs.writeFileSync(path.join(root,·"..",·`${identity.slug}.html`),·html);
+    71 71 │   if (!process.argv.includes("--quiet"))
+    72 72 │   	console.log(
+  
+
+tools/verify.mjs:155:48 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    153 │ if (suites.has("package")) {
+    154 │ 	const id = json("identity.json"),
+  > 155 │ 		html = fs.readFileSync(path.join(root, "..", id.slug + ".html"), "utf8"),
+        │ 		                                             ^^^^^^^^^^^^^^^^^
+    156 │ 		raw = fs.readFileSync("vendor/ai-hub/lib/hub/session.js", "utf8");
+    157 │ 	check(
+  
+  i Unsafe fix: Use a template literal.
+  
+    153 153 │   if (suites.has("package")) {
+    154 154 │     const id = json("identity.json"),
+    155     │ - → → html·=·fs.readFileSync(path.join(root,·"..",·id.slug·+·".html"),·"utf8"),
+        155 │ + → → html·=·fs.readFileSync(path.join(root,·"..",·`${id.slug}.html`),·"utf8"),
+    156 156 │       raw = fs.readFileSync("vendor/ai-hub/lib/hub/session.js", "utf8");
+    157 157 │     check(
+  
+
+tools/verify.mjs:228:48 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    226 │ 	JSON.stringify(result, null, 2),
+    227 │ );
+  > 228 │ for (const f of result.failures) console.error("FAIL " + f);
+        │                                                ^^^^^^^^^^^
+    229 │ console.log(`${result.checks} checks, ${result.failures.length} failures`);
+    230 │ process.exitCode = result.failures.length ? 1 : 0;
+  
+  i Unsafe fix: Use a template literal.
+  
+    226 226 │   	JSON.stringify(result, null, 2),
+    227 227 │   );
+    228     │ - for·(const·f·of·result.failures)·console.error("FAIL·"·+·f);
+        228 │ + for·(const·f·of·result.failures)·console.error(`FAIL·${f}`);
+    229 229 │   console.log(`${result.checks} checks, ${result.failures.length} failures`);
+    230 230 │   process.exitCode = result.failures.length ? 1 : 0;
+  
+
+tools/verify.mjs:92:4 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    90 │ 			c[k].length === n &&
+    91 │ 				c[k].every((x) => typeof x === "string" && x.length > 0),
+  > 92 │ 			"Feedback answers " + k,
+       │ 			^^^^^^^^^^^^^^^^^^^^^^^
+    93 │ 		);
+    94 │ 	check(
+  
+  i Unsafe fix: Use a template literal.
+  
+     90  90 │         c[k].length === n &&
+     91  91 │           c[k].every((x) => typeof x === "string" && x.length > 0),
+     92     │ - → → → "Feedback·answers·"·+·k,
+         92 │ + → → → `Feedback·answers·${k}`,
+     93  93 │       );
+     94  94 │     check(
+  
+
+tools/verify.mjs:173:4 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    171 │ 		check(
+    172 │ 			html.includes(`name="${name}" content="${value}"`),
+  > 173 │ 			"Missing Hub tag " + name,
+        │ 			^^^^^^^^^^^^^^^^^^^^^^^^^
+    174 │ 		);
+    175 │ 	check(
+  
+  i Unsafe fix: Use a template literal.
+  
+    171 171 │       check(
+    172 172 │         html.includes(`name="${name}" content="${value}"`),
+    173     │ - → → → "Missing·Hub·tag·"·+·name,
+        173 │ + → → → `Missing·Hub·tag·${name}`,
+    174 174 │       );
+    175 175 │     check(
+  
+
+tools/verify.mjs:49:37 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    47 │ 	});
+    48 │ 	const log = (r.stdout || "") + (r.stderr || "");
+  > 49 │ 	fs.writeFileSync(path.join(folder, name + ".log"), log);
+       │ 	                                   ^^^^^^^^^^^^^
+    50 │ 	const matches = pattern ? log.match(pattern) : null;
+    51 │ 	const count = matches ? +matches[1] : 1;
+  
+  i Unsafe fix: Use a template literal.
+  
+     47  47 │     });
+     48  48 │     const log = (r.stdout || "") + (r.stderr || "");
+     49     │ - → fs.writeFileSync(path.join(folder,·name·+·".log"),·log);
+         49 │ + → fs.writeFileSync(path.join(folder,·`${name}.log`),·log);
+     50  50 │     const matches = pattern ? log.match(pattern) : null;
+     51  51 │     const count = matches ? +matches[1] : 1;
+  
+
+tools/verify.mjs:58:8 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    56 │ 			...(lines.length
+    57 │ 				? lines
+  > 58 │ 				: [name + ": " + (r.error?.message || log.slice(-3000) || "failed")]),
+       │ 				   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    59 │ 		);
+    60 │ 	}
+  
+  i Unsafe fix: Use a template literal.
+  
+     56  56 │         ...(lines.length
+     57  57 │           ? lines
+     58     │ - → → → → :·[name·+·":·"·+·(r.error?.message·||·log.slice(-3000)·||·"failed")]),
+         58 │ + → → → → :·[`${name}:·${r.error?.message·||·log.slice(-3000)·||·"failed"}`]),
+     59  59 │       );
+     60  60 │     }
+  
+
+tools/verify.mjs:71:26 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    69 │ 				encoding: "utf8",
+    70 │ 			});
+  > 71 │ 			check(r.status === 0, "Syntax " + dir + "/" + name + ": " + r.stderr);
+       │ 			                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    72 │ 		}
+    73 │ 	const c = json("content/credits.json"),
+  
+  i Unsafe fix: Use a template literal.
+  
+     69  69 │           encoding: "utf8",
+     70  70 │         });
+     71     │ - → → → check(r.status·===·0,·"Syntax·"·+·dir·+·"/"·+·name·+·":·"·+·r.stderr);
+         71 │ + → → → check(r.status·===·0,·`Syntax·${dir}/${name}:·${r.stderr}`);
+     72  72 │       }
+     73  73 │     const c = json("content/credits.json"),
+  
+
+src/app.js:2:29 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    1 │ import "../vendor/engine/engine/my-3d2dge-3d.js";
+  > 2 │ import { BEARINGS, MISSION, U } from "../content/mission.js";
+      │                             ^
+    3 │ import { BomberAudio } from "./audio.js";
+    4 │ import { HubAdapter } from "./online.js";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    2 │ import·{·BEARINGS,·MISSION,·U·}·from·"../content/mission.js";
+      │                             --                               
+
+src/app.js:130:2 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable hudTime is unused.
+  
+    128 │ 	lastPointer = null,
+    129 │ 	lastPaused = false,
+  > 130 │ 	hudTime = 0,
+        │ 	^^^^^^^
+    131 │ 	sessionClock = null,
+    132 │ 	actionNo = 0,
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend hudTime with an underscore.
+  
+    128 128 │     lastPointer = null,
+    129 129 │     lastPaused = false,
+    130     │ - → hudTime·=·0,
+        130 │ + → _hudTime·=·0,
+    131 131 │     sessionClock = null,
+    132 132 │     actionNo = 0,
+  
+
+src/app.js:138:2 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable lastPad is unused.
+  
+    136 │ const jettisonHold = {},
+    137 │ 	fireLocked = {},
+  > 138 │ 	lastPad = new Map(),
+        │ 	^^^^^^^
+    139 │ 	connectedPads = new Set();
+    140 │ const portraits = Object.fromEntries(
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend lastPad with an underscore.
+  
+    136 136 │   const jettisonHold = {},
+    137 137 │     fireLocked = {},
+    138     │ - → lastPad·=·new·Map(),
+        138 │ + → _lastPad·=·new·Map(),
+    139 139 │     connectedPads = new Set();
+    140 140 │   const portraits = Object.fromEntries(
+  
+
+src/app.js:139:2 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable connectedPads is unused.
+  
+    137 │ 	fireLocked = {},
+    138 │ 	lastPad = new Map(),
+  > 139 │ 	connectedPads = new Set();
+        │ 	^^^^^^^^^^^^^
+    140 │ const portraits = Object.fromEntries(
+    141 │ 	["pilot", "gunner", "bombardier", "engineer"].map((r, i) => [
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend connectedPads with an underscore.
+  
+    137 137 │     fireLocked = {},
+    138 138 │     lastPad = new Map(),
+    139     │ - → connectedPads·=·new·Set();
+        139 │ + → _connectedPads·=·new·Set();
+    140 140 │   const portraits = Object.fromEntries(
+    141 141 │     ["pilot", "gunner", "bombardier", "engineer"].map((r, i) => [
+  
+
+src/app.js:285:19 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable value is unused.
+  
+    283 │ 	ui.dev.freeCamera = false;
+    284 │ 	ui.dev.debug = false;
+  > 285 │ 	for (const [key, value] of Object.entries(sim.balance)) {
+        │ 	                 ^^^^^
+    286 │ 		if (game.settings["dev_" + key] !== undefined)
+    287 │ 			sim.balance[key] = game.settings["dev_" + key];
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend value with an underscore.
+  
+    283 283 │     ui.dev.freeCamera = false;
+    284 284 │     ui.dev.debug = false;
+    285     │ - → for·(const·[key,·value]·of·Object.entries(sim.balance))·{
+        285 │ + → for·(const·[key,·_value]·of·Object.entries(sim.balance))·{
+    286 286 │       if (game.settings["dev_" + key] !== undefined)
+    287 287 │         sim.balance[key] = game.settings["dev_" + key];
+  
+
+src/audio.js:590:7 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    589 │ 	_speak(caption) {
+  > 590 │ 		if (!caption || !caption.text || !this.unlocked || this.paused) return;
+        │ 		    ^^^^^^^^^^^^^^^^^^^^^^^^^
+    591 │ 		const ctx = this.audio.ctx,
+    592 │ 			now = ctx.currentTime;
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    588 588 │   
+    589 589 │     _speak(caption) {
+    590     │ - → → if·(!caption·||·!caption.text·||·!this.unlocked·||·this.paused)·return;
+        590 │ + → → if·(!caption?.text·||·!this.unlocked·||·this.paused)·return;
+    591 591 │       const ctx = this.audio.ctx,
+    592 592 │         now = ctx.currentTime;
+  
+
+src/audio.js:674:9 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter dt is unused.
+  
+    672 │ 	}
+    673 │ 
+  > 674 │ 	update(dt, state, { active = true, paused = false } = {}) {
+        │ 	       ^^
+    675 │ 		if (this.disposed || !this.audio) return;
+    676 │ 		if (paused !== this.paused) this.pause(paused);
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend dt with an underscore.
+  
+    672 672 │     }
+    673 673 │   
+    674     │ - → update(dt,·state,·{·active·=·true,·paused·=·false·}·=·{})·{
+        674 │ + → update(_dt,·state,·{·active·=·true,·paused·=·false·}·=·{})·{
+    675 675 │       if (this.disposed || !this.audio) return;
+    676 676 │       if (paused !== this.paused) this.pause(paused);
+  
+
+src/sim.js:588:22 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter dt is unused.
+  
+    586 │ 		for (const m of Object.values(s.mounts)) m.jammed = false;
+    587 │ 	}
+  > 588 │ 	fireGun(station, p, dt) {
+        │ 	                    ^^
+    589 │ 		const s = this.state,
+    590 │ 			m = s.mounts[station];
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend dt with an underscore.
+  
+     586  586 │       for (const m of Object.values(s.mounts)) m.jammed = false;
+     587  587 │     }
+     588      │ - → fireGun(station,·p,·dt)·{
+          588 │ + → fireGun(station,·p,·_dt)·{
+     589  589 │       const s = this.state,
+     590  590 │         m = s.mounts[station];
+  
+
+src/style.css:420:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    418 │ 	margin-top: 3px;
+    419 │ }
+  > 420 │ .objective small {
+        │ ^^^^^^^^^^^^^^^^
+    421 │ 	font-size: 0.6em;
+    422 │ 	color: #cedcd0;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  > 61 │ #loading small {
+       │ ^^^^^^^^^^^^^^
+    62 │ 	color: #a9bcb6;
+    63 │ 	letter-spacing: 0.06em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:1021:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 1)
+  
+    1019 │ 	opacity: 0.4;
+    1020 │ }
+  > 1021 │ .esh .credit-content button {
+         │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1022 │ 	font-size: 0.7em !important;
+    1023 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    388 │ 	text-shadow: 0 2px 3px #00151e;
+    389 │ }
+  > 390 │ #hud button {
+        │ ^^^^^^^^^^^
+    391 │ 	pointer-events: auto;
+    392 │ 	cursor: pointer;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:70:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    68 │ }
+    69 │ [hidden] {
+  > 70 │ 	display: none !important;
+       │ 	              ^^^^^^^^^^
+    71 │ }
+    72 │ .esh {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    70 │ → display:·none·!important;
+       │                ----------- 
+
+src/style.css:73:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    71 │ }
+    72 │ .esh {
+  > 73 │ 	--ink: #f2e8cb !important;
+       │ 	               ^^^^^^^^^^
+    74 │ 	--paper: #112e37 !important;
+    75 │ 	--accent: #ebbd6c !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    73 │ → --ink:·#f2e8cb·!important;
+       │                 ----------- 
+
+src/style.css:74:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    72 │ .esh {
+    73 │ 	--ink: #f2e8cb !important;
+  > 74 │ 	--paper: #112e37 !important;
+       │ 	                 ^^^^^^^^^^
+    75 │ 	--accent: #ebbd6c !important;
+    76 │ 	--muted: #b9c7be !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    74 │ → --paper:·#112e37·!important;
+       │                   ----------- 
+
+src/style.css:75:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    73 │ 	--ink: #f2e8cb !important;
+    74 │ 	--paper: #112e37 !important;
+  > 75 │ 	--accent: #ebbd6c !important;
+       │ 	                  ^^^^^^^^^^
+    76 │ 	--muted: #b9c7be !important;
+    77 │ 	--danger: #e78261 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    75 │ → --accent:·#ebbd6c·!important;
+       │                    ----------- 
+
+src/style.css:76:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    74 │ 	--paper: #112e37 !important;
+    75 │ 	--accent: #ebbd6c !important;
+  > 76 │ 	--muted: #b9c7be !important;
+       │ 	                 ^^^^^^^^^^
+    77 │ 	--danger: #e78261 !important;
+    78 │ 	--line: #64817c !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    76 │ → --muted:·#b9c7be·!important;
+       │                   ----------- 
+
+src/style.css:77:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    75 │ 	--accent: #ebbd6c !important;
+    76 │ 	--muted: #b9c7be !important;
+  > 77 │ 	--danger: #e78261 !important;
+       │ 	                  ^^^^^^^^^^
+    78 │ 	--line: #64817c !important;
+    79 │ 	font-size: clamp(16px, 1.65vw, 32px) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    77 │ → --danger:·#e78261·!important;
+       │                    ----------- 
+
+src/style.css:78:18 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    76 │ 	--muted: #b9c7be !important;
+    77 │ 	--danger: #e78261 !important;
+  > 78 │ 	--line: #64817c !important;
+       │ 	                ^^^^^^^^^^
+    79 │ 	font-size: clamp(16px, 1.65vw, 32px) !important;
+    80 │ 	z-index: 40 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    78 │ → --line:·#64817c·!important;
+       │                  ----------- 
+
+src/style.css:79:39 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    77 │ 	--danger: #e78261 !important;
+    78 │ 	--line: #64817c !important;
+  > 79 │ 	font-size: clamp(16px, 1.65vw, 32px) !important;
+       │ 	                                     ^^^^^^^^^^
+    80 │ 	z-index: 40 !important;
+    81 │ 	line-height: 1.35;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    79 │ → font-size:·clamp(16px,·1.65vw,·32px)·!important;
+       │                                       ----------- 
+
+src/style.css:80:14 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    78 │ 	--line: #64817c !important;
+    79 │ 	font-size: clamp(16px, 1.65vw, 32px) !important;
+  > 80 │ 	z-index: 40 !important;
+       │ 	            ^^^^^^^^^^
+    81 │ 	line-height: 1.35;
+    82 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    80 │ → z-index:·40·!important;
+       │              ----------- 
+
+src/style.css:97:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    95 │ 	);
+    96 │ 	backdrop-filter: none;
+  > 97 │ 	align-items: center !important;
+       │ 	                    ^^^^^^^^^^
+    98 │ 	justify-content: flex-start !important;
+    99 │ 	text-align: left !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    97 │ → align-items:·center·!important;
+       │                      ----------- 
+
+src/style.css:98:30 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+     96 │ 	backdrop-filter: none;
+     97 │ 	align-items: center !important;
+   > 98 │ 	justify-content: flex-start !important;
+        │ 	                            ^^^^^^^^^^
+     99 │ 	text-align: left !important;
+    100 │ 	padding-left: 6.8vw !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    98 │ → justify-content:·flex-start·!important;
+       │                              ----------- 
+
+src/style.css:99:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+     97 │ 	align-items: center !important;
+     98 │ 	justify-content: flex-start !important;
+   > 99 │ 	text-align: left !important;
+        │ 	                 ^^^^^^^^^^
+    100 │ 	padding-left: 6.8vw !important;
+    101 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    99 │ → text-align:·left·!important;
+       │                   ----------- 
+
+src/style.css:100:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+     98 │ 	justify-content: flex-start !important;
+     99 │ 	text-align: left !important;
+  > 100 │ 	padding-left: 6.8vw !important;
+        │ 	                    ^^^^^^^^^^
+    101 │ }
+    102 │ .esh .esh-ttl > div {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    100 │ → padding-left:·6.8vw·!important;
+        │                      ----------- 
+
+src/style.css:104:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    102 │ .esh .esh-ttl > div {
+    103 │ 	width: min(48vw, 900px);
+  > 104 │ 	max-width: unset !important;
+        │ 	                 ^^^^^^^^^^
+    105 │ 	display: flex;
+    106 │ 	flex-direction: column;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    104 │ → max-width:·unset·!important;
+        │                   ----------- 
+
+src/style.css:110:50 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    108 │ }
+    109 │ .esh h1 {
+  > 110 │ 	font-family: Impact, "Arial Narrow", sans-serif !important;
+        │ 	                                                ^^^^^^^^^^
+    111 │ 	white-space: pre-line;
+    112 │ 	text-transform: uppercase !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    110 │ → font-family:·Impact,·"Arial·Narrow",·sans-serif·!important;
+        │                                                  ----------- 
+
+src/style.css:112:28 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    110 │ 	font-family: Impact, "Arial Narrow", sans-serif !important;
+    111 │ 	white-space: pre-line;
+  > 112 │ 	text-transform: uppercase !important;
+        │ 	                          ^^^^^^^^^^
+    113 │ 	font-weight: 900 !important;
+    114 │ 	line-height: 0.94 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    112 │ → text-transform:·uppercase·!important;
+        │                            ----------- 
+
+src/style.css:113:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    111 │ 	white-space: pre-line;
+    112 │ 	text-transform: uppercase !important;
+  > 113 │ 	font-weight: 900 !important;
+        │ 	                 ^^^^^^^^^^
+    114 │ 	line-height: 0.94 !important;
+    115 │ 	letter-spacing: 0.015em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    113 │ → font-weight:·900·!important;
+        │                   ----------- 
+
+src/style.css:114:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    112 │ 	text-transform: uppercase !important;
+    113 │ 	font-weight: 900 !important;
+  > 114 │ 	line-height: 0.94 !important;
+        │ 	                  ^^^^^^^^^^
+    115 │ 	letter-spacing: 0.015em !important;
+    116 │ 	font-size: clamp(54px, 6.8vw, 130px) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    114 │ → line-height:·0.94·!important;
+        │                    ----------- 
+
+src/style.css:115:26 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    113 │ 	font-weight: 900 !important;
+    114 │ 	line-height: 0.94 !important;
+  > 115 │ 	letter-spacing: 0.015em !important;
+        │ 	                        ^^^^^^^^^^
+    116 │ 	font-size: clamp(54px, 6.8vw, 130px) !important;
+    117 │ 	margin: 18px 0 22px !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    115 │ → letter-spacing:·0.015em·!important;
+        │                          ----------- 
+
+src/style.css:116:39 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    114 │ 	line-height: 0.94 !important;
+    115 │ 	letter-spacing: 0.015em !important;
+  > 116 │ 	font-size: clamp(54px, 6.8vw, 130px) !important;
+        │ 	                                     ^^^^^^^^^^
+    117 │ 	margin: 18px 0 22px !important;
+    118 │ 	color: var(--cream) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    116 │ → font-size:·clamp(54px,·6.8vw,·130px)·!important;
+        │                                       ----------- 
+
+src/style.css:117:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    115 │ 	letter-spacing: 0.015em !important;
+    116 │ 	font-size: clamp(54px, 6.8vw, 130px) !important;
+  > 117 │ 	margin: 18px 0 22px !important;
+        │ 	                    ^^^^^^^^^^
+    118 │ 	color: var(--cream) !important;
+    119 │ 	text-shadow: 0 4px 0 #10252b !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    117 │ → margin:·18px·0·22px·!important;
+        │                      ----------- 
+
+src/style.css:118:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    116 │ 	font-size: clamp(54px, 6.8vw, 130px) !important;
+    117 │ 	margin: 18px 0 22px !important;
+  > 118 │ 	color: var(--cream) !important;
+        │ 	                    ^^^^^^^^^^
+    119 │ 	text-shadow: 0 4px 0 #10252b !important;
+    120 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    118 │ → color:·var(--cream)·!important;
+        │                      ----------- 
+
+src/style.css:119:31 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    117 │ 	margin: 18px 0 22px !important;
+    118 │ 	color: var(--cream) !important;
+  > 119 │ 	text-shadow: 0 4px 0 #10252b !important;
+        │ 	                             ^^^^^^^^^^
+    120 │ }
+    121 │ .esh .esh-k {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    119 │ → text-shadow:·0·4px·0·#10252b·!important;
+        │                               ----------- 
+
+src/style.css:122:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    120 │ }
+    121 │ .esh .esh-k {
+  > 122 │ 	font-size: 0.65em !important;
+        │ 	                  ^^^^^^^^^^
+    123 │ 	font-weight: 700;
+    124 │ 	letter-spacing: 0.18em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    122 │ → font-size:·0.65em·!important;
+        │                    ----------- 
+
+src/style.css:124:25 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    122 │ 	font-size: 0.65em !important;
+    123 │ 	font-weight: 700;
+  > 124 │ 	letter-spacing: 0.18em !important;
+        │ 	                       ^^^^^^^^^^
+    125 │ 	text-transform: uppercase;
+    126 │ 	color: var(--gold) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    124 │ → letter-spacing:·0.18em·!important;
+        │                         ----------- 
+
+src/style.css:126:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    124 │ 	letter-spacing: 0.18em !important;
+    125 │ 	text-transform: uppercase;
+  > 126 │ 	color: var(--gold) !important;
+        │ 	                   ^^^^^^^^^^
+    127 │ }
+    128 │ .esh .esh-sub {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    126 │ → color:·var(--gold)·!important;
+        │                     ----------- 
+
+src/style.css:130:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    128 │ .esh .esh-sub {
+    129 │ 	max-width: 24em;
+  > 130 │ 	font-size: 0.9em !important;
+        │ 	                 ^^^^^^^^^^
+    131 │ 	line-height: 1.45;
+    132 │ 	color: #d5dfd3 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    130 │ → font-size:·0.9em·!important;
+        │                   ----------- 
+
+src/style.css:132:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    130 │ 	font-size: 0.9em !important;
+    131 │ 	line-height: 1.45;
+  > 132 │ 	color: #d5dfd3 !important;
+        │ 	               ^^^^^^^^^^
+    133 │ 	margin: 0 0 22px !important;
+    134 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    132 │ → color:·#d5dfd3·!important;
+        │                 ----------- 
+
+src/style.css:133:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    131 │ 	line-height: 1.45;
+    132 │ 	color: #d5dfd3 !important;
+  > 133 │ 	margin: 0 0 22px !important;
+        │ 	                 ^^^^^^^^^^
+    134 │ }
+    135 │ .esh .esh-btns {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    133 │ → margin:·0·0·22px·!important;
+        │                   ----------- 
+
+src/style.css:136:13 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    134 │ }
+    135 │ .esh .esh-btns {
+  > 136 │ 	gap: 0.4em !important;
+        │ 	           ^^^^^^^^^^
+    137 │ 	margin-top: 1em !important;
+    138 │ 	display: flex !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    136 │ → gap:·0.4em·!important;
+        │             ----------- 
+
+src/style.css:137:18 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    135 │ .esh .esh-btns {
+    136 │ 	gap: 0.4em !important;
+  > 137 │ 	margin-top: 1em !important;
+        │ 	                ^^^^^^^^^^
+    138 │ 	display: flex !important;
+    139 │ 	flex-wrap: wrap !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    137 │ → margin-top:·1em·!important;
+        │                  ----------- 
+
+src/style.css:138:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    136 │ 	gap: 0.4em !important;
+    137 │ 	margin-top: 1em !important;
+  > 138 │ 	display: flex !important;
+        │ 	              ^^^^^^^^^^
+    139 │ 	flex-wrap: wrap !important;
+    140 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    138 │ → display:·flex·!important;
+        │                ----------- 
+
+src/style.css:139:18 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    137 │ 	margin-top: 1em !important;
+    138 │ 	display: flex !important;
+  > 139 │ 	flex-wrap: wrap !important;
+        │ 	                ^^^^^^^^^^
+    140 │ }
+    141 │ .esh .esh-ttl .esh-btns {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    139 │ → flex-wrap:·wrap·!important;
+        │                  ----------- 
+
+src/style.css:142:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    140 │ }
+    141 │ .esh .esh-ttl .esh-btns {
+  > 142 │ 	display: grid !important;
+        │ 	              ^^^^^^^^^^
+    143 │ 	grid-template-columns: 1fr 1fr;
+    144 │ 	max-width: 20em;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    142 │ → display:·grid·!important;
+        │                ----------- 
+
+src/style.css:146:14 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    144 │ 	max-width: 20em;
+    145 │ 	width: 100%;
+  > 146 │ 	gap: 0.45em !important;
+        │ 	            ^^^^^^^^^^
+    147 │ }
+    148 │ .esh button {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    146 │ → gap:·0.45em·!important;
+        │              ----------- 
+
+src/style.css:149:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    147 │ }
+    148 │ .esh button {
+  > 149 │ 	border-radius: 2px !important;
+        │ 	                   ^^^^^^^^^^
+    150 │ 	border: 1px solid #6b8682 !important;
+    151 │ 	background: rgba(13, 39, 48, 0.9) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    149 │ → border-radius:·2px·!important;
+        │                     ----------- 
+
+src/style.css:150:28 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    148 │ .esh button {
+    149 │ 	border-radius: 2px !important;
+  > 150 │ 	border: 1px solid #6b8682 !important;
+        │ 	                          ^^^^^^^^^^
+    151 │ 	background: rgba(13, 39, 48, 0.9) !important;
+    152 │ 	padding: 0.62em 1.1em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    150 │ → border:·1px·solid·#6b8682·!important;
+        │                            ----------- 
+
+src/style.css:151:36 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    149 │ 	border-radius: 2px !important;
+    150 │ 	border: 1px solid #6b8682 !important;
+  > 151 │ 	background: rgba(13, 39, 48, 0.9) !important;
+        │ 	                                  ^^^^^^^^^^
+    152 │ 	padding: 0.62em 1.1em !important;
+    153 │ 	min-height: 2.7em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    151 │ → background:·rgba(13,·39,·48,·0.9)·!important;
+        │                                    ----------- 
+
+src/style.css:152:24 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    150 │ 	border: 1px solid #6b8682 !important;
+    151 │ 	background: rgba(13, 39, 48, 0.9) !important;
+  > 152 │ 	padding: 0.62em 1.1em !important;
+        │ 	                      ^^^^^^^^^^
+    153 │ 	min-height: 2.7em !important;
+    154 │ 	color: var(--cream) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    152 │ → padding:·0.62em·1.1em·!important;
+        │                        ----------- 
+
+src/style.css:153:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    151 │ 	background: rgba(13, 39, 48, 0.9) !important;
+    152 │ 	padding: 0.62em 1.1em !important;
+  > 153 │ 	min-height: 2.7em !important;
+        │ 	                  ^^^^^^^^^^
+    154 │ 	color: var(--cream) !important;
+    155 │ 	letter-spacing: 0.02em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    153 │ → min-height:·2.7em·!important;
+        │                    ----------- 
+
+src/style.css:154:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    152 │ 	padding: 0.62em 1.1em !important;
+    153 │ 	min-height: 2.7em !important;
+  > 154 │ 	color: var(--cream) !important;
+        │ 	                    ^^^^^^^^^^
+    155 │ 	letter-spacing: 0.02em !important;
+    156 │ 	font-weight: 700 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    154 │ → color:·var(--cream)·!important;
+        │                      ----------- 
+
+src/style.css:155:25 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    153 │ 	min-height: 2.7em !important;
+    154 │ 	color: var(--cream) !important;
+  > 155 │ 	letter-spacing: 0.02em !important;
+        │ 	                       ^^^^^^^^^^
+    156 │ 	font-weight: 700 !important;
+    157 │ 	box-shadow: none !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    155 │ → letter-spacing:·0.02em·!important;
+        │                         ----------- 
+
+src/style.css:156:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    154 │ 	color: var(--cream) !important;
+    155 │ 	letter-spacing: 0.02em !important;
+  > 156 │ 	font-weight: 700 !important;
+        │ 	                 ^^^^^^^^^^
+    157 │ 	box-shadow: none !important;
+    158 │ 	transition:
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    156 │ → font-weight:·700·!important;
+        │                   ----------- 
+
+src/style.css:157:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    155 │ 	letter-spacing: 0.02em !important;
+    156 │ 	font-weight: 700 !important;
+  > 157 │ 	box-shadow: none !important;
+        │ 	                 ^^^^^^^^^^
+    158 │ 	transition:
+    159 │ 		background 0.15s,
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    157 │ → box-shadow:·none·!important;
+        │                   ----------- 
+
+src/style.css:163:26 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    161 │ }
+    162 │ .esh button.pri {
+  > 163 │ 	background: var(--gold) !important;
+        │ 	                        ^^^^^^^^^^
+    164 │ 	color: #162a2b !important;
+    165 │ 	border-color: var(--gold) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    163 │ → background:·var(--gold)·!important;
+        │                          ----------- 
+
+src/style.css:164:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    162 │ .esh button.pri {
+    163 │ 	background: var(--gold) !important;
+  > 164 │ 	color: #162a2b !important;
+        │ 	               ^^^^^^^^^^
+    165 │ 	border-color: var(--gold) !important;
+    166 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    164 │ → color:·#162a2b·!important;
+        │                 ----------- 
+
+src/style.css:165:28 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    163 │ 	background: var(--gold) !important;
+    164 │ 	color: #162a2b !important;
+  > 165 │ 	border-color: var(--gold) !important;
+        │ 	                          ^^^^^^^^^^
+    166 │ }
+    167 │ .esh button:hover,
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    165 │ → border-color:·var(--gold)·!important;
+        │                            ----------- 
+
+src/style.css:169:34 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    167 │ .esh button:hover,
+    168 │ .esh button:focus-visible {
+  > 169 │ 	outline: 2px solid var(--cream) !important;
+        │ 	                                ^^^^^^^^^^
+    170 │ 	outline-offset: 3px !important;
+    171 │ 	background: #294b53 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    169 │ → outline:·2px·solid·var(--cream)·!important;
+        │                                  ----------- 
+
+src/style.css:170:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    168 │ .esh button:focus-visible {
+    169 │ 	outline: 2px solid var(--cream) !important;
+  > 170 │ 	outline-offset: 3px !important;
+        │ 	                    ^^^^^^^^^^
+    171 │ 	background: #294b53 !important;
+    172 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    170 │ → outline-offset:·3px·!important;
+        │                      ----------- 
+
+src/style.css:171:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    169 │ 	outline: 2px solid var(--cream) !important;
+    170 │ 	outline-offset: 3px !important;
+  > 171 │ 	background: #294b53 !important;
+        │ 	                    ^^^^^^^^^^
+    172 │ }
+    173 │ .esh button.pri:focus-visible,
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    171 │ → background:·#294b53·!important;
+        │                      ----------- 
+
+src/style.css:175:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    173 │ .esh button.pri:focus-visible,
+    174 │ .esh button.pri:hover {
+  > 175 │ 	background: #f7d79f !important;
+        │ 	                    ^^^^^^^^^^
+    176 │ }
+    177 │ .esh .esh-tags {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    175 │ → background:·#f7d79f·!important;
+        │                      ----------- 
+
+src/style.css:180:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    178 │ 	display: flex;
+    179 │ 	gap: 1em;
+  > 180 │ 	margin-top: 1.5em !important;
+        │ 	                  ^^^^^^^^^^
+    181 │ 	font-size: 0.48em !important;
+    182 │ 	letter-spacing: 0.1em;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    180 │ → margin-top:·1.5em·!important;
+        │                    ----------- 
+
+src/style.css:181:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    179 │ 	gap: 1em;
+    180 │ 	margin-top: 1.5em !important;
+  > 181 │ 	font-size: 0.48em !important;
+        │ 	                  ^^^^^^^^^^
+    182 │ 	letter-spacing: 0.1em;
+    183 │ 	opacity: 0.8;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    181 │ → font-size:·0.48em·!important;
+        │                    ----------- 
+
+src/style.css:186:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    184 │ }
+    185 │ .esh .esh-tags span {
+  > 186 │ 	background: none !important;
+        │ 	                 ^^^^^^^^^^
+    187 │ 	padding: 0 !important;
+    188 │ 	border: 0 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    186 │ → background:·none·!important;
+        │                   ----------- 
+
+src/style.css:187:13 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    185 │ .esh .esh-tags span {
+    186 │ 	background: none !important;
+  > 187 │ 	padding: 0 !important;
+        │ 	           ^^^^^^^^^^
+    188 │ 	border: 0 !important;
+    189 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    187 │ → padding:·0·!important;
+        │             ----------- 
+
+src/style.css:188:12 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    186 │ 	background: none !important;
+    187 │ 	padding: 0 !important;
+  > 188 │ 	border: 0 !important;
+        │ 	          ^^^^^^^^^^
+    189 │ }
+    190 │ .esh .esh-ttl .esh-m {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    188 │ → border:·0·!important;
+        │            ----------- 
+
+src/style.css:191:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    189 │ }
+    190 │ .esh .esh-ttl .esh-m {
+  > 191 │ 	font-size: 0.47em !important;
+        │ 	                  ^^^^^^^^^^
+    192 │ 	line-height: 1.5;
+    193 │ 	max-width: 35em;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    191 │ → font-size:·0.47em·!important;
+        │                    ----------- 
+
+src/style.css:198:27 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    196 │ }
+    197 │ .esh .esh-mod {
+  > 198 │ 	width: min(93vw, 1300px) !important;
+        │ 	                         ^^^^^^^^^^
+    199 │ 	max-width: min(93vw, 1300px) !important;
+    200 │ 	max-height: 90vh !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    198 │ → width:·min(93vw,·1300px)·!important;
+        │                           ----------- 
+
+src/style.css:199:31 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    197 │ .esh .esh-mod {
+    198 │ 	width: min(93vw, 1300px) !important;
+  > 199 │ 	max-width: min(93vw, 1300px) !important;
+        │ 	                             ^^^^^^^^^^
+    200 │ 	max-height: 90vh !important;
+    201 │ 	padding: 1.3em 1.6em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    199 │ → max-width:·min(93vw,·1300px)·!important;
+        │                               ----------- 
+
+src/style.css:200:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    198 │ 	width: min(93vw, 1300px) !important;
+    199 │ 	max-width: min(93vw, 1300px) !important;
+  > 200 │ 	max-height: 90vh !important;
+        │ 	                 ^^^^^^^^^^
+    201 │ 	padding: 1.3em 1.6em !important;
+    202 │ 	background: linear-gradient(150deg, #173943, #0c252e) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    200 │ → max-height:·90vh·!important;
+        │                   ----------- 
+
+src/style.css:201:23 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    199 │ 	max-width: min(93vw, 1300px) !important;
+    200 │ 	max-height: 90vh !important;
+  > 201 │ 	padding: 1.3em 1.6em !important;
+        │ 	                     ^^^^^^^^^^
+    202 │ 	background: linear-gradient(150deg, #173943, #0c252e) !important;
+    203 │ 	border: 1px solid #64817c !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    201 │ → padding:·1.3em·1.6em·!important;
+        │                       ----------- 
+
+src/style.css:202:56 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    200 │ 	max-height: 90vh !important;
+    201 │ 	padding: 1.3em 1.6em !important;
+  > 202 │ 	background: linear-gradient(150deg, #173943, #0c252e) !important;
+        │ 	                                                      ^^^^^^^^^^
+    203 │ 	border: 1px solid #64817c !important;
+    204 │ 	border-top: 3px solid var(--gold) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    202 │ → background:·linear-gradient(150deg,·#173943,·#0c252e)·!important;
+        │                                                        ----------- 
+
+src/style.css:203:28 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    201 │ 	padding: 1.3em 1.6em !important;
+    202 │ 	background: linear-gradient(150deg, #173943, #0c252e) !important;
+  > 203 │ 	border: 1px solid #64817c !important;
+        │ 	                          ^^^^^^^^^^
+    204 │ 	border-top: 3px solid var(--gold) !important;
+    205 │ 	border-radius: 3px !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    203 │ → border:·1px·solid·#64817c·!important;
+        │                            ----------- 
+
+src/style.css:204:36 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    202 │ 	background: linear-gradient(150deg, #173943, #0c252e) !important;
+    203 │ 	border: 1px solid #64817c !important;
+  > 204 │ 	border-top: 3px solid var(--gold) !important;
+        │ 	                                  ^^^^^^^^^^
+    205 │ 	border-radius: 3px !important;
+    206 │ 	box-shadow: 0 20px 80px #00131b90 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    204 │ → border-top:·3px·solid·var(--gold)·!important;
+        │                                    ----------- 
+
+src/style.css:205:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    203 │ 	border: 1px solid #64817c !important;
+    204 │ 	border-top: 3px solid var(--gold) !important;
+  > 205 │ 	border-radius: 3px !important;
+        │ 	                   ^^^^^^^^^^
+    206 │ 	box-shadow: 0 20px 80px #00131b90 !important;
+    207 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    205 │ → border-radius:·3px·!important;
+        │                     ----------- 
+
+src/style.css:206:36 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    204 │ 	border-top: 3px solid var(--gold) !important;
+    205 │ 	border-radius: 3px !important;
+  > 206 │ 	box-shadow: 0 20px 80px #00131b90 !important;
+        │ 	                                  ^^^^^^^^^^
+    207 │ }
+    208 │ .esh h2 {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    206 │ → box-shadow:·0·20px·80px·#00131b90·!important;
+        │                                    ----------- 
+
+src/style.css:209:50 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    207 │ }
+    208 │ .esh h2 {
+  > 209 │ 	font-family: Impact, "Arial Narrow", sans-serif !important;
+        │ 	                                                ^^^^^^^^^^
+    210 │ 	text-transform: uppercase;
+    211 │ 	font-weight: 700 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    209 │ → font-family:·Impact,·"Arial·Narrow",·sans-serif·!important;
+        │                                                  ----------- 
+
+src/style.css:211:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    209 │ 	font-family: Impact, "Arial Narrow", sans-serif !important;
+    210 │ 	text-transform: uppercase;
+  > 211 │ 	font-weight: 700 !important;
+        │ 	                 ^^^^^^^^^^
+    212 │ 	font-size: 1.9em !important;
+    213 │ 	letter-spacing: 0.035em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    211 │ → font-weight:·700·!important;
+        │                   ----------- 
+
+src/style.css:212:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    210 │ 	text-transform: uppercase;
+    211 │ 	font-weight: 700 !important;
+  > 212 │ 	font-size: 1.9em !important;
+        │ 	                 ^^^^^^^^^^
+    213 │ 	letter-spacing: 0.035em !important;
+    214 │ 	line-height: 1.1;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    212 │ → font-size:·1.9em·!important;
+        │                   ----------- 
+
+src/style.css:213:26 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    211 │ 	font-weight: 700 !important;
+    212 │ 	font-size: 1.9em !important;
+  > 213 │ 	letter-spacing: 0.035em !important;
+        │ 	                        ^^^^^^^^^^
+    214 │ 	line-height: 1.1;
+    215 │ 	margin: 0 0 0.45em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    213 │ → letter-spacing:·0.035em·!important;
+        │                          ----------- 
+
+src/style.css:215:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    213 │ 	letter-spacing: 0.035em !important;
+    214 │ 	line-height: 1.1;
+  > 215 │ 	margin: 0 0 0.45em !important;
+        │ 	                   ^^^^^^^^^^
+    216 │ }
+    217 │ .esh .esh-m {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    215 │ → margin:·0·0·0.45em·!important;
+        │                     ----------- 
+
+src/style.css:218:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    216 │ }
+    217 │ .esh .esh-m {
+  > 218 │ 	font-size: 0.73em !important;
+        │ 	                  ^^^^^^^^^^
+    219 │ 	color: #c0d0c7 !important;
+    220 │ 	max-width: 56em;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    218 │ → font-size:·0.73em·!important;
+        │                    ----------- 
+
+src/style.css:219:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    217 │ .esh .esh-m {
+    218 │ 	font-size: 0.73em !important;
+  > 219 │ 	color: #c0d0c7 !important;
+        │ 	               ^^^^^^^^^^
+    220 │ 	max-width: 56em;
+    221 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    219 │ → color:·#c0d0c7·!important;
+        │                 ----------- 
+
+src/style.css:223:24 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    221 │ }
+    222 │ .esh .esh-row {
+  > 223 │ 	padding: 0.45em 0.1em !important;
+        │ 	                      ^^^^^^^^^^
+    224 │ 	border-bottom-color: #3c5c5d !important;
+    225 │ 	gap: 1em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    223 │ → padding:·0.45em·0.1em·!important;
+        │                        ----------- 
+
+src/style.css:224:31 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    222 │ .esh .esh-row {
+    223 │ 	padding: 0.45em 0.1em !important;
+  > 224 │ 	border-bottom-color: #3c5c5d !important;
+        │ 	                             ^^^^^^^^^^
+    225 │ 	gap: 1em !important;
+    226 │ 	font-size: 0.8em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    224 │ → border-bottom-color:·#3c5c5d·!important;
+        │                               ----------- 
+
+src/style.css:225:11 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    223 │ 	padding: 0.45em 0.1em !important;
+    224 │ 	border-bottom-color: #3c5c5d !important;
+  > 225 │ 	gap: 1em !important;
+        │ 	         ^^^^^^^^^^
+    226 │ 	font-size: 0.8em !important;
+    227 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    225 │ → gap:·1em·!important;
+        │           ----------- 
+
+src/style.css:226:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    224 │ 	border-bottom-color: #3c5c5d !important;
+    225 │ 	gap: 1em !important;
+  > 226 │ 	font-size: 0.8em !important;
+        │ 	                 ^^^^^^^^^^
+    227 │ }
+    228 │ .esh input[type="range"] {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    226 │ → font-size:·0.8em·!important;
+        │                   ----------- 
+
+src/style.css:230:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    228 │ .esh input[type="range"] {
+    229 │ 	accent-color: var(--gold);
+  > 230 │ 	min-width: 6em !important;
+        │ 	               ^^^^^^^^^^
+    231 │ }
+    232 │ .esh .esh-grid {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    230 │ → min-width:·6em·!important;
+        │                 ----------- 
+
+src/style.css:233:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    231 │ }
+    232 │ .esh .esh-grid {
+  > 233 │ 	font-size: 0.72em !important;
+        │ 	                  ^^^^^^^^^^
+    234 │ 	gap: 0.4em 1em !important;
+    235 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    233 │ → font-size:·0.72em·!important;
+        │                    ----------- 
+
+src/style.css:234:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    232 │ .esh .esh-grid {
+    233 │ 	font-size: 0.72em !important;
+  > 234 │ 	gap: 0.4em 1em !important;
+        │ 	               ^^^^^^^^^^
+    235 │ }
+    236 │ .esh .esh-stats {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    234 │ → gap:·0.4em·1em·!important;
+        │                 ----------- 
+
+src/style.css:237:40 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    235 │ }
+    236 │ .esh .esh-stats {
+  > 237 │ 	grid-template-columns: repeat(3, 1fr) !important;
+        │ 	                                      ^^^^^^^^^^
+    238 │ 	gap: 0.5em !important;
+    239 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    237 │ → grid-template-columns:·repeat(3,·1fr)·!important;
+        │                                        ----------- 
+
+src/style.css:238:13 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    236 │ .esh .esh-stats {
+    237 │ 	grid-template-columns: repeat(3, 1fr) !important;
+  > 238 │ 	gap: 0.5em !important;
+        │ 	           ^^^^^^^^^^
+    239 │ }
+    240 │ .esh .esh-stats b {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    238 │ → gap:·0.5em·!important;
+        │             ----------- 
+
+src/style.css:245:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    243 │ }
+    244 │ .esh .esh-stats small {
+  > 245 │ 	font-size: 0.55em !important;
+        │ 	                  ^^^^^^^^^^
+    246 │ }
+    247 │ .esh .esh-med {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    245 │ → font-size:·0.55em·!important;
+        │                    ----------- 
+
+src/style.css:248:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    246 │ }
+    247 │ .esh .esh-med {
+  > 248 │ 	font-size: 0.6em !important;
+        │ 	                 ^^^^^^^^^^
+    249 │ }
+    250 │ .esh .esh-nav {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    248 │ → font-size:·0.6em·!important;
+        │                   ----------- 
+
+src/style.css:251:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    249 │ }
+    250 │ .esh .esh-nav {
+  > 251 │ 	background: #0e2931 !important;
+        │ 	                    ^^^^^^^^^^
+    252 │ 	min-height: 0 !important;
+    253 │ 	width: 48px !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    251 │ → background:·#0e2931·!important;
+        │                      ----------- 
+
+src/style.css:252:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    250 │ .esh .esh-nav {
+    251 │ 	background: #0e2931 !important;
+  > 252 │ 	min-height: 0 !important;
+        │ 	              ^^^^^^^^^^
+    253 │ 	width: 48px !important;
+    254 │ 	height: 48px !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    252 │ → min-height:·0·!important;
+        │                ----------- 
+
+src/style.css:253:14 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    251 │ 	background: #0e2931 !important;
+    252 │ 	min-height: 0 !important;
+  > 253 │ 	width: 48px !important;
+        │ 	            ^^^^^^^^^^
+    254 │ 	height: 48px !important;
+    255 │ 	padding: 8px !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    253 │ → width:·48px·!important;
+        │              ----------- 
+
+src/style.css:254:15 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    252 │ 	min-height: 0 !important;
+    253 │ 	width: 48px !important;
+  > 254 │ 	height: 48px !important;
+        │ 	             ^^^^^^^^^^
+    255 │ 	padding: 8px !important;
+    256 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    254 │ → height:·48px·!important;
+        │               ----------- 
+
+src/style.css:255:15 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    253 │ 	width: 48px !important;
+    254 │ 	height: 48px !important;
+  > 255 │ 	padding: 8px !important;
+        │ 	             ^^^^^^^^^^
+    256 │ }
+    257 │ .esh .esh-emb {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    255 │ → padding:·8px·!important;
+        │               ----------- 
+
+src/style.css:259:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    257 │ .esh .esh-emb {
+    258 │ 	color: var(--gold);
+  > 259 │ 	font-size: 2em !important;
+        │ 	               ^^^^^^^^^^
+    260 │ }
+    261 │ .esh .esh-sec {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    259 │ → font-size:·2em·!important;
+        │                 ----------- 
+
+src/style.css:262:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    260 │ }
+    261 │ .esh .esh-sec {
+  > 262 │ 	margin-top: 1.3em !important;
+        │ 	                  ^^^^^^^^^^
+    263 │ }
+    264 │ .esh kbd {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    262 │ → margin-top:·1.3em·!important;
+        │                    ----------- 
+
+src/style.css:266:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    264 │ .esh kbd {
+    265 │ 	border: 1px solid #69857d;
+  > 266 │ 	background: #25454c !important;
+        │ 	                    ^^^^^^^^^^
+    267 │ 	border-radius: 2px !important;
+    268 │ 	color: var(--gold);
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    266 │ → background:·#25454c·!important;
+        │                      ----------- 
+
+src/style.css:267:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    265 │ 	border: 1px solid #69857d;
+    266 │ 	background: #25454c !important;
+  > 267 │ 	border-radius: 2px !important;
+        │ 	                   ^^^^^^^^^^
+    268 │ 	color: var(--gold);
+    269 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    267 │ → border-radius:·2px·!important;
+        │                     ----------- 
+
+src/style.css:340:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    338 │ }
+    339 │ .dev-tools button {
+  > 340 │ 	font-size: 0.6em !important;
+        │ 	                 ^^^^^^^^^^
+    341 │ 	padding: 0.6em !important;
+    342 │ 	min-height: 2.8em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    340 │ → font-size:·0.6em·!important;
+        │                   ----------- 
+
+src/style.css:341:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    339 │ .dev-tools button {
+    340 │ 	font-size: 0.6em !important;
+  > 341 │ 	padding: 0.6em !important;
+        │ 	               ^^^^^^^^^^
+    342 │ 	min-height: 2.8em !important;
+    343 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    341 │ → padding:·0.6em·!important;
+        │                 ----------- 
+
+src/style.css:342:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    340 │ 	font-size: 0.6em !important;
+    341 │ 	padding: 0.6em !important;
+  > 342 │ 	min-height: 2.8em !important;
+        │ 	                  ^^^^^^^^^^
+    343 │ }
+    344 │ .dev-note {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    342 │ → min-height:·2.8em·!important;
+        │                    ----------- 
+
+src/style.css:797:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    795 │ .esh .esh-hb,
+    796 │ .esh .esh-keys {
+  > 797 │ 	display: none !important;
+        │ 	              ^^^^^^^^^^
+    798 │ }
+    799 │ body:after {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    797 │ → display:·none·!important;
+        │                ----------- 
+
+src/style.css:834:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    832 │ }
+    833 │ .mission-editor button {
+  > 834 │ 	font-size: 0.8em !important;
+        │ 	                 ^^^^^^^^^^
+    835 │ }
+    836 │ .hud-top button.menu-toggle {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    834 │ → font-size:·0.8em·!important;
+        │                   ----------- 
+
+src/style.css:848:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    846 │ }
+    847 │ .esh .esh-corner {
+  > 848 │ 	display: none !important;
+        │ 	              ^^^^^^^^^^
+    849 │ }
+    850 │ @media (max-width: 800px) {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    848 │ → display:·none·!important;
+        │                ----------- 
+
+src/style.css:852:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    850 │ @media (max-width: 800px) {
+    851 │ 	.esh {
+  > 852 │ 		font-size: 18px !important;
+        │ 		                ^^^^^^^^^^
+    853 │ 	}
+    854 │ 	.esh .esh-ttl {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    852 │ → → font-size:·18px·!important;
+        │                    ----------- 
+
+src/style.css:855:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    853 │ 	}
+    854 │ 	.esh .esh-ttl {
+  > 855 │ 		padding: 8vh 7vw !important;
+        │ 		                 ^^^^^^^^^^
+    856 │ 		align-items: flex-end !important;
+    857 │ 		background: linear-gradient(
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    855 │ → → padding:·8vh·7vw·!important;
+        │                     ----------- 
+
+src/style.css:856:25 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    854 │ 	.esh .esh-ttl {
+    855 │ 		padding: 8vh 7vw !important;
+  > 856 │ 		align-items: flex-end !important;
+        │ 		                      ^^^^^^^^^^
+    857 │ 		background: linear-gradient(
+    858 │ 			0deg,
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    856 │ → → align-items:·flex-end·!important;
+        │                          ----------- 
+
+src/style.css:868:38 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    866 │ 	}
+    867 │ 	.esh h1 {
+  > 868 │ 		font-size: clamp(48px, 12vw, 86px) !important;
+        │ 		                                   ^^^^^^^^^^
+    869 │ 	}
+    870 │ 	.esh .esh-sub {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    868 │ → → font-size:·clamp(48px,·12vw,·86px)·!important;
+        │                                       ----------- 
+
+src/style.css:871:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    869 │ 	}
+    870 │ 	.esh .esh-sub {
+  > 871 │ 		font-size: 0.85em !important;
+        │ 		                  ^^^^^^^^^^
+    872 │ 		max-width: 28em;
+    873 │ 		margin-bottom: 4px !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    871 │ → → font-size:·0.85em·!important;
+        │                      ----------- 
+
+src/style.css:873:22 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    871 │ 		font-size: 0.85em !important;
+    872 │ 		max-width: 28em;
+  > 873 │ 		margin-bottom: 4px !important;
+        │ 		                   ^^^^^^^^^^
+    874 │ 	}
+    875 │ 	.esh .esh-ttl .esh-btns {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    873 │ → → margin-bottom:·4px·!important;
+        │                       ----------- 
+
+src/style.css:878:12 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    876 │ 		max-width: 100%;
+    877 │ 		grid-template-columns: 1fr 1fr;
+  > 878 │ 		gap: 9px !important;
+        │ 		         ^^^^^^^^^^
+    879 │ 	}
+    880 │ 	.esh .esh-tags {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    878 │ → → gap:·9px·!important;
+        │             ----------- 
+
+src/style.css:881:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    879 │ 	}
+    880 │ 	.esh .esh-tags {
+  > 881 │ 		margin-top: 1em !important;
+        │ 		                ^^^^^^^^^^
+    882 │ 		font-size: 0.55em !important;
+    883 │ 	}
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    881 │ → → margin-top:·1em·!important;
+        │                    ----------- 
+
+src/style.css:882:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    880 │ 	.esh .esh-tags {
+    881 │ 		margin-top: 1em !important;
+  > 882 │ 		font-size: 0.55em !important;
+        │ 		                  ^^^^^^^^^^
+    883 │ 	}
+    884 │ 	.esh .esh-mod {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    882 │ → → font-size:·0.55em·!important;
+        │                      ----------- 
+
+src/style.css:885:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    883 │ 	}
+    884 │ 	.esh .esh-mod {
+  > 885 │ 		padding: 1em !important;
+        │ 		             ^^^^^^^^^^
+    886 │ 		max-height: 91vh !important;
+    887 │ 	}
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    885 │ → → padding:·1em·!important;
+        │                 ----------- 
+
+src/style.css:886:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    884 │ 	.esh .esh-mod {
+    885 │ 		padding: 1em !important;
+  > 886 │ 		max-height: 91vh !important;
+        │ 		                 ^^^^^^^^^^
+    887 │ 	}
+    888 │ 	.esh .esh-sh {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    886 │ → → max-height:·91vh·!important;
+        │                     ----------- 
+
+src/style.css:892:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    890 │ 	}
+    891 │ 	.esh h2 {
+  > 892 │ 		font-size: 1.7em !important;
+        │ 		                 ^^^^^^^^^^
+    893 │ 	}
+    894 │ 	.brief-grid {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    892 │ → → font-size:·1.7em·!important;
+        │                     ----------- 
+
+src/style.css:908:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    906 │ 	}
+    907 │ 	.esh .esh-mod .esh-btns {
+  > 908 │ 		margin-top: 0.6em !important;
+        │ 		                  ^^^^^^^^^^
+    909 │ 	}
+    910 │ 	.esh .esh-mod .esh-btns button {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    908 │ → → margin-top:·0.6em·!important;
+        │                      ----------- 
+
+src/style.css:911:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    909 │ 	}
+    910 │ 	.esh .esh-mod .esh-btns button {
+  > 911 │ 		font-size: 0.8em !important;
+        │ 		                 ^^^^^^^^^^
+    912 │ 		min-height: 2.8em !important;
+    913 │ 		padding: 0.6em 0.8em !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    911 │ → → font-size:·0.8em·!important;
+        │                     ----------- 
+
+src/style.css:912:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    910 │ 	.esh .esh-mod .esh-btns button {
+    911 │ 		font-size: 0.8em !important;
+  > 912 │ 		min-height: 2.8em !important;
+        │ 		                  ^^^^^^^^^^
+    913 │ 		padding: 0.6em 0.8em !important;
+    914 │ 	}
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    912 │ → → min-height:·2.8em·!important;
+        │                      ----------- 
+
+src/style.css:913:24 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    911 │ 		font-size: 0.8em !important;
+    912 │ 		min-height: 2.8em !important;
+  > 913 │ 		padding: 0.6em 0.8em !important;
+        │ 		                     ^^^^^^^^^^
+    914 │ 	}
+    915 │ 	.esh .esh-row {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    913 │ → → padding:·0.6em·0.8em·!important;
+        │                         ----------- 
+
+src/style.css:916:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    914 │ 	}
+    915 │ 	.esh .esh-row {
+  > 916 │ 		font-size: 0.78em !important;
+        │ 		                  ^^^^^^^^^^
+    917 │ 	}
+    918 │ 	.esh .esh-grid {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    916 │ → → font-size:·0.78em·!important;
+        │                      ----------- 
+
+src/style.css:919:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    917 │ 	}
+    918 │ 	.esh .esh-grid {
+  > 919 │ 		font-size: 0.7em !important;
+        │ 		                 ^^^^^^^^^^
+    920 │ 	}
+    921 │ 	.radio {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    919 │ → → font-size:·0.7em·!important;
+        │                     ----------- 
+
+src/style.css:964:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    962 │ @media (max-height: 620px) and (min-width: 801px) {
+    963 │ 	.esh {
+  > 964 │ 		font-size: 20px !important;
+        │ 		                ^^^^^^^^^^
+    965 │ 	}
+    966 │ 	.esh h1 {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    964 │ → → font-size:·20px·!important;
+        │                    ----------- 
+
+src/style.css:967:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    965 │ 	}
+    966 │ 	.esh h1 {
+  > 967 │ 		font-size: 12vh !important;
+        │ 		                ^^^^^^^^^^
+    968 │ 	}
+    969 │ 	.esh .esh-sub {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    967 │ → → font-size:·12vh·!important;
+        │                    ----------- 
+
+src/style.css:970:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    968 │ 	}
+    969 │ 	.esh .esh-sub {
+  > 970 │ 		font-size: 0.8em !important;
+        │ 		                 ^^^^^^^^^^
+    971 │ 	}
+    972 │ 	.esh .esh-btns {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    970 │ → → font-size:·0.8em·!important;
+        │                     ----------- 
+
+src/style.css:973:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    971 │ 	}
+    972 │ 	.esh .esh-btns {
+  > 973 │ 		margin-top: 0.5em !important;
+        │ 		                  ^^^^^^^^^^
+    974 │ 	}
+    975 │ 	.esh .esh-tags {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    973 │ → → margin-top:·0.5em·!important;
+        │                      ----------- 
+
+src/style.css:976:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    974 │ 	}
+    975 │ 	.esh .esh-tags {
+  > 976 │ 		margin-top: 0.5em !important;
+        │ 		                  ^^^^^^^^^^
+    977 │ 	}
+    978 │ 	.map-board svg {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    976 │ → → margin-top:·0.5em·!important;
+        │                      ----------- 
+
+src/style.css:988:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    986 │ 	}
+    987 │ 	.esh .esh-mod {
+  > 988 │ 		max-height: 94vh !important;
+        │ 		                 ^^^^^^^^^^
+    989 │ 	}
+    990 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    988 │ → → max-height:·94vh·!important;
+        │                     ----------- 
+
+src/style.css:993:44 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    991 │ /* Native shell buttons inherit TV-sized type; the source theme fixes them at 13px. */
+    992 │ .esh button {
+  > 993 │ 	font-family: Arial, Helvetica, sans-serif !important;
+        │ 	                                          ^^^^^^^^^^
+    994 │ 	font-size: 0.82em !important;
+    995 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    993 │ → font-family:·Arial,·Helvetica,·sans-serif·!important;
+        │                                            ----------- 
+
+src/style.css:994:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    992 │ .esh button {
+    993 │ 	font-family: Arial, Helvetica, sans-serif !important;
+  > 994 │ 	font-size: 0.82em !important;
+        │ 	                  ^^^^^^^^^^
+    995 │ }
+    996 │ .esh h1 {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    994 │ → font-size:·0.82em·!important;
+        │                    ----------- 
+
+src/style.css:997:39 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    995 │ }
+    996 │ .esh h1 {
+  > 997 │ 	font-size: clamp(54px, 5.4vw, 104px) !important;
+        │ 	                                     ^^^^^^^^^^
+    998 │ 	letter-spacing: -0.015em !important;
+    999 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    997 │ → font-size:·clamp(54px,·5.4vw,·104px)·!important;
+        │                                       ----------- 
+
+src/style.css:998:27 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+     996 │ .esh h1 {
+     997 │ 	font-size: clamp(54px, 5.4vw, 104px) !important;
+   > 998 │ 	letter-spacing: -0.015em !important;
+         │ 	                         ^^^^^^^^^^
+     999 │ }
+    1000 │ .esh .esh-ttl .esh-btns {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    998 │ → letter-spacing:·-0.015em·!important;
+        │                           ----------- 
+
+src/style.css:1007:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    1005 │ }
+    1006 │ .esh .esh-ttl .esh-btns button {
+  > 1007 │ 	min-height: 2.6em !important;
+         │ 	                  ^^^^^^^^^^
+    1008 │ }
+    1009 │ .esh .esh-btns .pri {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    1007 │ → min-height:·2.6em·!important;
+         │                    ----------- 
+
+src/style.css:1010:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    1008 │ }
+    1009 │ .esh .esh-btns .pri {
+  > 1010 │ 	font-size: 0.86em !important;
+         │ 	                  ^^^^^^^^^^
+    1011 │ }
+    1012 │ .esh .esh-ttl .esh-sub {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    1010 │ → font-size:·0.86em·!important;
+         │                    ----------- 
+
+src/style.css:1013:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    1011 │ }
+    1012 │ .esh .esh-ttl .esh-sub {
+  > 1013 │ 	font-style: normal !important;
+         │ 	                   ^^^^^^^^^^
+    1014 │ }
+    1015 │ .esh .brief-copy {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    1013 │ → font-style:·normal·!important;
+         │                     ----------- 
+
+src/style.css:1022:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    1020 │ }
+    1021 │ .esh .credit-content button {
+  > 1022 │ 	font-size: 0.7em !important;
+         │ 	                 ^^^^^^^^^^
+    1023 │ }
+    1024 │ @media (max-width: 800px) {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    1022 │ → font-size:·0.7em·!important;
+         │                   ----------- 
+
+src/style.css:1026:38 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    1024 │ @media (max-width: 800px) {
+    1025 │ 	.esh h1 {
+  > 1026 │ 		font-size: clamp(48px, 11vw, 86px) !important;
+         │ 		                                   ^^^^^^^^^^
+    1027 │ 	}
+    1028 │ 	.esh .esh-ttl > div {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    1026 │ → → font-size:·clamp(48px,·11vw,·86px)·!important;
+         │                                       ----------- 
+
+src/style.css:1032:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    1030 │ 	}
+    1031 │ 	.esh .esh-ttl .esh-btns button {
+  > 1032 │ 		font-size: 0.85em !important;
+         │ 		                  ^^^^^^^^^^
+    1033 │ 	}
+    1034 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    1032 │ → → font-size:·0.85em·!important;
+         │                      ----------- 
+
+src/style.css:217:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 0)
+  
+    215 │ 	margin: 0 0 0.45em !important;
+    216 │ }
+  > 217 │ .esh .esh-m {
+        │ ^^^^^^^^^^^
+    218 │ 	font-size: 0.73em !important;
+    219 │ 	color: #c0d0c7 !important;
+  
+  i This selector specificity is (0, 3, 0)
+  
+    188 │ 	border: 0 !important;
+    189 │ }
+  > 190 │ .esh .esh-ttl .esh-m {
+        │ ^^^^^^^^^^^^^^^^^^^^
+    191 │ 	font-size: 0.47em !important;
+    192 │ 	line-height: 1.5;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:244:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 1)
+  
+    242 │ 	color: var(--gold);
+    243 │ }
+  > 244 │ .esh .esh-stats small {
+        │ ^^^^^^^^^^^^^^^^^^^^^
+    245 │ 	font-size: 0.55em !important;
+    246 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  > 61 │ #loading small {
+       │ ^^^^^^^^^^^^^^
+    62 │ 	color: #a9bcb6;
+    63 │ 	letter-spacing: 0.06em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:322:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    320 │ 	padding-top: 0.6em;
+    321 │ }
+  > 322 │ .loadout strong {
+        │ ^^^^^^^^^^^^^^^
+    323 │ 	color: var(--gold);
+    324 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    56 │ 	letter-spacing: 0.16em;
+    57 │ }
+  > 58 │ #loading strong {
+       │ ^^^^^^^^^^^^^^^
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:415:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    413 │ 	font-weight: bold;
+    414 │ }
+  > 415 │ .objective b {
+        │ ^^^^^^^^^^^^
+    416 │ 	display: block;
+    417 │ 	font-size: 1.05em;
+  
+  i This selector specificity is (0, 2, 1)
+  
+    238 │ 	gap: 0.5em !important;
+    239 │ }
+  > 240 │ .esh .esh-stats b {
+        │ ^^^^^^^^^^^^^^^^^
+    241 │ 	font-size: 1.5em !important;
+    242 │ 	color: var(--gold);
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:440:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    438 │ 	display: block;
+    439 │ }
+  > 440 │ .vital strong {
+        │ ^^^^^^^^^^^^^
+    441 │ 	font-size: 1.1em;
+    442 │ 	letter-spacing: 0.03em;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    56 │ 	letter-spacing: 0.16em;
+    57 │ }
+  > 58 │ #loading strong {
+       │ ^^^^^^^^^^^^^^^
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:471:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    469 │ 	color: var(--gold);
+    470 │ }
+  > 471 │ .seat-hud b {
+        │ ^^^^^^^^^^^
+    472 │ 	display: block;
+    473 │ 	font-size: 0.95em;
+  
+  i This selector specificity is (0, 2, 1)
+  
+    238 │ 	gap: 0.5em !important;
+    239 │ }
+  > 240 │ .esh .esh-stats b {
+        │ ^^^^^^^^^^^^^^^^^
+    241 │ 	font-size: 1.5em !important;
+    242 │ 	color: var(--gold);
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:484:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 1)
+  
+    482 │ 	color: #b7cec1;
+    483 │ }
+  > 484 │ .seat-hud .readings strong {
+        │ ^^^^^^^^^^^^^^^^^^^^^^^^^^
+    485 │ 	color: var(--cream);
+    486 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    56 │ 	letter-spacing: 0.16em;
+    57 │ }
+  > 58 │ #loading strong {
+       │ ^^^^^^^^^^^^^^^
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:509:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    507 │ 	margin-top: 0.5em;
+    508 │ }
+  > 509 │ .station-links button {
+        │ ^^^^^^^^^^^^^^^^^^^^^
+    510 │ 	font: inherit;
+    511 │ 	font-size: 0.48em;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    388 │ 	text-shadow: 0 2px 3px #00151e;
+    389 │ }
+  > 390 │ #hud button {
+        │ ^^^^^^^^^^^
+    391 │ 	pointer-events: auto;
+    392 │ 	cursor: pointer;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:538:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    536 │ 	color: #c4d1c3;
+    537 │ }
+  > 538 │ .instrument strong {
+        │ ^^^^^^^^^^^^^^^^^^
+    539 │ 	font-family: monospace;
+    540 │ 	font-size: 1.6em;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    56 │ 	letter-spacing: 0.16em;
+    57 │ }
+  > 58 │ #loading strong {
+       │ ^^^^^^^^^^^^^^^
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:544:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    542 │ 	display: block;
+    543 │ }
+  > 544 │ .instrument small {
+        │ ^^^^^^^^^^^^^^^^^
+    545 │ 	font-size: 0.55em;
+    546 │ 	color: #a9c1b7;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  > 61 │ #loading small {
+       │ ^^^^^^^^^^^^^^
+    62 │ 	color: #a9bcb6;
+    63 │ 	letter-spacing: 0.06em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:643:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    641 │ 	display: block;
+    642 │ }
+  > 643 │ .bomb-inset strong {
+        │ ^^^^^^^^^^^^^^^^^^
+    644 │ 	font-size: 0.85em;
+    645 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    56 │ 	letter-spacing: 0.16em;
+    57 │ }
+  > 58 │ #loading strong {
+       │ ^^^^^^^^^^^^^^^
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:646:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    644 │ 	font-size: 0.85em;
+    645 │ }
+  > 646 │ .bomb-inset small {
+        │ ^^^^^^^^^^^^^^^^^
+    647 │ 	display: block;
+    648 │ 	color: #b6cbbb;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    59 │ 	font-size: clamp(22px, 2.1vw, 40px);
+    60 │ }
+  > 61 │ #loading small {
+       │ ^^^^^^^^^^^^^^
+    62 │ 	color: #a9bcb6;
+    63 │ 	letter-spacing: 0.06em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:718:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    716 │ 	gap: 9px;
+    717 │ }
+  > 718 │ .touch-actions button {
+        │ ^^^^^^^^^^^^^^^^^^^^^
+    719 │ 	background: #193c45e0;
+    720 │ 	border: 1px solid #a7b6a0;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    388 │ 	text-shadow: 0 2px 3px #00151e;
+    389 │ }
+  > 390 │ #hud button {
+        │ ^^^^^^^^^^^
+    391 │ 	pointer-events: auto;
+    392 │ 	cursor: pointer;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:730:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 0)
+  
+    728 │ 	display: flex;
+    729 │ }
+  > 730 │ .touch-mode .seat-hud {
+        │ ^^^^^^^^^^^^^^^^^^^^^
+    731 │ 	display: none;
+    732 │ }
+  
+  i This selector specificity is (1, 2, 0)
+  
+    671 │ 	font-size: 0.8em;
+    672 │ }
+  > 673 │ #hud.split .seat-hud {
+        │ ^^^^^^^^^^^^^^^^^^^^
+    674 │ 	bottom: 53%;
+    675 │ 	font-size: 0.8em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:733:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 0)
+  
+    731 │ 	display: none;
+    732 │ }
+  > 733 │ .touch-mode .instrument {
+        │ ^^^^^^^^^^^^^^^^^^^^^^^
+    734 │ 	font-size: 0.7em;
+    735 │ 	bottom: 16%;
+  
+  i This selector specificity is (1, 2, 0)
+  
+    679 │ 	bottom: 3%;
+    680 │ }
+  > 681 │ #hud.split .instrument {
+        │ ^^^^^^^^^^^^^^^^^^^^^^
+    682 │ 	bottom: 53%;
+    683 │ 	font-size: 0.8em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:737:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 0)
+  
+    735 │ 	bottom: 16%;
+    736 │ }
+  > 737 │ .touch-mode .hud-top {
+        │ ^^^^^^^^^^^^^^^^^^^^
+    738 │ 	font-size: 0.7em;
+    739 │ 	top: 5%;
+  
+  i This selector specificity is (1, 2, 0)
+  
+    667 │ 	background: #d1b779;
+    668 │ }
+  > 669 │ #hud.split .hud-top {
+        │ ^^^^^^^^^^^^^^^^^^^
+    670 │ 	top: 2%;
+    671 │ 	font-size: 0.8em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:750:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 0)
+  
+    748 │ 	min-width: 4em;
+    749 │ }
+  > 750 │ .touch-mode .radio {
+        │ ^^^^^^^^^^^^^^^^^^
+    751 │ 	bottom: 25%;
+    752 │ 	max-width: 92%;
+  
+  i This selector specificity is (1, 2, 0)
+  
+    686 │ 	bottom: 3%;
+    687 │ }
+  > 688 │ #hud.split .radio {
+        │ ^^^^^^^^^^^^^^^^^
+    689 │ 	bottom: auto;
+    690 │ 	top: 43%;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:756:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 1)
+  
+    754 │ 	font-size: 1.1em;
+    755 │ }
+  > 756 │ .touch-mode .radio canvas {
+        │ ^^^^^^^^^^^^^^^^^^^^^^^^^
+    757 │ 	width: 48px;
+    758 │ 	height: 48px;
+  
+  i This selector specificity is (1, 2, 1)
+  
+    692 │ 	max-width: 75%;
+    693 │ }
+  > 694 │ #hud.split .radio canvas {
+        │ ^^^^^^^^^^^^^^^^^^^^^^^^
+    695 │ 	width: 42px;
+    696 │ 	height: 42px;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:760:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 2, 0)
+  
+    758 │ 	height: 48px;
+    759 │ }
+  > 760 │ .touch-mode .warning {
+        │ ^^^^^^^^^^^^^^^^^^^^
+    761 │ 	top: 18%;
+    762 │ 	font-size: 0.65em;
+  
+  i This selector specificity is (1, 2, 0)
+  
+    696 │ 	height: 42px;
+    697 │ }
+  > 698 │ #hud.split .warning {
+        │ ^^^^^^^^^^^^^^^^^^^
+    699 │ 	top: 16%;
+    700 │ 	font-size: 0.55em;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:833:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    831 │ 	margin: 0.4em;
+    832 │ }
+  > 833 │ .mission-editor button {
+        │ ^^^^^^^^^^^^^^^^^^^^^^
+    834 │ 	font-size: 0.8em !important;
+    835 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    388 │ 	text-shadow: 0 2px 3px #00151e;
+    389 │ }
+  > 390 │ #hud button {
+        │ ^^^^^^^^^^^
+    391 │ 	pointer-events: auto;
+    392 │ 	cursor: pointer;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:992:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 1, 1)
+  
+    990 │ }
+    991 │ /* Native shell buttons inherit TV-sized type; the source theme fixes them at 13px. */
+  > 992 │ .esh button {
+        │ ^^^^^^^^^^^
+    993 │ 	font-family: Arial, Helvetica, sans-serif !important;
+    994 │ 	font-size: 0.82em !important;
+  
+  i This selector specificity is (1, 0, 1)
+  
+    388 │ 	text-shadow: 0 2px 3px #00151e;
+    389 │ }
+  > 390 │ #hud button {
+        │ ^^^^^^^^^^^
+    391 │ 	pointer-events: auto;
+    392 │ 	cursor: pointer;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:1006:1 lint/style/noDescendingSpecificity ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Descending specificity selector found. This selector specificity is (0, 3, 1)
+  
+    1004 │ 	width: min(49vw, 940px);
+    1005 │ }
+  > 1006 │ .esh .esh-ttl .esh-btns button {
+         │ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1007 │ 	min-height: 2.6em !important;
+    1008 │ }
+  
+  i This selector specificity is (1, 0, 1)
+  
+    388 │ 	text-shadow: 0 2px 3px #00151e;
+    389 │ }
+  > 390 │ #hud button {
+        │ ^^^^^^^^^^^
+    391 │ 	pointer-events: auto;
+    392 │ 	cursor: pointer;
+  
+  i Descending specificity selector may not be applied. Consider rearranging the order of the selectors. See MDN web docs for more details.
+  
+
+src/style.css:241:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    239 │ }
+    240 │ .esh .esh-stats b {
+  > 241 │ 	font-size: 1.5em !important;
+        │ 	                 ^^^^^^^^^^
+    242 │ 	color: var(--gold);
+    243 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    241 │ → font-size:·1.5em·!important;
+        │                   ----------- 
+
+src/view.js:23:29 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter z is unused.
+  
+    21 │ 	red: "#9a4436",
+    22 │ };
+  > 23 │ function terrainColor(x, y, z, nz, out) {
+       │                             ^
+    24 │ 	x -= ORIGIN.x;
+    25 │ 	y -= ORIGIN.y;
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend z with an underscore.
+  
+      21   21 │   	red: "#9a4436",
+      22   22 │   };
+      23      │ - function·terrainColor(x,·y,·z,·nz,·out)·{
+           23 │ + function·terrainColor(x,·y,·_z,·nz,·out)·{
+      24   24 │   	x -= ORIGIN.x;
+      25   25 │   	y -= ORIGIN.y;
+  
+
+src/view.js:1410:15 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter t is unused.
+  
+    1408 │ 		}
+    1409 │ 	}
+  > 1410 │ 	effect(p, e, t) {
+         │ 	             ^
+    1411 │ 		const age = e.age || 0,
+    1412 │ 			size = e.size || 200;
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend t with an underscore.
+  
+    1408 1408 │       }
+    1409 1409 │     }
+    1410      │ - → effect(p,·e,·t)·{
+         1410 │ + → effect(p,·e,·_t)·{
+    1411 1411 │       const age = e.age || 0,
+    1412 1412 │         size = e.size || 200;
+  
+
+src/view.js:23:32 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter nz is unused.
+  
+    21 │ 	red: "#9a4436",
+    22 │ };
+  > 23 │ function terrainColor(x, y, z, nz, out) {
+       │                                ^^
+    24 │ 	x -= ORIGIN.x;
+    25 │ 	y -= ORIGIN.y;
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend nz with an underscore.
+  
+      21   21 │   	red: "#9a4436",
+      22   22 │   };
+      23      │ - function·terrainColor(x,·y,·z,·nz,·out)·{
+           23 │ + function·terrainColor(x,·y,·z,·_nz,·out)·{
+      24   24 │   	x -= ORIGIN.x;
+      25   25 │   	y -= ORIGIN.y;
+  
+
+src/view.js:396:19 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter i is unused.
+  
+    394 │ 		this.world.step(dt);
+    395 │ 	}
+  > 396 │ 	cameraPose(a, p, i = 0) {
+        │ 	                 ^
+    397 │ 		const t = this.state?.t || 0,
+    398 │ 			aim = p.aim || {},
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend i with an underscore.
+  
+     394  394 │       this.world.step(dt);
+     395  395 │     }
+     396      │ - → cameraPose(a,·p,·i·=·0)·{
+          396 │ + → cameraPose(a,·p,·_i·=·0)·{
+     397  397 │       const t = this.state?.t || 0,
+     398  398 │         aim = p.aim || {},
+  
+
+src/view.js:864:16 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter t is unused.
+  
+    862 │ 		}
+    863 │ 	}
+  > 864 │ 	battery(p, q, t) {
+        │ 	              ^
+    865 │ 		const alive = q.alive !== false && q.hp !== 0;
+    866 │ 		p.box(0, 0, 35, 2200, 1800, 70, "#777f65");
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend t with an underscore.
+  
+     862  862 │       }
+     863  863 │     }
+     864      │ - → battery(p,·q,·t)·{
+          864 │ + → battery(p,·q,·_t)·{
+     865  865 │       const alive = q.alive !== false && q.hp !== 0;
+     866  866 │       p.box(0, 0, 35, 2200, 1800, 70, "#777f65");
+  
+
+src/ui.js:978:47 lint/suspicious/useIterableCallbackReturn ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This callback passed to forEach() iterable method should not return a value.
+  
+    976 │ 		};
+    977 │ 		activate($(".menu-toggle", this.hud), () => this.game.menu());
+  > 978 │ 		this.hud.querySelectorAll("[data-station]").forEach((b) =>
+        │ 		                                            ^^^^^^^
+    979 │ 			activate(b, () => {
+    980 │ 				this.send(
+  
+  i Either remove this return or remove the returned value.
+  
+    977 │ 		activate($(".menu-toggle", this.hud), () => this.game.menu());
+    978 │ 		this.hud.querySelectorAll("[data-station]").forEach((b) =>
+  > 979 │ 			activate(b, () => {
+        │ 			^^^^^^^^^^^^^^^^^^^
+  > 980 │ 				this.send(
+         ...
+  > 984 │ 				this.clear();
+  > 985 │ 			}),
+        │ 			^^
+    986 │ 		);
+    987 │ 		this.hud.querySelectorAll("[data-context]").forEach((b) =>
+  
+
+src/ui.js:987:47 lint/suspicious/useIterableCallbackReturn ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This callback passed to forEach() iterable method should not return a value.
+  
+    985 │ 			}),
+    986 │ 		);
+  > 987 │ 		this.hud.querySelectorAll("[data-context]").forEach((b) =>
+        │ 		                                            ^^^^^^^
+    988 │ 			activate(b, () => {
+    989 │ 				const c = b.dataset.context;
+  
+  i Either remove this return or remove the returned value.
+  
+     986 │ 		);
+     987 │ 		this.hud.querySelectorAll("[data-context]").forEach((b) =>
+   > 988 │ 			activate(b, () => {
+         │ 			^^^^^^^^^^^^^^^^^^^
+   > 989 │ 				const c = b.dataset.context;
+          ...
+   > 997 │ 				else this.send({ type: c });
+   > 998 │ 			}),
+         │ 			^^
+     999 │ 		);
+    1000 │ 		this.hud.querySelectorAll("[data-context=fire]").forEach((b) => {
+  
+
+Checked 18 files in 50ms. No fixes applied.
+Found 2 errors.
+Found 171 warnings.
+Found 41 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+

@@ -1,0 +1,864 @@
+<!doctype html><html><head><meta charset="utf-8"><script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script><meta name="hub:session" content="1"><meta name="hub:session-players" content="1-2"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-goal" content="Test one authoritative expedition"><meta name="hub:session-howto" content="Move WASD or arrows"><meta name="hub:session-minutes" content="20"><title>DT Hub transport fixture</title></head><body data-game="dt-hub-transport-fixture"><script>/* Dungeons and Deeper Trouble — authoritative transport adapters. */
+(function (root) {
+  'use strict';
+  const VERSION = 1;
+  const CONTENT = root.DTContent?.version || 'dt-expedition-1.0.0';
+  const MAX_PACKET = 16000;
+  const MAX_STATE = 196608;
+  const MAX_CHUNKS = 24;
+  const CHUNK_SIZE = 9000;
+  const EVENT_TYPES = new Set(['fire', 'interact', 'dash', 'dodge', 'quickstep', 'travel', 'quiver', 'map', 'continue']);
+  const now = () => root.performance?.now?.() ?? Date.now();
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const blank = () => ({ mx: 0, my: 0, ax: 1, ay: 0, focus: false, run: false, revive: false });
+  function token() {
+    const a = new Uint32Array(3);
+    if (root.crypto?.getRandomValues) root.crypto.getRandomValues(a);
+    else for (let i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 4294967296);
+    return Array.from(a, (n) => n.toString(36)).join('-');
+  }
+  function safeHeld(h) {
+    if (!h || typeof h !== 'object' || Array.isArray(h)) return blank();
+    const out = blank();
+    for (const k of ['mx', 'my', 'ax', 'ay']) out[k] = Number.isFinite(h[k]) ? Math.max(-1, Math.min(1, h[k])) : out[k];
+    for (const k of ['focus', 'run', 'revive']) out[k] = h[k] === true;
+    out.run ||= h.sprint === true;
+    out.revive ||= h.heldInteract === true;
+    return out;
+  }
+  function safeEvent(e) {
+    if (typeof e === 'string') e = { type: e };
+    if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.type)) return null;
+    const out = { type: e.type };
+    if (typeof e.target === 'string' && e.target.length <= 64) out.target = e.target;
+    if (typeof e.node === 'string' && e.node.length <= 64) out.node = e.node;
+    if (Number.isInteger(e.index) && e.index >= 0 && e.index < 32) out.index = e.index;
+    for (const k of ['ax', 'ay']) if (Number.isFinite(e[k])) out[k] = Math.max(-1, Math.min(1, e[k]));
+    return out;
+  }
+  function validPacket(m, nonce) {
+    if (!m || typeof m !== 'object' || m.dt !== VERSION || m.c !== CONTENT || m.nonce !== nonce) return false;
+    try { return JSON.stringify(m).length <= MAX_PACKET; } catch { return false; }
+  }
+  class Link {
+    constructor(hooks, options) {
+      this.hooks = hooks || {};
+      this.mode = options.mode;
+      this.authority = options.authority;
+      this.dedicated = options.dedicated === true;
+      this.localId = this.dedicated ? null : options.localId;
+      this.hostId = options.hostId;
+      this.playerIds = options.playerIds.slice();
+      this.seed = options.seed >>> 0;
+      this.nonce = options.nonce;
+      this.epoch = token();
+      this.open = options.open !== false;
+      this.ended = false;
+      this.finished = false;
+      this.started = this.mode !== 'hub';
+      this.bootstrapped = this.authority;
+      this.held = blank();
+      this.events = [];
+      this.eventSeq = 0;
+      this.inputSeq = 0;
+      this.snapshotSeq = 0;
+      this.appliedSnapshot = -1;
+      this.lastInputSend = -Infinity;
+      this.lastStateSend = -Infinity;
+      this.lastSend = -Infinity;
+      this.peers = new Map();
+      this.outbound = [];
+      this.parts = new Map();
+      this.sendRaw = options.send;
+      this.clock = options.clock || now;
+      this.stats = { sent: 0, received: 0, bytes: 0, rejected: 0, duplicateActions: 0, retransmittedActions: 0, maxBytes: 0, maxRate: 0, lastInputSequence: 0, snapshots: 0 };
+      this.sendTimes = [];
+      this.removers = [];
+      if (options.initialize !== false) this.initialize();
+    }
+    initialize() {
+      this.hooks.init?.({ mode: this.mode, authority: this.authority, dedicated: this.dedicated, localId: this.localId, playerIds: this.playerIds.slice(), seed: this.seed });
+    }
+    canStep() {
+      if (!this.open || this.ended || this.finished || !this.bootstrapped) return false;
+      return this.mode !== 'hub' || (this.started && root.AIHub.time() >= 0);
+    }
+    input(held, events = []) {
+      if (this.ended || this.finished || this.localId == null) return;
+      this.held = safeHeld({ ...held, ax: held?.ax ?? this.held.ax, ay: held?.ay ?? this.held.ay });
+      // UI may sample while the Hub card is up. Those actions must never leak into play.
+      if (!this.canStep()) return;
+      const clean = events.map(safeEvent).filter(Boolean);
+      if (this.authority) this.hooks.applyInput?.(this.localId, this.held, clean.map((e) => ({ ...e, id: ++this.eventSeq })));
+      else {
+        for (const e of clean) {
+          if (this.events.length >= 96) break;
+          this.events.push({ ...e, id: ++this.eventSeq });
+        }
+      }
+    }
+    packet(type, data) { return { dt: VERSION, c: CONTENT, nonce: this.nonce, t: type, ...data }; }
+    enqueue(type, data, to) {
+      const p = this.packet(type, data);
+      if (JSON.stringify(p).length > MAX_PACKET) { this.stats.rejected++; return false; }
+      this.outbound.push({ p, to });
+      return true;
+    }
+    flush(t) {
+      if (!this.open || this.ended || t - this.lastSend < 65 || !this.outbound.length) return;
+      const item = this.outbound[0];
+      const text = JSON.stringify(item.p);
+      if (this.sendRaw(item.p, item.to) === false) return;
+      this.outbound.shift();
+      this.lastSend = t;
+      this.stats.sent++;
+      this.stats.bytes += text.length;
+      this.stats.maxBytes = Math.max(this.stats.maxBytes, text.length);
+      this.sendTimes.push(t);
+      while (this.sendTimes.length && this.sendTimes[0] <= t - 1000) this.sendTimes.shift();
+      this.stats.maxRate = Math.max(this.stats.maxRate, this.sendTimes.length);
+    }
+    queueSnapshot() {
+      if (this.outbound.some((x) => x.p.t === 's' || x.p.t === 'chunk')) return;
+      const state = this.hooks.snapshot?.();
+      if (!state) return;
+      let text;
+      try { text = JSON.stringify(state); } catch { this.stats.rejected++; return; }
+      if (text.length > MAX_STATE) { this.hooks.status?.('World snapshot exceeds the supported connection limit.'); this.stats.rejected++; return; }
+      const ack = {};
+      for (const [id, p] of this.peers) ack[id] = [p.epoch, p.action];
+      const seq = ++this.snapshotSeq;
+      const common = { seq, ack };
+      if (text.length <= 13000) this.enqueue('s', { ...common, state });
+      else {
+        const total = Math.ceil(text.length / CHUNK_SIZE);
+        for (let i = 0; i < total; i++) this.enqueue('chunk', { ...common, i, total, text: text.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE) });
+      }
+    }
+    applySnapshot(state, seq, ack) {
+      if (!Number.isSafeInteger(seq) || seq <= this.appliedSnapshot) return;
+      this.appliedSnapshot = seq;
+      this.stats.snapshots++;
+      this.hooks.restore?.(state);
+      this.bootstrapped = true;
+      const a = ack?.[this.localId];
+      if (Array.isArray(a) && a[0] === this.epoch && Number.isSafeInteger(a[1])) this.events = this.events.filter((e) => e.id > a[1]);
+    }
+    receive(m, from) {
+      if (this.ended || !validPacket(m, this.nonce)) { this.stats.rejected++; return; }
+      this.stats.received++;
+      if (this.authority) {
+        if (!this.playerIds.includes(from) || from === this.localId || m.t !== 'i') { this.stats.rejected++; return; }
+        if (!Number.isSafeInteger(m.seq) || m.seq < 0 || typeof m.epoch !== 'string' || m.epoch.length > 64 || !Array.isArray(m.events) || m.events.length > 32) { this.stats.rejected++; return; }
+        let peer = this.peers.get(from);
+        if (!peer) { peer = { epoch: m.epoch, action: 0, input: -1, at: this.clock() }; this.peers.set(from, peer); }
+        if (peer.epoch !== m.epoch) { this.stats.rejected++; return; }
+        peer.at = this.clock();
+        peer.stale = false;
+        const events = [];
+        for (const e of m.events.slice().sort((a, b) => a.id - b.id)) {
+          const clean = safeEvent(e);
+          if (!clean || !Number.isSafeInteger(e.id) || e.id < 1) continue;
+          if (e.id <= peer.action) { this.stats.duplicateActions++; continue; }
+          if (e.id !== peer.action + 1) break;
+          peer.action = e.id;
+          events.push({ ...clean, id: e.id });
+        }
+        const held = m.seq > peer.input ? safeHeld(m.held) : null;
+        if (held) peer.input = m.seq;
+        this.stats.lastInputSequence = Math.max(this.stats.lastInputSequence, m.seq);
+        // Reliable input received during countdown is acknowledged, but cannot act.
+        if (this.canStep()) this.hooks.applyInput?.(from, held, events);
+      } else {
+        if (from !== this.hostId) { this.stats.rejected++; return; }
+        if (m.t === 's' && m.state && typeof m.state === 'object') this.applySnapshot(m.state, m.seq, m.ack);
+        else if (m.t === 'chunk') {
+          if (!Number.isSafeInteger(m.seq) || m.seq <= this.appliedSnapshot || !Number.isInteger(m.total) || m.total < 1 || m.total > MAX_CHUNKS || !Number.isInteger(m.i) || m.i < 0 || m.i >= m.total || typeof m.text !== 'string' || m.text.length > CHUNK_SIZE) { this.stats.rejected++; return; }
+          let part = this.parts.get(m.seq);
+          if (!part) { this.parts.clear(); part = { total: m.total, data: new Array(m.total), ack: m.ack }; this.parts.set(m.seq, part); }
+          if (part.total !== m.total) return;
+          part.data[m.i] = m.text;
+          if (part.data.filter((x) => typeof x === 'string').length === m.total) {
+            try { const state = JSON.parse(part.data.join('')); this.applySnapshot(state, m.seq, part.ack); } catch { this.stats.rejected++; }
+            this.parts.delete(m.seq);
+          }
+        } else { this.stats.rejected++; }
+      }
+    }
+    update() {
+      if (!this.open || this.ended) return;
+      const t = this.clock();
+      if (this.authority) {
+        for (const [id, p] of this.peers) if (t - p.at > 500 && !p.stale) { p.stale = true; this.hooks.applyInput?.(id, blank(), []); }
+        if (t - this.lastStateSend >= 125) { this.lastStateSend = t; this.queueSnapshot(); }
+      } else if (t - this.lastInputSend >= 1000 / 15 && this.localId != null) {
+        this.lastInputSend = t;
+        // Coalesce held state while preserving the acknowledged discrete queue.
+        this.outbound = this.outbound.filter((x) => x.p.t !== 'i');
+        const actions = this.events.slice(0, 32);
+        this.stats.retransmittedActions += actions.length;
+        this.enqueue('i', { epoch: this.epoch, seq: ++this.inputSeq, held: this.canStep() ? this.held : blank(), events: this.canStep() ? actions : [] }, this.hostId);
+      }
+      this.flush(t);
+    }
+    removePlayer(id) {
+      this.playerIds = this.playerIds.filter((x) => x !== id);
+      this.peers.delete(id);
+      this.hooks.removePlayer?.(id);
+    }
+    finish(won, stats = {}) {
+      if (!this.authority || this.finished || this.ended) return;
+      this.finished = true;
+      if (this.mode === 'hub') {
+        const perPlayer = {};
+        for (const id of this.playerIds) perPlayer[id] = stats;
+        root.AIHub.finish({ standings: [this.playerIds.slice()], scores: Object.fromEntries(this.playerIds.map((id) => [id, won ? 1 : 0])), won: won === true, stats: perPlayer });
+      }
+    }
+    stop(reason) {
+      if (this.ended) return;
+      this.ended = true;
+      this.held = blank(); this.events = []; this.outbound = [];
+      for (const off of this.removers) off();
+      this.removers = [];
+      this.hooks.stop?.(reason);
+    }
+    inspect() {
+      return { mode: this.mode, role: this.dedicated ? 'dedicated authority' : this.authority ? 'authority' : 'guest', localId: this.localId, playerIds: this.playerIds.slice(), open: this.open, ended: this.ended, bootstrapped: this.bootstrapped, pendingActions: this.events.length, epoch: this.epoch, snapshotSequence: this.appliedSnapshot, stats: { ...this.stats }, peers: Array.from(this.peers, ([id, p]) => ({ id, action: p.action, input: p.input, epoch: p.epoch })) };
+    }
+  }
+  async function connectHub(hooks) {
+    if (!root.AIHub) return null;
+    const info = await root.AIHub.connect({ mode: 'shared-world', seats: [1, 2] });
+    if (!info) return null;
+    const link = new Link(hooks, { mode: 'hub', authority: info.isHost, dedicated: info.server, localId: info.me, hostId: info.host, playerIds: info.players.map((p) => p.id), seed: info.seed, nonce: `hub-${info.round}-${info.seed}`, send: (p, to) => root.AIHub.send(p, { to, reliable: true }) });
+    link.removers.push(root.AIHub.on('start', () => { link.started = true; hooks.status?.('The expedition begins at the common signal.'); }));
+    link.removers.push(root.AIHub.on('message', (p, from) => link.receive(p, from)));
+    link.removers.push(root.AIHub.on('leave', ({ id }) => { link.removePlayer(id); hooks.status?.('A ranger has left. The remaining expedition continues.'); }));
+    link.removers.push(root.AIHub.on('time-up', () => { if (link.authority) { hooks.timeUp?.(); link.finish(false, hooks.result?.()?.stats || {}); } }));
+    link.removers.push(root.AIHub.on('end', ({ reason }) => link.stop(reason)));
+    // All lifecycle listeners are in place before this single genuine loading completion.
+    root.AIHub.ready();
+    return link;
+  }
+  function encodeSignal(signal) {
+    const text = JSON.stringify(signal);
+    return `DT1.${root.btoa(unescape(encodeURIComponent(text)))}`;
+  }
+  function decodeSignal(text, role, nonce) {
+    if (typeof text !== 'string' || text.length > 262144 || !text.trim().startsWith('DT1.')) throw new Error('This is not a Dungeons and Deeper Trouble invitation or reply.');
+    let s;
+    try { s = JSON.parse(decodeURIComponent(escape(root.atob(text.trim().slice(4))))); } catch { throw new Error('The pairing text is incomplete or damaged. Copy the entire invitation or reply.'); }
+    if (s.v !== VERSION || s.c !== CONTENT) throw new Error('These expeditions use different game versions. Load the same HTML on both devices.');
+    if (s.role !== role || (nonce && s.nonce !== nonce)) throw new Error('That pairing text belongs to another invitation or the wrong step.');
+    if (typeof s.nonce !== 'string' || s.nonce.length > 64 || !Number.isFinite(s.at) || Math.abs(Date.now() - s.at) > 600000) throw new Error('This invitation has expired. Ask the host for a new one.');
+    const type = role === 'host' ? 'offer' : 'answer';
+    if (s.desc?.type !== type || typeof s.desc.sdp !== 'string' || s.desc.sdp.length > 150000 || !s.desc.sdp.startsWith('v=0')) throw new Error('The pairing text has no valid connection description.');
+    return s;
+  }
+  class Peer {
+    constructor(hooks, options = {}) {
+      if (root.AIHub?.active) throw new Error('AI Hub owns this round’s network.');
+      this.hooks = hooks || {};
+      this.options = options;
+      this.pc = null; this.channel = null; this.link = null;
+      this.nonce = null; this.role = null; this.cancelled = false;
+      this.status = 'Choose Host or Join.';
+      this.timeout = null; this.gatherCancel = null;
+    }
+    say(text) { this.status = text; this.hooks.status?.(text); }
+    makePC() {
+      if (!root.RTCPeerConnection) throw new Error('This browser does not support direct WebRTC co-op. Solo and couch co-op remain available.');
+      this.cancelled = false;
+      // STUN is discovery only. There is deliberately no undisclosed signaling or relay service.
+      this.pc = new root.RTCPeerConnection({ iceServers: this.options.iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] });
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState;
+        if (state === 'failed') this.fail('Direct connection failed. Some networks require a TURN relay; try another network or couch co-op.');
+        if (state === 'disconnected') { this.say('Connection interrupted. Waiting briefly for the same peer…'); this.timeout = setTimeout(() => { if (this.pc?.connectionState === 'disconnected') this.lost(); }, 6000); }
+        if (state === 'connected') { if (this.timeout) clearTimeout(this.timeout); this.timeout = null; }
+        if (state === 'closed' && !this.cancelled) this.lost();
+      };
+      this.pc.ondatachannel = (e) => { if (e.channel.label === 'dt-expedition') this.bindChannel(e.channel); else e.channel.close(); };
+    }
+    bindChannel(channel) {
+      if (this.channel && this.channel !== channel) { channel.close(); return; }
+      this.channel = channel;
+      channel.onopen = () => { this.say('Connected. Checking expedition version…'); this.raw({ hello: VERSION, c: CONTENT, nonce: this.nonce, role: this.role }); };
+      channel.onmessage = (e) => {
+        if (typeof e.data !== 'string' || e.data.length > MAX_PACKET) return;
+        let m; try { m = JSON.parse(e.data); } catch { return; }
+        if (m.hello) {
+          if (m.hello !== VERSION || m.c !== CONTENT || m.nonce !== this.nonce || m.role === this.role) return this.fail('The peer failed the expedition version check.');
+          if (!this.link) this.start();
+        } else if (this.link) this.link.receive(m, this.role === 'host' ? 1 : 0);
+      };
+      channel.onclose = () => { if (!this.cancelled) this.lost(); };
+      channel.onerror = () => this.say('The data channel reported a connection error.');
+    }
+    raw(m) { if (this.channel?.readyState !== 'open') return false; this.channel.send(JSON.stringify(m)); return true; }
+    async gathered() {
+      const pc = this.pc;
+      if (pc.iceGatheringState === 'complete') return;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { pc.removeEventListener('icegatheringstatechange', change); this.gatherCancel = null; reject(new Error('Candidate discovery timed out. Cancel and try again on another network.')); }, 15000);
+        this.gatherCancel = () => { clearTimeout(timer); pc.removeEventListener('icegatheringstatechange', change); this.gatherCancel = null; reject(new Error('Pairing was cancelled.')); };
+        const change = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); pc.removeEventListener('icegatheringstatechange', change); this.gatherCancel = null; resolve(); } };
+        pc.addEventListener('icegatheringstatechange', change);
+        if (pc.iceGatheringState === 'complete') change();
+      });
+      if (this.cancelled) throw new Error('Pairing was cancelled.');
+    }
+    async offer() {
+      this.cancel(); this.role = 'host'; this.nonce = token(); this.makePC();
+      this.say('Preparing invitation. Discovering a direct path…');
+      this.bindChannel(this.pc.createDataChannel('dt-expedition', { ordered: true }));
+      try { await this.pc.setLocalDescription(await this.pc.createOffer()); await this.gathered(); const s = encodeSignal({ v: VERSION, c: CONTENT, role: 'host', nonce: this.nonce, at: Date.now(), desc: this.pc.localDescription }); this.say('Copy the invitation to the guest. Paste their reply here.'); return s; } catch (e) { this.fail(e.message); throw e; }
+    }
+    async answer(text) {
+      const signal = decodeSignal(text, 'host');
+      this.cancel(); this.role = 'guest'; this.nonce = signal.nonce; this.makePC();
+      this.say('Preparing reply. Discovering a direct path…');
+      try { await this.pc.setRemoteDescription(signal.desc); await this.pc.setLocalDescription(await this.pc.createAnswer()); await this.gathered(); const s = encodeSignal({ v: VERSION, c: CONTENT, role: 'guest', nonce: this.nonce, at: Date.now(), desc: this.pc.localDescription }); this.say('Copy this reply to the host. Play starts once they connect.'); return s; } catch (e) { this.fail(e.message); throw e; }
+    }
+    async accept(text) {
+      if (this.role !== 'host' || !this.pc) throw new Error('Create a host invitation before pasting a reply.');
+      const signal = decodeSignal(text, 'guest', this.nonce);
+      await this.pc.setRemoteDescription(signal.desc);
+      this.say('Connecting to the invited ranger…');
+    }
+    start() {
+      const host = this.role === 'host';
+      this.link = new Link(this.hooks, { mode: 'peer', authority: host, localId: host ? 0 : 1, hostId: 0, playerIds: [0, 1], seed: this.options.seed ?? 1729, nonce: this.nonce, send: (m) => this.raw(m) });
+      this.say(host ? 'Two rangers connected. You hold the expedition save.' : 'Joined the host’s expedition. Your solo save is untouched.');
+    }
+    lost() {
+      if (this.cancelled) return;
+      if (this.link?.authority) {
+        this.link.removePlayer(1);
+        this.say('Guest departed. You may continue this expedition alone.');
+      } else {
+        this.link?.stop('host-left');
+        this.say('The host connection ended. Return to the title and pair again for a fresh shared state.');
+      }
+    }
+    fail(text) { this.say(text); this.close(false); }
+    update(dt) { this.link?.update(dt); }
+    input(held, events) { this.link?.input(held, events); }
+    canStep() { return this.link?.canStep() ?? false; }
+    finish(won, stats) { this.link?.finish(won, stats); }
+    get authority() { return this.link?.authority ?? this.role === 'host'; }
+    get dedicated() { return false; }
+    get localId() { return this.link?.localId ?? (this.role === 'host' ? 0 : 1); }
+    get playerIds() { return this.link?.playerIds ?? []; }
+    inspect() { return { ...(this.link?.inspect() || {}), status: this.status, connection: this.pc?.connectionState || 'closed', channel: this.channel?.readyState || 'closed' }; }
+    cancel() { this.close(true); this.say('Pairing cancelled.'); }
+    close(silent = false) {
+      this.cancelled = true;
+      this.gatherCancel?.();
+      if (this.timeout) clearTimeout(this.timeout); this.timeout = null;
+      if (this.channel) { this.channel.onclose = null; this.channel.close(); }
+      if (this.pc) { this.pc.onconnectionstatechange = null; this.pc.close(); }
+      if (!silent) this.link?.stop('connection-failed');
+      this.channel = null; this.pc = null; this.link = null;
+    }
+  }
+  root.DTNet = { VERSION, CONTENT, connectHub, createPeer: (hooks, options) => new Peer(hooks, options), Link, safeHeld, safeEvent, encodeSignal, decodeSignal };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script><script>
+const F=window.fixture={state:{tick:0,players:[],ammo:3},held:{}};
+addEventListener('keydown',e=>{if(!F.hub?.canStep())return; F.hub.input({mx:e.key==='d'?1:0,my:e.key==='s'?1:0},[]);});
+addEventListener('keyup',()=>F.hub?.input({},[]));
+(async()=>{
+ F.hub=await DTNet.connectHub({init(i){F.info=i;F.state.players=i.playerIds;},snapshot(){return F.state},restore(s){F.state=s},applyInput(id,h,es){F.held[id]=h},removePlayer(id){F.state.players=F.state.players.filter(x=>x!==id)},stop(r){F.stopped=r;clearInterval(F.timer)}});
+ F.timer=setInterval(()=>{F.hub.update();if(F.hub.authority&&F.hub.canStep())F.state.tick++;},16);
+})();
+</script></body></html>

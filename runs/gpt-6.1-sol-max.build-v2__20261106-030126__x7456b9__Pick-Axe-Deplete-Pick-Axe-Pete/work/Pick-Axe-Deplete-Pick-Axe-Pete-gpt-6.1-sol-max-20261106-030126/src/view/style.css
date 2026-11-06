@@ -1,0 +1,907 @@
+:root {
+  color-scheme: dark;
+  --cream: #fff0d2;
+  --gold: #ffc56d;
+  --muted: #c4b6a7;
+  --teal: #8ddcd6;
+  --night: #0c111b;
+  font-family: "Trebuchet MS", system-ui, sans-serif;
+  background: #0c111b;
+}
+* {
+  box-sizing: border-box;
+}
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+button,
+input {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:focus-visible,
+input:focus-visible {
+  outline: 3px solid #fff0c5;
+  outline-offset: 5px;
+}
+button {
+  touch-action: manipulation;
+}
+[hidden] {
+  display: none !important;
+}
+#screen {
+  display: block;
+  width: 100vw;
+  height: 100vh;
+  image-rendering: pixelated;
+  touch-action: none;
+  background: #0b1019;
+}
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  box-shadow: inset 0 0 100px #05070c88;
+  pointer-events: none;
+  z-index: 3;
+}
+#hud {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 7;
+  color: var(--cream);
+  --safe: clamp(15px, 3vw, 60px);
+}
+.hud-top {
+  position: absolute;
+  left: var(--safe);
+  right: calc(var(--safe) + 60px);
+  top: max(22px, env(safe-area-inset-top));
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 22px;
+}
+.chapter {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex: 1;
+}
+.chapter-num {
+  width: 52px;
+  height: 58px;
+  border: 1px solid #947958;
+  background: #131b25e6;
+  display: grid;
+  place-items: center;
+  font:
+    700 30px Georgia,
+    serif;
+  box-shadow: 3px 3px 0 #070c14;
+}
+.eyebrow {
+  color: var(--gold);
+  font-size: clamp(11px, 1.2vw, 21px);
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-weight: 700;
+}
+#room-name {
+  font:
+    700 clamp(21px, 2.25vw, 39px) Georgia,
+    serif;
+  letter-spacing: 0.02em;
+  margin-top: 3px;
+}
+#objective {
+  color: #e2d4c2;
+  font-size: clamp(13px, 1.28vw, 23px);
+  margin-top: 4px;
+  line-height: 1.35;
+}
+.hud-score {
+  text-align: right;
+}
+.hud-score strong {
+  display: block;
+  font:
+    700 clamp(28px, 3.2vw, 58px) Georgia,
+    serif;
+  color: var(--gold);
+  letter-spacing: 0.03em;
+  line-height: 1.1;
+}
+.hud-score small {
+  color: #d6c3a9;
+  font-size: clamp(10px, 1vw, 18px);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.work-meter {
+  height: 5px;
+  max-width: 330px;
+  width: 26vw;
+  margin-top: 11px;
+  background: #090d14;
+  border: 1px solid #4e4d50;
+}
+.work-meter i {
+  display: block;
+  background: linear-gradient(90deg, #aa733e, #ffce80);
+  height: 100%;
+  transition: width 0.15s;
+}
+#miners {
+  position: absolute;
+  bottom: max(30px, env(safe-area-inset-bottom));
+  left: var(--safe);
+  display: flex;
+  gap: 25px;
+}
+.miner-card {
+  color: var(--cream);
+  min-width: 145px;
+  text-shadow: 1px 2px 0 #050a13;
+}
+.miner-name {
+  font-size: clamp(12px, 1.25vw, 22px);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.health {
+  display: flex;
+  gap: 7px;
+  margin-top: 7px;
+}
+.helmet {
+  display: block;
+  width: 17px;
+  height: 13px;
+  background: var(--player);
+  border-radius: 8px 8px 1px 1px;
+  border-bottom: 3px solid #f6e4bd;
+  box-shadow: 0 2px 0 #0b111b;
+}
+.helmet.off {
+  opacity: 0.18;
+}
+.tool-status {
+  font-size: clamp(11px, 1.1vw, 20px);
+  color: #e2d0b8;
+  margin-top: 8px;
+}
+.tool-status.empty {
+  color: #9ce7e0;
+}
+.tool-status.last {
+  color: #ff9b94;
+}
+.wear {
+  display: inline-flex;
+  gap: 3px;
+  vertical-align: middle;
+  margin-right: 6px;
+}
+.wear i {
+  height: 5px;
+  width: 8px;
+  background: #eabe7a;
+}
+.wear i.off {
+  background: #4d5359;
+}
+#key-status {
+  position: absolute;
+  right: var(--safe);
+  bottom: max(32px, env(safe-area-inset-bottom));
+  font-size: clamp(13px, 1.3vw, 23px);
+  border-left: 3px solid #eac17a;
+  padding: 7px 0 7px 14px;
+  max-width: 31vw;
+  color: #f9d898;
+  text-align: left;
+  background: #0d1521b3;
+}
+#caption {
+  position: absolute;
+  top: clamp(100px, 11vw, 180px);
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  max-width: min(640px, 72vw);
+  padding: 10px 20px;
+  border: 1px solid #8e785788;
+  background: #101722eb;
+  box-shadow: 0 4px 18px #0008;
+  font-size: clamp(14px, 1.4vw, 25px);
+  color: #f7deae;
+  transition: opacity 0.2s;
+}
+#hint {
+  position: absolute;
+  bottom: clamp(99px, 10vw, 155px);
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 18px;
+  border-left: 2px solid #a68b5e;
+  background: #0e1520db;
+  text-align: center;
+  max-width: 70vw;
+  font-size: clamp(13px, 1.2vw, 21px);
+  color: #d9d3c8;
+  line-height: 1.4;
+  pointer-events: none;
+}
+#hint b {
+  color: #ffdf9c;
+}
+#action-prompt {
+  position: absolute;
+  bottom: clamp(55px, 6.2vw, 95px);
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: clamp(14px, 1.4vw, 26px);
+  color: #fff0d3;
+  text-align: center;
+  text-shadow: 2px 2px 0 #000;
+}
+kbd {
+  display: inline-block;
+  border: 1px solid #b89a71;
+  border-bottom-width: 3px;
+  padding: 3px 8px;
+  border-radius: 3px;
+  background: #141d29;
+  color: #ffe0a8;
+  font:
+    700 0.85em "Trebuchet MS",
+    sans-serif;
+  margin-right: 7px;
+}
+#controls-ribbon {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: #bba98f;
+  letter-spacing: 0.04em;
+  font-size: clamp(10px, 0.95vw, 17px);
+  white-space: nowrap;
+}
+#controls-ribbon span {
+  margin: 0 8px;
+}
+#menu-button {
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  top: max(20px, env(safe-area-inset-top));
+  width: 48px;
+  height: 48px;
+  border: 1px solid #887359;
+  border-radius: 2px;
+  background: #111b28df;
+  color: #e9d4b1;
+  font-size: 23px;
+  z-index: 15;
+  box-shadow: 3px 3px 0 #050b14;
+  display: grid;
+  place-items: center;
+}
+#context {
+  position: fixed;
+  right: max(22px, env(safe-area-inset-right));
+  bottom: max(70px, env(safe-area-inset-bottom));
+  max-width: 220px;
+  min-height: 64px;
+  border: 2px solid #e4bd79;
+  border-radius: 38px;
+  background: #152734f0;
+  color: #ffe5b4;
+  padding: 15px 24px;
+  font-size: 18px;
+  font-weight: 700;
+  z-index: 16;
+  box-shadow: 0 4px 22px #0009;
+  touch-action: none;
+}
+#attract-banner {
+  position: fixed;
+  left: 50%;
+  bottom: 32px;
+  transform: translateX(-50%);
+  z-index: 10;
+  text-align: center;
+  background: #111a29e8;
+  border: 1px solid #b39766;
+  box-shadow: 0 6px 24px #0007;
+  padding: 16px 32px;
+  color: var(--cream);
+  font-size: clamp(14px, 1.3vw, 24px);
+  letter-spacing: 0.08em;
+  pointer-events: none;
+}
+#attract-banner b {
+  color: var(--gold);
+}
+#dev-flag {
+  position: fixed;
+  left: 50%;
+  top: 8px;
+  transform: translateX(-50%);
+  z-index: 12;
+  padding: 5px 12px;
+  background: #733558e6;
+  color: #ffdaeb;
+  border: 1px solid #d08aa9;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+#boot {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #0d131e;
+  color: #eec98f;
+  font-family: Georgia, serif;
+  font-size: 26px;
+  z-index: 50;
+}
+.brand-mark {
+  color: #dfae66;
+  font:
+    700 13px "Trebuchet MS",
+    sans-serif;
+  letter-spacing: 0.22em;
+}
+/* Native Shell supplies focus, pad navigation, controls/rebinding and rows. */
+.esh {
+  --pt: 24px !important;
+  --pr: 28px !important;
+  --pl: 28px !important;
+  --pb: 22px !important;
+}
+.esh .esh-sh {
+  background: #090e17d9;
+  padding-top: 52px;
+}
+.esh .esh-pan {
+  background: #111925f5;
+  border: 1px solid #887456;
+  border-radius: 2px;
+  box-shadow:
+    7px 7px 0 #060b12,
+    0 20px 80px #0009;
+}
+.esh .esh-mod {
+  width: min(490px, 100%);
+  padding: 23px 27px 22px;
+  scrollbar-color: #8d7756 #15202c;
+  scrollbar-width: thin;
+}
+.esh h2 {
+  font-size: 32px;
+  color: #fff0d2;
+  font-weight: 700;
+}
+.esh .esh-k {
+  font-size: 11px;
+  color: #e5b573;
+  letter-spacing: 0.19em;
+}
+.esh .esh-m {
+  font-size: 13px;
+  color: #c1b6aa;
+  line-height: 1.5;
+}
+.esh p {
+  margin-top: 9px;
+}
+.esh .esh-btns {
+  gap: 7px;
+  margin-top: 19px;
+}
+.esh button {
+  border-radius: 2px;
+  background: #1a2634;
+  border-color: #62594c;
+  color: #f4dfbd;
+  padding: 12px 16px;
+  font-size: 13px;
+  letter-spacing: 0.08em;
+  min-height: 43px;
+  transition:
+    background 0.12s,
+    transform 0.12s,
+    border-color 0.12s;
+}
+.esh button.pri {
+  background: #efc17f;
+  color: #1b2025;
+  border-color: #ffe0a4;
+  box-shadow: 0 3px 0 #9c6b3e;
+}
+.esh button:hover,
+.esh button:focus {
+  background: #34414a;
+  border-color: #e3bf85;
+  outline: 1px solid #d8bb88;
+  outline-offset: 2px;
+}
+.esh button.pri:hover,
+.esh button.pri:focus {
+  background: #ffe1a7;
+  transform: translateX(3px);
+}
+.esh button::before {
+  content: "";
+}
+.esh button.pri::before {
+  content: "↗";
+  margin-right: 10px;
+  font-size: 17px;
+}
+.esh .esh-row {
+  padding: 8px 0;
+  gap: 7px;
+}
+.esh .esh-row > span {
+  flex-basis: 135px;
+}
+.esh .esh-row small {
+  font-size: 10px;
+}
+.esh .esh-row .esh-ctl {
+  flex-basis: auto;
+}
+.esh input[type="range"] {
+  width: 115px;
+}
+.esh .esh-stats {
+  gap: 12px;
+}
+.esh .esh-stats b {
+  color: #ffce8a;
+  font-size: 31px;
+}
+.esh .esh-stats small {
+  font-size: 10px;
+}
+.esh .esh-nav {
+  background: #111d2be8;
+  border-color: #9b805b;
+}
+.esh .esh-grid {
+  font-size: 13px;
+}
+.esh .esh-grid kbd {
+  font-size: 11px;
+}
+.esh .esh-sec {
+  margin-top: 12px;
+}
+.esh .esh-ttl {
+  background: linear-gradient(90deg, #0b111bf5 0%, #0b111be0 32%, #0b111b66 55%, #0b111b00 75%);
+  padding: 0 3vw;
+  place-items: center start;
+}
+.esh .esh-ttl > div {
+  max-width: 440px;
+  padding-left: 16px;
+  position: relative;
+  border-left: 1px solid #ac895044;
+}
+.esh .esh-ttl > div::before {
+  content: "MISTY MOUNTAIN MINING CO. · EST. 1982";
+  display: block;
+  color: #c9aa79;
+  letter-spacing: 0.15em;
+  font-size: 9px;
+  font-weight: 700;
+  margin-bottom: 19px;
+}
+.esh .esh-ttl h1 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: 900;
+  letter-spacing: -0.055em;
+  font-size: 74px;
+  line-height: 0.88;
+  text-transform: uppercase;
+  color: #fff0d3;
+  text-shadow:
+    1px 2px 0 #8b623d,
+    3px 4px 0 #281f20;
+  max-width: 370px;
+}
+.esh .esh-ttl h1::after {
+  content: "";
+  display: block;
+  height: 5px;
+  background: #eab26c;
+  width: 70px;
+  margin: 21px 0 17px;
+  box-shadow: 8px 4px 0 #72543a;
+}
+.esh .esh-sub {
+  font:
+    italic 20px Georgia,
+    serif;
+  letter-spacing: 0;
+  color: #efc590;
+  margin: 7px 0 10px;
+}
+.esh .esh-ttl p {
+  font-size: 13px;
+  line-height: 1.5;
+  max-width: 300px;
+  color: #c4b9a9;
+}
+.esh .esh-ttl .esh-btns {
+  max-width: 285px;
+  margin-top: 24px;
+}
+.esh .esh-ttl .esh-btns button {
+  padding: 13px 16px;
+  min-height: 44px;
+}
+.esh .esh-ttl .esh-tags {
+  font-size: 9px;
+  letter-spacing: 0.13em;
+  margin-top: 21px;
+  gap: 13px;
+  color: #a69985;
+}
+.esh .esh-ttl .esh-m {
+  font-size: 9px;
+  margin-top: 14px;
+  color: #8d8f92;
+}
+.esh .esh-bind {
+  font-size: 12px;
+}
+.esh .esh-bind button {
+  font-size: 11px;
+  padding: 8px 9px;
+}
+.esh .esh-bind small {
+  font-size: 9px;
+}
+.esh .esh-toast,
+.esh .esh-tut,
+.esh .esh-keys,
+.esh .esh-obj,
+.esh .esh-vit,
+.esh .esh-col {
+  display: none !important;
+}
+@media (min-width: 1500px) {
+  #menu-button {
+    width: 58px;
+    height: 58px;
+    font-size: 28px;
+  }
+  .chapter-num {
+    width: 68px;
+    height: 73px;
+    font-size: 38px;
+  }
+  .helmet {
+    width: 24px;
+    height: 18px;
+    border-bottom-width: 4px;
+  }
+  .wear i {
+    width: 12px;
+    height: 7px;
+  }
+  .miner-card {
+    min-width: 210px;
+  }
+  #miners {
+    gap: 38px;
+  }
+}
+@media (max-width: 700px) {
+  .hud-top {
+    left: 15px;
+    right: 76px;
+    top: 16px;
+    gap: 8px;
+  }
+  .chapter {
+    gap: 8px;
+  }
+  .chapter-num {
+    width: 31px;
+    height: 42px;
+    font-size: 22px;
+  }
+  .eyebrow {
+    font-size: 9px;
+  }
+  .hud-score strong {
+    font-size: 29px;
+  }
+  .hud-score small {
+    font-size: 8px;
+  }
+  #room-name {
+    font-size: 21px;
+  }
+  #objective {
+    font-size: 11px;
+    max-width: 210px;
+  }
+  .work-meter {
+    width: 37vw;
+    margin-top: 7px;
+  }
+  #menu-button {
+    right: 15px;
+    top: 16px;
+    width: 44px;
+    height: 44px;
+  }
+  #miners {
+    left: 17px;
+    bottom: 28px;
+    gap: 15px;
+  }
+  .miner-card {
+    min-width: 105px;
+  }
+  .miner-name {
+    font-size: 13px;
+  }
+  .health {
+    gap: 5px;
+  }
+  .helmet {
+    width: 13px;
+    height: 11px;
+  }
+  .tool-status {
+    font-size: 11px;
+  }
+  .wear {
+    gap: 2px;
+  }
+  .wear i {
+    width: 5px;
+    height: 4px;
+  }
+  #key-status {
+    right: 15px;
+    bottom: 31px;
+    max-width: 37vw;
+    font-size: 11px;
+    padding-left: 8px;
+  }
+  #caption {
+    top: 110px;
+    font-size: 13px;
+    padding: 8px 12px;
+    max-width: 82vw;
+    min-width: 240px;
+  }
+  #controls-ribbon {
+    display: none;
+  }
+  #hint {
+    font-size: 12px;
+    bottom: 125px;
+    max-width: 80vw;
+    padding: 9px 13px;
+    width: max-content;
+  }
+  #action-prompt {
+    bottom: 90px;
+    font-size: 15px;
+  }
+  #context {
+    font-size: 15px;
+    min-height: 56px;
+    padding: 13px 18px;
+    right: 20px;
+    bottom: 85px;
+    max-width: 185px;
+  }
+  #attract-banner {
+    font-size: 12px;
+    padding: 12px 16px;
+    width: 86vw;
+    bottom: 22px;
+  }
+  .esh .esh-ttl {
+    place-items: center;
+    background: #0b111bbf;
+    padding: 30px 22px;
+  }
+  .esh .esh-ttl > div {
+    padding-left: 16px;
+    max-width: 320px;
+  }
+  .esh .esh-ttl h1 {
+    font-size: 60px;
+    max-width: 300px;
+  }
+  .esh .esh-ttl > div::before {
+    font-size: 8px;
+    max-width: 285px;
+    line-height: 1.5;
+    margin-bottom: 16px;
+  }
+  .esh .esh-ttl .esh-sub {
+    font-size: 18px;
+  }
+  .esh .esh-ttl p {
+    font-size: 12px;
+  }
+  .esh .esh-ttl .esh-btns {
+    margin-top: 19px;
+  }
+  .esh .esh-ttl .esh-btns button {
+    padding: 12px 14px;
+  }
+  .esh .esh-ttl .esh-tags {
+    font-size: 8px;
+    gap: 9px;
+  }
+  .esh .esh-mod {
+    padding: 21px 20px;
+  }
+  .esh .esh-sh {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  .esh h2 {
+    font-size: 28px;
+  }
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .esh .esh-ttl {
+    padding: 15px 4vw;
+  }
+  .esh .esh-ttl > div {
+    max-width: 390px;
+  }
+  .esh .esh-ttl h1 {
+    font-size: 45px;
+    max-width: 390px;
+  }
+  .esh .esh-ttl h1::after {
+    display: none;
+  }
+  .esh .esh-ttl > div::before {
+    margin-bottom: 8px;
+    font-size: 8px;
+  }
+  .esh .esh-ttl .esh-sub {
+    font-size: 16px;
+    margin: 6px 0;
+  }
+  .esh .esh-ttl p {
+    display: none;
+  }
+  .esh .esh-ttl .esh-btns {
+    gap: 5px;
+    margin-top: 13px;
+  }
+  .esh .esh-ttl .esh-btns button {
+    min-height: 35px;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+  .esh .esh-ttl .esh-tags {
+    margin-top: 11px;
+  }
+  .esh .esh-ttl .esh-m {
+    display: none;
+  }
+  .hud-top {
+    top: 10px;
+    left: 16px;
+  }
+  .chapter-num {
+    display: none;
+  }
+  #room-name {
+    font-size: 19px;
+  }
+  #objective {
+    font-size: 10px;
+  }
+  .hud-score strong {
+    font-size: 25px;
+  }
+  #menu-button {
+    top: 11px;
+    width: 38px;
+    height: 38px;
+  }
+  #miners {
+    bottom: 17px;
+  }
+  .health {
+    margin-top: 4px;
+  }
+  .tool-status {
+    margin-top: 5px;
+  }
+  #key-status {
+    bottom: 17px;
+  }
+  #hint {
+    bottom: 72px;
+    padding: 6px 12px;
+    font-size: 11px;
+  }
+  #caption {
+    top: 73px;
+    font-size: 11px;
+    padding: 5px 10px;
+  }
+  #action-prompt {
+    bottom: 50px;
+    font-size: 12px;
+  }
+  #context {
+    bottom: 38px;
+    font-size: 13px;
+    min-height: 48px;
+  }
+  .esh .esh-sh {
+    padding-top: 42px;
+  }
+  .esh .esh-mod {
+    max-height: 100%;
+  }
+  .esh .esh-nav {
+    width: 34px;
+    height: 34px;
+    min-height: 34px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+.touch-mode #controls-ribbon {
+  display: none;
+}
+.touch-mode #hint {
+  bottom: 185px;
+}
+.touch-mode:has(#context:not([hidden])) #key-status {
+  display: none;
+}
+@media (max-height: 520px) and (orientation: landscape) {
+  .touch-mode #hint {
+    bottom: 105px;
+    max-width: 65vw;
+  }
+  .esh .esh-ttl .esh-btns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    max-width: 420px;
+    gap: 7px;
+  }
+  .esh .esh-ttl .esh-btns button {
+    min-height: 44px;
+    padding: 10px 12px;
+  }
+}

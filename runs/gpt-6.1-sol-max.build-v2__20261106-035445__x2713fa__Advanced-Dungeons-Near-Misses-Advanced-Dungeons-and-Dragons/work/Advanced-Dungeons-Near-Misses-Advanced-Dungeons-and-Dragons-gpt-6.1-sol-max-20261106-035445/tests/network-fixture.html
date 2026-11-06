@@ -1,0 +1,15 @@
+<!doctype html><meta charset="utf-8"><title>Near Misses transport fixture</title>
+<script src="../src/net/network.js"></script>
+<script>
+const fixture = { commands: [], state: { tick:0, time:0, mode:'cave', players:[], enemies:[{id:'fixture-rat',hp:1}], party:{ammo:3,tools:[],halves:[]}, arrows:[] } };
+window.__fixture = fixture;
+fixture.net = new NM.Network({
+ start:({seats})=>{fixture.state.players=seats.map(seat=>({seat,x:seat*16,y:16}));},
+ command:(seat,cmd)=>{fixture.commands.push({seat,cmd});if(cmd.fireId){fixture.state.party.ammo--;fixture.state.enemies[0].hp--;};if(cmd.travel)fixture.state.party.tools.push(cmd.travel);},
+ getState:()=>fixture.state,
+ applyState:state=>{fixture.state=state;},
+ removePlayer:seat=>{fixture.state.players=fixture.state.players.filter(player=>player.seat!==seat);},
+ ended:reason=>{fixture.ended=reason;}
+});
+setInterval(()=>{fixture.net.update(1/120);if(fixture.net.running&&fixture.net.authority)fixture.state.tick++;},1000/120);
+</script>

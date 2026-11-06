@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>Tarmin network verification fixture</title>
+<button id="host">Host</button><button id="guest">Join</button><button id="cancel">Cancel</button>
+<button id="offer">Create offer</button><button id="answer">Create answer</button><button id="accept">Connect</button>
+<textarea id="code"></textarea><p id="status"></p>
+<button id="attack">Attack</button><button id="south">Step south</button><button id="pickup">Claim key</button>
+<script type="module">
+import {createPeerLobby} from './src/net.js';
+const $=id=>document.getElementById(id);
+const status=(s,d)=>{$('status').textContent=s+': '+(d||'');window.statusState=s;};
+function make(role){window.lobby?.cancel();window.controller=null;window.lobby=createPeerLobby({role,timeoutMs:30000,onStatus:status,onReady:c=>{window.controller=c;},onState:s=>{window.run=s;},onEnd:e=>{window.end=e;}});}
+function run(id,fn){$(id).onclick=async()=>{try{await fn();}catch(e){status('error',e.message);}};}
+run('host',()=>make('host'));run('guest',()=>make('guest'));run('cancel',()=>window.lobby.cancel());
+run('offer',async()=>{$('code').value=await window.lobby.makeOffer();});
+run('answer',async()=>{$('code').value=await window.lobby.acceptOffer($('code').value);});
+run('accept',()=>window.lobby.acceptAnswer($('code').value));
+run('attack',()=>window.controller.send({type:'attack',target:'marrow-first'}));
+run('south',()=>window.controller.send({type:'move',dx:0,dy:1}));
+run('pickup',()=>window.controller.send({type:'pickup',target:'upper-key'}));
+window.fixtureReady=true;
+</script>

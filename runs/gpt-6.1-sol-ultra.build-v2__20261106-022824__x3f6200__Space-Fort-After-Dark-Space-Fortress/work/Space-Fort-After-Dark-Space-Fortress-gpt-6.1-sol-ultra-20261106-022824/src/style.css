@@ -1,0 +1,549 @@
+:root {
+	color-scheme: dark;
+	font-family: Arial, Helvetica, sans-serif;
+	background: #050914;
+	color: #ecf5ff;
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body {
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background: #050914;
+}
+canvas {
+	display: block;
+	position: fixed;
+	inset: 0;
+	touch-action: none;
+	image-rendering: pixelated;
+}
+button,
+input {
+	font: inherit;
+}
+button {
+	cursor: pointer;
+}
+button:focus-visible,
+input:focus-visible {
+	outline: 3px solid #ffce81;
+	outline-offset: 5px;
+}
+.esh {
+	--title: Arial, sans-serif !important;
+}
+.esh-ttl {
+	background: linear-gradient(
+		90deg,
+		#040912ed,
+		#040912b0 34%,
+		#04091212 70%
+	) !important;
+}
+.esh-ttl > div {
+	max-width: 520px !important;
+	padding-left: 4vw !important;
+}
+.esh-ttl h1 {
+	white-space: pre-line;
+	line-height: 0.97 !important;
+	font-size: clamp(42px, 5vw, 68px) !important;
+	font-weight: 900 !important;
+	letter-spacing: 0.01em !important;
+	color: #effbff;
+	text-shadow: 0 4px #213e57;
+}
+.esh-sub {
+	font-style: normal !important;
+	font-size: 21px !important;
+	color: #ffcc80 !important;
+	margin: 18px 0 12px !important;
+}
+.esh-ttl .esh-btns {
+	display: grid;
+	max-width: 280px;
+	margin-top: 24px;
+	gap: 8px;
+}
+.esh-ttl .esh-btns button {
+	text-align: left;
+	padding: 12px 18px !important;
+	border-radius: 2px !important;
+	letter-spacing: 0.07em;
+	text-transform: uppercase;
+	font-size: 17px !important;
+}
+.esh-ttl .esh-k {
+	letter-spacing: 0.18em;
+	color: #87d8e5;
+}
+.esh-ttl p {
+	color: #b4c4d9 !important;
+	font-size: 17px !important;
+	max-width: 330px;
+}
+.esh-tags {
+	margin-top: 22px !important;
+	font-size: 11px !important;
+}
+.esh-pan {
+	border-radius: 4px !important;
+	background: #0a1525f5 !important;
+	box-shadow: 0 0 80px #0008 !important;
+	border-color: #37566a !important;
+}
+.esh-mod {
+	max-height: 85vh !important;
+	max-width: min(800px, 88vw) !important;
+	padding: 28px !important;
+}
+.esh-sh {
+	padding: 26px !important;
+}
+.esh-sh h2 {
+	font-weight: 850 !important;
+	font-size: 32px !important;
+	line-height: 1.1 !important;
+	margin-bottom: 18px !important;
+}
+.esh-sh p {
+	white-space: pre-line;
+	line-height: 1.45 !important;
+}
+.esh-sh button {
+	border-radius: 3px !important;
+	min-height: 42px !important;
+}
+.esh-sh .esh-btns {
+	gap: 9px !important;
+}
+.esh-sh button:hover,
+.esh-sh button:focus {
+	border-color: #ffce81 !important;
+	background: #273c4b !important;
+	box-shadow: inset 4px 0 #ffce81 !important;
+}
+.esh-sh button.pri {
+	background: #a3e7ed !important;
+	color: #071725 !important;
+	font-weight: 800 !important;
+}
+.esh-sh button.pri:focus {
+	background: #ffce81 !important;
+	box-shadow: inset 4px 0 #fff !important;
+}
+.esh-k {
+	letter-spacing: 0.12em !important;
+	font-weight: 700 !important;
+}
+.esh-row {
+	padding: 10px 0 !important;
+}
+.esh-row small {
+	font-size: 11px !important;
+}
+.esh-m {
+	color: #bdc9da !important;
+	font-size: 16px !important;
+}
+.esh-nav {
+	background: #162b3f !important;
+}
+#hud {
+	position: fixed;
+	inset: 0;
+	z-index: 5;
+	pointer-events: none;
+	font-size: clamp(13px, 1.3vw, 26px);
+	padding: max(22px, env(safe-area-inset-top)) 3.4vw;
+	--pilot: #8de9ee;
+}
+.hud-top {
+	display: flex;
+	justify-content: space-between;
+	gap: 6vw;
+}
+#objective {
+	width: 38vw;
+	max-width: 730px;
+}
+#objective .kicker {
+	font-size: 0.58em;
+	margin-bottom: 0.6em;
+	white-space: nowrap;
+}
+#objective b {
+	font-size: 0.65em;
+	display: block;
+	letter-spacing: 0.12em;
+}
+#objective em {
+	float: right;
+	font-style: normal;
+	color: #e3f5ff;
+}
+#objective .meter {
+	height: 5px;
+	margin-top: 9px;
+}
+.kicker {
+	display: block;
+	letter-spacing: 0.12em;
+	color: #9bb2c8;
+	font-size: 0.65em;
+	font-weight: 700;
+}
+.meter {
+	height: 4px;
+	background: #20384b;
+	overflow: hidden;
+}
+.meter i {
+	height: 100%;
+	display: block;
+	background: var(--pilot);
+	transition: width 0.12s linear;
+}
+#team-score {
+	text-align: right;
+	margin-right: 45px;
+}
+#team-score b {
+	display: block;
+	font-size: 1.45em;
+	letter-spacing: 0.04em;
+	margin-top: 0.2em;
+}
+#team-score small {
+	color: #ffcf85;
+	font-size: 0.6em;
+}
+#radio {
+	position: absolute;
+	bottom: 20%;
+	left: 50%;
+	transform: translateX(-50%);
+	max-width: 86%;
+	padding: 0.8em 1.1em;
+	border-left: 3px solid #ffca7b;
+	background: #081423eb;
+	color: #f3e6ca;
+	text-align: center;
+	font-size: 0.65em;
+	letter-spacing: 0.065em;
+	font-weight: 750;
+	white-space: pre-line;
+	line-height: 1.6;
+}
+#pilots {
+	position: absolute;
+	bottom: 42px;
+	left: 3.4vw;
+	right: 3.4vw;
+	display: flex;
+	gap: 2vw;
+}
+.pilot {
+	min-width: 135px;
+	max-width: 260px;
+	flex: 1;
+	background: #091321cc;
+	border-left: 3px solid var(--pilot);
+	padding: 10px 14px;
+}
+.pilot b {
+	display: block;
+	font-size: 0.59em;
+	letter-spacing: 0.08em;
+	color: var(--pilot);
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+.pilot span {
+	display: block;
+	font-size: 0.47em;
+	margin: 6px 0;
+	white-space: nowrap;
+}
+.pilot small {
+	display: block;
+	margin-top: 6px;
+	font-size: 0.45em;
+	letter-spacing: 0.1em;
+	color: #b9cddd;
+}
+#prompts {
+	position: absolute;
+	left: 3.4vw;
+	bottom: 14px;
+	font-size: 0.5em;
+	letter-spacing: 0.1em;
+	color: #92a8bf;
+}
+#demo-label {
+	position: absolute;
+	top: 48%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	font-size: 0.9em;
+	font-weight: 800;
+	letter-spacing: 0.13em;
+	color: #ffe0a0;
+	text-shadow: 0 2px #000;
+	background: #0814239e;
+}
+#flight-menu {
+	position: fixed;
+	right: 3vw;
+	top: 22px;
+	z-index: 10;
+	width: 46px;
+	height: 46px;
+	border: 1px solid #547087;
+	color: #bcecf7;
+	background: #0e2032d9;
+	border-radius: 3px;
+	font-size: 22px;
+}
+#touch-actions {
+	position: fixed;
+	bottom: max(160px, 25%);
+	right: 4vw;
+	z-index: 10;
+	display: flex;
+	gap: 12px;
+}
+#touch-actions button {
+	height: 58px;
+	padding: 0 18px;
+	border-radius: 50%;
+	border: 2px solid #8de9ee;
+	background: #102332d9;
+	color: #dffaff;
+	font-size: 12px;
+	font-weight: 800;
+	touch-action: none;
+}
+[hidden] {
+	display: none !important;
+}
+@media (max-width: 700px) {
+	.esh-ttl > div {
+		padding-left: 3vw !important;
+		max-width: 88vw !important;
+	}
+	.esh-ttl h1 {
+		font-size: 48px !important;
+	}
+	.esh-ttl .esh-btns {
+		max-width: 260px;
+	}
+	.esh-ttl p {
+		max-width: 290px;
+	}
+	.esh-ttl {
+		background: linear-gradient(
+			90deg,
+			#040912e6,
+			#04091286 70%,
+			#04091212
+		) !important;
+	}
+	.esh-mod {
+		padding: 20px !important;
+		max-width: 94vw !important;
+		max-height: 88vh !important;
+	}
+	.esh-sh h2 {
+		font-size: 28px !important;
+	}
+	.esh-sh p {
+		font-size: 15px !important;
+	}
+	#hud {
+		padding: 20px 18px;
+		font-size: 19px;
+	}
+	.hud-top {
+		gap: 20px;
+		flex-wrap: wrap;
+	}
+	#objective {
+		width: 100%;
+		max-width: calc(100% - 64px);
+	}
+	#objective .kicker {
+		font-size: 10px;
+	}
+	#objective .kicker span {
+		display: none;
+	}
+	#team-score {
+		margin: 0;
+		text-align: left;
+	}
+	#team-score b {
+		font-size: 22px;
+	}
+	#team-score .kicker {
+		font-size: 10px;
+	}
+	#radio {
+		bottom: 23%;
+		font-size: 11px;
+		max-width: 94%;
+		width: max-content;
+	}
+	#pilots {
+		left: 18px;
+		right: 18px;
+		bottom: 65px;
+		gap: 6px;
+		flex-wrap: wrap;
+	}
+	.pilot {
+		padding: 8px 9px;
+		min-width: 125px;
+		max-width: 48%;
+		font-size: 20px;
+	}
+	#prompts {
+		bottom: 25px;
+		left: 18px;
+		font-size: 9px;
+		max-width: 90%;
+	}
+	#flight-menu {
+		right: 18px;
+		top: 20px;
+	}
+	#demo-label {
+		font-size: 12px;
+		white-space: nowrap;
+	}
+}
+@media (max-height: 550px) {
+	.esh-ttl h1 {
+		font-size: 38px !important;
+	}
+	.esh-sub {
+		margin: 9px 0 !important;
+		font-size: 17px !important;
+	}
+	.esh-ttl .esh-btns {
+		margin-top: 10px;
+		gap: 4px;
+	}
+	.esh-ttl .esh-btns button {
+		padding: 7px 14px !important;
+		min-height: 34px !important;
+		font-size: 14px !important;
+	}
+	.esh-tags {
+		margin-top: 10px !important;
+	}
+	.esh-mod {
+		max-height: 92vh !important;
+	}
+	#pilots {
+		bottom: 28px;
+	}
+	.pilot {
+		padding: 6px 9px;
+	}
+	#prompts {
+		bottom: 8px;
+	}
+	#radio {
+		bottom: 21%;
+		font-size: 10px;
+	}
+	#hud {
+		padding-top: 14px;
+	}
+	#flight-menu {
+		top: 14px;
+		width: 36px;
+		height: 36px;
+	}
+}
+/* Screen owns letterboxing and coordinate transforms; give its canvas the whole viewport. */
+#screen {
+	width: 100vw;
+	height: 100vh;
+	width: 100dvw;
+	height: 100dvh;
+}
+/* Shell scales its containing block; viewport units inside that block would overflow after scaling. */
+.esh-ttl > div {
+	max-width: 500px !important;
+	padding-left: 24px !important;
+}
+.esh-ttl h1 {
+	font-size: 58px !important;
+}
+.esh-mod {
+	max-height: 100% !important;
+}
+body:has(.esh-sh) #hud,
+body:has(.esh-sh) #flight-menu,
+body:has(.esh-sh) #touch-actions {
+	display: none !important;
+}
+@media (max-width: 700px) {
+	.esh-ttl > div {
+		padding-left: 3vw !important;
+		max-width: 88vw !important;
+	}
+	.esh-ttl h1 {
+		font-size: 48px !important;
+	}
+	.esh-mod {
+		max-height: 100% !important;
+	}
+}
+@media (max-height: 550px) {
+	.esh-ttl h1 {
+		font-size: 38px !important;
+	}
+	.esh-mod {
+		max-height: 100% !important;
+	}
+}
+/* Compact status remains readable from a sofa while staying below the active flight plane. */
+@media (min-width: 701px) and (min-height: 551px) {
+	#pilots {
+		bottom: 34px;
+	}
+	.pilot {
+		min-width: 190px;
+		max-width: 340px;
+		padding: 8px 12px;
+	}
+	.pilot b {
+		font-size: 0.8em;
+	}
+	.pilot span {
+		font-size: 0.64em;
+		margin: 4px 0;
+	}
+	.pilot small {
+		font-size: 0.56em;
+		margin-top: 4px;
+	}
+}
+/* Credits use short pages and a wider reading measure at the native Shell scale. */
+.esh-sh:is(
+	[aria-label="Source Information"],
+	[aria-label="Testing Feedback"],
+	[aria-label="Engine Feedback"],
+	[aria-label="Prompt Feedback"]
+) .esh-mod {
+	width: min(720px, 100%) !important;
+}

@@ -1,0 +1,20 @@
+# Evidence ledger
+
+Inspected 2026-11-06. These are source checks, not claims that the original game was played here.
+
+| Reference | Actually inspected | What it supports and uncertainties |
+| --- | --- | --- |
+| [Original U.S. manual](https://odyssey2.info/library/manuals/us_killerbees/Killer%20Bees%20(USA).pdf) | Extracted text of the twelve-page PDF, particularly printed rules pages 3–9. | Twelve starting bees; contact slows and eventually defeats Beebots; interrupted contact lets them recover; red/blue robots turn differently; graves obstruct robots. Hostile swarms mature through three behaviors. The horizontal ray removes rival swarms, including touching ones, recharges on a robot kill, and cannot stack charges. Survival affects the round bonus. Exact sound and animation timing are not established by text. |
+| [Bob Harris interview, Classic Gamer 5, p.40](https://www.oldschoolgamermagazine.com/osgdigital/cgm05/files/basic-html/page40.html) | HTML transcription of page 40. | Creator describes twelve individual bees, patterned robot turns, useful grave placement, entrance warnings, and the increasing survival bonus. His recollection says a Voice-module effect inspired the buzzing concept. This is retrospective testimony; no original sound was heard. |
+| [The Fantastic, Fantastic World of Bob](https://experienciaodyssey.com.br/the-fantastic-fantastic-world-of-bob/) | Creator interview text, especially arena backgrounds, robot movement, and enemy entrances. | Describes the readability problem with decorated arena backgrounds, gradual individual losses, predictable turns, and moving arrivals into visible cells after an unfair spawn death. Some recollections are explicitly uncertain. |
+| [Recording without The Voice](https://www.youtube.com/watch?v=i3OVu6cs3CQ), [with The Voice](https://www.youtube.com/watch?v=yN8ekDBvpJY) | URLs supplied in PLAN.md; neither viewed nor listened to. | Original pitch, envelopes, speech wording, and audiovisual timing remain **unknown**. This game's score, effects, and gibberish are original code compositions. |
+| [Required engine handoff](https://github.com/michaelcrosato/my-3d2dge/tree/8ecc2f62353761187bdfe226f327b7ea5d2eb691/dist/handoff) | Vendored README, API.md, settings and ChipAudio implementation; renderer/input read by their respective owners. | my-3D2dge v0.89.1 at commit `8ecc2f62353761187bdfe226f327b7ea5d2eb691`. Native overhead view, fixed 120 Hz stepping, custom rigs, persistent settings, chip instruments, native music layers, and separate SFX/music/voice buses. No external audio files are necessary. |
+| [AI Hub SDK and harness](https://github.com/michaelcrosato/ai-hub/tree/35a1047f2067b2af3de3943f0fe452f39105d869/lib/hub) | Network owner inspected the full README, pristine session client, shared-world arena example, harness conformance logic, and official checker. | Session Protocol 1, client 1.4.0, commit `35a1047f2067b2af3de3943f0fe452f39105d869`. Metadata schema, start-clock gating, dedicated authority without a local seat, lifecycle/results, and transport limits come from the actual vendored contract. Local WebRTC signalling and gameplay are implemented separately; arbitrary internet/NAT reachability remains unknown without TURN. |
+
+## Deliberate additions
+
+Focus formation, a six-encounter authored moon garden, simultaneous cooperative play, the bell gardener finale, collision of player swarms with husks, a starting charged ray, and checkpoint retry are original design choices from PLAN.md. They are not attributed to the 1983 game.
+
+## Audio verification limits
+
+All sound is synthesized in `src/audio.js` through the engine. The persistent music setting defaults to `0.10`; the voice setting controls a dedicated native voice bus. Chromium and WebKit offline rendering passed 12 checks covering finite nonzero unclipped output, envelope decay, music bus attenuation, mute, the real settings default, and silent dedicated authority. Evidence: `evidence/audio-results.json`. Nobody listened on this headless machine; subjective musical quality and real speaker balance are unknown.

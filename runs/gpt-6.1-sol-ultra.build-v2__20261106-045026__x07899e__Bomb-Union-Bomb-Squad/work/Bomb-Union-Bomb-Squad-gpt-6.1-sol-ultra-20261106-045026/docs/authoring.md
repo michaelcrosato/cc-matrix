@@ -1,0 +1,22 @@
+# Author a board and a case
+
+The original cases live in `src/sim/content.js`; the deterministic repair model lives in `src/sim/model.js`. The renderer and transport consume that model rather than owning repair rules. `docs/sim-contract.md` describes every field and ordinary command.
+
+Open a live case, pause, then choose **Developer workbench → Board / case authoring**. This edits an isolated scratch template. The authored campaign and ordinary records are never overwritten. Developer and scratch results carry a modified label; live Hub sessions expose inspection without gameplay editing.
+
+1. Load an authored template. Select a component and set its world X/Y and left/right terminal offsets. Component silhouettes are resistor, capacitor, or chip. Amber bars, coral dots, and cyan crosses duplicate color identity.
+2. Choose a single matching rule for the board. A jumper board uses jumper components and reusable jumper stock. A shape board has exactly one matching shape spare for each ordered source; a color board has exactly one matching color/pattern spare. Rebuild the tray after editing a rule or source identity.
+3. Rotate the required repair order. Every ID must refer to an existing unique component. Decorative or practice-error components may remain outside the ordered list. Both terminal anchors must be reachable: world X within ±110 and Y within ±70, with at least ten units separating a component's anchors.
+4. Paint evidence reward cells on the 4-column × 5-row stencil. A case board may reveal a partial pack. All boards for a digit, together, must identify exactly one of the actual ten glyphs. A one-board scratch case additionally validates that its own mask identifies the selected seed's digit; if it is ambiguous, paint more cells. Painting all twenty is a reliable first scratch example.
+5. Set the scratch fuse, validate, and playtest. Ordinary tool controls remain necessary: cut both leads, grip the part, pick and place a replacement, hold/release both solder joints, then deliberately submit the inferred code. A complete board still cannot publish evidence through fire or a pending wrong-cut recovery.
+6. Export versioned JSON. Import uses explicit parse and validation feedback before replacing the scratch copy. Exported files have `version: "bomb-union-1"`; unrecognized versions, bad orders, unreachable anchors, and missing or ambiguous stock are rejected.
+
+A minimal practical addition is the **Editor-authored safety loop** exercised by `tests/simulation.mjs`: export a waterfront board, rename it, move C1 to X=-40, set terminal offsets to -20/+20, paint all twenty reward cells, JSON round-trip it, and complete the scratch case through ordinary commands. This demonstrates a new playable board without changing production templates.
+
+To add a production case, add a definition in `BU.CONTENT` with a stable ID, title/subtitle, theme, digit count, board count divisible by digit count, required component count, solo duration and one duration per supported party size, brief/intro, sector names, mechanics, taunts, success/failure and ending text. Existing themes are workshop, waterfront, relay, and central. Add new scene dressing to the native art module for a new theme. Board generation uses labeled seeded content decisions chosen once at case start; current templates vary source identities, replacement arrangement, and code while preserving diagnostic uniqueness.
+
+Run `node tools/verify.mjs` after changing content or rules. The content validator checks glyph uniqueness, all authored masks' eventual solutions, positions, order references, stock, and templates across deterministic seeds. The simulation suite completes every case and every supported party size, and exercises recoverable errors, fire, ownership, voting, exact expiry, snapshots, tuning, and editor round-trips.
+
+Safe authoring rules are deliberate: do not change glyphs in the UI alone, do not publish cells from rendering, do not consume spare stock in a test socket, and do not clear established fire when cooling or switching boards. The shared simulation is the source of truth for all these behaviors.
+
+Scratch authoring, checkpoint capture/restore and single-step are solo tools. They are disabled during online dispatches so they cannot replace a live shared device. A standalone host can still tune balances and inject supported fuse/hazard commands through the authoritative adapter; guests receive the resulting revision. Hub retains read-only inspection and personal presentation settings.

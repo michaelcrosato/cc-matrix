@@ -1,0 +1,5 @@
+# Engine integration
+
+Pinned full my-3D2dge v0.89.1 is vendored in vendor/engine/my-3d2dge.js. Game code extends native rigs with update/draw, uses E.px, E.tones, E.Blob, native E.anim, renderer actors/queues, lighting, E.font, E.Menu, E.Shell, settings and rebinding. FORMATION's fixed-shooter step/draw structure is adapted; its alternating-turn ledger and generic combat are replaced with the game's authoritative co-op world. Engine modification: the actor scratch-buffer bounds tracker now applies the current Canvas transform when tracking fillRect/drawImage rectangles. Translated/scaled custom native pixel rigs otherwise drew outside the tracked raw-coordinate crop and vanished without errors. Supports translation, scale, rotation and mirrored transforms; headless fallback keeps raw bounds. Original revision is recorded above; the small marked patch is in Renderer constructor.
+
+Second engine patch: native Fill scaling now permits fractional factors below one (minimum 0.1), preserving the entire canonical arena on low-density small screens. Touch defaults to Fill through standard settings; desktop keeps Auto. No collision geometry depends on the viewport.

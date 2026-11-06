@@ -1,0 +1,17 @@
+# Presentation and synthesized sound
+
+The shipped presentation uses my-3D2dge v0.89.1, revision 8ecc2f62353761187bdfe226f327b7ea5d2eb691, and its unchanged World3D add-on. World3D owns the three.js / Rapier initialization and renderer. The game follows the native `E.Game` scene update/draw lifecycle: `DungeonView.update(dt)` calls `world.step(dt)` and `DungeonView.draw(r)` calls `world.draw(r)`. Rules never inspect rendered geometry or wait for animation callbacks.
+
+The 32-unit logical cells become 2 × 2 native 16-unit tiles. Camera height is 25 units, with quarter-turn headings and interpolated tile movement. Authored maps use the native procedural flagstone/brick texture generators. The Spirit Passages use cool tile and masonry colors. Warm portable lantern light and placed lanterns preserve edges; ambient fill keeps enemies and objects readable.
+
+Original art extends both native registries. `E.SHAPES.tarminUrn` and `tarminPedestal` are material/part data; generic architecture uses the native shape renderer. Registered `E.World3D.THINGS` draw vault arches, lanterns, eye murals, one-way gates, descending ladders, hearths, treasure, and each item family. Secrets remain physical geometry until opened and have a visible seam. Wall-sight highlights that seam. Loot disappears only when authoritative state marks its stable ID claimed.
+
+Skeletons, sentinels, ogres, wraiths, and the Warden use native `E.Humanoid` rigs, with native pose blending, hurt and death poses. Species extend their silhouette with drawn ribs, shield plates, spectral layers, or curved segmented horns. The scorpion uses a native `E.Blob` with eight articulated legs, pincers, and a segmented, animated rune-lit tail. Native `E.Combo` and `E.Attack` moves animate anticipation, strikes, and recovery in reaction to authoritative events. Native animation never awards damage.
+
+The first-person hands use the native World3D overlay pen, which clears depth before drawing so weapons cannot clip into corridor walls. The bow has a curved stave, taut string, and visible arrow; the blade, rune, shield, potion, and alternate left-hand weapon have distinct geometry. Spell impacts, intent circles, equipment swaps, guard movement, and treasure reveal use authoritative state/events. Reduced motion removes camera bob; intentions remain visible.
+
+`DungeonAudio` uses the engine's chip synthesizer, native sequencer, mixer and sound-effect envelopes. All sound is generated in code. Original score loops cover ordinary vaults, Spirit Passages, combat, the Warden and victory. A registered bell instrument combines sinusoidal partials. Effects distinguish War, Spirit, bow, guard, footsteps, rest, pages, keys, masonry doors, suction gates, secrets, defeat, phase breaks and treasure. Voice consists of short synthesized formant-filtered gibberish; meaningful messages remain text.
+
+Fresh music gain is exactly 0.10, with separate master/effects/voice controls. A real input gesture unlocks Web Audio. Audio provides pause/resume/stop methods; stop clears sequenced music and live voices. An analyser reports finite RMS/peak values. `DungeonAudio.renderProbe()` renders a finite oscillator/envelope sequence through an OfflineAudioContext for machine verification; this alone does not constitute human listening.
+
+No engine files were changed by the presentation implementation. No recorded image, model, sound, speech, or music files are required.

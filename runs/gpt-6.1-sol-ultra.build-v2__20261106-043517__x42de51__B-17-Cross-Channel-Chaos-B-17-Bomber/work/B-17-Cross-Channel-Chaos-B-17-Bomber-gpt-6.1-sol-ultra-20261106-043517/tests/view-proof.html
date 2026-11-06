@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><title>B-17 Native View Proof</title><style>html,body{margin:0;background:#152d32;height:100%;overflow:hidden}#stage{position:relative;height:100%;width:100%}#screen{position:absolute;inset:0;width:100%;height:100%}</style><script type="importmap">{"imports":{"three":"../vendor/engine/vendor/three-0.182.0/three.webgpu.min.js","three/webgpu":"../vendor/engine/vendor/three-0.182.0/three.webgpu.min.js","three/tsl":"../vendor/engine/vendor/three-0.182.0/three.tsl.min.js","@dimforge/rapier3d-simd-compat":"../vendor/engine/vendor/rapier3d-simd-compat-0.19.3/rapier.js"}}</script></head><body><div id="stage"><canvas id="screen"></canvas></div><script src="../vendor/engine/dist/handoff/my-3d2dge.js"></script><script type="module">
+import '../vendor/engine/engine/my-3d2dge-3d.js';
+import {BomberView} from '../src/view.js';
+import {BomberSim} from '../src/sim.js';
+const E=window.My3D2dge,game=new E.Game({canvas:'screen',res:[640,360],expand:true,bg:null,input:{},menu:{quit:false}}),view=new BomberView(E,game),sim=new BomberSim();
+const s=sim.state;Object.assign(s.aircraft,{x:285000,y:-20000,z:12500,airborne:true,speed:1120,bank:.12,gear:0});sim.updatePrediction();
+await view.init();
+window.proof={game,view,sim,opts:{exterior:true,title:true},setStation(station){s.players[0].station=station;this.opts={};},split(){sim.join(2,'GUNNER');s.players[1].station='starboard';game.splitScreen(2,{layout:'rows'});this.opts={};},ready:true};
+game.start({update(dt){s.t+=dt;view.update(dt,s);},draw(r){view.draw(r,s,s.players,window.proof.opts);}});
+</script></body></html>

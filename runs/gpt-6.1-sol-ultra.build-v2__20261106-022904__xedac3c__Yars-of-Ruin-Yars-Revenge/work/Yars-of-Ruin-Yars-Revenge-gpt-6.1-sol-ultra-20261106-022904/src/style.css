@@ -1,0 +1,526 @@
+:root {
+	color-scheme: dark;
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body {
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background: #060c14;
+	color: #eef7ea;
+	font-family:
+		Trebuchet MS,
+		Arial,
+		sans-serif;
+}
+canvas#screen {
+	position: fixed;
+	inset: 0;
+	display: block;
+	width: 100%;
+	height: 100%;
+	image-rendering: pixelated;
+	touch-action: none;
+}
+button {
+	font: inherit;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+	outline: 3px solid #e3ff9f;
+	outline-offset: 4px;
+}
+.esh {
+	--paper: #0c1721;
+	--ink: #f1f7e7;
+	--accent: #d5f68a;
+	--muted: #a1b2b6;
+	--line: #3a5056;
+	--danger: #ff927a;
+	--font: Trebuchet MS, Arial, sans-serif;
+	--title: Georgia, serif;
+}
+.esh .esh-sh {
+	background: rgba(2, 8, 14, 0.76);
+	backdrop-filter: blur(5px);
+}
+.esh .esh-pan {
+	border: 1px solid #405658;
+	border-radius: 2px;
+	background: linear-gradient(
+		135deg,
+		rgba(18, 33, 39, 0.98),
+		rgba(6, 16, 27, 0.98)
+	);
+	box-shadow: 0 12px 55px #0009;
+}
+.esh .esh-mod {
+	max-width: min(700px, 92%);
+	max-height: 88vh;
+}
+.esh .esh-btns button {
+	border-radius: 1px;
+	text-transform: uppercase;
+	font-size: 0.87em;
+	letter-spacing: 0.075em;
+	border: 1px solid #405655;
+	background: #13232a;
+}
+.esh .esh-btns .pri {
+	background: #d5ed9d;
+	color: #101d1b;
+	border-color: #e4ffb4;
+}
+.esh .esh-btns button:focus,
+.esh .esh-btns button:hover {
+	color: #081416;
+	background: #e1f6bb;
+	border-color: #edffd6;
+	box-shadow: 0 0 0 2px #d7f7a44d;
+}
+.esh .esh-k {
+	color: #b6d391;
+	letter-spacing: 0.16em;
+}
+.esh h2 {
+	font-family: Georgia, serif;
+	font-weight: normal;
+	letter-spacing: -0.035em;
+}
+.esh .esh-ttl {
+	background: linear-gradient(
+		90deg,
+		rgba(3, 11, 18, 0.97) 0%,
+		rgba(4, 13, 20, 0.9) 35%,
+		rgba(4, 13, 20, 0.35) 62%,
+		rgba(3, 11, 18, 0.1) 100%
+	);
+	backdrop-filter: none;
+	align-items: center;
+	justify-content: flex-start;
+	padding: 3vh 6vw;
+}
+.esh .esh-ttl > div {
+	max-width: 420px;
+	text-align: left;
+}
+.esh .esh-ttl h1 {
+	font-family: Georgia, serif;
+	font-size: clamp(56px, 7.2vw, 90px);
+	font-weight: normal;
+	line-height: 0.88;
+	letter-spacing: -0.06em;
+	color: #eff6d8;
+	text-shadow:
+		0 4px #14372f,
+		0 12px 45px #0008;
+	margin: 16px 0 20px;
+	max-width: 400px;
+}
+.esh .esh-ttl .esh-sub {
+	font-size: 14px;
+	letter-spacing: 0.08em;
+	color: #b6d891;
+	text-transform: uppercase;
+}
+.esh .esh-ttl p {
+	color: #bccac6;
+	font-size: 14px;
+	line-height: 1.5;
+	max-width: 340px;
+}
+.esh .esh-ttl .esh-btns {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 7px;
+	margin: 22px 0;
+}
+.esh .esh-ttl .esh-btns button {
+	min-height: 38px;
+	padding: 9px 14px;
+	font-size: 12px;
+}
+.esh .esh-ttl .esh-btns button:first-child {
+	grid-column: span 2;
+	min-height: 46px;
+	font-size: 14px;
+	text-align: left;
+}
+.esh .esh-ttl .esh-tags {
+	justify-content: flex-start;
+	font-size: 10px;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+}
+.esh .esh-ttl .esh-m {
+	font-size: 10px;
+	line-height: 1.6;
+	color: #789b9b;
+}
+.esh .esh-ttl .esh-k {
+	font-size: 10px;
+}
+.esh .esh-keys {
+	display: none;
+}
+.esh-nav {
+	border-radius: 2px !important;
+}
+.ruin-editor {
+	display: block;
+	width: 100%;
+	background: #050c12;
+	border: 1px solid #4b6363;
+	image-rendering: pixelated;
+	touch-action: none;
+	max-height: 220px;
+}
+.ruin-json {
+	width: 100%;
+	height: 140px;
+	background: #06111a;
+	color: #d9efb3;
+	font: 11px monospace;
+	border: 1px solid #486361;
+	padding: 10px;
+	resize: vertical;
+}
+.editor-status {
+	color: #d1e9a3;
+	font-size: 12px;
+	line-height: 1.5;
+}
+#game-hud {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	font-size: clamp(13px, 1.48vw, 28px);
+	font-weight: bold;
+	text-shadow: 0 2px 3px #000;
+	z-index: 4;
+}
+#game-hud .hud-top {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-start;
+	padding: calc(env(safe-area-inset-top) + 2.1vh) 3.2vw;
+	gap: 2vw;
+	background: linear-gradient(#030b13e0, transparent);
+}
+.hud-sector {
+	display: flex;
+	flex-direction: column;
+	gap: 0.25em;
+}
+.hud-overline {
+	font-size: 0.52em;
+	letter-spacing: 0.19em;
+	text-transform: uppercase;
+	color: #a4bebb;
+}
+.hud-station {
+	font-family: Georgia, serif;
+	font-size: 1.22em;
+	font-weight: normal;
+	color: #eff9dc;
+}
+.hud-values {
+	display: flex;
+	gap: 1.8em;
+	align-items: center;
+	padding-right: 4em;
+}
+.hud-score {
+	font-variant-numeric: tabular-nums;
+	letter-spacing: 0.06em;
+}
+.hud-lives {
+	font-size: 0.6em;
+	letter-spacing: 0.06em;
+	color: #d4e9b5;
+}
+.hud-charge {
+	position: absolute;
+	bottom: 3vh;
+	left: 3.2vw;
+	right: 3.2vw;
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-end;
+	gap: 2em;
+}
+.hud-scout {
+	background: #06121bdc;
+	padding: 0.65em 0.9em;
+	border-left: 3px solid #b5f7da;
+	min-width: 12em;
+}
+.hud-scout.p2 {
+	border-color: #edbd78;
+}
+.hud-scout-label {
+	font-size: 0.56em;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	margin-bottom: 0.5em;
+}
+.charge-pips {
+	display: flex;
+	gap: 4px;
+}
+.charge-pips i {
+	width: 1.1em;
+	height: 0.22em;
+	background: #213e42;
+	border: 1px solid #527775;
+}
+.charge-pips i.on {
+	background: #ceffc6;
+	border-color: #e5ffdf;
+	box-shadow: 0 0 10px #aaffb373;
+}
+.hud-ready {
+	font-size: 0.56em;
+	letter-spacing: 0.08em;
+	margin-top: 0.6em;
+	color: #d0ee9f;
+}
+.hud-hint {
+	font-size: 0.54em;
+	letter-spacing: 0.055em;
+	text-align: right;
+	color: #b3c9c6;
+	max-width: 28em;
+	line-height: 1.7;
+	padding: 0.5em 0;
+}
+.hud-core {
+	display: flex;
+	gap: 5px;
+	margin-top: 0.3em;
+}
+.hud-core i {
+	width: 1.1em;
+	height: 0.15em;
+	background: #ff987b;
+}
+.hud-core i.off {
+	background: #3e3839;
+}
+#caption {
+	position: fixed;
+	z-index: 5;
+	left: 50%;
+	bottom: 16%;
+	transform: translateX(-50%);
+	max-width: 75vw;
+	text-align: center;
+	pointer-events: none;
+	font-size: clamp(15px, 1.6vw, 30px);
+	color: #eafbd0;
+	line-height: 1.4;
+	text-shadow: 0 2px 5px #000;
+	background: #06121be8;
+	border: 1px solid #65867b;
+	padding: 0.5em 1em;
+}
+#demo-mark {
+	position: fixed;
+	top: 3vh;
+	left: 3vw;
+	z-index: 15;
+	color: #d9f4b0;
+	font: bold clamp(18px, 2vw, 34px) monospace;
+	letter-spacing: 0.2em;
+}
+#demo-mark span {
+	display: block;
+	font:
+		normal 0.45em Trebuchet MS,
+		sans-serif;
+	letter-spacing: 0.04em;
+	margin-top: 0.5em;
+}
+#touch-cannon {
+	position: fixed;
+	z-index: 8;
+	right: 6vw;
+	bottom: 18vh;
+	background: #def5aeed;
+	color: #0b211b;
+	border: 2px solid #f1ffd7;
+	border-radius: 50%;
+	width: 90px;
+	height: 90px;
+	font: bold 12px Trebuchet MS;
+	box-shadow: 0 0 28px #d6ffa42b;
+	touch-action: none;
+}
+body[data-playing="true"] .esh {
+	pointer-events: none;
+}
+body[data-playing="true"] .esh-sh,
+body[data-playing="true"] .esh-nav {
+	pointer-events: auto;
+}
+@media (max-width: 650px) {
+	.esh .esh-ttl {
+		padding: 20px 7vw;
+		background: linear-gradient(90deg, #041019f0, #041019a0);
+	}
+	.esh .esh-ttl > div {
+		max-width: 85vw;
+	}
+	.esh .esh-ttl h1 {
+		font-size: 66px;
+	}
+	.esh .esh-ttl .esh-btns {
+		margin: 14px 0;
+		gap: 6px;
+	}
+	.esh .esh-ttl .esh-tags {
+		font-size: 9px;
+	}
+	#game-hud .hud-values {
+		padding-right: 45px;
+		gap: 10px;
+	}
+	.hud-station {
+		font-size: 1em;
+	}
+	.hud-charge {
+		bottom: calc(2vh + env(safe-area-inset-bottom));
+		gap: 5px;
+	}
+	.hud-scout {
+		min-width: 0;
+		padding: 0.5em 0.6em;
+	}
+	.hud-hint {
+		display: none;
+	}
+	#caption {
+		max-width: 90vw;
+		width: max-content;
+		bottom: 25%;
+		font-size: 14px;
+	}
+	.esh .esh-mod {
+		max-height: 85vh;
+	}
+	#touch-cannon {
+		bottom: 10vh;
+	}
+}
+@media (orientation: portrait) {
+	#game-hud .hud-top {
+		padding-top: 12vh;
+	}
+	.hud-charge {
+		bottom: 10vh;
+	}
+	.esh .esh-ttl h1 {
+		font-size: 64px;
+	}
+	.esh .esh-ttl .esh-m {
+		font-size: 9px;
+	}
+	.esh .esh-ttl p {
+		font-size: 13px;
+	}
+	#caption {
+		bottom: 28%;
+	}
+	#demo-mark {
+		top: 9vh;
+	}
+	#touch-cannon {
+		bottom: 18vh;
+	}
+}
+[hidden] {
+	display: none !important;
+}
+
+/* Fit the native TV-scaled shell inside its logical viewport. */
+.esh .esh-mod {
+	max-height: 100%;
+	width: min(580px, 100%);
+}
+.esh .esh-ttl {
+	display: flex;
+	padding: 18px 3vw;
+	overflow: auto;
+}
+.esh .esh-ttl > div {
+	padding-left: 0;
+	max-width: 400px;
+	max-height: 100%;
+	overflow-y: auto;
+	scrollbar-width: thin;
+}
+.esh .esh-ttl h1 {
+	font-size: 74px;
+	margin: 10px 0 12px;
+	line-height: 0.88;
+	max-width: 350px;
+}
+.esh .esh-ttl .esh-sub {
+	font-size: 12px;
+	line-height: 1.45;
+	margin-top: 0;
+	max-width: 340px;
+}
+.esh .esh-ttl p {
+	font-size: 13px;
+	line-height: 1.4;
+	margin: 12px 0;
+}
+.esh .esh-ttl .esh-btns {
+	margin: 16px 0 10px;
+	gap: 5px;
+}
+.esh .esh-ttl .esh-btns button {
+	min-height: 32px;
+	padding: 7px 12px;
+	font-size: 11px;
+}
+.esh .esh-ttl .esh-btns button:first-child {
+	min-height: 40px;
+	font-size: 13px;
+}
+.esh .esh-ttl .esh-tags {
+	margin-top: 10px;
+	font-size: 9px;
+	gap: 9px;
+}
+.esh .esh-ttl .esh-m {
+	margin-top: 8px;
+	font-size: 9px;
+	line-height: 1.45;
+}
+@media (max-width: 650px) {
+	.esh .esh-ttl {
+		padding: 18px 6vw;
+	}
+	.esh .esh-ttl h1 {
+		font-size: 58px;
+	}
+	.esh .esh-ttl .esh-sub {
+		font-size: 11px;
+	}
+	.esh .esh-ttl p {
+		font-size: 12px;
+	}
+	.esh .esh-ttl .esh-btns button {
+		font-size: 10px;
+	}
+	.esh .esh-ttl > div {
+		max-width: 100%;
+	}
+}

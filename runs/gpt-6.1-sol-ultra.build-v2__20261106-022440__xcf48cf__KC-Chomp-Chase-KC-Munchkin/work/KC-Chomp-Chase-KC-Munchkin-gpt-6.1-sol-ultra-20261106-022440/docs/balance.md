@@ -1,0 +1,15 @@
+# Balance evidence
+
+Defaults are six hero cells/second, food 0.62× nominal hero speed increasing monotonically to 1× for the final survivor, three predators at 3.05 cells/second multiplied by authored board scales, six-second power, 2.6-second gate cadence, four-second chirp cooldown, five shared lives, 1.2-second team grace and 1.5-second respawn invulnerability.
+
+The first legal-input solo campaign cleared in 191.57 simulated seconds with 3 lives. Food initially used Manhattan distance and substantial random route noise, which too often routed it into the player. Replacing that with shared-graph distance and a stronger committed flee choice yielded a 346.47-second solo campaign. All routing remains cardinal, continuous and non-reversing except dead ends; the target never teleports or reads future input. Turn anticipation is 0.075 seconds.
+
+The final-target bot originally followed current food positions. An eight-seed normal-play test caught the PLUM bot losing its fifth life with one target left. The game correctly ended, but the legal-input demonstration agent needed better interception. A failed experiment with panic reversal made bots less effective and was removed. The final agent forecasts committed routes, selects reachable future intersections and uses danger-weighted paths. This changes only legal intent selection, never speed, collision, food state, lives or scoring.
+
+With that stronger agent, the final ordinary solo campaign measured **218.58 simulated seconds**, with 72 food, 24 powered food, seven predator catches, one hit and five final lives (including normal clear replenishments). Stage clear times before transition were approximately 35.77, 47.84, 38.70, 36.83, 23.42 and 21.59 seconds. A full ordinary co-op campaign measured **90.87 seconds**, with both heroes contributing (46 and 26 food), two predator catches, no hits and all six final catches. Fast co-op is an expected result of coordinated route coverage; no forced waits were inserted to stretch the run.
+
+These are efficient automated agents with exact graph knowledge, not first-human playtime measurements. The plan's 12–18 minute first-run estimate remains unconfirmed and is not presented as measured. Campaign, remix and custom standalone runs are untimed. Hub may honestly declare a conservative duration while enforcing its own time-up outcome.
+
+Final verification: `node tests/sim.mjs` reports **32 passed, 0 failed, 0 skipped**. It includes full ordinary solo/co-op six-stage runs, 58 ordinary generated-board completions, 50 reproducible generated layouts, moving-food identities/speeds, power ordering, chains, damage/grace, gate occupancy/topology, tunnel sweeps, reveals and lifecycle boundaries. Additional browser/Hub checks belong to the root test runner.
+
+An expanded final sample of fifty additional generated seeds all completed under normal lives and ordinary intent movement, with no stalls or failures. The longest measured generated run was FINAL-SAMPLE-26 at 103.68 seconds. Detailed outcomes are in `build/generated-play-results.json`. The permanent simulation runner includes those fifty seeds as well as the original eight.

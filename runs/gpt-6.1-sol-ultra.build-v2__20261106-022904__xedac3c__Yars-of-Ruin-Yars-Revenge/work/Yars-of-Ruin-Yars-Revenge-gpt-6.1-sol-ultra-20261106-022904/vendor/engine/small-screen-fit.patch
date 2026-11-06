@@ -1,0 +1,12 @@
+--- a/my-3d2dge.js
++++ b/my-3d2dge.js
+@@ -686,7 +686,8 @@
+       // o.expand: the resolution is the least the screen shows, and the picture grows on both sides to fill the window
+       // (no bars at any shape, up to expand.maxW x maxH): a HUD anchors to W and H
+       const fit = Math.min(pw / fix[0], ph / fix[1]), fill = this.scale === 'fill' || (this.scale === 'auto' && dpr >= 2 && fit >= 2), x = o.expand;
+-      this.S = fill ? Math.max(1, fit) : Math.max(1, Math.min(Math.floor(pw / fix[0]), Math.floor(ph / fix[1])));
++      // Local small-screen-fit patch: a fixed arena must remain visible below 1x.
++      this.S = fit < 1 ? fit : fill ? fit : Math.max(1, Math.min(Math.floor(pw / fix[0]), Math.floor(ph / fix[1])));
+       this.W = x ? clamp(Math.ceil(pw / this.S - 1e-6), fix[0], Math.max(fix[0], x.maxW || 1e4)) : fix[0]; this.H = x ? clamp(Math.ceil(ph / this.S - 1e-6), fix[1], Math.max(fix[1], x.maxH || 1e4)) : fix[1];   // (a cap never cuts below res)
+     } else {
+       const S = Math.max(1, Math.min(Math.floor(ph / o.minH), Math.floor(pw / o.minW)));

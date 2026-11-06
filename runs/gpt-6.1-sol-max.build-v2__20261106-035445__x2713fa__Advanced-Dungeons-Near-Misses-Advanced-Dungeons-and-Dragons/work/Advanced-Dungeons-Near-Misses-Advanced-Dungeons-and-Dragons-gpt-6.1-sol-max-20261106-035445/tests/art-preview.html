@@ -1,0 +1,6 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Near Misses native rig contact sheet</title><style>html,body{margin:0;background:#15232d;width:100%;height:100%;overflow:hidden}canvas{display:block;width:100%;height:100%;image-rendering:pixelated}</style></head><body><canvas id="screen"></canvas><script src="../vendor/engine/my-3d2dge.js"></script><script src="../src/render/art.js"></script><script>
+const E=My3D2dge,A=NM.Art,game=new E.Game({canvas:'screen',res:'ps1',expand:true,view:'threequarter',menu:false,autoPause:false});
+const types=A.types, actors=types.map((type,i)=>({id:type,type,x:(i%3-1)*95,y:(Math.floor(i/3)-1)*95,angle:.35,hp:3,state:i>5?'windup':'investigating',stateTime:.3,walk:15,animTime:1.5}));
+game.start({update(){game.focus(0,0,0)},draw(r){r.sky(['#213e47','#243e40']);for(const actor of actors){A.creature(game,actor);r.textAt(actor.x,actor.y,45,actor.type.toUpperCase(),'#e5e2c7')}A.ranger(game,{id:'p1',seat:1,x:-145,y:0,angle:0,draw:.16,walk:15,animTime:1.5});A.ranger(game,{id:'p2',seat:2,x:145,y:0,angle:Math.PI,draw:.16,walk:15,animTime:1.5});}});
+window.game=game;
+</script></body></html>

@@ -1,0 +1,405 @@
+src/render.js:802:18 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    800 │ 						}
+    801 │ 						if (f.type === "kill" || f.type === "collapse")
+  > 802 │ 							text(ctx, "+" + (f.points || 200), x, y - u * 24 * z, C.gold, {
+        │ 							          ^^^^^^^^^^^^^^^^^^^^^^^
+    803 │ 								align: "center",
+    804 │ 							});
+  
+  i Unsafe fix: Use a template literal.
+  
+    800 800 │               }
+    801 801 │               if (f.type === "kill" || f.type === "collapse")
+    802     │ - → → → → → → → text(ctx,·"+"·+·(f.points·||·200),·x,·y·-·u·*·24·*·z,·C.gold,·{
+        802 │ + → → → → → → → text(ctx,·`+${f.points·||·200}`,·x,·y·-·u·*·24·*·z,·C.gold,·{
+    803 803 │                   align: "center",
+    804 804 │                 });
+  
+
+tests/native.mjs:132:30 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    130 │ 	);
+    131 │ 	for (const t of r.results)
+  > 132 │ 		if (!t.pass) console.error("FAIL " + t.name + ": " + t.detail);
+        │ 		                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    133 │ 	console.log(`${r.passed}/${r.checks} native engine checks passed`);
+    134 │ 	process.exitCode = r.failed ? 1 : 0;
+  
+  i Unsafe fix: Use a template literal.
+  
+    130 130 │     );
+    131 131 │     for (const t of r.results)
+    132     │ - → → if·(!t.pass)·console.error("FAIL·"·+·t.name·+·":·"·+·t.detail);
+        132 │ + → → if·(!t.pass)·console.error(`FAIL·${t.name}:·${t.detail}`);
+    133 133 │     console.log(`${r.passed}/${r.checks} native engine checks passed`);
+    134 134 │     process.exitCode = r.failed ? 1 : 0;
+  
+
+tools/build.mjs:22:70 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    20 │ 	.map(
+    21 │ 		(f) =>
+  > 22 │ 			`<script>\n${safe(read(f) + (f === "vendor/engine/my-3d2dge.js" ? "\n/* " + read("vendor/engine/LICENSE") + " */" : ""))}\n</script>`,
+       │ 			                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    23 │ 	)
+    24 │ 	.join("\n");
+  
+  i Unsafe fix: Use a template literal.
+  
+    20 20 │     .map(
+    21 21 │       (f) =>
+    22    │ - → → → `<script>\n${safe(read(f)·+·(f·===·"vendor/engine/my-3d2dge.js"·?·"\n/*·"·+·read("vendor/engine/LICENSE")·+·"·*/"·:·""))}\n</script>`,
+       22 │ + → → → `<script>\n${safe(read(f)·+·(f·===·"vendor/engine/my-3d2dge.js"·?·`\n/*·${read("vendor/engine/LICENSE")}·*/`·:·""))}\n</script>`,
+    23 23 │     )
+    24 24 │     .join("\n");
+  
+
+tools/build.mjs:27:40 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    25 │ const html = `<!doctype html>\n<html lang="en"><head><meta charset="utf-8">\n<script>${sdk}</script>...
+    26 │ fs.writeFileSync(path.join(root, "index.html"), html);
+  > 27 │ fs.writeFileSync(path.join(root, "..", meta.slug + ".html"), html);
+       │                                        ^^^^^^^^^^^^^^^^^^^
+    28 │ console.log(
+    29 │ 	`Built ${meta.slug}.html (${Math.round(Buffer.byteLength(html) / 1024)} KiB)`,
+  
+  i Unsafe fix: Use a template literal.
+  
+    25 25 │   ...s JavaScript.</noscript>${scripts}</body></html>`;
+    26 26 │   fs.writeFileSync(path.join(root, "index.html"), html);
+    27    │ - fs.writeFileSync(path.join(root,·"..",·meta.slug·+·".html"),·html);
+       27 │ + fs.writeFileSync(path.join(root,·"..",·`${meta.slug}.html`),·html);
+    28 28 │   console.log(
+    29 29 │   	`Built ${meta.slug}.html (${Math.round(Buffer.byteLength(html) / 1024)} KiB)`,
+  
+
+src/render.js:291:19 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter i is unused.
+  
+    289 │ 				this.bees
+    290 │ 					.get(p.id)
+  > 291 │ 					.forEach((b, i) =>
+        │ 					             ^
+    292 │ 						b.update(dt, {
+    293 │ 							look: [p.vx || 1, p.vy || 0],
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend i with an underscore.
+  
+    289 289 │           this.bees
+    290 290 │             .get(p.id)
+    291     │ - → → → → → .forEach((b,·i)·=>
+        291 │ + → → → → → .forEach((b,·_i)·=>
+    292 292 │               b.update(dt, {
+    293 293 │                 look: [p.vx || 1, p.vy || 0],
+  
+
+src/render.js:518:50 lint/correctness/noUnusedFunctionParameters ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter attract is unused.
+  
+    516 │ 				g.lights.add(a, 120, 8, 42, 0.18, { color: T.jewel });
+    517 │ 		}
+  > 518 │ 		world(r, w, { inspect = false, labels = false, attract = false } = {}) {
+        │ 		                                               ^^^^^^^
+    519 │ 			if (!w) return;
+    520 │ 			this.floor(r, w);
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+
+src/render.js:825:5 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable z is unused.
+  
+    823 │ 			const g = this.game,
+    824 │ 				st = NightContent.stages[w.stage],
+  > 825 │ 				z = r.view.zoom || 1,
+        │ 				^
+    826 │ 				[x, y] = r.w(0, 0, 0),
+    827 │ 				[x1, y1] = r.w(384, 240, 0);
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend z with an underscore.
+  
+    823 823 │         const g = this.game,
+    824 824 │           st = NightContent.stages[w.stage],
+    825     │ - → → → → z·=·r.view.zoom·||·1,
+        825 │ + → → → → _z·=·r.view.zoom·||·1,
+    826 826 │           [x, y] = r.w(0, 0, 0),
+    827 827 │           [x1, y1] = r.w(384, 240, 0);
+  
+
+src/render.js:826:6 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable x is unused.
+  
+    824 │ 				st = NightContent.stages[w.stage],
+    825 │ 				z = r.view.zoom || 1,
+  > 826 │ 				[x, y] = r.w(0, 0, 0),
+        │ 				 ^
+    827 │ 				[x1, y1] = r.w(384, 240, 0);
+    828 │ 			r.overlay((ctx) => {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend x with an underscore.
+  
+    824 824 │           st = NightContent.stages[w.stage],
+    825 825 │           z = r.view.zoom || 1,
+    826     │ - → → → → [x,·y]·=·r.w(0,·0,·0),
+        826 │ + → → → → [_x,·y]·=·r.w(0,·0,·0),
+    827 827 │           [x1, y1] = r.w(384, 240, 0);
+    828 828 │         r.overlay((ctx) => {
+  
+
+src/style.css:36:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    34 │ }
+    35 │ .esh {
+  > 36 │ 	--ink: #f8edce !important;
+       │ 	               ^^^^^^^^^^
+    37 │ 	--accent: #f5c85b !important;
+    38 │ 	--paper: rgba(9, 30, 35, 0.98) !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    36 │ → --ink:·#f8edce·!important;
+       │                 ----------- 
+
+src/style.css:37:20 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    35 │ .esh {
+    36 │ 	--ink: #f8edce !important;
+  > 37 │ 	--accent: #f5c85b !important;
+       │ 	                  ^^^^^^^^^^
+    38 │ 	--paper: rgba(9, 30, 35, 0.98) !important;
+    39 │ 	--muted: #a4b8ac !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    37 │ → --accent:·#f5c85b·!important;
+       │                    ----------- 
+
+src/style.css:38:33 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    36 │ 	--ink: #f8edce !important;
+    37 │ 	--accent: #f5c85b !important;
+  > 38 │ 	--paper: rgba(9, 30, 35, 0.98) !important;
+       │ 	                               ^^^^^^^^^^
+    39 │ 	--muted: #a4b8ac !important;
+    40 │ 	--line: #3a5c51 !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    38 │ → --paper:·rgba(9,·30,·35,·0.98)·!important;
+       │                                 ----------- 
+
+src/style.css:39:19 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    37 │ 	--accent: #f5c85b !important;
+    38 │ 	--paper: rgba(9, 30, 35, 0.98) !important;
+  > 39 │ 	--muted: #a4b8ac !important;
+       │ 	                 ^^^^^^^^^^
+    40 │ 	--line: #3a5c51 !important;
+    41 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    39 │ → --muted:·#a4b8ac·!important;
+       │                   ----------- 
+
+src/style.css:40:18 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    38 │ 	--paper: rgba(9, 30, 35, 0.98) !important;
+    39 │ 	--muted: #a4b8ac !important;
+  > 40 │ 	--line: #3a5c51 !important;
+       │ 	                ^^^^^^^^^^
+    41 │ }
+    42 │ .esh-sh {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    40 │ → --line:·#3a5c51·!important;
+       │                  ----------- 
+
+src/style.css:43:24 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    41 │ }
+    42 │ .esh-sh {
+  > 43 │ 	background: #031418d9 !important;
+       │ 	                      ^^^^^^^^^^
+    44 │ }
+    45 │ .esh-mod {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    43 │ → background:·#031418d9·!important;
+       │                        ----------- 
+
+src/style.css:46:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    44 │ }
+    45 │ .esh-mod {
+  > 46 │ 	border-radius: 2px !important;
+       │ 	                   ^^^^^^^^^^
+    47 │ 	max-width: 100%;
+    48 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    46 │ → border-radius:·2px·!important;
+       │                     ----------- 
+
+src/style.css:50:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    48 │ }
+    49 │ .esh button {
+  > 50 │ 	border-radius: 2px !important;
+       │ 	                   ^^^^^^^^^^
+    51 │ 	letter-spacing: 0.04em;
+    52 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    50 │ → border-radius:·2px·!important;
+       │                     ----------- 
+
+src/style.css:55:30 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    53 │ .esh h1,
+    54 │ .esh h2 {
+  > 55 │ 	font-family: Georgia, serif !important;
+       │ 	                            ^^^^^^^^^^
+    56 │ }
+    57 │ .esh-row {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    55 │ → font-family:·Georgia,·serif·!important;
+       │                              ----------- 
+
+src/style.css:58:18 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    56 │ }
+    57 │ .esh-row {
+  > 58 │ 	padding: 10px 0 !important;
+       │ 	                ^^^^^^^^^^
+    59 │ }
+    60 │ .esh-sh .esh-btns button:hover {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    58 │ → padding:·10px·0·!important;
+       │                  ----------- 
+
+src/style.css:65:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    63 │ .esh-m,
+    64 │ .esh-row small {
+  > 65 │ 	color: #a8c5b6 !important;
+       │ 	               ^^^^^^^^^^
+    66 │ }
+    67 │ .night-peer {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    65 │ → color:·#a8c5b6·!important;
+       │                 ----------- 
+
+src/render.js:291:7 lint/suspicious/useIterableCallbackReturn ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This callback passed to forEach() iterable method should not return a value.
+  
+    289 │ 				this.bees
+    290 │ 					.get(p.id)
+  > 291 │ 					.forEach((b, i) =>
+        │ 					 ^^^^^^^
+    292 │ 						b.update(dt, {
+    293 │ 							look: [p.vx || 1, p.vy || 0],
+  
+  i Either remove this return or remove the returned value.
+  
+    290 │ 					.get(p.id)
+    291 │ 					.forEach((b, i) =>
+  > 292 │ 						b.update(dt, {
+        │ 						^^^^^^^^^^^^^^
+  > 293 │ 							look: [p.vx || 1, p.vy || 0],
+  > 294 │ 							squash: p.focus ? -0.1 : p.contact ? 0.14 : 0,
+  > 295 │ 							flap: p.contact ? 1 : 0.8,
+  > 296 │ 						}),
+        │ 						^^
+    297 │ 					);
+    298 │ 			}
+  
+
+Skipped 63 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 14.
+Checked 5 files in 71ms. Fixed 5 files.
+Found 4 errors.
+Found 22 warnings.
+Found 8 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while applying fixes.
+  
+

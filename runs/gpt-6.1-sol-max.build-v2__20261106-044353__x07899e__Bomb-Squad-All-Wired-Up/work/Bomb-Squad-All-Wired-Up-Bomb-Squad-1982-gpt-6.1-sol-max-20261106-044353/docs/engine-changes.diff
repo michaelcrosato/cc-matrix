@@ -1,0 +1,14 @@
+diff --git a/vendor/engine-upstream/dist/handoff/my-3d2dge.js b/vendor/my-3d2dge.js
+index cecb15c..5a9ce53 100644
+--- a/vendor/engine-upstream/dist/handoff/my-3d2dge.js
++++ b/vendor/my-3d2dge.js
+@@ -9480,7 +9480,8 @@ class Shell {
+     const top = this._stack[this._stack.length - 1], again = top && top.name === name, s = Object.assign({}, this._o.screens && this._o.screens[name], again ? top.s : null, spec);
+     if (again) this._stack.pop();   // the same screen again: updated in place
+     else { if (top) top.focus = this._focusAt(); this._status = ''; }   // (the focus comes back here when the new screen closes)
+-    this._stack.push({ name, s, focus: again ? top.focus : undefined }); this._capEnd(); this._render(); return this;
++    const refreshedFocus = again ? this._focusAt() : -1;
++    this._stack.push({ name, s, focus: again ? (refreshedFocus >= 0 ? refreshedFocus : top.focus) : undefined }); this._capEnd(); this._render(); return this;
+   }
+   /** what cancel does: the screen's own back(), or close it (back to the screen under it; closing the pause screen resumes) */
+   back() {

@@ -1,0 +1,13 @@
+# State and lifetime contracts
+
+Fixed step: 1/120 second. One World is authoritative, never the renderer. Native E.Bullets owns projectile integration; the game resolves swept collision in the x/y overhead flight plane. Entity IDs are sector-prefixed monotonic IDs. RNG is an explicit per-world xorshift stream, separate from cosmetic engine randomness.
+
+Input maps authenticated seat ID to {mx,my,ax,ay,fire,burst}. Each vector is finite, clamped, and normalized. First seat steers, second aims and supplies the hyperspace vector; either fires the single cadence. One seat receives all actions. A fresh press is necessary for each warp; its vector locks during windup and burst.
+
+Tick order: enemy trajectory/state updates, ship movement and swept rescues, hostile contact, cannon/projectile integration and collision, objective/transition evaluation, terminal hull check. A valid rescue contact removes the crystal from collision before same-tick laser damage. IDs enter the rescue ledger once. Extraction reached on a simultaneous damage tick takes victory precedence; core destruction alone does not end an operation and hull depletion elsewhere fails.
+
+Mines deploy harmlessly, arm, activate, then disarm/die. Layer death disarms only mines with its owner ID, without awarding mine points. Active mines cannot deploy on a ship or rescue collar. Only the first four laser-destroyed mines per layer pay1 each, so replenishing fields cannot manufacture unlimited points; later mines remain fully destructible. Replacement groups restore reachability after losses, grant only base rescue points, and reduce rank; the director only adds the missing quota, so rescued replacements cannot be farmed. All director timers consume actual simulation dt, including fractional developer slow motion.
+
+Sector entry records any live unsecured crystals left behind, then clears shots, entities, temporary effects/inputs and local timers; restores authored hull/energy; preserves secured/lost ledgers, score, seed and cumulative operation stats. There are12 required signals and one optional high-risk signal in the complete operation. Checkpoint retry restores score and ledger baseline. A terminal result is latched once. Attract uses a disposable World and cannot save. Developer-modified runs are ineligible for ordinary records. Hub owns round end and forbids private retry or mutation.
+
+Designer changes: content.js contains sectors/spawns/quotas/briefing/shroud ranges; config.js contains validated authored balance ranges/defaults; World.fixture is explicitly a developer/test command and is not used by the action-driven verification pilot.

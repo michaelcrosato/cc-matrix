@@ -1,0 +1,90 @@
+Orbit-Invadettes-Astro-Battle-Space-Invaders-1979-gpt-6.1-sol-ultra-20261106-022709/src/audio.js:277:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    275 │ 	};
+    276 │ 	for (const [name, voice] of Object.entries(sounds))
+  > 277 │ 		audio.define("orbit:" + name, voice);
+        │ 		             ^^^^^^^^^^^^^^^
+    278 │ 
+    279 │ 	function effect(name, x = 240, throttle = 0.035) {
+  
+  i Unsafe fix: Use a template literal.
+  
+    275 275 │     };
+    276 276 │     for (const [name, voice] of Object.entries(sounds))
+    277     │ - → → audio.define("orbit:"·+·name,·voice);
+        277 │ + → → audio.define(`orbit:${name}`,·voice);
+    278 278 │   
+    279 279 │     function effect(name, x = 240, throttle = 0.035) {
+  
+
+Orbit-Invadettes-Astro-Battle-Space-Invaders-1979-gpt-6.1-sol-ultra-20261106-022709/src/audio.js:289:23 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    287 │ 		last.set(name, t);
+    288 │ 		counts.effects++;
+  > 289 │ 		const h = audio.sfx("orbit:" + name, {
+        │ 		                    ^^^^^^^^^^^^^^^
+    290 │ 			pan: Math.max(-0.75, Math.min(0.75, (Number(x) - 240) / 320)),
+    291 │ 			vary: name === "repair" ? 0 : 0.035,
+  
+  i Unsafe fix: Use a template literal.
+  
+    287 287 │       last.set(name, t);
+    288 288 │       counts.effects++;
+    289     │ - → → const·h·=·audio.sfx("orbit:"·+·name,·{
+        289 │ + → → const·h·=·audio.sfx(`orbit:${name}`,·{
+    290 290 │         pan: Math.max(-0.75, Math.min(0.75, (Number(x) - 240) / 320)),
+    291 291 │         vary: name === "repair" ? 0 : 0.035,
+  
+
+Orbit-Invadettes-Astro-Battle-Space-Invaders-1979-gpt-6.1-sol-ultra-20261106-022709/src/audio.js:349:8 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    347 │ 				world.encounter === 6 || world.boss
+    348 │ 					? "boss"
+  > 349 │ 					: "location" + Math.min(2, Math.max(0, Number(world.location) || 0));
+        │ 					  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    350 │ 		if (key === current) return;
+    351 │ 		current = key;
+  
+  i Unsafe fix: Use a template literal.
+  
+    347 347 │           world.encounter === 6 || world.boss
+    348 348 │             ? "boss"
+    349     │ - → → → → → :·"location"·+·Math.min(2,·Math.max(0,·Number(world.location)·||·0));
+        349 │ + → → → → → :·`location${Math.min(2,·Math.max(0,·Number(world.location)·||·0))}`;
+    350 350 │       if (key === current) return;
+    351 351 │       current = key;
+  
+
+Orbit-Invadettes-Astro-Battle-Space-Invaders-1979-gpt-6.1-sol-ultra-20261106-022709/src/audio.js:293:7 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    291 │ 			vary: name === "repair" ? 0 : 0.035,
+    292 │ 		});
+  > 293 │ 		if (h && h.playing) handles.add({ h, end: t + 1 });
+        │ 		    ^^^^^^^^^^^^^^
+    294 │ 		for (const v of handles) if (v.end < t) handles.delete(v);
+    295 │ 	}
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    291 291 │         vary: name === "repair" ? 0 : 0.035,
+    292 292 │       });
+    293     │ - → → if·(h·&&·h.playing)·handles.add({·h,·end:·t·+·1·});
+        293 │ + → → if·(h?.playing)·handles.add({·h,·end:·t·+·1·});
+    294 294 │       for (const v of handles) if (v.end < t) handles.delete(v);
+    295 295 │     }
+  
+
+Skipped 4 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+Checked 1 file in 15ms. Fixed 1 file.
+Found 1 warning.
+Found 3 infos.

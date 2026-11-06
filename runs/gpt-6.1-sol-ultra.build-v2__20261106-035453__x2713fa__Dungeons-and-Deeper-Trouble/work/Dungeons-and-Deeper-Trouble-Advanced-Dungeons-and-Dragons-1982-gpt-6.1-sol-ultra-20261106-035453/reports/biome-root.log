@@ -1,0 +1,699 @@
+scripts/build.mjs:14:2 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    12 │ const read = (p) => fs.readFileSync(path.join(dir, p), "utf8");
+    13 │ const script = (body) =>
+  > 14 │ 	"<script>\n" + body.replace(/<\/script/gi, "<\\/script") + "\n</script>\n";
+       │ 	^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    15 │ const sources = [
+    16 │ 	"vendor/engine-repo/dist/handoff/my-3d2dge.js",
+  
+  i Unsafe fix: Use a template literal.
+  
+    12 12 │   const read = (p) => fs.readFileSync(path.join(dir, p), "utf8");
+    13 13 │   const script = (body) =>
+    14    │ - → "<script>\n"·+·body.replace(/<\/script/gi,·"<\\/script")·+·"\n</script>\n";
+       14 │ + → `<script>\n${body.replace(/<\/script/gi,·"<\\/script")}\n</script>\n`;
+    15 15 │   const sources = [
+    16 16 │     "vendor/engine-repo/dist/handoff/my-3d2dge.js",
+  
+
+src/save/save.js:21:40 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    19 │ 			try {
+    20 │ 				for (const slot of ["a", "b"]) {
+  > 21 │ 					const raw = this.storage?.getItem(this.key + ":" + slot);
+       │ 					                                  ^^^^^^^^^^^^^^^^^^^^^
+    22 │ 					if (!raw) continue;
+    23 │ 					try {
+  
+  i Unsafe fix: Use a template literal.
+  
+     19  19 │         try {
+     20  20 │           for (const slot of ["a", "b"]) {
+     21     │ - → → → → → const·raw·=·this.storage?.getItem(this.key·+·":"·+·slot);
+         21 │ + → → → → → const·raw·=·this.storage?.getItem(`${this.key}:${slot}`);
+     22  22 │             if (!raw) continue;
+     23  23 │             try {
+  
+
+src/save/save.js:83:6 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    81 │ 			try {
+    82 │ 				this.storage?.setItem(
+  > 83 │ 					this.key + ":" + (this.sequence % 2 ? "a" : "b"),
+       │ 					^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    84 │ 					JSON.stringify(envelope),
+    85 │ 				);
+  
+  i Unsafe fix: Use a template literal.
+  
+     81  81 │         try {
+     82  82 │           this.storage?.setItem(
+     83     │ - → → → → → this.key·+·":"·+·(this.sequence·%·2·?·"a"·:·"b"),
+         83 │ + → → → → → `${this.key}:${this.sequence·%·2·?·"a"·:·"b"}`,
+     84  84 │             JSON.stringify(envelope),
+     85  85 │           );
+  
+
+src/save/save.js:97:31 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    95 │ 			for (const slot of ["a", "b"])
+    96 │ 				try {
+  > 97 │ 					this.storage?.removeItem(this.key + ":" + slot);
+       │ 					                         ^^^^^^^^^^^^^^^^^^^^^
+    98 │ 				} catch {
+    99 │ 					this.available = false;
+  
+  i Unsafe fix: Use a template literal.
+  
+     95  95 │         for (const slot of ["a", "b"])
+     96  96 │           try {
+     97     │ - → → → → → this.storage?.removeItem(this.key·+·":"·+·slot);
+         97 │ + → → → → → this.storage?.removeItem(`${this.key}:${slot}`);
+     98  98 │           } catch {
+     99  99 │             this.available = false;
+  
+
+src/ui/ui.js:767:11 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    765 │ 								.map(
+    766 │ 									(n) =>
+  > 767 │ 										n.kind + " at " + Math.round(n.x) + "," + Math.round(n.y),
+        │ 										^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    768 │ 								)
+    769 │ 								.join("\n"),
+  
+  i Unsafe fix: Use a template literal.
+  
+     765  765 │                   .map(
+     766  766 │                     (n) =>
+     767      │ - → → → → → → → → → → n.kind·+·"·at·"·+·Math.round(n.x)·+·","·+·Math.round(n.y),
+          767 │ + → → → → → → → → → → `${n.kind}·at·${Math.round(n.x)},${Math.round(n.y)}`,
+     768  768 │                   )
+     769  769 │                   .join("\n"),
+  
+
+src/ui/ui.js:101:11 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+     99 │ 			for (const sp of DTConfig.sliders)
+    100 │ 				this.game.settings.define({
+  > 101 │ 					key: "dev_" + sp.key,
+        │ 					     ^^^^^^^^^^^^^^^
+    102 │ 					label: sp.label,
+    103 │ 					type: "slider",
+  
+  i Unsafe fix: Use a template literal.
+  
+      99   99 │         for (const sp of DTConfig.sliders)
+     100  100 │           this.game.settings.define({
+     101      │ - → → → → → key:·"dev_"·+·sp.key,
+          101 │ + → → → → → key:·`dev_${sp.key}`,
+     102  102 │             label: sp.label,
+     103  103 │             type: "slider",
+  
+
+src/ui/ui.js:122:11 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    120 │ 			])
+    121 │ 				this.game.settings.define({
+  > 122 │ 					key: "dev_" + key,
+        │ 					     ^^^^^^^^^^^^
+    123 │ 					label,
+    124 │ 					type: "toggle",
+  
+  i Unsafe fix: Use a template literal.
+  
+     120  120 │         ])
+     121  121 │           this.game.settings.define({
+     122      │ - → → → → → key:·"dev_"·+·key,
+          122 │ + → → → → → key:·`dev_${key}`,
+     123  123 │             label,
+     124  124 │             type: "toggle",
+  
+
+src/ui/ui.js:307:9 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    305 │ 				label:
+    306 │ 					requires && !s.tools[requires]
+  > 307 │ 						? "◇ " + node.name + " · needs " + requires
+        │ 						  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    308 │ 						: "→ " + node.name,
+    309 │ 				disabled: !!requires && !s.tools[requires],
+  
+  i Unsafe fix: Use a template literal.
+  
+     305  305 │           label:
+     306  306 │             requires && !s.tools[requires]
+     307      │ - → → → → → → ?·"◇·"·+·node.name·+·"···needs·"·+·requires
+          307 │ + → → → → → → ?·`◇·${node.name}···needs·${requires}`
+     308  308 │               : "→ " + node.name,
+     309  309 │           disabled: !!requires && !s.tools[requires],
+  
+
+src/ui/ui.js:308:9 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    306 │ 					requires && !s.tools[requires]
+    307 │ 						? "◇ " + node.name + " · needs " + requires
+  > 308 │ 						: "→ " + node.name,
+        │ 						  ^^^^^^^^^^^^^^^^
+    309 │ 				disabled: !!requires && !s.tools[requires],
+    310 │ 				primary: !requires || s.tools[requires],
+  
+  i Unsafe fix: Use a template literal.
+  
+     306  306 │             requires && !s.tools[requires]
+     307  307 │               ? "◇ " + node.name + " · needs " + requires
+     308      │ - → → → → → → :·"→·"·+·node.name,
+          308 │ + → → → → → → :·`→·${node.name}`,
+     309  309 │           disabled: !!requires && !s.tools[requires],
+     310  310 │           primary: !requires || s.tools[requires],
+  
+
+src/ui/ui.js:402:7 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    400 │ 						"EXPEDITION",
+    401 │ 					],
+  > 402 │ 					[s.relics.length + "/2", "CROWN HALVES"],
+        │ 					 ^^^^^^^^^^^^^^^^^^^^^^
+    403 │ 					[st.shots ?? 0, "ARROWS LOOSED"],
+    404 │ 					[st.restarts ?? 0, "RESTARTS"],
+  
+  i Unsafe fix: Use a template literal.
+  
+     400  400 │               "EXPEDITION",
+     401  401 │             ],
+     402      │ - → → → → → [s.relics.length·+·"/2",·"CROWN·HALVES"],
+          402 │ + → → → → → [`${s.relics.length}/2`,·"CROWN·HALVES"],
+     403  403 │             [st.shots ?? 0, "ARROWS LOOSED"],
+     404  404 │             [st.restarts ?? 0, "RESTARTS"],
+  
+
+src/ui/ui.js:515:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    513 │ 			const current = pages[page];
+    514 │ 			this.open("about", {
+  > 515 │ 				kicker: "Field notes · " + (page + 1) + " / " + pages.length,
+        │ 				        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    516 │ 				title: current.title,
+    517 │ 				sections: current.sections,
+  
+  i Unsafe fix: Use a template literal.
+  
+     513  513 │         const current = pages[page];
+     514  514 │         this.open("about", {
+     515      │ - → → → → kicker:·"Field·notes···"·+·(page·+·1)·+·"·/·"·+·pages.length,
+          515 │ + → → → → kicker:·`Field·notes···${page·+·1}·/·${pages.length}`,
+     516  516 │           title: current.title,
+     517  517 │           sections: current.sections,
+  
+
+src/ui/ui.js:561:11 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    559 │ 								...[...new Set(DTConfig.sliders.map((s) => s.group))].map(
+    560 │ 									(group) => [
+  > 561 │ 										"Tune " + group.toLowerCase(),
+        │ 										^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    562 │ 										() => this.devSliders(group),
+    563 │ 									],
+  
+  i Unsafe fix: Use a template literal.
+  
+     559  559 │                   ...[...new Set(DTConfig.sliders.map((s) => s.group))].map(
+     560  560 │                     (group) => [
+     561      │ - → → → → → → → → → → "Tune·"·+·group.toLowerCase(),
+          561 │ + → → → → → → → → → → `Tune·${group.toLowerCase()}`,
+     562  562 │                       () => this.devSliders(group),
+     563  563 │                     ],
+  
+
+src/ui/ui.js:590:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    588 │ 										for (const s of DTConfig.sliders)
+    589 │ 											this.game.settings.set(
+  > 590 │ 												"dev_" + s.key,
+        │ 												^^^^^^^^^^^^^^
+    591 │ 												DTConfig.defaults[s.key],
+    592 │ 											);
+  
+  i Unsafe fix: Use a template literal.
+  
+     588  588 │                       for (const s of DTConfig.sliders)
+     589  589 │                         this.game.settings.set(
+     590      │ - → → → → → → → → → → → → "dev_"·+·s.key,
+          590 │ + → → → → → → → → → → → → `dev_${s.key}`,
+     591  591 │                           DTConfig.defaults[s.key],
+     592  592 │                         );
+  
+
+src/ui/ui.js:609:24 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    607 │ 		devToggles() {
+    608 │ 			for (const key of ["infiniteHealth", "infiniteAmmo", "noclip", "reveal"])
+  > 609 │ 				this.game.settings["dev_" + key] = this.app.sim.cheats[key];
+        │ 				                   ^^^^^^^^^^^^
+    610 │ 			for (const key of ["collision", "navigation", "hearing", "los"])
+    611 │ 				this.game.settings["dev_" + key] = this.app.overlays[key];
+  
+  i Unsafe fix: Use a template literal.
+  
+     607  607 │       devToggles() {
+     608  608 │         for (const key of ["infiniteHealth", "infiniteAmmo", "noclip", "reveal"])
+     609      │ - → → → → this.game.settings["dev_"·+·key]·=·this.app.sim.cheats[key];
+          609 │ + → → → → this.game.settings[`dev_${key}`]·=·this.app.sim.cheats[key];
+     610  610 │         for (const key of ["collision", "navigation", "hearing", "los"])
+     611  611 │           this.game.settings["dev_" + key] = this.app.overlays[key];
+  
+
+src/ui/ui.js:611:24 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    609 │ 				this.game.settings["dev_" + key] = this.app.sim.cheats[key];
+    610 │ 			for (const key of ["collision", "navigation", "hearing", "los"])
+  > 611 │ 				this.game.settings["dev_" + key] = this.app.overlays[key];
+        │ 				                   ^^^^^^^^^^^^
+    612 │ 			this.open("dev-cheats", {
+    613 │ 				kicker: "Assisted expedition",
+  
+  i Unsafe fix: Use a template literal.
+  
+     609  609 │           this.game.settings["dev_" + key] = this.app.sim.cheats[key];
+     610  610 │         for (const key of ["collision", "navigation", "hearing", "los"])
+     611      │ - → → → → this.game.settings["dev_"·+·key]·=·this.app.overlays[key];
+          611 │ + → → → → this.game.settings[`dev_${key}`]·=·this.app.overlays[key];
+     612  612 │         this.open("dev-cheats", {
+     613  613 │           kicker: "Assisted expedition",
+  
+
+src/ui/ui.js:639:24 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    637 │ 		devSliders(group) {
+    638 │ 			for (const spec of DTConfig.sliders.filter((s) => s.group === group))
+  > 639 │ 				this.game.settings["dev_" + spec.key] = this.app.sim.tunables[spec.key];
+        │ 				                   ^^^^^^^^^^^^^^^^^
+    640 │ 			this.open("dev-tune", {
+    641 │ 				kicker: "Live balance · " + group,
+  
+  i Unsafe fix: Use a template literal.
+  
+     637  637 │       devSliders(group) {
+     638  638 │         for (const spec of DTConfig.sliders.filter((s) => s.group === group))
+     639      │ - → → → → this.game.settings["dev_"·+·spec.key]·=·this.app.sim.tunables[spec.key];
+          639 │ + → → → → this.game.settings[`dev_${spec.key}`]·=·this.app.sim.tunables[spec.key];
+     640  640 │         this.open("dev-tune", {
+     641  641 │           kicker: "Live balance · " + group,
+  
+
+src/ui/ui.js:641:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    639 │ 				this.game.settings["dev_" + spec.key] = this.app.sim.tunables[spec.key];
+    640 │ 			this.open("dev-tune", {
+  > 641 │ 				kicker: "Live balance · " + group,
+        │ 				        ^^^^^^^^^^^^^^^^^^^^^^^^^
+    642 │ 				title: group + " tuning",
+    643 │ 				text: "Existing actors use the new values immediately.",
+  
+  i Unsafe fix: Use a template literal.
+  
+     639  639 │           this.game.settings["dev_" + spec.key] = this.app.sim.tunables[spec.key];
+     640  640 │         this.open("dev-tune", {
+     641      │ - → → → → kicker:·"Live·balance···"·+·group,
+          641 │ + → → → → kicker:·`Live·balance···${group}`,
+     642  642 │           title: group + " tuning",
+     643  643 │           text: "Existing actors use the new values immediately.",
+  
+
+src/ui/ui.js:642:12 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    640 │ 			this.open("dev-tune", {
+    641 │ 				kicker: "Live balance · " + group,
+  > 642 │ 				title: group + " tuning",
+        │ 				       ^^^^^^^^^^^^^^^^^
+    643 │ 				text: "Existing actors use the new values immediately.",
+    644 │ 				rows: DTConfig.sliders
+  
+  i Unsafe fix: Use a template literal.
+  
+     640  640 │         this.open("dev-tune", {
+     641  641 │           kicker: "Live balance · " + group,
+     642      │ - → → → → title:·group·+·"·tuning",
+          642 │ + → → → → title:·`${group}·tuning`,
+     643  643 │           text: "Existing actors use the new values immediately.",
+     644  644 │           rows: DTConfig.sliders
+  
+
+src/ui/ui.js:646:18 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    644 │ 				rows: DTConfig.sliders
+    645 │ 					.filter((s) => s.group === group)
+  > 646 │ 					.map((s) => "dev_" + s.key),
+        │ 					            ^^^^^^^^^^^^^^
+    647 │ 				actions: [
+    648 │ 					[
+  
+  i Unsafe fix: Use a template literal.
+  
+     644  644 │           rows: DTConfig.sliders
+     645  645 │             .filter((s) => s.group === group)
+     646      │ - → → → → → .map((s)·=>·"dev_"·+·s.key),
+          646 │ + → → → → → .map((s)·=>·`dev_${s.key}`),
+     647  647 │           actions: [
+     648  648 │             [
+  
+
+src/ui/ui.js:653:10 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    651 │ 							for (const s of DTConfig.sliders.filter((s) => s.group === group))
+    652 │ 								this.game.settings.set(
+  > 653 │ 									"dev_" + s.key,
+        │ 									^^^^^^^^^^^^^^
+    654 │ 									DTConfig.defaults[s.key],
+    655 │ 								);
+  
+  i Unsafe fix: Use a template literal.
+  
+     651  651 │                 for (const s of DTConfig.sliders.filter((s) => s.group === group))
+     652  652 │                   this.game.settings.set(
+     653      │ - → → → → → → → → → "dev_"·+·s.key,
+          653 │ + → → → → → → → → → `dev_${s.key}`,
+     654  654 │                     DTConfig.defaults[s.key],
+     655  655 │                   );
+  
+
+src/ui/ui.js:690:9 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    688 │ 							this.mutate("spawn", kind);
+    689 │ 							this.shell.toast(
+  > 690 │ 								"A " + kind + " appears",
+        │ 								^^^^^^^^^^^^^^^^^^^^^^^^
+    691 │ 								"At the nearest safe floor.",
+    692 │ 							);
+  
+  i Unsafe fix: Use a template literal.
+  
+     688  688 │                 this.mutate("spawn", kind);
+     689  689 │                 this.shell.toast(
+     690      │ - → → → → → → → → "A·"·+·kind·+·"·appears",
+          690 │ + → → → → → → → → `A·${kind}·appears`,
+     691  691 │                   "At the nearest safe floor.",
+     692  692 │                 );
+  
+
+src/ui/ui.js:754:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    752 │ 								s.enemies
+    753 │ 									.filter((e) => e.hp > 0)
+  > 754 │ 									.map((e) => e.id + ": " + e.state + " / " + e.hp),
+        │ 									            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    755 │ 							)
+    756 │ 							.join("\n"),
+  
+  i Unsafe fix: Use a template literal.
+  
+     752  752 │                   s.enemies
+     753  753 │                     .filter((e) => e.hp > 0)
+     754      │ - → → → → → → → → → .map((e)·=>·e.id·+·":·"·+·e.state·+·"·/·"·+·e.hp),
+          754 │ + → → → → → → → → → .map((e)·=>·`${e.id}:·${e.state}·/·${e.hp}`),
+     755  755 │                 )
+     756  756 │                 .join("\n"),
+  
+
+src/ui/ui.js:813:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    811 │ 			const host = this.pairRole === "host";
+    812 │ 			this.open("pair", {
+  > 813 │ 				kicker: "Direct co-op · " + (host ? "host" : "guest"),
+        │ 				        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    814 │ 				title: host ? "Invite another ranger." : "Answer the invitation.",
+    815 │ 				text: this.pairStatus || this.app.peer?.status,
+  
+  i Unsafe fix: Use a template literal.
+  
+     811  811 │         const host = this.pairRole === "host";
+     812  812 │         this.open("pair", {
+     813      │ - → → → → kicker:·"Direct·co-op···"·+·(host·?·"host"·:·"guest"),
+          813 │ + → → → → kicker:·`Direct·co-op···${host·?·"host"·:·"guest"}`,
+     814  814 │           title: host ? "Invite another ranger." : "Answer the invitation.",
+     815  815 │           text: this.pairStatus || this.app.peer?.status,
+  
+
+src/ui/ui.js:984:25 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    982 │ 						s.tools.boat ? "FERRY" : "",
+    983 │ 						s.tools.key ? "KEY" : "",
+  > 984 │ 						s.relics.length ? "CROWN " + s.relics.length + "/2" : "",
+        │ 						                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    985 │ 					]
+    986 │ 						.filter(Boolean)
+  
+  i Unsafe fix: Use a template literal.
+  
+     982  982 │               s.tools.boat ? "FERRY" : "",
+     983  983 │               s.tools.key ? "KEY" : "",
+     984      │ - → → → → → → s.relics.length·?·"CROWN·"·+·s.relics.length·+·"/2"·:·"",
+          984 │ + → → → → → → s.relics.length·?·`CROWN·${s.relics.length}/2`·:·"",
+     985  985 │             ]
+     986  986 │               .filter(Boolean)
+  
+
+src/ui/ui.js:1000:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+     998 │ 				},
+     999 │ 				bars: s.players.map((p) => ({
+  > 1000 │ 					label: "Ranger " + p.id + (p.down ? " · FALLEN" : ""),
+         │ 					       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1001 │ 					value: p.hp,
+    1002 │ 					max: 3,
+  
+  i Unsafe fix: Use a template literal.
+  
+     998  998 │           },
+     999  999 │           bars: s.players.map((p) => ({
+    1000      │ - → → → → → label:·"Ranger·"·+·p.id·+·(p.down·?·"···FALLEN"·:·""),
+         1000 │ + → → → → → label:·`Ranger·${p.id}${p.down·?·"···FALLEN"·:·""}`,
+    1001 1001 │             value: p.hp,
+    1002 1002 │             max: 3,
+  
+
+src/ui/ui.js:1007:17 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    1005 │ 				})),
+    1006 │ 				counts: [
+  > 1007 │ 					["ARROWS", s.quiver + "/" + (app.sim.tunables?.quiverCapacity || 12)],
+         │ 					           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    1008 │ 					["RESERVES", s.reserves],
+    1009 │ 				],
+  
+  i Unsafe fix: Use a template literal.
+  
+    1005 1005 │           })),
+    1006 1006 │           counts: [
+    1007      │ - → → → → → ["ARROWS",·s.quiver·+·"/"·+·(app.sim.tunables?.quiverCapacity·||·12)],
+         1007 │ + → → → → → ["ARROWS",·`${s.quiver}/${app.sim.tunables?.quiverCapacity·||·12}`],
+    1008 1008 │             ["RESERVES", s.reserves],
+    1009 1009 │           ],
+  
+
+tests/product.mjs:24:17 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    22 │ 		passed++;
+    23 │ 	} catch (e) {
+  > 24 │ 		failures.push(name + ": " + e.message);
+       │ 		              ^^^^^^^^^^^^^^^^^^^^^^^
+    25 │ 	}
+    26 │ };
+  
+  i Unsafe fix: Use a template literal.
+  
+     22  22 │       passed++;
+     23  23 │     } catch (e) {
+     24     │ - → → failures.push(name·+·":·"·+·e.message);
+         24 │ + → → failures.push(`${name}:·${e.message}`);
+     25  25 │     }
+     26  26 │   };
+  
+
+tests/product.mjs:186:13 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    184 │ });
+    185 │ for (const failure of failures) console.error(failure);
+  > 186 │ console.log(passed + " product checks passed; " + failures.length + " failed");
+        │             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    187 │ if (failures.length) process.exitCode = 1;
+    188 │ 
+  
+  i Unsafe fix: Use a template literal.
+  
+    184 184 │   });
+    185 185 │   for (const failure of failures) console.error(failure);
+    186     │ - console.log(passed·+·"·product·checks·passed;·"·+·failures.length·+·"·failed");
+        186 │ + console.log(`${passed}·product·checks·passed;·${failures.length}·failed`);
+    187 187 │   if (failures.length) process.exitCode = 1;
+    188 188 │   
+  
+
+tests/product.mjs:59:18 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    57 │ 	sim.state.quiver = 8;
+    58 │ 	store.write(sim);
+  > 59 │ 	storage.setItem(store.key + ":b", '{"schema":1');
+       │ 	                ^^^^^^^^^^^^^^^^
+    60 │ 	const saved = new DTSave.CampaignStore(storage).read();
+    61 │ 	assert.equal(saved.save.state.quiver, 3);
+  
+  i Unsafe fix: Use a template literal.
+  
+     57  57 │     sim.state.quiver = 8;
+     58  58 │     store.write(sim);
+     59     │ - → storage.setItem(store.key·+·":b",·'{"schema":1');
+         59 │ + → storage.setItem(`${store.key}:b`,·'{"schema":1');
+     60  60 │     const saved = new DTSave.CampaignStore(storage).read();
+     61  61 │     assert.equal(saved.save.state.quiver, 3);
+  
+
+tests/product.mjs:68:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    66 │ 		sim = new DTSim.Simulation();
+    67 │ 	store.write(sim);
+  > 68 │ 	const key = store.key + ":a",
+       │ 	            ^^^^^^^^^^^^^^^^
+    69 │ 		data = JSON.parse(storage.getItem(key));
+    70 │ 	data.payload = data.payload.replace('"quiver":3', '"quiver":999');
+  
+  i Unsafe fix: Use a template literal.
+  
+     66  66 │       sim = new DTSim.Simulation();
+     67  67 │     store.write(sim);
+     68     │ - → const·key·=·store.key·+·":a",
+         68 │ + → const·key·=·`${store.key}:a`,
+     69  69 │       data = JSON.parse(storage.getItem(key));
+     70  70 │     data.payload = data.payload.replace('"quiver":3', '"quiver":999');
+  
+
+tests/product.mjs:79:14 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    77 │ 		sim = new DTSim.Simulation();
+    78 │ 	store.write(sim);
+  > 79 │ 	const key = store.key + ":a",
+       │ 	            ^^^^^^^^^^^^^^^^
+    80 │ 		data = JSON.parse(storage.getItem(key));
+    81 │ 	data.schema = 999;
+  
+  i Unsafe fix: Use a template literal.
+  
+     77  77 │       sim = new DTSim.Simulation();
+     78  78 │     store.write(sim);
+     79     │ - → const·key·=·store.key·+·":a",
+         79 │ + → const·key·=·`${store.key}:a`,
+     80  80 │       data = JSON.parse(storage.getItem(key));
+     81  81 │     data.schema = 999;
+  
+
+tests/product.mjs:183:35 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    181 │ 	assert.ok(scripts.length >= 12);
+    182 │ 	for (const [i, s] of scripts.entries())
+  > 183 │ 		new vm.Script(s[1], { filename: "inline-" + i });
+        │ 		                                ^^^^^^^^^^^^^
+    184 │ });
+    185 │ for (const failure of failures) console.error(failure);
+  
+  i Unsafe fix: Use a template literal.
+  
+    181 181 │     assert.ok(scripts.length >= 12);
+    182 182 │     for (const [i, s] of scripts.entries())
+    183     │ - → → new·vm.Script(s[1],·{·filename:·"inline-"·+·i·});
+        183 │ + → → new·vm.Script(s[1],·{·filename:·`inline-${i}`·});
+    184 184 │   });
+    185 185 │   for (const failure of failures) console.error(failure);
+  
+
+src/main.js:573:4 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    571 │ 		app.save();
+    572 │ 		if (
+  > 573 │ 			app.net &&
+        │ 			^^^^^^^^^^
+  > 574 │ 			app.net.authority &&
+        │ 			^^^^^^^^^^^^^^^^^
+    575 │ 			(s.phase === "victory" || s.phase === "defeat")
+    576 │ 		)
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    571 571 │       app.save();
+    572 572 │       if (
+    573     │ - → → → app.net·&&
+    574     │ - → → → app.net.authority·&&
+        573 │ + → → → app.net?.authority·&&
+    575 574 │         (s.phase === "victory" || s.phase === "defeat")
+    576 575 │       )
+  
+
+Checked 6 files in 45ms. No fixes applied.
+Found 1 warning.
+Found 32 infos.

@@ -1,0 +1,3 @@
+Created [PLAN.md](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra.plan-v3__20261106-021204__xa9ee39/work/PLAN.md) and [planner-exit-interview.json](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra.plan-v3__20261106-021204__xa9ee39/work/planner-exit-interview.json).
+
+The plan leaves the title and run-specific filenames to each builder. All four interview answers are present, and the JSON validates.

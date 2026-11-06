@@ -1,0 +1,192 @@
+{
+  "policy": "Actual game findings from tests and visual/code review, deduplicated by underlying cause. Test fixture and tool configuration mistakes are recorded separately and excluded from game defect counts.",
+  "issues": [
+    {
+      "id": 1,
+      "severity": "major",
+      "finding": "All-cloaked targets caused an early return before contact damage.",
+      "resolution": "Resolve cloaked contact before target selection.",
+      "evidence": "Simulation cloak/contact regression."
+    },
+    {
+      "id": 2,
+      "severity": "major",
+      "finding": "Continue in a claimed cache did not restore its exit-ready state.",
+      "resolution": "Derive cache claim from persisted consumed rewards and preserve the spent ward state.",
+      "evidence": "Cache Continue/idempotency regressions."
+    },
+    {
+      "id": 3,
+      "severity": "major",
+      "finding": "Companion hero selection targeted the human's hero.",
+      "resolution": "Validate a separate safe-waystone companion intention; couch Hero 2 uses their own seat.",
+      "evidence": "Board and controller waystone checks."
+    },
+    {
+      "id": 4,
+      "severity": "critical",
+      "finding": "Escape could close the title screen with no start route.",
+      "resolution": "Title back is stable; a closed title layer is restored.",
+      "evidence": "Final-file title Escape regression."
+    },
+    {
+      "id": 5,
+      "severity": "minor",
+      "finding": "Dev sliders initially focused Reset and scrolled their header away.",
+      "resolution": "Focus the first native range control and start at the top.",
+      "evidence": "Pointer/pad Dev slider checks and screenshot."
+    },
+    {
+      "id": 6,
+      "severity": "major",
+      "finding": "Mouse motion after keyboard input did not restore mouse prompts/aim, and stationary cursor aim was lost while moving.",
+      "resolution": "Meaningful motion sets mouse ownership; keyboard/mouse share cursor aiming through the native camera.",
+      "evidence": "Hot-device and projected mouse-aim browser checks."
+    },
+    {
+      "id": 7,
+      "severity": "minor",
+      "finding": "Hero portraits were drawn below their canvas.",
+      "resolution": "Use native portrait top-left coordinates and render immediately.",
+      "evidence": "Hero-selection visual capture."
+    },
+    {
+      "id": 8,
+      "severity": "major",
+      "finding": "Late native Shell CSS overrode game layout, crowding phone controls and masking visual styling.",
+      "resolution": "Apply game CSS after Shell creation; use a phone scale and minimal coarse-pointer HUD.",
+      "evidence": "Phone portrait/landscape, tablet and TV captures."
+    },
+    {
+      "id": 9,
+      "severity": "major",
+      "finding": "Caster effects released during wind-up rather than the native active phase.",
+      "resolution": "Release bolts, reveals and lures from Attack's active transition.",
+      "evidence": "Attack timing and full ordinary-action runs."
+    },
+    {
+      "id": 10,
+      "severity": "major",
+      "finding": "Damage did not interrupt a revive hold.",
+      "resolution": "Reset partial revive/binding progress and apply a short interruption without dropping a carried ring.",
+      "evidence": "Revive-interruption regression."
+    },
+    {
+      "id": 11,
+      "severity": "major",
+      "finding": "Large set-dressing props had no shared collision definition.",
+      "resolution": "Author solid flags in the content data and block their footprint in both navigation maps.",
+      "evidence": "Schema, path, pair-extraction and normal campaign checks."
+    },
+    {
+      "id": 12,
+      "severity": "major",
+      "finding": "Holding Interact through pickup could immediately pass to a nearby willing companion.",
+      "resolution": "Latch one-shot pickup/pass per gesture while retaining continuous revive and extraction holds.",
+      "evidence": "Gesture-latch and ordinary touch-extraction regressions."
+    },
+    {
+      "id": 13,
+      "severity": "major",
+      "finding": "A stationary mouse over newly created menu elements stole controller focus.",
+      "resolution": "Move focus on actual pointer motion rather than DOM pointer-over events.",
+      "evidence": "Hero 2 pad-only waystone navigation."
+    },
+    {
+      "id": 14,
+      "severity": "major",
+      "finding": "The controller recovery choice closed its custom screen but left the simulation paused.",
+      "resolution": "Explicitly resume after reconnect or continue-with-AI.",
+      "evidence": "Disconnect recovery followed by controller-only pause/Dev navigation."
+    },
+    {
+      "id": 15,
+      "severity": "critical",
+      "finding": "Malformed checkpoint metadata could pass core validation and break Continue or later completion.",
+      "resolution": "Validate own room IDs, site ownership, flag types and every statistics field before restoration.",
+      "evidence": "Malformed/prototype-ID/statistics/site save regressions."
+    },
+    {
+      "id": 16,
+      "severity": "major",
+      "finding": "Quitting after a wipe and using Continue could avoid the retry Dread step.",
+      "resolution": "Persist the safe failure state; Continue reopens Retry and charges once only when retry is chosen.",
+      "evidence": "Continue-after-wipe Dread regression."
+    },
+    {
+      "id": 17,
+      "severity": "major",
+      "finding": "The initial finale camera could frame the party while leaving the dragon offscreen.",
+      "resolution": "Use a bounded shared sanctum framing that includes the dragon and party.",
+      "evidence": "Final sanctum visual capture and normal final-file campaign."
+    },
+    {
+      "id": 18,
+      "severity": "minor",
+      "finding": "Courtyard tutorial cards remained over the route board and ending.",
+      "resolution": "Clear scene-owned teaching cards on title, board and victory transitions.",
+      "evidence": "Route and victory captures."
+    },
+    {
+      "id": 19,
+      "severity": "major",
+      "finding": "The release of a touch extraction gesture could click a newly opened route-menu button.",
+      "resolution": "Validate pointer-down screen ownership before accepting a menu click, and clear touch state at menu transitions.",
+      "evidence": "Real touch extraction followed by an unpaused route-screen assertion."
+    },
+    {
+      "id": 20,
+      "severity": "major",
+      "finding": "Selection portraits continued painting detached canvases after leaving hero selection.",
+      "resolution": "Update portrait canvases only while their selection screen is active and release their references at new-run transition.",
+      "evidence": "Full browser campaign, attract and replay lifecycle checks."
+    },
+    {
+      "id": 21,
+      "severity": "major",
+      "finding": "Possession echoes used a generic claw timeline even when copying a caster.",
+      "resolution": "Copy the native sword/cast timeline and show class-appropriate rune, pulse or mirror effects.",
+      "evidence": "Director/normal campaign and shared gameplay checks."
+    },
+    {
+      "id": 22,
+      "severity": "major",
+      "finding": "Phantom pulse stopped lesser threats but did not physically repel them.",
+      "resolution": "Apply a short validated outward displacement together with the reveal/stagger.",
+      "evidence": "Phantom repulsion regression and all-pair extractions."
+    },
+    {
+      "id": 23,
+      "severity": "major",
+      "finding": "Flying Nightmares followed ground-only paths despite the room rule describing flight over partitions.",
+      "resolution": "Use bounded flight through interior geometry and telegraphed landings.",
+      "evidence": "Nightmare partition-crossing regression and shifting-room extractions."
+    },
+    {
+      "id": 24,
+      "severity": "minor",
+      "finding": "The victory tableau showed the default pair after choosing different heroes.",
+      "resolution": "Build tableau rigs from the current party classes.",
+      "evidence": "Victory and replay presentation checks."
+    },
+    {
+      "id": 25,
+      "severity": "major",
+      "finding": "Standalone pause lacked an explicit quit-to-title route and living parties lacked an abandonment action.",
+      "resolution": "Add standalone Quit to Title and validated return-to-board confirmation, with the Hub chooser retaining shared route authority.",
+      "evidence": "Browser pause/Dev path exits through the actual Quit to Title action; shared intent rules remain covered."
+    }
+  ],
+  "excludedFixtureFindings": [
+    "Cloak test started inside intentional entry grace.",
+    "Back locator matched both native navigation and action buttons.",
+    "Network pass fixture placed heroes 32 units apart beyond the 28-unit pass rule.",
+    "Touch harness ended an already-ended gesture.",
+    "Biome schema and Ruff exception-aggregator configuration.",
+    "Manual browser advance requires draw:true for current-camera screenshots and mouse projection.",
+    "Mouse-aim fixture needed to wait through intentional menu input consumption.",
+    "Flight fixture initially placed its destination inside the enemy standoff radius."
+  ],
+  "criticalCount": 2,
+  "gameFindingCount": 25
+}

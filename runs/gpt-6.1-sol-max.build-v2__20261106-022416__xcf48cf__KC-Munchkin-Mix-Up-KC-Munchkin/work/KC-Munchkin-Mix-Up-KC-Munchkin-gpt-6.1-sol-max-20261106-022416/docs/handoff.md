@@ -1,0 +1,44 @@
+# Release handoff
+
+Game: K.C. Munchkin Mix-Up
+
+Source Information
+
+- date: 2026-11-06 02:24:16
+- source: K.C. Munchkin! (1981)
+- plan: PLAN.md
+- genre: Arcade action / maze-chase
+- perspective: Fixed overhead
+- tech: JavaScript, Canvas 2D, my-3D2dge 0.89.1 (8ecc2f6), AI Hub client 1.4.0 (35a1047)
+- artDirection: Original shaded pixel toy theatre; plum floor, luminous violet walls, expressive cool-coloured heroes
+- animation: Native Blob squash, look and footfall with original antennae, mouths, tells, turn anticipation and event effects
+- audio: Original code-generated chip score, SFX and formant gibberish voices; music defaults to 10%; human listening quality unknown
+- online: Standalone solo/couch co-op; AI Hub 1–2-seat host-authoritative shared-world campaign, including dedicated host
+- testing: Headless deterministic simulation, legal-intent playthroughs, browser/controller/touch stand-ins and official Hub harness; no FPS target
+- research: Original manual, contemporary audiovisual observations, archival commercial contact sheet, pinned engine and Hub source
+- environment: Codex CLI (headless); Linux
+- model: OpenAI, gpt-6.1-sol, reasoning effort max
+- usage: added on import
+
+Testing Feedback
+
+1. 9 unique game issues were found and fixed; test-fixture corrections were counted separately.
+2. 0 critical or game-breaking issues.
+3. Legal-intent full campaigns and the dedicated-host latency/loss run, combined with the pen shortcut measurement.
+4. Syntax-only checks: useful for parsing, but they cannot establish maze readability, interception or controller feel.
+
+Engine Feedback
+
+1. Native shaded pixels, Blob squash/look/feet, procedural sound buses and the TV Shell gave the game a consistent base.
+2. Yes. I initially made the outer pen detour too short and rearmed an attract transition each input tick; route and runtime tests corrected both.
+3. The authoritative graph, moving-snack simulation, swept contacts, validated workshop and host-authoritative Hub adapter.
+4. Extending grid motion for expiring turns, immediate reversal and tunnel seams while keeping rendering and networking separate from the rules.
+5. No vendored engine changes. GraphMover subclasses the native mover; original art, mouth/antenna animation, UI and synthesis extend native systems.
+6. An official GridMover graph-edge adapter with tunnel transforms, expiring buffers and swept motion segments.
+
+Prompt Feedback
+
+1. The distinctive moving-food premise and concrete acceptance checks for a complete playable game.
+2. The first-player duration is a hypothesis; strong route-planning bots finish much faster, and human first-run timing is unknown.
+3. Keeping six stages, the editor, couch co-op, dedicated hosting, touch and final-file packaging consistent under one ruleset.
+4. Separate mandatory feature gates from pacing hypotheses and request measured timing ranges rather than an assumed first-run duration.

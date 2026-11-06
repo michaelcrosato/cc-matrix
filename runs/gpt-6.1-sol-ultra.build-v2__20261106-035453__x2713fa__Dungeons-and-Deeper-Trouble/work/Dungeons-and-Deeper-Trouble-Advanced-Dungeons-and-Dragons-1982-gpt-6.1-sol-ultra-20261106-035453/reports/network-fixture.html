@@ -1,0 +1,437 @@
+<!doctype html><meta charset="utf-8"><title>DT network fixture</title><body data-game="dt-network-fixture"><script>/* Dungeons and Deeper Trouble — authoritative transport adapters. */
+(function (root) {
+  'use strict';
+  const VERSION = 1;
+  const CONTENT = root.DTContent?.version || 'dt-expedition-1.0.0';
+  const MAX_PACKET = 16000;
+  const MAX_STATE = 196608;
+  const MAX_CHUNKS = 24;
+  const CHUNK_SIZE = 9000;
+  const EVENT_TYPES = new Set(['fire', 'interact', 'dash', 'dodge', 'quickstep', 'travel', 'quiver', 'map', 'continue']);
+  const now = () => root.performance?.now?.() ?? Date.now();
+  const clone = (x) => JSON.parse(JSON.stringify(x));
+  const blank = () => ({ mx: 0, my: 0, ax: 1, ay: 0, focus: false, run: false, revive: false });
+  function token() {
+    const a = new Uint32Array(3);
+    if (root.crypto?.getRandomValues) root.crypto.getRandomValues(a);
+    else for (let i = 0; i < a.length; i++) a[i] = Math.floor(Math.random() * 4294967296);
+    return Array.from(a, (n) => n.toString(36)).join('-');
+  }
+  function safeHeld(h) {
+    if (!h || typeof h !== 'object' || Array.isArray(h)) return blank();
+    const out = blank();
+    for (const k of ['mx', 'my', 'ax', 'ay']) out[k] = Number.isFinite(h[k]) ? Math.max(-1, Math.min(1, h[k])) : out[k];
+    for (const k of ['focus', 'run', 'revive']) out[k] = h[k] === true;
+    out.run ||= h.sprint === true;
+    out.revive ||= h.heldInteract === true;
+    return out;
+  }
+  function safeEvent(e) {
+    if (typeof e === 'string') e = { type: e };
+    if (!e || typeof e !== 'object' || !EVENT_TYPES.has(e.type)) return null;
+    const out = { type: e.type };
+    if (typeof e.target === 'string' && e.target.length <= 64) out.target = e.target;
+    if (typeof e.node === 'string' && e.node.length <= 64) out.node = e.node;
+    if (Number.isInteger(e.index) && e.index >= 0 && e.index < 32) out.index = e.index;
+    for (const k of ['ax', 'ay']) if (Number.isFinite(e[k])) out[k] = Math.max(-1, Math.min(1, e[k]));
+    return out;
+  }
+  function validPacket(m, nonce) {
+    if (!m || typeof m !== 'object' || m.dt !== VERSION || m.c !== CONTENT || m.nonce !== nonce) return false;
+    try { return JSON.stringify(m).length <= MAX_PACKET; } catch { return false; }
+  }
+  class Link {
+    constructor(hooks, options) {
+      this.hooks = hooks || {};
+      this.mode = options.mode;
+      this.authority = options.authority;
+      this.dedicated = options.dedicated === true;
+      this.localId = this.dedicated ? null : options.localId;
+      this.hostId = options.hostId;
+      this.playerIds = options.playerIds.slice();
+      this.seed = options.seed >>> 0;
+      this.nonce = options.nonce;
+      this.epoch = token();
+      this.open = options.open !== false;
+      this.ended = false;
+      this.finished = false;
+      this.started = this.mode !== 'hub';
+      this.bootstrapped = this.authority;
+      this.held = blank();
+      this.events = [];
+      this.eventSeq = 0;
+      this.inputSeq = 0;
+      this.snapshotSeq = 0;
+      this.appliedSnapshot = -1;
+      this.lastInputSend = -Infinity;
+      this.lastStateSend = -Infinity;
+      this.lastSend = -Infinity;
+      this.peers = new Map();
+      this.outbound = [];
+      this.parts = new Map();
+      this.sendRaw = options.send;
+      this.clock = options.clock || now;
+      this.stats = { sent: 0, received: 0, bytes: 0, rejected: 0, duplicateActions: 0, retransmittedActions: 0, maxBytes: 0, maxRate: 0, lastInputSequence: 0, snapshots: 0 };
+      this.sendTimes = [];
+      this.removers = [];
+      if (options.initialize !== false) this.initialize();
+    }
+    initialize() {
+      this.hooks.init?.({ mode: this.mode, authority: this.authority, dedicated: this.dedicated, localId: this.localId, playerIds: this.playerIds.slice(), seed: this.seed });
+    }
+    canStep() {
+      if (!this.open || this.ended || this.finished || !this.bootstrapped) return false;
+      return this.mode !== 'hub' || (this.started && root.AIHub.time() >= 0);
+    }
+    input(held, events = []) {
+      if (this.ended || this.finished || this.localId == null) return;
+      this.held = safeHeld({ ...held, ax: held?.ax ?? this.held.ax, ay: held?.ay ?? this.held.ay });
+      // UI may sample while the Hub card is up. Those actions must never leak into play.
+      if (!this.canStep()) return;
+      const clean = events.map(safeEvent).filter(Boolean);
+      if (this.authority) this.hooks.applyInput?.(this.localId, this.held, clean.map((e) => ({ ...e, id: ++this.eventSeq })));
+      else {
+        for (const e of clean) {
+          if (this.events.length >= 96) break;
+          this.events.push({ ...e, id: ++this.eventSeq });
+        }
+      }
+    }
+    packet(type, data) { return { dt: VERSION, c: CONTENT, nonce: this.nonce, t: type, ...data }; }
+    enqueue(type, data, to) {
+      const p = this.packet(type, data);
+      if (JSON.stringify(p).length > MAX_PACKET) { this.stats.rejected++; return false; }
+      this.outbound.push({ p, to });
+      return true;
+    }
+    flush(t) {
+      if (!this.open || this.ended || t - this.lastSend < 65 || !this.outbound.length) return;
+      const item = this.outbound[0];
+      const text = JSON.stringify(item.p);
+      if (this.sendRaw(item.p, item.to) === false) return;
+      this.outbound.shift();
+      this.lastSend = t;
+      this.stats.sent++;
+      this.stats.bytes += text.length;
+      this.stats.maxBytes = Math.max(this.stats.maxBytes, text.length);
+      this.sendTimes.push(t);
+      while (this.sendTimes.length && this.sendTimes[0] <= t - 1000) this.sendTimes.shift();
+      this.stats.maxRate = Math.max(this.stats.maxRate, this.sendTimes.length);
+    }
+    queueSnapshot() {
+      if (this.outbound.some((x) => x.p.t === 's' || x.p.t === 'chunk')) return;
+      const state = this.hooks.snapshot?.();
+      if (!state) return;
+      let text;
+      try { text = JSON.stringify(state); } catch { this.stats.rejected++; return; }
+      if (text.length > MAX_STATE) { this.hooks.status?.('World snapshot exceeds the supported connection limit.'); this.stats.rejected++; return; }
+      const ack = {};
+      for (const [id, p] of this.peers) ack[id] = [p.epoch, p.action];
+      const seq = ++this.snapshotSeq;
+      const common = { seq, ack };
+      if (text.length <= 13000) this.enqueue('s', { ...common, state });
+      else {
+        const total = Math.ceil(text.length / CHUNK_SIZE);
+        for (let i = 0; i < total; i++) this.enqueue('chunk', { ...common, i, total, text: text.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE) });
+      }
+    }
+    applySnapshot(state, seq, ack) {
+      if (!Number.isSafeInteger(seq) || seq <= this.appliedSnapshot) return;
+      this.appliedSnapshot = seq;
+      this.stats.snapshots++;
+      this.hooks.restore?.(state);
+      this.bootstrapped = true;
+      const a = ack?.[this.localId];
+      if (Array.isArray(a) && a[0] === this.epoch && Number.isSafeInteger(a[1])) this.events = this.events.filter((e) => e.id > a[1]);
+    }
+    receive(m, from) {
+      if (this.ended || !validPacket(m, this.nonce)) { this.stats.rejected++; return; }
+      this.stats.received++;
+      if (this.authority) {
+        if (!this.playerIds.includes(from) || from === this.localId || m.t !== 'i') { this.stats.rejected++; return; }
+        if (!Number.isSafeInteger(m.seq) || m.seq < 0 || typeof m.epoch !== 'string' || m.epoch.length > 64 || !Array.isArray(m.events) || m.events.length > 32) { this.stats.rejected++; return; }
+        let peer = this.peers.get(from);
+        if (!peer) { peer = { epoch: m.epoch, action: 0, input: -1, at: this.clock() }; this.peers.set(from, peer); }
+        if (peer.epoch !== m.epoch) { this.stats.rejected++; return; }
+        peer.at = this.clock();
+        peer.stale = false;
+        const events = [];
+        for (const e of m.events.slice().sort((a, b) => a.id - b.id)) {
+          const clean = safeEvent(e);
+          if (!clean || !Number.isSafeInteger(e.id) || e.id < 1) continue;
+          if (e.id <= peer.action) { this.stats.duplicateActions++; continue; }
+          if (e.id !== peer.action + 1) break;
+          peer.action = e.id;
+          events.push({ ...clean, id: e.id });
+        }
+        const held = m.seq > peer.input ? safeHeld(m.held) : null;
+        if (held) peer.input = m.seq;
+        this.stats.lastInputSequence = Math.max(this.stats.lastInputSequence, m.seq);
+        // Reliable input received during countdown is acknowledged, but cannot act.
+        if (this.canStep()) this.hooks.applyInput?.(from, held, events);
+      } else {
+        if (from !== this.hostId) { this.stats.rejected++; return; }
+        if (m.t === 's' && m.state && typeof m.state === 'object') this.applySnapshot(m.state, m.seq, m.ack);
+        else if (m.t === 'chunk') {
+          if (!Number.isSafeInteger(m.seq) || m.seq <= this.appliedSnapshot || !Number.isInteger(m.total) || m.total < 1 || m.total > MAX_CHUNKS || !Number.isInteger(m.i) || m.i < 0 || m.i >= m.total || typeof m.text !== 'string' || m.text.length > CHUNK_SIZE) { this.stats.rejected++; return; }
+          let part = this.parts.get(m.seq);
+          if (!part) { this.parts.clear(); part = { total: m.total, data: new Array(m.total), ack: m.ack }; this.parts.set(m.seq, part); }
+          if (part.total !== m.total) return;
+          part.data[m.i] = m.text;
+          if (part.data.filter((x) => typeof x === 'string').length === m.total) {
+            try { const state = JSON.parse(part.data.join('')); this.applySnapshot(state, m.seq, part.ack); } catch { this.stats.rejected++; }
+            this.parts.delete(m.seq);
+          }
+        } else { this.stats.rejected++; }
+      }
+    }
+    update() {
+      if (!this.open || this.ended) return;
+      const t = this.clock();
+      if (this.authority) {
+        for (const [id, p] of this.peers) if (t - p.at > 500 && !p.stale) { p.stale = true; this.hooks.applyInput?.(id, blank(), []); }
+        if (t - this.lastStateSend >= 125) { this.lastStateSend = t; this.queueSnapshot(); }
+      } else if (t - this.lastInputSend >= 1000 / 15 && this.localId != null) {
+        this.lastInputSend = t;
+        // Coalesce held state while preserving the acknowledged discrete queue.
+        this.outbound = this.outbound.filter((x) => x.p.t !== 'i');
+        const actions = this.events.slice(0, 32);
+        this.stats.retransmittedActions += actions.length;
+        this.enqueue('i', { epoch: this.epoch, seq: ++this.inputSeq, held: this.canStep() ? this.held : blank(), events: this.canStep() ? actions : [] }, this.hostId);
+      }
+      this.flush(t);
+    }
+    removePlayer(id) {
+      this.playerIds = this.playerIds.filter((x) => x !== id);
+      this.peers.delete(id);
+      this.hooks.removePlayer?.(id);
+    }
+    finish(won, stats = {}) {
+      if (!this.authority || this.finished || this.ended) return;
+      this.finished = true;
+      if (this.mode === 'hub') {
+        const perPlayer = {};
+        for (const id of this.playerIds) perPlayer[id] = stats;
+        root.AIHub.finish({ standings: [this.playerIds.slice()], scores: Object.fromEntries(this.playerIds.map((id) => [id, won ? 1 : 0])), won: won === true, stats: perPlayer });
+      }
+    }
+    stop(reason) {
+      if (this.ended) return;
+      this.ended = true;
+      this.held = blank(); this.events = []; this.outbound = [];
+      for (const off of this.removers) off();
+      this.removers = [];
+      this.hooks.stop?.(reason);
+    }
+    inspect() {
+      return { mode: this.mode, role: this.dedicated ? 'dedicated authority' : this.authority ? 'authority' : 'guest', localId: this.localId, playerIds: this.playerIds.slice(), open: this.open, ended: this.ended, bootstrapped: this.bootstrapped, pendingActions: this.events.length, epoch: this.epoch, snapshotSequence: this.appliedSnapshot, stats: { ...this.stats }, peers: Array.from(this.peers, ([id, p]) => ({ id, action: p.action, input: p.input, epoch: p.epoch })) };
+    }
+  }
+  async function connectHub(hooks) {
+    if (!root.AIHub) return null;
+    const info = await root.AIHub.connect({ mode: 'shared-world', seats: [1, 2] });
+    if (!info) return null;
+    const link = new Link(hooks, { mode: 'hub', authority: info.isHost, dedicated: info.server, localId: info.me, hostId: info.host, playerIds: info.players.map((p) => p.id), seed: info.seed, nonce: `hub-${info.round}-${info.seed}`, send: (p, to) => root.AIHub.send(p, { to, reliable: true }) });
+    link.removers.push(root.AIHub.on('start', () => { link.started = true; hooks.status?.('The expedition begins at the common signal.'); }));
+    link.removers.push(root.AIHub.on('message', (p, from) => link.receive(p, from)));
+    link.removers.push(root.AIHub.on('leave', ({ id }) => { link.removePlayer(id); hooks.status?.('A ranger has left. The remaining expedition continues.'); }));
+    link.removers.push(root.AIHub.on('time-up', () => { if (link.authority) { hooks.timeUp?.(); link.finish(false, hooks.result?.()?.stats || {}); } }));
+    link.removers.push(root.AIHub.on('end', ({ reason }) => link.stop(reason)));
+    // All lifecycle listeners are in place before this single genuine loading completion.
+    root.AIHub.ready();
+    return link;
+  }
+  function encodeSignal(signal) {
+    const text = JSON.stringify(signal);
+    return `DT1.${root.btoa(unescape(encodeURIComponent(text)))}`;
+  }
+  function decodeSignal(text, role, nonce) {
+    if (typeof text !== 'string' || text.length > 262144 || !text.trim().startsWith('DT1.')) throw new Error('This is not a Dungeons and Deeper Trouble invitation or reply.');
+    let s;
+    try { s = JSON.parse(decodeURIComponent(escape(root.atob(text.trim().slice(4))))); } catch { throw new Error('The pairing text is incomplete or damaged. Copy the entire invitation or reply.'); }
+    if (s.v !== VERSION || s.c !== CONTENT) throw new Error('These expeditions use different game versions. Load the same HTML on both devices.');
+    if (s.role !== role || (nonce && s.nonce !== nonce)) throw new Error('That pairing text belongs to another invitation or the wrong step.');
+    if (typeof s.nonce !== 'string' || s.nonce.length > 64 || !Number.isFinite(s.at) || Math.abs(Date.now() - s.at) > 600000) throw new Error('This invitation has expired. Ask the host for a new one.');
+    const type = role === 'host' ? 'offer' : 'answer';
+    if (s.desc?.type !== type || typeof s.desc.sdp !== 'string' || s.desc.sdp.length > 150000 || !s.desc.sdp.startsWith('v=0')) throw new Error('The pairing text has no valid connection description.');
+    return s;
+  }
+  class Peer {
+    constructor(hooks, options = {}) {
+      if (root.AIHub?.active) throw new Error('AI Hub owns this round’s network.');
+      this.hooks = hooks || {};
+      this.options = options;
+      this.pc = null; this.channel = null; this.link = null;
+      this.nonce = null; this.role = null; this.cancelled = false;
+      this.status = 'Choose Host or Join.';
+      this.timeout = null; this.gatherCancel = null; this.generation = 0; this.localOnly = false;
+    }
+    say(text) { this.status = text; this.hooks.status?.(text); }
+    makePC() {
+      if (!root.RTCPeerConnection) throw new Error('This browser does not support direct WebRTC co-op. Solo and couch co-op remain available.');
+      this.cancelled = false;
+      // STUN is discovery only. There is deliberately no undisclosed signaling or relay service.
+      this.pc = new root.RTCPeerConnection({ iceServers: this.localOnly ? [] : this.options.iceServers ?? [{ urls: 'stun:stun.l.google.com:19302' }] });
+      this.pc.onconnectionstatechange = () => {
+        const state = this.pc?.connectionState;
+        if (state === 'failed') { if (this.link) this.lost(); else this.fail('Direct connection failed. Some networks require a TURN relay; try another network or couch co-op.'); }
+        if (state === 'disconnected') { this.say('Connection interrupted. Waiting briefly for the same peer…'); this.timeout = setTimeout(() => { if (this.pc?.connectionState === 'disconnected') this.lost(); }, 6000); }
+        if (state === 'connected') { if (this.timeout) clearTimeout(this.timeout); this.timeout = null; }
+        if (state === 'closed' && !this.cancelled) this.lost();
+      };
+      this.pc.ondatachannel = (e) => { if (e.channel.label === 'dt-expedition') this.bindChannel(e.channel); else e.channel.close(); };
+    }
+    bindChannel(channel) {
+      if (this.channel && this.channel !== channel) { channel.close(); return; }
+      this.channel = channel;
+      channel.onopen = () => { this.say('Connected. Checking expedition version…'); this.raw({ hello: VERSION, c: CONTENT, nonce: this.nonce, role: this.role }); };
+      channel.onmessage = (e) => {
+        if (typeof e.data !== 'string' || e.data.length > MAX_PACKET) return;
+        let m; try { m = JSON.parse(e.data); } catch { return; }
+        if (m.hello) {
+          if (m.hello !== VERSION || m.c !== CONTENT || m.nonce !== this.nonce || m.role === this.role) return this.fail('The peer failed the expedition version check.');
+          if (!this.link) this.start();
+        } else if (this.link) this.link.receive(m, this.role === 'host' ? 1 : 0);
+      };
+      channel.onclose = () => { if (!this.cancelled) this.lost(); };
+      channel.onerror = () => this.say('The data channel reported a connection error.');
+    }
+    raw(m) { if (this.channel?.readyState !== 'open') return false; this.channel.send(JSON.stringify(m)); return true; }
+    assertCurrent(generation) { if (this.cancelled || generation !== this.generation) throw new Error('Pairing was cancelled.'); }
+    async gathered(pc = this.pc, generation = this.generation) {
+      this.assertCurrent(generation);
+      if (pc.iceGatheringState === 'complete') return;
+      await new Promise((resolve, reject) => {
+        const timer = setTimeout(() => { pc.removeEventListener('icegatheringstatechange', change); this.gatherCancel = null; const error = new Error('Candidate discovery timed out. Cancel and try again on another network.'); error.code = 'ICE_TIMEOUT'; reject(error); }, this.options.gatherTimeout ?? (this.options.iceServers === undefined && !this.localOnly ? 4500 : 15000));
+        this.gatherCancel = () => { clearTimeout(timer); pc.removeEventListener('icegatheringstatechange', change); this.gatherCancel = null; reject(new Error('Pairing was cancelled.')); };
+        const change = () => { if (pc.iceGatheringState === 'complete') { clearTimeout(timer); pc.removeEventListener('icegatheringstatechange', change); this.gatherCancel = null; resolve(); } };
+        pc.addEventListener('icegatheringstatechange', change);
+        if (pc.iceGatheringState === 'complete') change();
+      });
+      this.assertCurrent(generation);
+    }
+    async operation(generation, task) {
+      let abort;
+      const cancelled = new Promise((resolve, reject) => { abort = () => reject(new Error('Pairing was cancelled.')); });
+      this.operationCancel = abort;
+      let timer;
+      const timeout = new Promise((resolve, reject) => { timer = setTimeout(() => reject(new Error('Pairing timed out. Cancel and try again on another network.')), 30000); });
+      try { return await Promise.race([task(), cancelled, timeout]); }
+      finally { clearTimeout(timer); if (this.operationCancel === abort) this.operationCancel = null; }
+    }
+    async offer() {
+      this.cancel(); this.role = 'host'; this.nonce = token(); this.makePC();
+      const generation = this.generation, pc = this.pc;
+      this.say('Preparing invitation. Discovering a direct path…');
+      this.bindChannel(pc.createDataChannel('dt-expedition', { ordered: true }));
+      try {
+        return await this.operation(generation, async () => {
+          await pc.setLocalDescription(await pc.createOffer());
+          this.assertCurrent(generation);
+          await this.gathered(pc, generation);
+          const signal = encodeSignal({ v: VERSION, c: CONTENT, role: 'host', nonce: this.nonce, at: Date.now(), desc: pc.localDescription });
+          this.say(this.localOnly ? 'Public STUN did not answer. LAN invitation ready: copy it to the guest. Wide-area pairing may need a relay.' : 'Copy the invitation to the guest. Paste their reply here.');
+          return signal;
+        });
+      } catch (e) {
+        if (generation === this.generation && e.code === 'ICE_TIMEOUT' && this.options.iceServers === undefined && !this.localOnly) {
+          this.localOnly = true;
+          this.say('Public discovery did not answer. Retrying with complete local candidates…');
+          return this.offer();
+        }
+        if (generation === this.generation) this.fail(e.message);
+        throw e;
+      }
+    }
+    async answer(text) {
+      const signal = decodeSignal(text, 'host');
+      this.cancel(); this.role = 'guest'; this.nonce = signal.nonce; this.makePC();
+      const generation = this.generation, pc = this.pc;
+      this.say('Preparing reply. Discovering a direct path…');
+      try {
+        return await this.operation(generation, async () => {
+          await pc.setRemoteDescription(signal.desc);
+          this.assertCurrent(generation);
+          await pc.setLocalDescription(await pc.createAnswer());
+          this.assertCurrent(generation);
+          await this.gathered(pc, generation);
+          const reply = encodeSignal({ v: VERSION, c: CONTENT, role: 'guest', nonce: this.nonce, at: Date.now(), desc: pc.localDescription });
+          this.say(this.localOnly ? 'Public STUN did not answer. LAN reply ready: copy it to the host. Wide-area pairing may need a relay.' : 'Copy this reply to the host. Play starts once they connect.');
+          return reply;
+        });
+      } catch (e) {
+        if (generation === this.generation && e.code === 'ICE_TIMEOUT' && this.options.iceServers === undefined && !this.localOnly) {
+          this.localOnly = true;
+          this.say('Public discovery did not answer. Retrying with complete local candidates…');
+          return this.answer(text);
+        }
+        if (generation === this.generation) this.fail(e.message);
+        throw e;
+      }
+    }
+    async accept(text) {
+      if (this.role !== 'host' || !this.pc) throw new Error('Create a host invitation before pasting a reply.');
+      const signal = decodeSignal(text, 'guest', this.nonce);
+      await this.pc.setRemoteDescription(signal.desc);
+      this.say('Connecting to the invited ranger…');
+    }
+    start() {
+      const host = this.role === 'host';
+      this.link = new Link(this.hooks, { mode: 'peer', authority: host, localId: host ? 0 : 1, hostId: 0, playerIds: [0, 1], seed: this.options.seed ?? 1729, nonce: this.nonce, send: (m) => this.raw(m) });
+      this.say(host ? 'Two rangers connected. You hold the expedition save.' : 'Joined the host’s expedition. Your solo save is untouched.');
+    }
+    lost() {
+      if (this.cancelled) return;
+      // A departed guest leaves a live in-process authority. Close the orphaned
+      // peer now; a later ICE failure must never close that continuing world.
+      this.cancelled = true;
+      if (this.timeout) clearTimeout(this.timeout); this.timeout = null;
+      const channel = this.channel, pc = this.pc;
+      this.channel = null; this.pc = null;
+      if (channel) { channel.onclose = null; channel.onerror = null; channel.onmessage = null; channel.close(); }
+      if (pc) { pc.onconnectionstatechange = null; pc.ondatachannel = null; pc.close(); }
+      if (this.link?.authority) {
+        this.link.removePlayer(1);
+        this.say('Guest departed. You may continue this expedition alone.');
+      } else {
+        this.link?.stop('host-left');
+        this.say('The host connection ended. Return to the title and pair again for a fresh shared state.');
+      }
+    }
+    fail(text) { this.say(text); this.close(false); }
+    update(dt) { this.link?.update(dt); }
+    input(held, events) { this.link?.input(held, events); }
+    canStep() { return this.link?.canStep() ?? false; }
+    finish(won, stats) { this.link?.finish(won, stats); }
+    get authority() { return this.link?.authority ?? this.role === 'host'; }
+    get dedicated() { return false; }
+    get localId() { return this.link?.localId ?? (this.role === 'host' ? 0 : 1); }
+    get playerIds() { return this.link?.playerIds ?? []; }
+    inspect() { return { ...(this.link?.inspect() || {}), status: this.status, localCandidatesOnly: this.localOnly, connection: this.pc?.connectionState || 'closed', channel: this.channel?.readyState || 'closed' }; }
+    cancel() { this.close(true); this.say('Pairing cancelled.'); }
+    close(silent = false) {
+      this.cancelled = true;
+      this.generation++;
+      this.operationCancel?.();
+      this.gatherCancel?.();
+      if (this.timeout) clearTimeout(this.timeout); this.timeout = null;
+      if (this.channel) { this.channel.onclose = null; this.channel.close(); }
+      if (this.pc) { this.pc.onconnectionstatechange = null; this.pc.close(); }
+      if (!silent) this.link?.stop('connection-failed');
+      this.channel = null; this.pc = null; this.link = null;
+    }
+  }
+  root.DTNet = { VERSION, CONTENT, connectHub, createPeer: (hooks, options) => new Peer(hooks, options), Link, safeHeld, safeEvent, encodeSignal, decodeSignal };
+})(typeof window !== 'undefined' ? window : globalThis);
+</script><script>
+window.fixture={state:{ammo:6,wounds:0,cache:3,tools:[],relics:[],players:[0,1]},stopped:null};
+const F=fixture;
+F.peer=DTNet.createPeer({
+ init(info){F.info=info;F.state.players=info.playerIds;},
+ snapshot(){return F.state;},restore(s){F.state=s;},
+ applyInput(id,h,events){for(const e of events){if(e.type==='fire'&&F.state.ammo>0){F.state.ammo--;F.state.wounds++;}if(e.type==='interact'&&F.state.cache){F.state.ammo+=F.state.cache;F.state.cache=0;}if(e.type==='travel'){F.state.tools=['axe','boat','key'];F.state.relics=['dawn','dusk'];}}},
+ removePlayer(id){F.state.players=F.state.players.filter(x=>x!==id);},
+ status(s){F.status=s;},stop(s){F.stopped=s;}
+},{iceServers:[]});
+F.timer=setInterval(()=>F.peer.update(),16);
+</script>

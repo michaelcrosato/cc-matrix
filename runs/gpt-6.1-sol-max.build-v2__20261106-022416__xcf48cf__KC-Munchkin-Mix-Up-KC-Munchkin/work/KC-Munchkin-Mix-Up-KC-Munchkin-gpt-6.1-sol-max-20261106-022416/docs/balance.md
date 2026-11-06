@@ -1,0 +1,13 @@
+# Balance and measured pacing
+
+Defaults are 6 cells/s for heroes, 60% initial and 98% final snack speed (3.6 → 5.88 cells/s), 3.65 cells/s base predator travel plus bounded junction decisions, six-second bright food, a 1.5-second recovery warning, 2.6-second pen cadence, four-second chirp cooldown, 0.85-second shared damage grace and five team lives. A clear restores one life. The food curve is monotonic and no catch uses a speed boost, teleport, dash or forced food clear.
+
+The first whole-campaign bot experiment finished in about two minutes because random food goals were too passive. Food now strongly prefers distance from nearby heroes while retaining a committed destination, no open-junction reversals and short visible turn tells. Interception became the useful choice. The last three get restrained trails and rings; the last target gets a slightly larger presentation silhouette, without a larger collision radius or reduced speed.
+
+The initial pen looked useful but was not. Its outer approach was six cells / one second; a well-timed ride took about 1.5 seconds. Turning stages now have connected approach lanes around the machinery. The measured adjacent-door outer detour is eighteen cells / three seconds, versus a planned 1.5-second ride when entering near the warning. Waiting an entire cadence can still be slower: reading the timing matters. All four orientations preserve connectivity and closure defers over occupied crossings.
+
+At seed 4242, legal route-planning bots with normal movement, normal lives and no assistance clear the full campaign in 272.31 seconds solo and 141.46 seconds co-op. They catch all 72 snacks through the real six transitions. Twenty generated remix seeds also clear under normal rules; all 64 generation samples validate without fallback. The detailed stage times and lives are in build/reports/simulation.json.
+
+A dedicated host with two legal-input clients under 150 ms latency, 50 ms jitter and 5% loss cleared three stages with 36 catches and one hit in the measured run. All 227 sampled client states matched an actual retained host snapshot. All four gate orientations appeared. Snapshots peaked at 568 bytes in that run. The test driver plans its turns one junction ahead; planning only on arrival was too late for the simulated network. Local clients predict movement presentation only, then reconcile; food, hits and score always await the host.
+
+First-time human 12–18-minute pacing has not been measured. The observed bot times are not labelled as human play or a listening/device review. The standalone campaign is untimed. The Hub declares eight minutes as a conservative playing estimate and honestly reports partial progress on time-up; it never skips stages or manufactures a victory.

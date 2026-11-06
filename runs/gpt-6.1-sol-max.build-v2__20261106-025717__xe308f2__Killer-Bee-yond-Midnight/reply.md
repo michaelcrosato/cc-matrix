@@ -1,0 +1,13 @@
+Built [**Killer Bee-yond Midnight**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-025717__xe308f2/work/Killer-Bee-yond-Midnight-Killer-Bees-1983-gpt-6.1-sol-max-20261106-025717.html). Open the HTML directly in a browser.
+
+**224 checks passed, zero failures.** Normal-rule campaigns finished in 10:10 solo and 10:01 co-op. [Interview JSON](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-025717__xe308f2/work/exit-interview.json) and [PROGRESS.md](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-025717__xe308f2/work/PROGRESS.md) are complete.
+
+**Source Information:** Date: 2026-11-06 02:57:17. Source: *Killer Bees! (1983, Odyssey²)*; plan: PLAN.md. Genre/perspective: Action arcade, fixed overhead. Tech: my-3D2dge 0.89.1, Hub client 1.4.0, JavaScript, Canvas 2D, Web Audio, WebRTC, Bun 1.3.14. Art/animation: original shaded pixel art and native procedural rigs. Audio: code-only music, effects and gibberish chatter; music defaults to 10%. Online: couch, Hub shared-world and direct-peer co-op. Research: [original manual](https://odyssey2.info/library/manuals/us_killerbees/Killer%20Bees%20(USA).pdf), two creator interviews and engine/network documentation; exact original sound remains unknown. Testing: headless campaigns, three browsers, emulated controls, audio analysis and real multiplayer connections. Environment/model: Codex CLI, headless Linux; OpenAI gpt-6.1-sol, max reasoning. Usage: added on import.
+
+**Testing Feedback:** Six defects fixed; one critical startup issue. Most helpful: ordinary-command campaign replay plus real network tests. Least helpful: an unbound synthetic touch event, replaced with valid browser touch tests.
+
+**Engine Feedback:** Best: native assets, rigs and menus. Stuck: boot state and camera fitting. Built: combat, campaign and network authority. Hardest: arena framing across orientations. Engine change: one boot-flag fix. Requested improvement: an arena-fit helper that accounts for HUD space.
+
+**Prompt Feedback:** Best: verifiable contracts. Confusing: differing model attribution between PLAN and TASK. Hardest: complete campaign and multiplayer integration. Suggested change: separate mandatory checks from implementation examples.
+
+Physical devices and subjective listening were unavailable. Direct-peer connectivity was verified on this machine; arbitrary Internet/NAT connectivity is not guaranteed.

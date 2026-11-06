@@ -1,0 +1,32 @@
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+import json
+root=Path(__file__).resolve().parents[1]
+with sync_playwright() as p:
+ browser=p.chromium.launch(headless=True)
+ page=browser.new_page(viewport={'width':1920,'height':1080})
+ errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+ page.goto((root/'artifacts/game.html').as_uri());page.wait_for_function('window.__SIEGE?.app?.world');page.wait_for_timeout(300)
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/title.png'))
+ page.get_by_role('button',name='Quick duel',exact=True).click();page.get_by_role('button',name='To the battlements',exact=True).click()
+ page.wait_for_timeout(450);page.keyboard.down('Space');page.wait_for_timeout(810)
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/charge.png'));page.keyboard.up('Space')
+ page.evaluate('''()=>{__SIEGE.game.stop();__SIEGE.app.prepare('quick',{court:2});__SIEGE.game.advance(1/120);__SIEGE.app.ais=[null,null];}''')
+ page.evaluate('''()=>{const {app,world,command,predict,step,planShot}=__SIEGE;const plan=planShot(world,0,{kind:'mason',harass:0},'castle');command(world,0,{kind:'stone',stone:1});command(world,0,{kind:'begin'});for(let i=0;i<Math.round(plan.power*1.4*120);i++)step(world);command(world,0,{kind:'release'});app.game.advance(3.2);}''')
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/collapse.png'))
+ page.evaluate('''()=>{const {app,command,planShot,step}=__SIEGE;app.prepare('quick',{court:3});app.game.advance(1/120);app.ais=[null,null];const w=app.world,plan=planShot(w,0,{kind:'harasser',harass:10},'launcher');command(w,0,{kind:'stone',stone:plan.stone});command(w,0,{kind:'begin'});for(let i=0;i<Math.round(plan.power*1.4*120);i++)step(w);command(w,0,{kind:'release'});while(w.players[1].launcherUntil===0 && w.tick<1500)app.game.advance(1/120);app.game.advance(.15);}''')
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/repair.png'))
+ page.evaluate('''()=>{const {app}=__SIEGE;app.game.advance(2.5);}''')
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/protected-return.png'))
+ page.evaluate('''()=>{const {app,command,predict,step}=__SIEGE;app.prepare('quick',{court:4});app.game.advance(1/120);app.ais=[null,null];const w=app.world,blocks=w.castles[1].filter(b=>!b.foundation);for(const b of blocks)b.hp=0;const b=blocks[4];b.hp=b.max;w.players[1].crewUntil=1e6;w.players[1].launcherUntil=1e6;w.revision++;app.view.preview=null;app.view.predKey='';app.game.advance(1/120);}''')
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/last-fragment.png'))
+ page.evaluate('''()=>{const {app,command,predict,step}=__SIEGE,w=app.world;let power=.5;for(let p=.1;p<1;p+=.001)if(predict(w,0,0,p).hits.some(h=>h.kind==='castle')){power=p+.001;break;}command(w,0,{kind:'begin'});app.game.advance(Math.round(power*1.4*120)/120);command(w,0,{kind:'release'});app.game.advance(6);}''')
+ page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/result.png'))
+ page.evaluate('__SIEGE.app.about(0)');page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/credits.png'))
+ print(json.dumps({'errors':errors,'state':page.evaluate('__SIEGE.app.snapshot()')}))
+ browser.close()
+ browser=p.webkit.launch(headless=True)
+ context=browser.new_context(**p.devices['iPhone 13']);page=context.new_page()
+ page.goto((root/'artifacts/game.html').as_uri());page.wait_for_function('window.__SIEGE?.world')
+ page.evaluate('__SIEGE.app.prepare("quick",{court:3});__SIEGE.game.input.lastDevice="touch"')
+ page.wait_for_function('__SIEGE.world.tick>=20',timeout=20000);page.evaluate('__SIEGE.game.advance(0,{draw:true})');page.wait_for_timeout(300);page.screenshot(path=str(root/'artifacts/phone.png'));browser.close()

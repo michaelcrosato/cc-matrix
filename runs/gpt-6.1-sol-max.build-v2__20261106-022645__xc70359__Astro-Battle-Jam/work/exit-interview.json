@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-06 02:26:45",
+    "source": "Astro Battle Space Invaders - 1979. Interpreted as Bally's Astrocade Space Invaders, later Astro Battle; the renamed manual bears a 1981 copyright. This interpretation is not a new release-history finding.",
+    "plan": "PLAN.md",
+    "genre": "Arcade shooter",
+    "perspective": "Fixed-screen, screen-aligned overhead x/y",
+    "tech": "my-3D2dge v0.89.1, commit 8ecc2f62353761187bdfe226f327b7ea5d2eb691; native Canvas2D; JavaScript; Web Audio; AI Hub session client 1.4.0 / Protocol v1, commit 35a1047f2067b2af3de3943f0fe452f39105d869. Self-contained HTML; no CDN or runtime downloads.",
+    "artDirection": "Original shaded retro-modern pixel art using native sprites, hue-shifted ramps, stepped planet lighting and three location palettes.",
+    "animation": "Native E.anim, game.tween and engine fixed clocks; procedural recoil, beat-synchronized march poses, shell breaks, repair clusters, debris and flagship opening/closing states.",
+    "audio": "Runtime oscillator/noise synthesis through native music, SFX and voice buses; original location loops, march pulse, result stingers and synthesized gibberish barks. Music defaults and resets to 10%. No audio files.",
+    "online": "Standalone solo and simultaneous local two-player co-op. AI Hub supplies online one- or two-seat shared-world co-op with host authority, complete reliable snapshots, input heartbeats and server-only hosting. No standalone remote matchmaking.",
+    "testing": "133 automated checks: deterministic simulation, complete ordinary-action standard solo and co-op campaigns, ordinary solo and local co-op campaigns through the native exported scripts, headless draw/UI, Chromium input/audio, standard gamepad stubs, phone/tablet emulation, Firefox/WebKit startup/input smoke, isolated file export, and the pinned Hub harness plus semantic state checks. Hub scenarios use 150 ms latency, 50 ms jitter and 5% loss. Physical controller feel, human listening, real TV distance, physical iOS behavior and novice first-run duration are unknown.",
+    "research": "Read Bally Alley's HTML manual and inspected pages of the five-page manual scan. Inspected the October 1982 comparison scan, especially printed page 66, and eight extracted frames from the linked Nice and Games Astro Battle review around 80-96 seconds. Confirmed colored rows, marching poses, four arched bunkers and erosion visually. Historical audio listening is unknown. New co-op, repairs, specialists and hostile flagship are original design additions.",
+    "environment": "Codex CLI (headless); Linux; Ubuntu 26.04.1 LTS on WSL2. Installed Node 24.21.0 and Python Playwright 1.63.0.",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "15 distinct issues across automated checks, visual inspection and implementation review; all fixed. The issue log records root causes, severity and the check that caught each one.",
+    "1 critical issue: at an exact bunker-cell boundary, repeated shots could hit a neighboring cell that erosion never removed. Swept hits now erode the actual collided cell, with a regression test.",
+    "The lossy Hub semantic fire-and-repair check. It exposed the boundary collision bug even though complete ordinary campaign bots and transport conformance passed; it also verifies remote masks, repair cost, deaths, protected respawns and terminal agreement.",
+    "The initial boot-only smoke check. It confirmed startup and native drawing but could not establish ordinary playability or remote world agreement."
+  ],
+  "engineFeedback": [
+    "Native sprite, palette, animation, synthesis and exact headless stepping fit a self-contained arcade cartridge well.",
+    "Yes: sampling only held input missed quick mouse repair clicks, and mixing pointer-down actions with native compatibility clicks advanced menus twice. One action route and pressed-edge sampling fixed these. The documented arcade helper alternates players, so simultaneous co-op uses a shared simulation.",
+    "The serializable shared-world simulation, destructible bunker masks and aperture-preserving repair rules.",
+    "Keeping engine input ownership, local overlays and the Hub clock separate while preserving one combat rectangle on portrait and landscape displays.",
+    "none; the full pinned engine is embedded unchanged. Game adapters supply simultaneous co-op, swept collision, custom controller-first pages and session authority.",
+    "A native serializable fixed-screen co-op example with swept projectile collision and an explicit session clock adapter."
+  ],
+  "promptFeedback": [
+    "The source research, finite campaign, two-action constraint and concrete completion tests gave the game a clear identity.",
+    "The source name was ambiguous; the plan's explicit Astrocade interpretation resolved it. The engine's default alternating co-op also needed to be distinguished from simultaneous play.",
+    "Making destructive cover, ordinary-input full campaign completion and authoritative lossy-network co-op agree on the same rules.",
+    "Keep the detailed acceptance contracts, but provide the pinned engine and matching Hub harness as an attached package to reduce setup ambiguity."
+  ],
+  "aiHub": {
+    "name": "Astro Battle Jam",
+    "tagline": "Cut a lane. Patch the planet.",
+    "description": "A colorful planetary-defense shooter where your own missiles carve firing lanes through cover and alien salvage rebuilds it. Defend three locations through six formations and a two-phase flagship, solo, in local co-op or together through AI Hub.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Astro Battle Space Invaders - 1979",
+    "series": "",
+    "players": "1–2",
+    "controls": "Move: stick/D-pad, A/D or arrows, mouse target; fire: R2/Cross, Space or left click; repair: L1/Square, Q or right click; Options/Esc pauses. Touch: drag, assisted fire, second finger cuts cover, contextual repair.",
+    "tags": [
+      "2d",
+      "arcade",
+      "co-op",
+      "pixel art",
+      "sci-fi",
+      "boss fights"
+    ]
+  }
+}

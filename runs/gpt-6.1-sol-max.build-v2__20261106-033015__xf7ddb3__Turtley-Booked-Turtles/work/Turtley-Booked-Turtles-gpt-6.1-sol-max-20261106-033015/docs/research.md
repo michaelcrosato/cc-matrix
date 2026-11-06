@@ -1,0 +1,11 @@
+# Source research, 2026-11-06
+
+Primary interpretation: **Turtles, 1983 US Odyssey² hotel-rescue release**, not uniquely identified by the year (other 1983 ports exist). The arcade ancestor is Konami's 1981 Turtles. No connection to Teenage Mutant Ninja Turtles.
+
+- [US manual](https://odyssey2.info/library/manuals/us_turtles/Turtles%20(USA).pdf): read all gameplay text and inspected rendered illustrations on pages 4, 5 and 7. Archived PDF and page images are in this directory. Question marks hide babies or beetles; a passenger rides the shell to an edge house. Blue beetles wander, yellow sees straight halls, red tracks around corners. One active bomb; flashing central refill. The manual contradicts itself about lives. This game's clear original rule is three team lives, with the third damaging hit ending the run.
+- [Release entry](https://odyssey2.info/db/game/turtles-47): US platform/year, hotel intermissions, genuine attract sequence and Voice music. Inspected its documented gameplay screenshot directly: `https://odyssey2.info/i/screens/turt-scr2.gif` (archived as source-gameplay.gif/png). Broad green corridors, thin bright walls, oversized cyan punctuation and a compact bottom HUD. Source screenshots are research only and are not embedded in the game.
+- [Historical review](https://odyssey2.info/reviews/turtles-117): secondary evidence for ascending hotel floors, four recurring maze layouts, and short staccato vocal tunes. Ten historical floors are reference rather than our quota.
+
+Mechanics, progression, enemy states, visual language and sound were considered separately. No gameplay recording was watched; no original audio was heard. Sound descriptions above are written evidence, not listening claims. The game uses an original synthesized tune, original gibberish and five authored floors with 26 rescues; score, timings, stock caps, cooperative rules, art and layouts are original.
+
+Engine v0.89.1 at `8ecc2f62353761187bdfe226f327b7ea5d2eb691`; Hub protocol 1/client 1.4.0 at `35a1047f2067b2af3de3943f0fe452f39105d869`. Downloaded pinned handoff and Hub files. Read engine README/API, assets card, maze slice, input/settings, Blob continuous rig, audio synthesis, headless example, Hub README/shared-world arena example and harness. No engine version change from planning.

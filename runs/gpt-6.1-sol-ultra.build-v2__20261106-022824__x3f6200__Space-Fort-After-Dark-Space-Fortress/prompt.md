@@ -1,0 +1,1 @@
+Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md, which is filled in for you. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted.

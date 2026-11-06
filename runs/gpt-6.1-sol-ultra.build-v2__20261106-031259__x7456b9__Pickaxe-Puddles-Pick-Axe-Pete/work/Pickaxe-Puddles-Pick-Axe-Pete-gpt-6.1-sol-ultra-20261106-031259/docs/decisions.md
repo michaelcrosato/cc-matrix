@@ -1,0 +1,12 @@
+# Design and implementation decisions
+
+- Title chosen by a real `crypto.randomInt(0,50)` draw after50candidates; selected index8, Pickaxe Puddles. Run-specific paths are in parent build-config.json, not reusable simulation code.
+- Original strengths retained: whole-room layers, doors that emit rocks, temporary ladders, broken picks, opposing supplies and score pressure. New redirect timing, three-hit helmet health, co-op rescues and extraction bells are adaptations. No original sound fidelity claim is made.
+- Five/six/seven-tier rooms share two permanent ladder routes; timed shortcuts supplement them. Ladder-crossing one-way solids preserve drawn floor contacts and allow explicit down traversal without removing floors.
+- A successful scripted expedition takes roughly2minutes at skilled uninterrupted input. The plan’s10–12minute first-success target is a pacing intention, not a gate; the release avoids forced waits and can take longer while learning or retrying. This is a measured difference from the target, not a claimed10minute proof.
+- Desktop and landscape use a whole-room camera. Portrait uses larger miner silhouettes and horizontal local-player tracking with offscreen mine warnings, as allowed by the plan. All tiers remain visible vertically.
+- The full native engine is embedded. One Screen.resize correction permits fractional downscaling below the fixed logical resolution on narrow displays. The original clone remains available for a minimal reviewable diff.
+- Native Input owns actions, pads, rebinding, prompts and saved bindings. Presentation menus use large HTML controls to keep typography legible across TV and phone layouts. Scene pausing is controlled at the application layer so one Hub client’s menu cannot freeze authority.
+- Standalone internet matchmaking is outside the supplied Hub client. Standalone offers solo/local co-op; AI Hub offers true online co-op with a hidden authority option. Labels and catalogue describe this scope explicitly.
+- WebAudio instruments connect to native buses, with a separate voice bus, independently controlled volumes and0.1music default. All sounds are code, and the installed offline browser verifies signal energy, clipping and cleanup. Actual listening quality is unknown.
+- Complete-run records are separate from chamber checkpoint/retry values, practice, attract and Developer sessions. Session rounds end through Hub; there is no local retry in a session.

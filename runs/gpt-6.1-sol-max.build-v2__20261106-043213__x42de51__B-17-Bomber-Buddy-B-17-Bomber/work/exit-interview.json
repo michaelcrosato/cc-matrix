@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-06 04:32:13",
+    "source": "B-17 Bomber (Mattel Electronics, Intellivision, 1982); original, unaffiliated adaptation",
+    "plan": "PLAN.md",
+    "genre": "Arcade flight action with mission planning and station-based combat",
+    "perspective": "First-person pilot and four gun mounts, downward bombsight, overhead operational map, brief exterior views",
+    "tech": "HTML/CSS/ES2022 JavaScript; my-3D2dge 0.89.1 at 8ecc2f62353761187bdfe226f327b7ea5d2eb691; World3D; Three.js 0.182.0; Rapier SIMD compat 0.19.3; esbuild 0.25.12. Native fixed stepping at 120 Hz. Everything is embedded in one offline HTML.",
+    "artDirection": "Original procedural low-poly aircraft, cockpit, coast, harbor, cranes, military ship, refinery and airfield, using the engine's native pixel/cel style and olive, teal and amber palette",
+    "animation": "Native Humanoid math rigs and expressions; fixed-step aircraft bank and pitch, engine-dependent propellers, ailerons, gun traverse/recoil, bomb doors, gravity-driven bombs, fire/smoke, destruction and landing gear",
+    "audio": "Original code-synthesized score, four engine layers, guns, flak, bomb release/whistle, impacts, radio and warning effects; distinct pitched gibberish crew voices through native audio buses. First-run music volume is 10%. No audio files or browser speech synthesis. Original source recording timbres: unknown.",
+    "online": "Standalone solo and local horizontal split-screen co-op for 1-2 players; AI Hub Session Protocol 1/client 1.4.0 at 35a1047f2067b2af3de3943f0fe452f39105d869, shared-world 1-2 player co-op with authoritative host, periodic corrections, reliable actions/outcome, departure handling and playerless-server support. Standalone internet rooms are supplied by AI Hub.",
+    "testing": "Unrestricted headless state, native-input, browser, audio and full-playthrough tests; screenshots for composition. One quiet verification entrypoint. Tested all nine difficulty/loadout combinations, controller stubs, touch profiles/multitouch, split screen, audio analyser, file-origin/offline packaging, WebGPU, WebGL 2, and Hub normal/impaired network/departure/server scenarios. Physical controller, real touch hardware, TV and human listening were unavailable. No FPS targets or optimization milestone.",
+    "research": "Read preserved original instructions and developer history on history.blueskyrangers.com, preserved visual references on intvfunhouse.com, the native engine handoff/API/assets/flight/racing references, and the full current AI Hub contract and harness. Evidence and exact links are in docs/research.md.",
+    "environment": "Codex CLI (headless); Linux, Ubuntu on WSL2; Playwright 1.63.0 with the installed Chromium, WebKit and Firefox",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "18 distinct product issues were caught by scripted play, browser checks, screenshot inspection and contract/source inspection; fixes and evidence are recorded in docs/issues.md. Test-driver mistakes are listed separately and are not counted as product issues.",
+    "Two were critical: the first takeoff collided with the initial collision threshold, and native WebGL bloom hid procedural aircraft geometry. Both are fixed.",
+    "The full native-input sortie was most useful: it drove the public menus, takeoff, directional gunnery, flak, bomb release, map return and recovery. The Hub counterpart also verified a guest station claim and finite release, then a successful shared sortie.",
+    "The first isolated gun test was least useful before its authored mission waves were disabled; extra encounters made the test report unrelated kills. Correcting test isolation made it meaningful. Hardware feel and subjective listening remain unknown."
+  ],
+  "engineFeedback": [
+    "The native 3D pen, fixed-step loop, Humanoid portraits, reusable Shell/settings and audio buses supplied a coherent foundation for a procedural game.",
+    "I initially trusted bloom and the split-overlay contract. WebGL screenshots exposed missing pen geometry; source inspection showed the camera foreground was explicitly skipped in split view, and scene entry resets split setup.",
+    "The main custom work was the coupled bomber simulation: flight/resources, six stations, ownership/handover, continuous weapon checks, shared bomb prediction, encounters, mission outcomes and the authoritative Hub adapter.",
+    "The hardest integration was keeping camera foregrounds, projected HUD, split view, input ownership and remote authority consistent while producing one portable offline file.",
+    "One World3D engine change: allow the rebuilt camera foreground to render in each split viewport and restore the renderer's previous auto-clear value. The full core engine is unchanged. Bloom is disabled in game configuration; packaging, flight, capability checks and networking are game-side additions.",
+    "I would add a tested portable single-HTML World3D example with embedded Rapier and working split-screen foregrounds to the handoff."
+  ],
+  "promptFeedback": [
+    "The prompt identified the source's whole-aircraft responsibility and required complete outcomes, practical dev tools and evidence instead of a shallow shooting gallery.",
+    "The plan referred to a broader builder brief and planner-time model settings; TASK.md resolved the delivery names, metadata schema and max-effort model record.",
+    "The hardest part was sustaining navigation, defense, bombing and recovery as one readable game while supporting solo, couch co-op, touch and a playerless authoritative Hub host.",
+    "I would include the portable native 3D/Hub reference with the handoff and consolidate repeated delivery rules into one explicit acceptance checklist."
+  ],
+  "aiHub": {
+    "name": "B-17 Bomber Buddy",
+    "tagline": "Deliver the parcel. Bring the crew home.",
+    "description": "Plan a Channel crossing, defend four bearings, hold the bombsight steady and bring a vulnerable four-engine bomber home. Fly solo, share the stations on a couch, or crew the same aircraft through AI Hub.",
+    "type": "Game",
+    "genre": "Flight",
+    "source": "B-17 Bomber (Intellivision, 1982)",
+    "series": "",
+    "players": "1–2",
+    "controls": "WASD fly, mouse aim, E/Q power, 1 pilot, 2 guns, 3 sight, 4–7 bearings, Space/click fire/release, B doors, X salvo, M map, H hold, F extinguisher, hold J jettison, Esc pause; standard pad and contextual touch supported.",
+    "tags": ["3d", "flight", "co-op", "first-person", "low-poly", "retro"]
+  }
+}

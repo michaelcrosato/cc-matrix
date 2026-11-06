@@ -1,0 +1,13 @@
+Built [**Smithereens Under Siege**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-032856__xc31afd/work/Smithereens-Under-Siege-Stone-Sling-Smithereens-1980-gpt-6.1-sol-max-20261106-032856.html), a self-contained offline HTML game with five courts, a ten-bout tour, local versus, Hub multiplayer, and developer tools.
+
+[Exit interview](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-032856__xc31afd/work/exit-interview.json) · [Progress and verification record](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-032856__xc31afd/work/PROGRESS.md)
+
+**Source Information:** Date: 2026-11-06 03:28:56. Source: Stone Sling Smithereens - 1980. Plan: PLAN.md. Genre: action/artillery strategy. Perspective: fixed side-on 2D. Tech: my-3D2dge 0.89.1, JavaScript, Canvas 2D, Web Audio, AI Hub protocol 1/client 1.4.0. Art: shaded medieval pixel theatre. Animation: native Humanoid rigs and state-driven machinery. Audio: synthesized music, effects and gibberish; music defaults to 10%. Online: authoritative two-player Hub matches alongside simultaneous local play.
+
+Testing allowed unlimited headless verification; completed tests cover the full tour, browser controls, audio and six Hub harness scenarios. Research included the [official manual](https://odyssey2.info/library/manuals/us_smithereens/smithereens.txt), archive, engine and Hub contracts. Environment: Codex CLI (headless); Linux. Model: OpenAI, gpt-6.1-sol, reasoning effort max. Usage: **added on import**.
+
+**Testing Feedback:** Five testing-found issues fixed, including one game-breaking pause bug. Most helpful: the pause regression and complete-tour driver. Least helpful for gameplay assessment: catalogue schema validation. The full suite passed 209 checks; subsequent affected checks also passed. Physical hardware and acoustic quality remain unconfirmed.
+
+**Engine Feedback:** Best features: native materials, rigs and headless clock. My main misstep was consuming pause input too early. I built the support graphs, combat states and network authority. TV/portrait framing was hardest. No vendor engine edits; extensions use its APIs. Suggested improvement: a built-in fixed-arena framing helper.
+
+**Prompt Feedback:** The combat rules and changing silhouettes provided clear direction. The source-year discrepancy was confusing. Integrating controls, authoring and multiplayer was hardest. I would separate core gameplay acceptance from the extensive authoring/network verification requirements.

@@ -1,0 +1,33 @@
+2026-11-06T10:54:26.195851Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-034245__x8d70ab/work/UFOh-Chain-Gang-UFO-gpt-6.1-sol-max-20261106-034245/src/net/hub-adapter.js:
+function movePresentation(player, intent, dt, balance = {}) {
+	if (!player || player.down || player.active === false || dt <= 0) return player;
+	const speed = finite(balance.moveSpeed, finite(balance.speed, 220));
+	const recovery = finite(
+		balance.recoverySpeed,
+		finite(balance.recoveryFactor, 0.5),
+	);
+	const response = finite(balance.acceleration, finite(balance.response, 12));
+	const factor = player.shield > 0 ? recovery : 1;
+	const lerp = 1 - Math.exp(-response * dt);
+	player.vx =
+		finite(player.vx) + (intent.mx * speed * factor - finite(player.vx)) * lerp;
+	player.vy =
+		finite(player.vy) + (intent.my * speed * factor - finite(player.vy)) * lerp;
+	player.x = clamp(player.x + player.vx * dt, 14, 946);
+	player.y = clamp(player.y + player.vy * dt, 14, 526);
+	const bearingKey =
+		"bearing" in player ? "bearing" : "a" in player ? "a" : "angle";
+	const current = finite(player[bearingKey]);
+	let requested = intent.aim;
+	if (requested === null && Math.hypot(intent.mx, intent.my) > 0.05) {
+		requested = (Math.atan2(intent.my, intent.mx) + TAU) % TAU;
+	}
+	if (requested !== null) {
+		const distance = (((requested - current) % TAU) + TAU) % TAU;
+		const slew = finite(balance.cannonSlew, finite(balance.slew, TAU));
+		player[bearingKey] = (current + Math.min(distance, slew * dt)) % TAU;
+		if ("requested" in player) player.requested = requested;
+		if ("targetBearing" in player) player.targetBearing = requested;
+	}
+	return player;
+}

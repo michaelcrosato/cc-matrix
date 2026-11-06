@@ -1,0 +1,11 @@
+Built **[Auto Lap Happy](./Auto-Lap-Happy-Auto-Racing-1980-gpt-6.1-sol-ultra-20261106-041321.html)**. Open the single HTML file in a browser.
+
+**282/282 checks passed.** [Source and instructions](./Auto-Lap-Happy-Auto-Racing-1980-gpt-6.1-sol-ultra-20261106-041321/README.md) · [Exit interview](./exit-interview.json) · [Progress](./PROGRESS.md)
+
+**Source Information:** Date: 2026-11-06 04:13:21. Source: [Auto Racing, Intellivision, 1980](https://history.blueskyrangers.com/mattelelectronics/games/autoracing.html). Plan: `PLAN.md`. Genre: arcade racing; perspective: north-up overhead. Tech: my-3D2dge 0.89.1, Hub client 1.4.0, JavaScript, Canvas 2D, Web Audio and WebRTC. Art: native shaded pixel countryside. Animation: procedural native shapes. Audio: synthesized music, effects and gibberish voices; music defaults to 10%. Online: WebRTC and Hub; local couch play included. Testing: scripted/headless playthroughs, screenshots, Chromium/WebKit and controller/touch stand-ins; no FPS gate. Research: manual, history and archival imagery. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, ultra. Usage: **added on import**. Physical hardware, listening and public cross-NAT connectivity: unknown.
+
+**Testing Feedback:** Twelve product issues caught, including two critical completion/replay bugs; all fixed. Most helpful: the complete browser tour and replay. Least helpful: the initial rendering smoke test.
+
+**Engine Feedback:** Best features: native shapes and deterministic headless simulation. Wrong guesses: shape orientation and curve closure. Main addition: directed gates and shared pursuit rules. Hardest part: separating competitive time from rendering. Vendored engine changes: none; game-side adapters added. Desired improvement: a complete overhead racing starter with an independent online clock.
+
+**Prompt Feedback:** Most useful: concrete delivery and acceptance requirements. Confusing: balancing TV readability with minimal touch UI. Hardest: one simulation across every multiplayer path. Suggested change: consolidate repeated requirements and distinguish pacing targets from mandatory checks.

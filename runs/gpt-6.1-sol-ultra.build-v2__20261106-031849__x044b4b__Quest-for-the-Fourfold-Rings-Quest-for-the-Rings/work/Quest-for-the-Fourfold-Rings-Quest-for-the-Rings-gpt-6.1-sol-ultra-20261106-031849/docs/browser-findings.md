@@ -1,0 +1,90 @@
+# Browser evidence
+
+Final HTML tested through file://. Detailed current results: evidence/browser.json.
+
+- single emitted HTML boots file:// with pinned native renderer: PASS
+- clean-profile actual music default is ten percent: PASS
+- title buttons and disabled Continue are usable: PASS
+- mouse hover moves native menu focus: PASS
+- help explains solo/couch/Hub and every mandatory touch action: PASS
+- attract never starts over Settings: PASS
+- native settings exposes independent music, SFX, voice and comfort: PASS
+- About has all four required feedback categories: PASS
+- source information is backed by parsed builder interview: PASS
+- four selectable animated native hero rigs exist: PASS
+- new expedition gives one human and useful AI companion: PASS
+- real keyboard movement changes authoritative position: PASS
+- mouse primary uses ordinary combat and switches prompts: PASS
+- mouse aim transforms camera and native view correctly: PASS
+- keyboard class power and dodge use live kit rules: PASS
+- standard pad hot-switch shows PlayStation glyphs: PASS
+- Xbox glyph setting changes context prompt: PASS
+- free second standard controller joins safely from courtyard: PASS
+- secondary disconnect pauses with reconnect choice: PASS
+- actual returning controller resumes its human hero: PASS
+- Continue with AI transfers secondary ownership without stranding run: PASS
+- pad Options opens standalone pause: PASS
+- standalone pause stops simulation without charging Dread: PASS
+- controller-only pause navigation reaches Dev Mode: PASS
+- Dev Mode exposes complete tuning registry bounds: PASS
+- pad adjusts focused live tuning slider: PASS
+- live slider mutation marks run assisted: PASS
+- Reset to Defaults restores tuning registry safely: PASS
+- controller-only pause navigation reaches credits: PASS
+- ordinary input driver reaches courtyard waystone: PASS
+- secondary controller cannot choose the primary seat route: PASS
+- secondary controller changes only its own waystone hero: PASS
+- castle entry charges Dread exactly once: PASS
+- ordinary input retrieves oath-ring and extracts room one: PASS
+- moving to room two does not charge entry again: PASS
+- safe transition checkpoint contains room two and charged Dread: PASS
+- Continue enabled after a real safe checkpoint: PASS
+- Continue restores room, classes and Dread without re-entry charge: PASS
+- rendering remains observational for authoritative state: PASS
+- native controls screen lists rebindable primary action: PASS
+- native key rebinding updates the primary action map: PASS
+- native crystal2 visual scenario has no engine errors: PASS
+- native inferno2 visual scenario has no engine errors: PASS
+- native shifting2 visual scenario has no engine errors: PASS
+- native final visual scenario has no engine errors: PASS
+- all native authored enemies draw finite coordinates for string IDs: PASS
+- remote interpolation stays presentation-only and derives walking velocity: PASS
+- played escape reaches ending and replay options: PASS
+- attract does not start before ten seconds: PASS
+- attract starts at ten-second idle threshold: PASS
+- attract loop covers all geometry families and dragon: PASS
+- attract never writes checkpoint progress: PASS
+- any keyboard input exits demo and is consumed: PASS
+- pointer exits attract without selecting title action: PASS
+- pad exits attract without selecting title action: PASS
+- file launch makes no missing neighboring requests: PASS
+- integrated desktop has no console/page/engine exceptions: PASS
+- malformed checkpoint is rejected without Continue trap: PASS
+- malformed storage degrades gracefully and can start a new run: PASS
+- outdated checkpoint is rejected without Continue trap: PASS
+- outdated storage degrades gracefully and can start a new run: PASS
+- blocked checkpoint is rejected without Continue trap: PASS
+- blocked storage degrades gracefully and can start a new run: PASS
+- full storage degrades gracefully and can start a new run: PASS
+- iPhone 13 simultaneous invisible movement and aim sticks: PASS
+- iPhone 13 contextual class power reachable while moving: PASS
+- iPhone 13 cancelled pointers release movement: PASS
+- iPhone 13 lifting a stick over pause cannot leave ghost movement: PASS
+- iPhone 13 ordinary route works at touch viewport: PASS
+- iPhone 13 contact-sensitive touch pickup takes shared ring: PASS
+- iPhone 13 touch extraction reaches second authored room: PASS
+- iPhone 13 landscape resize keeps native rendering and safe document bounds: PASS
+- iPhone 13 touch exits disposable attract world immediately: PASS
+- iPad Pro 11 simultaneous invisible movement and aim sticks: PASS
+- iPad Pro 11 contextual class power reachable while moving: PASS
+- iPad Pro 11 cancelled pointers release movement: PASS
+- iPad Pro 11 lifting a stick over pause cannot leave ghost movement: PASS
+- iPad Pro 11 ordinary route works at touch viewport: PASS
+- iPad Pro 11 contact-sensitive touch pickup takes shared ring: PASS
+- iPad Pro 11 touch extraction reaches second authored room: PASS
+- iPad Pro 11 landscape resize keeps native rendering and safe document bounds: PASS
+- iPad Pro 11 touch exits disposable attract world immediately: PASS
+- webkit native file boot and gameplay: PASS
+- firefox native file boot and gameplay: PASS
+
+Physical hardware and remote-human behavior remain unknown. Gamepads and touch hardware were emulated; all screenshots with development setup are labeled assisted.

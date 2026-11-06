@@ -1,0 +1,22 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import crypto from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+import '../vendor/engine/my-3d2dge.js';
+import '../src/content/content.js';
+import '../src/sim/sim.js';
+const dev=path.dirname(path.dirname(fileURLToPath(import.meta.url))),root=path.dirname(dev);
+export function runIntegrationTests(){
+  const results=[];const check=(name,fn)=>{try{fn();results.push({name,pass:true,errors:[]});}catch(e){results.push({name,pass:false,errors:[e.message]});}};const assert=(ok,msg)=>{if(!ok)throw Error(msg);};
+  const file=path.join(root,path.basename(dev)+'.html'),html=fs.readFileSync(file,'utf8');
+  check('bundled HTML parses every complete inline script',()=>{const all=[...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)];assert(all.length===10,'Expected ten runtime script blocks, found '+all.length);for(let i=0;i<all.length;i++)new vm.Script(all[i][1],{filename:'bundle-script-'+i});});
+  check('unmodified Hub client is first script immediately after charset',()=>{const session=fs.readFileSync(path.join(dev,'vendor/hub/session.js'),'utf8');assert(html.includes('<meta charset="utf-8"><script>'+session+'</script>'),'Session placement/content changed');});
+  check('runtime is self-contained and metadata declares actual modes',()=>{assert(!/<script[^>]+src=|<link[^>]+href=/i.test(html),'Runtime dependency URL present');for(const [key,value] of [['session','1'],['session-players','1-2'],['session-mode','shared-world']])assert(html.includes('name="hub:'+key+'" content="'+value+'"'),'Incorrect Hub tag '+key);assert(!html.includes('name="hub:webgpu"'),'Native renderer must not require WebGPU');});
+  check('native Game.advance drives the same fixed-step simulation without DOM or rendering',()=>{const S=globalThis.RingSim,w=S.create({seed:'native-headless-loop'});const game=new My3D2dge.Game({headless:true,loop:false,autoPause:false,menu:false});game.start({update:dt=>S.step(w,dt,[S.ZERO()]),draw:()=>{throw Error('Headless ordinary stepping must not draw');}});game.advance(.5);assert(w.tick===60,'Expected60 fixed steps, got '+w.tick);assert(game.errors.length===0,'Native errors');game.dispose();});
+  check('headless authority handles board decisions without a local hero or camera',()=>{const S=globalThis.RingSim,w=S.create({seed:'server-headless',humans:[0,1]});S.board(w);assert(w.heroes.every(h=>!h.ai),'Remote humans must not become local AI');assert(S.intent(w,0,{type:'route',value:'dungeon'},0),'Remote chooser intent rejected');const game=new My3D2dge.Game({headless:true,loop:false,autoPause:false,menu:false});game.start({update:dt=>S.step(w,dt,[S.ZERO(),S.ZERO()]),draw(){}});game.advance(.25);assert(w.mode==='room'&&w.roomId==='dungeon1'&&w.tick===30,'Server needs local operation');game.dispose();});
+  check('Phantom safe re-entry preview is carried by authoritative snapshots',()=>{const S=globalThis.RingSim,w=S.create({classes:['phantom','wizard']});S.power(w,w.heroes[0]);const peer=S.applySnapshot(null,S.snapshot(w));assert(peer.heroes[0].phase>0,'Phase status omitted');assert(Math.abs(peer.heroes[0].phaseSafe.x-w.heroes[0].phaseSafe.x)<.11&&Math.abs(peer.heroes[0].phaseSafe.y-w.heroes[0].phaseSafe.y)<.11,'Remote phase return preview omitted');});
+  check('interview has every required field and catalogue values',()=>{const j=JSON.parse(fs.readFileSync(path.join(root,'exit-interview.json'),'utf8'));assert(Object.keys(j.sourceInformation).join(',')==='date,source,plan,genre,perspective,tech,artDirection,animation,audio,online,testing,research,environment,model,usage','Source field shape');assert(Object.values(j.sourceInformation).every(v=>typeof v==='string'&&v.trim()),'Empty source metadata');assert(j.sourceInformation.plan==='PLAN.md'&&j.sourceInformation.usage==='added on import','Plan/usage');for(const [key,n] of [['testingFeedback',4],['engineFeedback',6],['promptFeedback',4]])assert(j[key].length===n&&j[key].every(v=>typeof v==='string'&&v.trim()),'Interview question order/count');assert(j.aiHub.players==='1–2'&&j.aiHub.genre==='Adventure'&&j.aiHub.type==='Game','Catalogue category/player count');assert(j.aiHub.tags.length>=3&&j.aiHub.tags.length<=6&&j.aiHub.tags.every(t=>t===t.toLowerCase()),'Catalogue tags');});
+  fs.writeFileSync(path.join(dev,'evidence/integration.json'),JSON.stringify({artifact:path.basename(file),sha256:crypto.createHash('sha256').update(html).digest('hex'),results},null,2));
+  return results;
+}

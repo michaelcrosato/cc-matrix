@@ -1,0 +1,5 @@
+import '../vendor/engine/my-3d2dge.js';
+import {createWorld,step} from '../src/sim.js';
+import {createView} from '../src/view.js';
+const E=globalThis.My3D2dge,game=new E.Game({headless:true,draw:true,loop:false,res:[640,360],expand:true,view:'side',input:{},menu:false,corner:false,autoPause:false}),app={game,world:createWorld({court:4}),screen:'play',mode:'quick',settings:{reducedMotion:false,prediction:true},device:'touch',dev:{}};
+const view=createView(E,game);game.start({update(dt){step(app.world,dt);view.update(dt,app);},draw:r=>view.draw(r,app)});game.advance(1/120,{draw:true});game.screen.W=390;game.screen.H=844;game.advance(1/120,{draw:true});console.log(JSON.stringify({full:view.diagnostics().inset,errors:game.errors}));const enemy=app.world.blocks.filter(b=>b.seat===1&&!b.foundation);for(const b of enemy)b.alive=b===enemy[0];enemy[0].w=9;enemy[0].h=10;app.world.revision++;game.advance(1/120,{draw:true});console.log(JSON.stringify({fragment:view.diagnostics().inset,errors:game.errors}));game.dispose();

@@ -1,0 +1,586 @@
+src/main.js:184:22 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    182 │ 	game.input.touchButtons([]);
+    183 │ 	const best = (assisted = false) =>
+  > 184 │ 		Number(E.store.get("night-best-" + (assisted ? "assisted" : "clean"), 0)) ||
+        │ 		                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    185 │ 		0;
+    186 │ 	function saveBest() {
+  
+  i Unsafe fix: Use a template literal.
+  
+     182  182 │     game.input.touchButtons([]);
+     183  183 │     const best = (assisted = false) =>
+     184      │ - → → Number(E.store.get("night-best-"·+·(assisted·?·"assisted"·:·"clean"),·0))·||
+          184 │ + → → Number(E.store.get(`night-best-${assisted·?·"assisted"·:·"clean"}`,·0))·||
+     185  185 │       0;
+     186  186 │     function saveBest() {
+  
+
+src/main.js:188:15 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    186 │ 	function saveBest() {
+    187 │ 		if (!world || attract || server) return;
+  > 188 │ 		const key = "night-best-" + (world.assisted ? "assisted" : "clean");
+        │ 		            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    189 │ 		if (world.score > best(world.assisted)) E.store.set(key, world.score);
+    190 │ 	}
+  
+  i Unsafe fix: Use a template literal.
+  
+     186  186 │     function saveBest() {
+     187  187 │       if (!world || attract || server) return;
+     188      │ - → → const·key·=·"night-best-"·+·(world.assisted·?·"assisted"·:·"clean");
+          188 │ + → → const·key·=·`night-best-${world.assisted·?·"assisted"·:·"clean"}`;
+     189  189 │       if (world.score > best(world.assisted)) E.store.set(key, world.score);
+     190  190 │     }
+  
+
+src/main.js:394:16 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    392 │ 		const definitions = S.tuningDefs.slice(page * 4, page * 4 + 4);
+    393 │ 		for (const d of definitions) {
+  > 394 │ 			const key = "dev_" + d.key;
+        │ 			            ^^^^^^^^^^^^^^
+    395 │ 			if (!game.settings.spec(key))
+    396 │ 				game.settings.define({
+  
+  i Unsafe fix: Use a template literal.
+  
+     392  392 │       const definitions = S.tuningDefs.slice(page * 4, page * 4 + 4);
+     393  393 │       for (const d of definitions) {
+     394      │ - → → → const·key·=·"dev_"·+·d.key;
+          394 │ + → → → const·key·=·`dev_${d.key}`;
+     395  395 │         if (!game.settings.spec(key))
+     396  396 │           game.settings.define({
+  
+
+src/main.js:422:33 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    420 │ 				(world.stage + 1) +
+    421 │ 				" / 6",
+  > 422 │ 			rows: definitions.map((d) => "dev_" + d.key),
+        │ 			                             ^^^^^^^^^^^^^^
+    423 │ 			actions: [
+    424 │ 				["Next tuning page", () => developer((page + 1) % pages)],
+  
+  i Unsafe fix: Use a template literal.
+  
+     420  420 │           (world.stage + 1) +
+     421  421 │           " / 6",
+     422      │ - → → → rows:·definitions.map((d)·=>·"dev_"·+·d.key),
+          422 │ + → → → rows:·definitions.map((d)·=>·`dev_${d.key}`),
+     423  423 │         actions: [
+     424  424 │           ["Next tuning page", () => developer((page + 1) % pages)],
+  
+
+src/render.js:802:18 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    800 │ 						}
+    801 │ 						if (f.type === "kill" || f.type === "collapse")
+  > 802 │ 							text(ctx, "+" + (f.points || 200), x, y - u * 24 * z, C.gold, {
+        │ 							          ^^^^^^^^^^^^^^^^^^^^^^^
+    803 │ 								align: "center",
+    804 │ 							});
+  
+  i Unsafe fix: Use a template literal.
+  
+    800 800 │               }
+    801 801 │               if (f.type === "kill" || f.type === "collapse")
+    802     │ - → → → → → → → text(ctx,·"+"·+·(f.points·||·200),·x,·y·-·u·*·24·*·z,·C.gold,·{
+        802 │ + → → → → → → → text(ctx,·`+${f.points·||·200}`,·x,·y·-·u·*·24·*·z,·C.gold,·{
+    803 803 │                   align: "center",
+    804 804 │                 });
+  
+
+tests/native.mjs:132:30 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    130 │ 	);
+    131 │ 	for (const t of r.results)
+  > 132 │ 		if (!t.pass) console.error("FAIL " + t.name + ": " + t.detail);
+        │ 		                           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    133 │ 	console.log(`${r.passed}/${r.checks} native engine checks passed`);
+    134 │ 	process.exitCode = r.failed ? 1 : 0;
+  
+  i Unsafe fix: Use a template literal.
+  
+    130 130 │     );
+    131 131 │     for (const t of r.results)
+    132     │ - → → if·(!t.pass)·console.error("FAIL·"·+·t.name·+·":·"·+·t.detail);
+        132 │ + → → if·(!t.pass)·console.error(`FAIL·${t.name}:·${t.detail}`);
+    133 133 │     console.log(`${r.passed}/${r.checks} native engine checks passed`);
+    134 134 │     process.exitCode = r.failed ? 1 : 0;
+  
+
+tools/build.mjs:22:70 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    20 │ 	.map(
+    21 │ 		(f) =>
+  > 22 │ 			`<script>\n${safe(read(f) + (f === "vendor/engine/my-3d2dge.js" ? "\n/* " + read("vendor/engine/LICENSE") + " */" : ""))}\n</script>`,
+       │ 			                                                                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    23 │ 	)
+    24 │ 	.join("\n");
+  
+  i Unsafe fix: Use a template literal.
+  
+    20 20 │     .map(
+    21 21 │       (f) =>
+    22    │ - → → → `<script>\n${safe(read(f)·+·(f·===·"vendor/engine/my-3d2dge.js"·?·"\n/*·"·+·read("vendor/engine/LICENSE")·+·"·*/"·:·""))}\n</script>`,
+       22 │ + → → → `<script>\n${safe(read(f)·+·(f·===·"vendor/engine/my-3d2dge.js"·?·`\n/*·${read("vendor/engine/LICENSE")}·*/`·:·""))}\n</script>`,
+    23 23 │     )
+    24 24 │     .join("\n");
+  
+
+tools/build.mjs:27:40 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    25 │ const html = `<!doctype html>\n<html lang="en"><head><meta charset="utf-8">\n<script>${sdk}</script>...
+    26 │ fs.writeFileSync(path.join(root, "index.html"), html);
+  > 27 │ fs.writeFileSync(path.join(root, "..", meta.slug + ".html"), html);
+       │                                        ^^^^^^^^^^^^^^^^^^^
+    28 │ console.log(
+    29 │ 	`Built ${meta.slug}.html (${Math.round(Buffer.byteLength(html) / 1024)} KiB)`,
+  
+  i Unsafe fix: Use a template literal.
+  
+    25 25 │   ...s JavaScript.</noscript>${scripts}</body></html>`;
+    26 26 │   fs.writeFileSync(path.join(root, "index.html"), html);
+    27    │ - fs.writeFileSync(path.join(root,·"..",·meta.slug·+·".html"),·html);
+       27 │ + fs.writeFileSync(path.join(root,·"..",·`${meta.slug}.html`),·html);
+    28 28 │   console.log(
+    29 29 │   	`Built ${meta.slug}.html (${Math.round(Buffer.byteLength(html) / 1024)} KiB)`,
+  
+
+src/main.js:22:3 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable devPage is unused.
+  
+    20 │ 		inspect = false,
+    21 │ 		labels = false,
+  > 22 │ 		devPage = 0,
+       │ 		^^^^^^^
+    23 │ 		devScale = 1,
+    24 │ 		manualStep = false,
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend devPage with an underscore.
+  
+      20   20 │       inspect = false,
+      21   21 │       labels = false,
+      22      │ - → → devPage·=·0,
+           22 │ + → → _devPage·=·0,
+      23   23 │       devScale = 1,
+      24   24 │       manualStep = false,
+    ········· │ 
+     373  373 │       if (!world) return;
+     374  374 │       wasDev = true;
+     375      │ - → → devPage·=·page;
+          375 │ + → → _devPage·=·page;
+     376  376 │       if (!devAllowed()) {
+     377  377 │         game.shell.show("dev", {
+  
+
+src/main.js:24:3 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable manualStep is unused.
+  
+    22 │ 		devPage = 0,
+    23 │ 		devScale = 1,
+  > 24 │ 		manualStep = false,
+       │ 		^^^^^^^^^^
+    25 │ 		frameAction = null,
+    26 │ 		injected = {},
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend manualStep with an underscore.
+  
+      22   22 │       devPage = 0,
+      23   23 │       devScale = 1,
+      24      │ - → → manualStep·=·false,
+           24 │ + → → _manualStep·=·false,
+      25   25 │       frameAction = null,
+      26   26 │       injected = {},
+    ········· │ 
+     202  202 │       game.timeScale = 1;
+     203  203 │       devScale = 1;
+     204      │ - → → manualStep·=·false;
+          204 │ + → → _manualStep·=·false;
+     205  205 │       audio.stop();
+     206  206 │       if (!server) audio.unlock();
+    ········· │ 
+     262  262 │       game.timeScale = 1;
+     263  263 │       devScale = 1;
+     264      │ - → → manualStep·=·false;
+          264 │ + → → _manualStep·=·false;
+     265  265 │       world = null;
+     266  266 │       attract = false;
+    ········· │ 
+     436  436 │             () => {
+     437  437 │               devScale = 1;
+     438      │ - → → → → → → manualStep·=·false;
+          438 │ + → → → → → → _manualStep·=·false;
+     439  439 │               game.shell.back();
+     440  440 │             },
+  
+
+src/main.js:29:3 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable peerMode is unused.
+  
+    27 │ 		startedAt = 0,
+    28 │ 		ended = false,
+  > 29 │ 		peerMode = false,
+       │ 		^^^^^^^^
+    30 │ 		wasDev = false;
+    31 │ 	let rayCounters = [0, 0];
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend peerMode with an underscore.
+  
+      27   27 │       startedAt = 0,
+      28   28 │       ended = false,
+      29      │ - → → peerMode·=·false,
+           29 │ + → → _peerMode·=·false,
+      30   30 │       wasDev = false;
+      31   31 │     let rayCounters = [0, 0];
+    ········· │ 
+      64   64 │       onConnect(info, n) {
+      65   65 │         session = n;
+      66      │ - → → → peerMode·=·n.kind·!==·"hub";
+           66 │ + → → → _peerMode·=·n.kind·!==·"hub";
+      67   67 │         world = S.create({
+      68   68 │           seed: info.seed || 4813,
+    ········· │ 
+     210  210 │       attract = false;
+     211  211 │       ended = false;
+     212      │ - → → peerMode·=·false;
+          212 │ + → → _peerMode·=·false;
+     213  213 │       game.live = false;
+     214  214 │       game.o.autoPause = true;
+    ········· │ 
+     253  253 │       }
+     254  254 │       session = null;
+     255      │ - → → peerMode·=·false;
+          255 │ + → → _peerMode·=·false;
+     256  256 │       closePeerPanel();
+     257  257 │       audio.stop();
+    ········· │ 
+     967  967 │           }
+     968  968 │           session = null;
+     969      │ - → → → → peerMode·=·false;
+          969 │ + → → → → _peerMode·=·false;
+     970  970 │           audio.stop();
+     971  971 │           closePeerPanel();
+  
+
+src/main.js:405:14 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter g is unused.
+  
+    403 │ 					max: d.max,
+    404 │ 					step: d.step,
+  > 405 │ 					apply: (g, v) => {
+        │ 					        ^
+    406 │ 						if (world && world.tuning[d.key] !== v && devAllowed())
+    407 │ 							S.setTuning(world, d.key, v);
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend g with an underscore.
+  
+     403  403 │             max: d.max,
+     404  404 │             step: d.step,
+     405      │ - → → → → → apply:·(g,·v)·=>·{
+          405 │ + → → → → → apply:·(_g,·v)·=>·{
+     406  406 │               if (world && world.tuning[d.key] !== v && devAllowed())
+     407  407 │                 S.setTuning(world, d.key, v);
+  
+
+src/main.js:860:33 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter p is unused.
+  
+    858 │ 			session.tick(dt, local, world);
+    859 │ 		} else if (world.phase === "playing") {
+  > 860 │ 			const a = world.players.map((p, i) => readAction(i));
+        │ 			                             ^
+    861 │ 			S.step(world, a, dt * devScale);
+    862 │ 		}
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend p with an underscore.
+  
+     858  858 │         session.tick(dt, local, world);
+     859  859 │       } else if (world.phase === "playing") {
+     860      │ - → → → const·a·=·world.players.map((p,·i)·=>·readAction(i));
+          860 │ + → → → const·a·=·world.players.map((_p,·i)·=>·readAction(i));
+     861  861 │         S.step(world, a, dt * devScale);
+     862  862 │       }
+  
+
+src/render.js:291:19 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter i is unused.
+  
+    289 │ 				this.bees
+    290 │ 					.get(p.id)
+  > 291 │ 					.forEach((b, i) =>
+        │ 					             ^
+    292 │ 						b.update(dt, {
+    293 │ 							look: [p.vx || 1, p.vy || 0],
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend i with an underscore.
+  
+    289 289 │           this.bees
+    290 290 │             .get(p.id)
+    291     │ - → → → → → .forEach((b,·i)·=>
+        291 │ + → → → → → .forEach((b,·_i)·=>
+    292 292 │               b.update(dt, {
+    293 293 │                 look: [p.vx || 1, p.vy || 0],
+  
+
+src/render.js:518:50 lint/correctness/noUnusedFunctionParameters ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This parameter attract is unused.
+  
+    516 │ 				g.lights.add(a, 120, 8, 42, 0.18, { color: T.jewel });
+    517 │ 		}
+  > 518 │ 		world(r, w, { inspect = false, labels = false, attract = false } = {}) {
+        │ 		                                               ^^^^^^^
+    519 │ 			if (!w) return;
+    520 │ 			this.floor(r, w);
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+
+src/render.js:825:5 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable z is unused.
+  
+    823 │ 			const g = this.game,
+    824 │ 				st = NightContent.stages[w.stage],
+  > 825 │ 				z = r.view.zoom || 1,
+        │ 				^
+    826 │ 				[x, y] = r.w(0, 0, 0),
+    827 │ 				[x1, y1] = r.w(384, 240, 0);
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend z with an underscore.
+  
+    823 823 │         const g = this.game,
+    824 824 │           st = NightContent.stages[w.stage],
+    825     │ - → → → → z·=·r.view.zoom·||·1,
+        825 │ + → → → → _z·=·r.view.zoom·||·1,
+    826 826 │           [x, y] = r.w(0, 0, 0),
+    827 827 │           [x1, y1] = r.w(384, 240, 0);
+  
+
+src/render.js:826:6 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable x is unused.
+  
+    824 │ 				st = NightContent.stages[w.stage],
+    825 │ 				z = r.view.zoom || 1,
+  > 826 │ 				[x, y] = r.w(0, 0, 0),
+        │ 				 ^
+    827 │ 				[x1, y1] = r.w(384, 240, 0);
+    828 │ 			r.overlay((ctx) => {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend x with an underscore.
+  
+    824 824 │           st = NightContent.stages[w.stage],
+    825 825 │           z = r.view.zoom || 1,
+    826     │ - → → → → [x,·y]·=·r.w(0,·0,·0),
+        826 │ + → → → → [_x,·y]·=·r.w(0,·0,·0),
+    827 827 │           [x1, y1] = r.w(384, 240, 0);
+    828 828 │         r.overlay((ctx) => {
+  
+
+src/render.js:826:9 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable y is unused.
+  
+    824 │ 				st = NightContent.stages[w.stage],
+    825 │ 				z = r.view.zoom || 1,
+  > 826 │ 				[x, y] = r.w(0, 0, 0),
+        │ 				    ^
+    827 │ 				[x1, y1] = r.w(384, 240, 0);
+    828 │ 			r.overlay((ctx) => {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend y with an underscore.
+  
+    824 824 │           st = NightContent.stages[w.stage],
+    825 825 │           z = r.view.zoom || 1,
+    826     │ - → → → → [x,·y]·=·r.w(0,·0,·0),
+        826 │ + → → → → [x,·_y]·=·r.w(0,·0,·0),
+    827 827 │           [x1, y1] = r.w(384, 240, 0);
+    828 828 │         r.overlay((ctx) => {
+  
+
+src/render.js:827:6 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable x1 is unused.
+  
+    825 │ 				z = r.view.zoom || 1,
+    826 │ 				[x, y] = r.w(0, 0, 0),
+  > 827 │ 				[x1, y1] = r.w(384, 240, 0);
+        │ 				 ^^
+    828 │ 			r.overlay((ctx) => {
+    829 │ 				const compact = r.W < 520;
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend x1 with an underscore.
+  
+    825 825 │           z = r.view.zoom || 1,
+    826 826 │           [x, y] = r.w(0, 0, 0),
+    827     │ - → → → → [x1,·y1]·=·r.w(384,·240,·0);
+        827 │ + → → → → [_x1,·y1]·=·r.w(384,·240,·0);
+    828 828 │         r.overlay((ctx) => {
+    829 829 │           const compact = r.W < 520;
+  
+
+src/main.js:654:16 lint/suspicious/noAssignInExpressions ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × The assignment should not be in an expression.
+  
+    652 │ 		makePeer();
+    653 │ 		game.shell.hide();
+  > 654 │ 		const box = (peerPanel = document.createElement("div"));
+        │ 		             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    655 │ 		box.className = "night-peer";
+    656 │ 		box.innerHTML =
+  
+  i The use of assignments in expressions is confusing.
+    Expressions are often considered as side-effect free.
+  
+
+src/main.js:192:16 lint/suspicious/useIterableCallbackReturn ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This callback passed to forEach() iterable method should not return a value.
+  
+    190 │ 	}
+    191 │ 	function consume() {
+  > 192 │ 		game.players.forEach((p) => p.clear());
+        │ 		             ^^^^^^^
+    193 │ 		injected = {};
+    194 │ 		frameAction = null;
+  
+  i Either remove this return or remove the returned value.
+  
+    190 │ 	}
+    191 │ 	function consume() {
+  > 192 │ 		game.players.forEach((p) => p.clear());
+        │ 		                            ^^^^^^^^^
+    193 │ 		injected = {};
+    194 │ 		frameAction = null;
+  
+
+src/main.js:503:20 lint/suspicious/useIterableCallbackReturn ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This callback passed to forEach() iterable method should not return a value.
+  
+    501 │ 				"Refill both rays",
+    502 │ 				() => {
+  > 503 │ 					world.players.forEach((p) => (p.charge = true));
+        │ 					              ^^^^^^^
+    504 │ 					mark();
+    505 │ 				},
+  
+  i Either remove this return or remove the returned value.
+  
+    501 │ 				"Refill both rays",
+    502 │ 				() => {
+  > 503 │ 					world.players.forEach((p) => (p.charge = true));
+        │ 					                             ^^^^^^^^^^^^^^^^^
+    504 │ 					mark();
+    505 │ 				},
+  
+
+src/render.js:291:7 lint/suspicious/useIterableCallbackReturn ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × This callback passed to forEach() iterable method should not return a value.
+  
+    289 │ 				this.bees
+    290 │ 					.get(p.id)
+  > 291 │ 					.forEach((b, i) =>
+        │ 					 ^^^^^^^
+    292 │ 						b.update(dt, {
+    293 │ 							look: [p.vx || 1, p.vy || 0],
+  
+  i Either remove this return or remove the returned value.
+  
+    290 │ 					.get(p.id)
+    291 │ 					.forEach((b, i) =>
+  > 292 │ 						b.update(dt, {
+        │ 						^^^^^^^^^^^^^^
+  > 293 │ 							look: [p.vx || 1, p.vy || 0],
+  > 294 │ 							squash: p.focus ? -0.1 : p.contact ? 0.14 : 0,
+  > 295 │ 							flap: p.contact ? 1 : 0.8,
+  > 296 │ 						}),
+        │ 						^^
+    297 │ 					);
+    298 │ 			}
+  
+
+src/render.js format ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Formatter would have printed the following content:
+  
+    287 287 │               ),
+    288 288 │             );
+    289     │ - → → → → this.bees
+    290     │ - → → → → → .get(p.id)
+    291     │ - → → → → → .forEach((b,·i)·=>
+    292     │ - → → → → → → b.update(dt,·{
+    293     │ - → → → → → → → look:·[p.vx·||·1,·p.vy·||·0],
+    294     │ - → → → → → → → squash:·p.focus·?·-0.1·:·p.contact·?·0.14·:·0,
+    295     │ - → → → → → → → flap:·p.contact·?·1·:·0.8,
+    296     │ - → → → → → → }),
+    297     │ - → → → → → );
+        289 │ + → → → → this.bees.get(p.id).forEach((b,·i)·=>
+        290 │ + → → → → → b.update(dt,·{
+        291 │ + → → → → → → look:·[p.vx·||·1,·p.vy·||·0],
+        292 │ + → → → → → → squash:·p.focus·?·-0.1·:·p.contact·?·0.14·:·0,
+        293 │ + → → → → → → flap:·p.contact·?·1·:·0.8,
+        294 │ + → → → → → }),
+        295 │ + → → → → );
+    298 296 │         }
+    299 297 │         for (const q of w.targets) {
+  
+
+Checked 4 files in 38ms. No fixes applied.
+Found 5 errors.
+Found 11 warnings.
+Found 8 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while running checks.
+  
+

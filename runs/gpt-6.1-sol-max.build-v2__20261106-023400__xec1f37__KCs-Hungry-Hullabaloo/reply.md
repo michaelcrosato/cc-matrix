@@ -1,0 +1,11 @@
+Built **K.C.’s Hungry Hullabaloo**. **380 checks passed, 0 failed.**
+
+[Play the single-file game](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-023400__xec1f37/work/KCs-Hungry-Hullabaloo-KCs-Krazy-Chase-1982-gpt-6.1-sol-max-20261106-023400.html) · [Exit interview](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-023400__xec1f37/work/exit-interview.json) · [Progress](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-023400__xec1f37/work/PROGRESS.md)
+
+**Source Information:** Date: 2026-11-06 02:34:00. Based on [K.C.’s Krazy Chase! (1982)](https://odyssey2.info/library/manuals/us_kcskrazychase/kcs-krazy-chase.txt), following PLAN.md. Arcade maze chase with fixed overhead perspective. JavaScript/Canvas 2D, my-3D2dge 0.89.1, AI Hub protocol 1/client 1.4.0. Original shaded pixel gardens and native procedural animation. Synthesized music, effects and gibberish voices; music defaults to 10%. Solo, local and Hub co-op. Unlimited headless testing permitted; research used the manual/PDF and sampled gameplay frames. Environment: Codex CLI, headless Linux/WSL2. Model metadata: OpenAI, gpt-6.1-sol, max. Usage: added on import.
+
+**Testing Feedback:** 22 issues fixed; 4 critical. Most helpful: the complete controller campaign and record entry. Least helpful: raw snapshot dumps. Physical hardware, subjective audio quality and human campaign timing remain unknown.
+
+**Engine Feedback:** Best: integrated pixel rigs, synthesis and exact-step testing. Wrong assumption: custom inputs inherit menu bindings. Built: authoritative simulation and shared snapshots. Hardest: input, pause and Hub lifecycle integration. Vendor engine unchanged; authored adapters supply game behavior. Suggested improvement: a shared custom-edge topology API.
+
+**Prompt Feedback:** Liked the distinctive chase loop and concrete acceptance criteria. Pacing needed interpretation. Cross-device, workshop and Hub integration was hardest. Suggested change: distinguish strict requirements from tuning values and clarify finite-course pacing.

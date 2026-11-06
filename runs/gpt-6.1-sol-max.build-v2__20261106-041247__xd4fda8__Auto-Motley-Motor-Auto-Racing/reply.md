@@ -1,0 +1,13 @@
+Built [**Auto Motley Motor**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-041247__xd4fda8/work/Auto-Motley-Motor-Auto-Racing-gpt-6.1-sol-max-20261106-041247.html). Open the HTML directly in your browser.
+
+Includes five connected circuits, five cars, the complete tour, time trials, free drive, ghosts, AI/couch/WebRTC/Hub duels, dev tools and attract mode.
+
+**Verification:** 171 checks passed. Final packaging, visual checks and all four official Hub scenarios also passed. [Report](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-041247__xd4fda8/work/exit-interview.json) · [Progress](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261106-041247__xd4fda8/work/PROGRESS.md)
+
+**Source Information:** Date: 2026-11-06 04:12:47. Source: [Auto Racing, 1980](https://history.blueskyrangers.com/mattelelectronics/games/autoracing.html). Plan: PLAN.md. Genre/view: arcade racing and pursuit, north-up overhead. Tech: HTML/JavaScript/CSS, my-3D2dge 0.89.1, Hub client 1.4.0, WebRTC, Node 24. Art: original shaded pixel countryside. Animation: native shapes, rigs, tweens and particles. Audio: synthesized music, effects and gibberish voices; music defaults to 10%. Research: [original instructions](https://history.blueskyrangers.com/instructions/autoracinginst.html), corrected history, manual illustrations and archival stills; source soundtrack unknown. Testing: unlimited headless checks and browser stand-ins, no FPS target. Environment: Codex CLI, headless Linux/WSL2. Model: OpenAI gpt-6.1-sol, max effort. Usage: **added on import**. Physical hardware, listening and cross-NAT connectivity remain unknown.
+
+**Testing Feedback:** 13 unique issues fixed; 5 critical. Most helpful: the full input-driven tour and 25 course/car lap combinations. Least helpful: the cold-boot smoke check, which missed later integration failures.
+
+**Engine Feedback:** Best parts: native shapes, car physics, fixed-step testing and Shell. Wrong assumption: restoring solo bindings after seat assignment. Most important addition: directed gates and authoritative pursuit rules. Hardest integration: native pause/focus with online clocks. Upstream engine changes: none; game adapters handle stopping, input and contact. Desired addition: a native directed-gate race tracker.
+
+**Prompt Feedback:** Best part: precise delivery requirements and testing stand-ins. Confusing part: PLAN.md’s ultra effort versus TASK.md’s max. Hardest part: consistent controls and multiplayer around one simulation. Suggested change: place a short acceptance checklist beside the delivery contract.

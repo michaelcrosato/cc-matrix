@@ -1,0 +1,8 @@
+# Research provenance
+
+- Read the original Astrocade manual transcription: https://ballyalley.com/cart_manuals/text_manuals/incredible_wizard.txt . Cross-checked the scanned gameplay page in `research/manual-page3.png` from https://ballyalley.com/cart_manuals/pdf_manuals/Incredible_Wizard,_The.pdf .
+- Read the December 1982 Videogaming Illustrated feature: https://vgpavilion.com/mags/1982/12/vi/conquering-the-incredible-wizard/ . It disagrees with the manual about some multiplier/life rules and reports Hard monster fire. The manual governs the interpretation. This game's hunters deliberately use contact attacks.
+- Downloaded the archived hardware recording through https://archive.org/metadata/IncredibleWizardBallyArcadeAstrocade1982 and inspected a frame at 65 seconds (`research/hardware-frame.png`). Observed dark background, bright short creature silhouettes, cardinal lanes, visible paired gates and a compact radar without walls. Video/audio streams are Theora/Vorbis, about 331 seconds. No human listened; exact instrument synthesis and historical AI remain unknown.
+- Engine full handoff 0.89.1, git 8ecc2f62353761187bdfe226f327b7ea5d2eb691. Read README, full API card, full asset specification, frame/camera/player guide sections, relevant index entries, ARCADE kit shell and maze. Native kit patterns are adapted into original scenes and simultaneous simulation.
+- Hub client 1.4.0, protocol 1, repo 35a1047f2067b2af3de3943f0fe452f39105d869. Read README, client lifecycle and harness. Client bytes preserved by build.
+- All game-specific assets, maps, writing, animations, compositions and synthesized effects are new code. Native Humanoid, Blob, textured floor/walls and core candle are engine-provided. No source sprites, samples, music or maps reused.

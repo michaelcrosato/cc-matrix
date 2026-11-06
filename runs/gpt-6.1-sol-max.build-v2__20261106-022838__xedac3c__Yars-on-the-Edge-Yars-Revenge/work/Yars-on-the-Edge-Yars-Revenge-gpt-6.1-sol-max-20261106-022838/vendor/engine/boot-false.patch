@@ -1,0 +1,11 @@
+--- a/my-3d2dge.js
++++ b/my-3d2dge.js
+@@ -2790,7 +2790,7 @@
+     this._booting = true; this._bootOpt = o;
+     const live = !this.headless && this.o.loop !== false && hooks.boot !== false && typeof document !== 'undefined';
+     const steps = (Array.isArray(o.steps) ? o.steps : []).filter(Boolean).map(x => Array.isArray(x) ? x : [x.label || 'Getting ready', x.run]);
+-    if (hooks.boot === false) { BOOT.played = true; const el = typeof document !== 'undefined' && document.getElementById('e3-boot'); if (el) { el.hidden = true; el.style.display = 'none'; } BOOT.el = null; return this.start(h); }
++    if (hooks.boot === false) { BOOT.played = true; const el = typeof document !== 'undefined' && document.getElementById('e3-boot'); if (el) { el.hidden = true; el.style.display = 'none'; } BOOT.el = null; this._booting = false; return this.start(h); }
+     let res; this.booted = new Promise(r => { res = r; });
+     if (live) { BOOT._open(this, o); BOOT._checks(this); }
+     const now = () => typeof performance !== 'undefined' ? performance.now() : 0, t0 = now(), n = steps.length;   // (no clock in a bare Node context)

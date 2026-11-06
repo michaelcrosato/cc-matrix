@@ -1,0 +1,416 @@
+src/dev/tools.js:15:9 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    13 │ 	for (const [k, sp] of Object.entries(TUNING_SPECS))
+    14 │ 		S.define({
+  > 15 │ 			key: "dev_" + k,
+       │ 			     ^^^^^^^^^^
+    16 │ 			label: sp.label,
+    17 │ 			group: "Controls",
+  
+  i Unsafe fix: Use a template literal.
+  
+     13  13 │     for (const [k, sp] of Object.entries(TUNING_SPECS))
+     14  14 │       S.define({
+     15     │ - → → → key:·"dev_"·+·k,
+         15 │ + → → → key:·`dev_${k}`,
+     16  16 │         label: sp.label,
+     17  17 │         group: "Controls",
+  
+
+src/dev/tools.js:168:32 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    166 │ 								ui.show("tuning", {
+    167 │ 									title: label,
+  > 168 │ 									rows: keys.map((k) => "dev_" + k),
+        │ 									                      ^^^^^^^^^^
+    169 │ 									actions: [
+    170 │ 										[
+  
+  i Unsafe fix: Use a template literal.
+  
+    166 166 │                   ui.show("tuning", {
+    167 167 │                     title: label,
+    168     │ - → → → → → → → → → rows:·keys.map((k)·=>·"dev_"·+·k),
+        168 │ + → → → → → → → → → rows:·keys.map((k)·=>·`dev_${k}`),
+    169 169 │                     actions: [
+    170 170 │                       [
+  
+
+src/dev/tools.js:174:20 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    172 │ 											() => {
+    173 │ 												for (const [k, sp] of Object.entries(TUNING_SPECS))
+  > 174 │ 													S.set("dev_" + k, sp.value);
+        │ 													      ^^^^^^^^^^
+    175 │ 												ui.show("tuning", {});
+    176 │ 											},
+  
+  i Unsafe fix: Use a template literal.
+  
+    172 172 │                         () => {
+    173 173 │                           for (const [k, sp] of Object.entries(TUNING_SPECS))
+    174     │ - → → → → → → → → → → → → → S.set("dev_"·+·k,·sp.value);
+        174 │ + → → → → → → → → → → → → → S.set(`dev_${k}`,·sp.value);
+    175 175 │                           ui.show("tuning", {});
+    176 176 │                         },
+  
+
+src/net/peer.js:98:4 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+     96 │ 	encode(desc) {
+     97 │ 		return (
+   > 98 │ 			"BEE1." + btoa(JSON.stringify({ v: 1, type: desc.type, sdp: desc.sdp }))
+        │ 			^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     99 │ 		);
+    100 │ 	}
+  
+  i Unsafe fix: Use a template literal.
+  
+     96  96 │     encode(desc) {
+     97  97 │       return (
+     98     │ - → → → "BEE1."·+·btoa(JSON.stringify({·v:·1,·type:·desc.type,·sdp:·desc.sdp·}))
+         98 │ + → → → `BEE1.${btoa(JSON.stringify({·v:·1,·type:·desc.type,·sdp:·desc.sdp·}))}`
+     99  99 │       );
+    100 100 │     }
+  
+
+src/presentation/garden.js:467:42 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    465 │ 			}
+    466 │ 			if (e.type === "collapse" && age < 1.3)
+  > 467 │ 				r.textAt(e.x, e.y - 10 - age * 9, 0, "+" + e.points, "#f6de9f");
+        │ 				                                     ^^^^^^^^^^^^^^
+    468 │ 			if (e.type === "pulse" && age < 0.65)
+    469 │ 				r.decal(() =>
+  
+  i Unsafe fix: Use a template literal.
+  
+    465 465 │         }
+    466 466 │         if (e.type === "collapse" && age < 1.3)
+    467     │ - → → → → r.textAt(e.x,·e.y·-·10·-·age·*·9,·0,·"+"·+·e.points,·"#f6de9f");
+        467 │ + → → → → r.textAt(e.x,·e.y·-·10·-·age·*·9,·0,·`+${e.points}`,·"#f6de9f");
+    468 468 │         if (e.type === "pulse" && age < 0.65)
+    469 469 │           r.decal(() =>
+  
+
+tools/test.mjs:18:39 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    16 │ 		failed++;
+    17 │ 		failures.push({ name, detail });
+  > 18 │ 		console.log(`FAIL ${name}${detail ? ": " + detail : ""}`);
+       │ 		                                    ^^^^^^^^^^^^^
+    19 │ 	}
+    20 │ };
+  
+  i Unsafe fix: Use a template literal.
+  
+    16 16 │       failed++;
+    17 17 │       failures.push({ name, detail });
+    18    │ - → → console.log(`FAIL·${name}${detail·?·":·"·+·detail·:·""}`);
+       18 │ + → → console.log(`FAIL·${name}${detail·?·`:·${detail}`·:·""}`);
+    19 19 │     }
+    20 20 │   };
+  
+
+tools/test.mjs:60:2 lint/style/useTemplate  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  i Template literals are preferred over string concatenation.
+  
+    58 │ writeFileSync(
+    59 │ 	resolve(root, "evidence/test-results.json"),
+  > 60 │ 	JSON.stringify({ group, passed, failed, failures }, null, 2) + "\n",
+       │ 	^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    61 │ );
+    62 │ console.log(`${passed + failed} checks: ${passed} passed, ${failed} failed`);
+  
+  i Unsafe fix: Use a template literal.
+  
+    58 58 │   writeFileSync(
+    59 59 │     resolve(root, "evidence/test-results.json"),
+    60    │ - → JSON.stringify({·group,·passed,·failed,·failures·},·null,·2)·+·"\n",
+       60 │ + → `${JSON.stringify({·group,·passed,·failed,·failures·},·null,·2)}\n`,
+    61 61 │   );
+    62 62 │   console.log(`${passed + failed} checks: ${passed} passed, ${failed} failed`);
+  
+
+src/dev/tools.js:3:2 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    1 │ import { STAGES, TUNING_SPECS } from "../../content/stages.js";
+    2 │ import {
+  > 3 │ 	clone,
+      │ 	^^^^^
+    4 │ 	enterStage,
+    5 │ 	spawnRival,
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+      1   1 │   import { STAGES, TUNING_SPECS } from "../../content/stages.js";
+      2   2 │   import {
+      3     │ - → clone,
+      4   3 │     enterStage,
+      5   4 │     spawnRival,
+  
+
+src/net/protocol.js:2:17 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    1 │ import { DEFAULT_TUNING } from "../../content/stages.js";
+  > 2 │ import { clamp, clone, newWorld } from "../sim/world.js";
+      │                 ^^^^^
+    3 │ export const TYPES = ["left", "right", "bell"],
+    4 │ 	PHASES = ["play", "result", "failed", "ending"],
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    2 │ import·{·clamp,·clone,·newWorld·}·from·"../sim/world.js";
+      │                 -------                                  
+
+src/net/protocol.js:247:3 lint/complexity/useOptionalChain  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Change to an optional chain.
+  
+    245 │ export function validateInput(packet, record, stage) {
+    246 │ 	if (
+  > 247 │ 		!packet ||
+        │ 		^^^^^^^^^^
+  > 248 │ 		packet.t !== "i" ||
+        │ 		^^^^^^^^^^^^^^^^
+    249 │ 		packet.v !== 1 ||
+    250 │ 		packet.stage !== stage ||
+  
+  i Unsafe fix: Change to an optional chain.
+  
+    245 245 │   export function validateInput(packet, record, stage) {
+    246 246 │     if (
+    247     │ - → → !packet·||
+    248     │ - → → packet.t·!==·"i"·||
+        247 │ + → → packet?.t·!==·"i"·||
+    249 248 │       packet.v !== 1 ||
+    250 249 │       packet.stage !== stage ||
+  
+
+src/presentation/garden.js:255:15 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable i is unused.
+  
+    253 │ 			}
+    254 │ 		}
+  > 255 │ 		for (const [i, e] of d.entrances.entries()) {
+        │ 		            ^
+    256 │ 			r.shape("garden-jewel", e.x, e.y, 0, { scale: 0.9, shadow: false });
+    257 │ 			r.decal((ctx) => {
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend i with an underscore.
+  
+    253 253 │         }
+    254 254 │       }
+    255     │ - → → for·(const·[i,·e]·of·d.entrances.entries())·{
+        255 │ + → → for·(const·[_i,·e]·of·d.entrances.entries())·{
+    256 256 │         r.shape("garden-jewel", e.x, e.y, 0, { scale: 0.9, shadow: false });
+    257 257 │         r.decal((ctx) => {
+  
+
+src/presentation/garden.js:327:14 lint/correctness/noUnusedFunctionParameters  FIXABLE  ━━━━━━━━━━━━
+
+  ! This parameter ctx is unused.
+  
+    325 │ 				});
+    326 │ 			if (t.type === "bell" && t.bossPhase === "pulse")
+  > 327 │ 				r.decal((ctx) => {
+        │ 				         ^^^
+    328 │ 					r.groundRing(t.x, t.y, 20 + (70 * t.bossT) / 1.5, "#c3a176", 0.65);
+    329 │ 					r.groundRing(t.x, t.y, 95, "#786d55", 0.4);
+  
+  i Unused parameters might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: If this is intentional, prepend ctx with an underscore.
+  
+    325 325 │           });
+    326 326 │         if (t.type === "bell" && t.bossPhase === "pulse")
+    327     │ - → → → → r.decal((ctx)·=>·{
+        327 │ + → → → → r.decal((_ctx)·=>·{
+    328 328 │             r.groundRing(t.x, t.y, 20 + (70 * t.bossT) / 1.5, "#c3a176", 0.65);
+    329 329 │             r.groundRing(t.x, t.y, 95, "#786d55", 0.4);
+  
+
+src/presentation/garden.js:360:13 lint/correctness/noUnusedVariables  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━
+
+  ! This variable w is unused.
+  
+    358 │ 				(ctx, x, y) => {
+    359 │ 					if (a.warning > 0) {
+  > 360 │ 						const w = Math.sin(s.time * 9) * 0.2 + 0.5;
+        │ 						      ^
+    361 │ 						px.ell(ctx, x, y, 8 * k, 8 * k, "#344643");
+    362 │ 						px.ell(ctx, x, y, 6 * k, 6 * k, color);
+  
+  i Unused variables are often the result of typos, incomplete refactors, or other sources of bugs.
+  
+  i Unsafe fix: If this is intentional, prepend w with an underscore.
+  
+    358 358 │           (ctx, x, y) => {
+    359 359 │             if (a.warning > 0) {
+    360     │ - → → → → → → const·w·=·Math.sin(s.time·*·9)·*·0.2·+·0.5;
+        360 │ + → → → → → → const·_w·=·Math.sin(s.time·*·9)·*·0.2·+·0.5;
+    361 361 │               px.ell(ctx, x, y, 8 * k, 8 * k, "#344643");
+    362 362 │               px.ell(ctx, x, y, 6 * k, 6 * k, color);
+  
+
+src/presentation/rigs.js:1:10 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+  > 1 │ import { clamp, footprint } from "../sim/world.js";
+      │          ^^^^^
+    2 │ export function createRigs(E) {
+    3 │ 	const { px } = E;
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    1 │ import·{·clamp,·footprint·}·from·"../sim/world.js";
+      │          -------                                   
+
+src/style.css:104:21 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    102 │ }
+    103 │ button[data-act="ray"] {
+  > 104 │ 	border-radius: 50% !important;
+        │ 	                   ^^^^^^^^^^
+    105 │ 	border-color: #cfb67f !important;
+    106 │ 	color: #fff0bf !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    104 │ → border-radius:·50%·!important;
+        │                     ----------- 
+
+src/style.css:105:24 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    103 │ button[data-act="ray"] {
+    104 │ 	border-radius: 50% !important;
+  > 105 │ 	border-color: #cfb67f !important;
+        │ 	                      ^^^^^^^^^^
+    106 │ 	color: #fff0bf !important;
+    107 │ 	background: #1e3636dd !important;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    105 │ → border-color:·#cfb67f·!important;
+        │                        ----------- 
+
+src/style.css:106:17 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    104 │ 	border-radius: 50% !important;
+    105 │ 	border-color: #cfb67f !important;
+  > 106 │ 	color: #fff0bf !important;
+        │ 	               ^^^^^^^^^^
+    107 │ 	background: #1e3636dd !important;
+    108 │ 	box-shadow: 0 0 0 4px #15252555;
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    106 │ → color:·#fff0bf·!important;
+        │                 ----------- 
+
+src/style.css:107:24 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    105 │ 	border-color: #cfb67f !important;
+    106 │ 	color: #fff0bf !important;
+  > 107 │ 	background: #1e3636dd !important;
+        │ 	                      ^^^^^^^^^^
+    108 │ 	box-shadow: 0 0 0 4px #15252555;
+    109 │ }
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    107 │ → background:·#1e3636dd·!important;
+        │                        ----------- 
+
+src/style.css:111:16 lint/complexity/noImportantStyles  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Avoid the use of the !important style.
+  
+    109 │ }
+    110 │ body[data-mode="title"] [data-sys="touch"] {
+  > 111 │ 	display: none !important;
+        │ 	              ^^^^^^^^^^
+    112 │ }
+    113 │ @media (max-width: 600px) {
+  
+  i This style reverses the cascade logic, and precedence is reversed. This could lead to having styles with higher specificity being overridden by styles with lower specificity.
+  
+  i Unsafe fix: Remove the style.
+  
+    111 │ → display:·none·!important;
+        │                ----------- 
+
+tools/test.mjs:2:10 lint/correctness/noUnusedImports  FIXABLE  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  ! Several of these imports are unused.
+  
+    1 │ import { spawnSync } from "node:child_process";
+  > 2 │ import { readFileSync, writeFileSync } from "node:fs";
+      │          ^^^^^^^^^^^^
+    3 │ import { dirname, resolve } from "node:path";
+    4 │ import { fileURLToPath } from "node:url";
+  
+  i Unused imports might be the result of an incomplete refactoring.
+  
+  i Unsafe fix: Remove the unused imports.
+  
+    2 │ import·{·readFileSync,·writeFileSync·}·from·"node:fs";
+      │          --------------                               
+
+Skipped 68 suggested fixes.
+If you wish to apply the suggested (unsafe) fixes, use the command biome check --write --unsafe
+
+The number of diagnostics exceeds the limit allowed. Use --max-diagnostics to increase it.
+Diagnostics not shown: 16.
+Checked 19 files in 76ms. Fixed 19 files.
+Found 5 errors.
+Found 21 warnings.
+Found 10 infos.
+check ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  × Some errors were emitted while applying fixes.
+  
+

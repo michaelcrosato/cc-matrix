@@ -1,0 +1,46 @@
+globalThis.NightCredits = {
+	sourceInformation: {
+		date: "2026-11-06 03:01:23",
+		source:
+			"Killer Bees! (1983, Odyssey²), Bob Harris / North American Philips",
+		plan: "PLAN.md",
+		genre: "Action / arcade",
+		perspective: "Fixed overhead, single shared screen",
+		tech: "my-3D2dge v0.89.1 (8ecc2f6), AI Hub Session SDK 1.4.0 (35a1047), JavaScript, native Canvas 2D, Web Audio and WebRTC; no runtime asset downloads",
+		artDirection:
+			"Original shaded procedural pixel insects, clockwork gardeners and three moonlit garden dioramas, using the engine native palette, pixel primitives, shapes and materials",
+		animation:
+			"Custom E.Blob-derived spring, wing, segmented-body and gardener rigs; explicit simulation-driven contact, recovery, maturation, loss, collapse, ray, pulse and celebration cues",
+		audio:
+			"Original code-only reactive music, synthesized effects and Animalese-style gibberish; native music/SFX/voice buses; persistent 10% default music. Subjective listening unknown.",
+		online:
+			"1–2 player Hub shared-world host authority, dedicated authority, simultaneous couch co-op, and standalone manual-offer/answer WebRTC co-op. Local data-channel play verified; arbitrary internet/NAT reachability unknown without TURN.",
+		testing:
+			"Headless deterministic and native-engine scripted full campaigns; installed Chromium, WebKit and Firefox; standard-mapped controller stubs; phone/touch stand-ins; offline audio; real official Hub harness and two-context WebRTC. Physical controller, real iOS and TV-device testing unknown.",
+		research:
+			"Read the original U.S. manual, Classic Gamer issue 5 page 40, and the Experiência Odyssey Bob Harris interview; inspected vendored engine and Hub contracts. Original gameplay recordings were not viewed or listened to; exact original sound and audiovisual timing unknown.",
+		environment: "Codex CLI (headless); Linux (Ubuntu on WSL2)",
+		model: "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+		usage: "added on import",
+	},
+	testingFeedback: [
+		"Executed checks and visual testing caught 8 distinct game issues; the development evidence separates these from additional code-review improvements and test-fixture corrections. All eight were fixed.",
+		"3 were blocking or game-breaking: a boot syntax error, the initial canvas clipping most of the game, and failing to await Hub connection before selecting dedicated authority.",
+		"The normal-rule action-driven whole-campaign proof, repeated through the native 120 Hz engine and followed by an earned real Hub cooperative victory. It exercised all six encounters, both formations, bee loss, ray refills, changing routes and the Bellkeeper opening/pulse.",
+		"Syntax-only checks were least informative about the game itself; they caught a boot typo but could not establish readable collision, cooperative steering or combat balance.",
+	],
+	engineFeedback: [
+		"The coherent native pixel shading, E.Blob procedural motion, exact fixed-step headless execution, and controller-ready menus/settings made a strong foundation.",
+		"Yes. The default canvas needed explicit CSS dimensions, expansion alone did not contain the arena, and automatic half-key mapping assigned mouse steering to the ray key until explicitly overridden.",
+		"The deterministic swarm combat and campaign authority, including safe persistent husk placement, contributor-based charge allocation, and transport-independent shared-world snapshots.",
+		"Fitting truthful collision and native rig drawing into a fixed overhead arena while keeping menus and controls legible on both portrait phones and a television-sized viewport.",
+		"None in the engine source. The game extends its public rig, shape/material, input, menu/settings, sound-bus and fixed-step interfaces; the original engine and notices remain intact.",
+		"An explicit fixed-arena containment helper that reserves HUD and touch safe areas, with corner assertions and a documented portrait example.",
+	],
+	promptFeedback: [
+		"The precise combat contract, authored encounter arc and required evidence made the intended result concrete.",
+		"The word demo suggests a smaller scope than the mandatory ten-minute six-encounter campaign. I followed the complete six-encounter contract.",
+		"Integrating real host-authoritative multiplayer, controller/touch lifecycle behavior and a balanced complete campaign without splitting them into separate rule systems.",
+		"Keep the specific acceptance contract, but separate essential delivery gates from optional presentation refinements so effort can follow playtest findings.",
+	],
+};

@@ -1,0 +1,44 @@
+error[unsupported-operator]: Unsupported `+=` operation
+  --> tests/browser.py:22:9
+   |
+22 |         REPORT["passed"] += 1
+   |         ----------------^^^^-
+   |         |                   |
+   |         |                   Has type `Literal[1]`
+   |         Has type `list[Unknown]`
+
+error[unsupported-operator]: Unsupported `+=` operation
+  --> tests/browser.py:24:9
+   |
+24 |         REPORT["failed"] += 1
+   |         ----------------^^^^-
+   |         |                   |
+   |         |                   Has type `Literal[1]`
+   |         Has type `list[Unknown]`
+
+error[unresolved-attribute]: Attribute `append` is not defined on `int` in union `int | list[Unknown]`
+  --> tests/browser.py:25:9
+   |
+25 |         REPORT["failures"].append({"name": name, "detail": str(detail)[:3000]})
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[unresolved-attribute]: Attribute `group` is not defined on `None` in union `Match[str] | None`
+  --> tests/browser.py:69:13
+   |
+69 |     first = re.search(r"<script>([\s\S]*?)</script>", html).group(1)
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[invalid-method-override]: Invalid override of method `log_message`
+   --> tests/browser.py:727:9
+    |
+727 |     def log_message(self, *args):
+    |         ^^^^^^^^^^^^^^^^^^^^^^^^ Definition is incompatible with `BaseHTTPRequestHandler.log_message`
+    |
+   ::: stdlib/http/server.pyi:275:9
+    |
+275 |     def log_message(self, format: str, *args: Any) -> None:
+    |         -------------------------------------------------- `BaseHTTPRequestHandler.log_message` defined here
+info: parameter `format` is missing
+info: This violates the Liskov Substitution Principle
+
+Found 5 diagnostics

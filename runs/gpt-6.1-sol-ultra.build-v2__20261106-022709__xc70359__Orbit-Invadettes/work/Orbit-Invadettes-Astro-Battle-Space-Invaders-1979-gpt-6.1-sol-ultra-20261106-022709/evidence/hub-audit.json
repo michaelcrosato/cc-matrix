@@ -1,0 +1,82 @@
+{
+  "scope": "Hub integration and read-only app/view/UI acceptance review",
+  "uniqueFindings": 9,
+  "criticalFindings": 1,
+  "automaticallyReproducedProductDefects": 1,
+  "notes": "Eight additional findings came from direct source-contract review. This is not a claim that nine automated tests failed. Export syntax and audio event mismatches were also seen by other team members and must be counted only once in a combined issue ledger. A test-fixture expectation adjustment is not a product defect.",
+  "findings": [
+    {
+      "id": "export-esm-in-classic-script",
+      "severity": "critical",
+      "method": "Pinned live Hub harness startup test",
+      "finding": "Final bundled classic script contained export syntax, producing Unexpected token export and preventing hello/readiness.",
+      "status": "Fixed by root using Bun IIFE export; live harness then passed."
+    },
+    {
+      "id": "hub-diagnostics-object-call",
+      "severity": "major",
+      "method": "Source integration review",
+      "finding": "App debug snapshot and dev summary called adapter diagnostics() although the contract exposes diagnostics as an object.",
+      "status": "Fixed by root."
+    },
+    {
+      "id": "hyphenated-combat-presentation-events",
+      "severity": "major",
+      "method": "Source event-producer/consumer review; independent research agent also found audio mismatch",
+      "finding": "boss-hit, boss-phase, emitter-break and saucer-hit were absent from audio aliases and visual event routing, losing corresponding hit/destruction/phase feedback.",
+      "status": "Audio fixed by research agent; view fixed by root. Native asset/audio regression now covers exact simulation event names and throttling."
+    },
+    {
+      "id": "victory-presentation-missing",
+      "severity": "major",
+      "method": "Source lifecycle and renderer review",
+      "finding": "Victory immediately opened results and continued drawing the intact hp0 flagship, omitting defended-planet celebration.",
+      "status": "Root added 2.4-second standalone planet/fireworks sequence and hides defeated hull."
+    },
+    {
+      "id": "salvage-expiry-invisible",
+      "severity": "minor",
+      "method": "Source simulation/render event review",
+      "finding": "Pickup life was never rendered and pickup-expire was ignored, so missed salvage disappeared without warning or expiry feedback.",
+      "status": "Root added warning indicator and expiry burst."
+    },
+    {
+      "id": "server-local-input-sampling",
+      "severity": "minor",
+      "method": "Source Hub server contract review",
+      "finding": "Server controller ignored input correctly, but the app still polled pads and sampled game.players before handing it to the adapter.",
+      "status": "Root skips app local input sampling on server sessions."
+    },
+    {
+      "id": "synthetic-slider-glyph-switch",
+      "severity": "major",
+      "method": "Source input provenance review",
+      "finding": "Controller range changes dispatch synthetic input; its listener forced activity(keyboard), switching prompts despite pad interaction.",
+      "status": "Root changed listener to preserve existing primary device."
+    },
+    {
+      "id": "seed-field-back-ignored",
+      "severity": "minor",
+      "method": "Source controller menu flow review",
+      "finding": "Dev text seed input continued before cancel/back handling, making Escape/Circle ineffective while that row had focus.",
+      "status": "Root handles cancel before the text-input editing skip."
+    },
+    {
+      "id": "hub-void-misreported-as-depleted-lives",
+      "severity": "major",
+      "method": "Source terminal lifecycle review",
+      "finding": "Non-finished Hub end reasons can leave shared world status playing; generic results therefore falsely said all deployments were exhausted after host-left/void/sat-out/session-ended.",
+      "status": "Fixed by root: onEnd retains sessionEndReason and non-finished Hub results show ROUND VOID / ROUND CLOSED with truthful explanation; authoritative world remains unchanged."
+    }
+  ],
+  "verification": {
+    "sessionUnitChecks": 17,
+    "sessionUnitFailures": 0,
+    "liveHubChecks": 63,
+    "liveHubFailures": 0,
+    "largestMeasuredSnapshotBytes": 7279,
+    "audioEventRegression": "Passed: exact boss-hit/core, boss-phase/heavy, emitter-break/heavy, saucer-hit/extra routes and repeated-core throttling.",
+    "physicalController": "unknown",
+    "humanListening": "unknown"
+  }
+}

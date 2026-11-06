@@ -1,0 +1,11 @@
+Built [**Space Fortnight**](./Space-Fortnight-Space-Fortress-gpt-6.1-sol-max-20261106-022731.html). Open the HTML directly in a browser. The three-act game includes co-op, attract mode, settings and dev tools.
+
+**Verification: 51 checks passed, 0 failed.** [Exit interview](./exit-interview.json) and [PROGRESS.md](./PROGRESS.md) are complete.
+
+**Source Information:** Inspired by [Space Fortress, Century/CVS, 1981](https://flyers.arcade-museum.com/videogames/show/3233), following PLAN.md. Assigned date: 2026-11-06 02:27:31. Arcade shooter with overhead flight/defense and side-view ground combat. JavaScript, Canvas 2D, my-3D2dge 0.89.1 and Web Audio; custom shaded pixel art, native sprite/state/tween animation, coded music/SFX/gibberish voices. Music defaults to 10%. Solo, 2–4 couch co-op and 1–4 AI Hub co-op, including dedicated hosting, using client 1.4.0. Research covered the flyer, gameplay footage, Museum entry, MAME, engine and Hub sources. Testing was unrestricted and headless. Environment: Codex CLI, Linux. Model: OpenAI gpt-6.1-sol, reasoning effort max. Usage: **added on import**.
+
+**Testing Feedback:** Found and fixed 14 unique defects, including one critical credits-navigation recursion. Most helpful: no-cheat campaign runs across every upgrade branch. Least helpful: the title-only smoke check. Physical hardware, actual iOS, public internet hosting and human listening quality remain unknown.
+
+**Engine Feedback:** Native pixels, animation, audio buses and controller menus fit well. I initially misused the Back callback. I built the deterministic siege simulation and replication; clock ownership and portrait framing were hardest. Engine changes: none. Suggested improvement: a tested authority-clock/snapshot example.
+
+**Prompt Feedback:** The completion criteria and deliverables were clear. The ambiguous source title needed PLAN.md’s Century interpretation. Integrating all acts, input methods and co-op was hardest. I would include pinned engine and Hub handoffs with the task.

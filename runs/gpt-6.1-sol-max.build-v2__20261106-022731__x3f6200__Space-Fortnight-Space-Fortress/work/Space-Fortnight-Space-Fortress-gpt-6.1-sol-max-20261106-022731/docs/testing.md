@@ -1,0 +1,17 @@
+# Verification evidence
+
+Run `npm run verify` from the development folder. It captures child chatter, prints failures if present and one final count. The final full run covers 51 functional checks; reports are saved in evidence/{simulation,browser,hub}-checks.json. Build the artifact with `npm run build`.
+
+- **25 simulation checks:** seeded full wins without cheats at 1, 2 and 4 pilots, all upgrade branches, all eight threats, all three boss phases, 10–12-minute active pacing, forced retreats and final defeat, deterministic replay/recovery, empty boost, cooling, tractor/pulse/gravity escape, pickup/kill idempotence, invulnerability, swept hit/miss, team redeploy/wipe priority, validated data-only added encounter, safe entry placement and native-render independence.
+- **18 browser checks:** actual delivered file:// artifact and exact client placement; real keyboard/mouse movement, aiming, short clicks and resize; pause/dev sliders/reset/single-step/preview; settings persistence/rebinding; factual paged credits; full win and real defeat/retries; ten-second attract, complete tour and input-class exits; native art in every act; offline audio and bus cleanup; four synthetic controllers with independent upgrade choices and reserved chord; two keyboard halves; phone/tablet multitouch/cancellation/rotation; denied storage; WebKit phone and Firefox Canvas 2D smoke.
+- **8 Hub checks:** six unchanged official conformance runs at 1/2/3/4 players plus dedicated server and host departure; then deeper remote-control/fire, inert countdown, malicious/stale input, neutral local overlay, delayed timer catch-up, recoverable state convergence, once-only time-up and dedicated-host full victory checks. Network is the official local bridge with 150 ms latency, 50 ms jitter and 5% loss.
+
+The dedicated no-cheat victory record is evidence/hub-dedicated-victory.json. It demonstrates approximately 610 active seconds within the actual 900-second harness ceiling, every mandatory introduction, all boss phases and a genuine tied team win. Peak compact complete state measured in that authored run was under 8 KB; it is split into reliable chunks. The four-pilot full-campaign packet maxima are recorded separately in evidence/packet-budget.json. Every routine packet is asserted at or below 1200 bytes, every packet below 16 KB, and combined sends are capped at 18 per second. Game traffic and sound stop after end.
+
+Offline audio evidence is evidence/audio-signals.json: finite, non-silent music/SFX/gibberish, with bounded peaks. Music defaults to 0.1 and saved choices persist. These are signal checks, not listening.
+
+Purposeful screenshots cover title, all defensive acts, gravity, boss, victory/defeat, credits, controller tuning and phone/tablet framing. Native animation filmstrips cover pulse/boost, boss shutters, ground docking and victory flyout. See tools/capture_motion.py for the deterministic engine-clock capture.
+
+Limitations: pads and touch are synthetic; WebKit profiles are desktop emulation, not actual iOS; no physical TV, controller, phone or tablet was used. Public internet deployment and human audio quality are unknown. No FPS benchmark or optimization target was introduced. All test servers are owned, bound to 127.0.0.1 on an OS-selected port, identified before use and shut down by their creating process.
+
+The issue ledger records 14 unique corrected game defects, one critical. Engine source and the released Hub client are unchanged. In-game metadata and root exit-interview.json share the same source through the bundler.

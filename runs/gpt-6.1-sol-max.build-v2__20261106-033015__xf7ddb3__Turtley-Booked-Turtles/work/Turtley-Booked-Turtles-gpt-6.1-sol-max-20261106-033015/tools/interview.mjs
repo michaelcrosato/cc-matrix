@@ -1,0 +1,67 @@
+import fs from "node:fs";
+
+const data = {
+	sourceInformation: {
+		date: "2026-11-06 03:30:15",
+		source:
+			"Turtles (1983 US Odyssey² hotel-rescue release; arcade ancestor 1981)",
+		plan: "PLAN.md",
+		genre: "Rescue-maze arcade action",
+		perspective:
+			"Fixed overhead 2D gameplay; illustrated hotel and rooftop intermissions",
+		tech: "JavaScript, self-contained HTML, my-3D2dge v0.89.1 (8ecc2f62353761187bdfe226f327b7ea5d2eb691), AI Hub protocol 1/client 1.4.0 (35a1047f2067b2af3de3943f0fe452f39105d869)",
+		artDirection:
+			"Original shaded native pixel turtles, hatchlings, beetles and a warm miniature hotel; native props and lighting",
+		animation:
+			"Native continuous Blob-derived custom rigs, timers, easing, sorted pixel parts and particles",
+		audio:
+			"Original code-only Web Audio/native synthesis: buoyant layered tune, distinct effects and formant gibberish; music defaults to 0.10; no audio files or TTS",
+		online:
+			"AI Hub authoritative shared-world 1–2 player campaign with dedicated host support; standalone solo and simultaneous local co-op",
+		testing:
+			"Native fixed-step rules and ordinary full campaigns, exact-file browser playback, standard gamepad stubs, Chromium CDP multitouch, WebKit phone profile, OfflineAudioContext, supplied multi-copy Hub harness with latency/jitter/loss and dedicated host, export/schema checks; no performance target",
+		research:
+			"Read 1983 US manual and inspected its pictures and a documented gameplay screenshot; release entry and historical review cross-checked mechanics, progression, enemies, visuals and written sound descriptions. No original video or audio was watched/heard.",
+		environment: "Codex CLI (headless); Linux (Ubuntu on WSL2)",
+		model: "OpenAI, gpt-6.1-sol, reasoning effort max",
+		usage: "added on import",
+	},
+	testingFeedback: [
+		"Twelve unique product issues, all fixed; legitimate bot losses and automation-driver mistakes are recorded separately.",
+		"Three critical issues: initial boot syntax, a namespace initialization regression during cleanup, and a Hub-only presentation update error.",
+		"The complete bundled-game campaign through the actual Hub harness exposed a session-only update error missed by isolated rules tests.",
+		"Page-load-only smoke checks provided the least confidence about real progress and synchronization.",
+	],
+	engineFeedback: [
+		"The native fixed-step loop, grid navigation, shaded pixel renderer and continuous rigs worked together without runtime dependencies.",
+		"Yes: TV scaling option placement and contextual touch-button creation required source inspection; signatures were checked against the pinned handoff.",
+		"The deterministic simultaneous-coop rescue simulation, especially passenger/home reservations and authoritative shared-world replication.",
+		"Keeping native UI/device handling and the online host lifetime consistent while sharing one simulation across all modes.",
+		"None. Game code extends native GridMover for immediate reversal and Blob for bespoke turtle and beetle anatomy.",
+		"Add a compact simultaneous shared-world kit demonstrating explicit input seats, lifecycle and snapshot reconciliation.",
+	],
+	promptFeedback: [
+		"The manual-backed rescue relationships and concrete completion gates made the game coherent.",
+		"The year alone was ambiguous across ports; I explicitly used the 1983 US Odyssey² release.",
+		"Verifying a complete cooperative campaign and device/lifecycle behavior in one self-contained HTML.",
+		"Separate mandatory acceptance checks from suggested tuning values, and supply one minimal engine/shared-world integration example.",
+	],
+	aiHub: {
+		name: "Turtley Booked",
+		tagline: "Small shells. Big room service.",
+		description:
+			"Give 26 tiny hotel guests a lift home across five mischievous maze floors. Outwit maturing beetles, share a scarce bug bomb, and reunite the family on the roof, solo or with a friend.",
+		type: "Game",
+		genre: "Action",
+		source: "Turtles (1983 US Odyssey²)",
+		series: "",
+		players: "1–2",
+		controls:
+			"Stick/D-pad or WASD/arrows move; Cross/Space bombs; click routes/right-click bombs; co-op WASD/Space + arrows/Right Shift; touch drag + contextual POP.",
+		tags: ["2d", "arcade", "co-op", "top-down", "pixel art", "comedy"],
+	},
+};
+fs.writeFileSync(
+	"../exit-interview.json",
+	JSON.stringify(data, null, 2) + "\n",
+);

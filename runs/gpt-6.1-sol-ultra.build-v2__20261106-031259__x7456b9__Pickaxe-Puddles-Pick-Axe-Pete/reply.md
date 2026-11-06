@@ -1,0 +1,13 @@
+Built [**Pickaxe Puddles**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra.build-v2__20261106-031259__x7456b9/work/Pickaxe-Puddles-Pick-Axe-Pete-gpt-6.1-sol-ultra-20261106-031259.html). Open the HTML directly to play. **384 checks passed.**
+
+[Development files and verification instructions](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra.build-v2__20261106-031259__x7456b9/work/Pickaxe-Puddles-Pick-Axe-Pete-gpt-6.1-sol-ultra-20261106-031259/README.md) · [Required feedback JSON](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra.build-v2__20261106-031259__x7456b9/work/exit-interview.json). PROGRESS.md is marked complete.
+
+**Source Information:** Date: 2026-11-06 03:12:59. Inspired by [Pick Axe Pete (1982)](https://odyssey2.info/library/manuals/us_pickaxepete/pick-axe-pete.txt), following PLAN.md. Arcade action platformer with a side-on room camera and portrait tracking. JavaScript/HTML/CSS, my-3d2dge 0.89.1, Hub 1.4.0 and Web Audio. Native procedural pixel art, Humanoid rigs, Attack animation and custom poses. Original coded music, effects and gibberish; music defaults to 10%. Solo, two-player local co-op and Hub online co-op. Research covered the manual, contemporary review, screenshots and dependency contracts. Testing used headless scripts, emulated controls, Chromium/WebKit, screenshots and offline audio. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, ultra. Usage: **added on import**.
+
+**Testing Feedback:** 26 distinct defects fixed; five critical. Most useful: complete input-driven expeditions and deterministic restoration/network tests. Least useful: syntax checks alone.
+
+**Engine Feedback:** Best feature: native traversal and animated rigs. Pitfalls: coordinate conventions, restoration internals and narrow-screen scaling. Main custom work: supply/collision rules and Hub authority. Hardest task: aligning ladders, animation and serialized state. Engine change: fractional downscaling in `Screen.resize`. Suggested improvement: native movement snapshots.
+
+**Prompt Feedback:** Best: concrete gameplay and verification requirements. Ambiguous: standalone versus Hub online scope. Hardest: unifying input and authority modes. Suggested change: prioritize acceptance requirements and clarify pacing. Skilled scripted runs take roughly two to three minutes; ten-to-twelve-minute first-success pacing was not measured.
+
+Physical controller feel, real iOS behavior, TV comfort and listening quality remain **unknown**.

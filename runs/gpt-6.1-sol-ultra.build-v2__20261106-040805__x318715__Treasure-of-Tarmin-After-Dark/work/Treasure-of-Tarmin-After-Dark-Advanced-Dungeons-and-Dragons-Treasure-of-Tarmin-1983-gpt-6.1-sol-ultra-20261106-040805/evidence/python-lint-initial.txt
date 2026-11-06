@@ -1,0 +1,56 @@
+BLE001 Do not catch blind exception: `Exception`
+   --> tools/browser-check.py:195:10
+    |
+193 |    check('Phone WebGL has no exceptions',not mobile_errors,mobile_errors)
+194 |    phone.close()
+195 |   except Exception as e:
+    |          ^^^^^^^^^
+196 |    check('Browser integration completed',False,str(e))
+197 |    evidence['exception']=traceback.format_exc()
+    |
+
+E722 Do not use bare `except`
+   --> tools/browser-check.py:199:4
+    |
+197 |    evidence['exception']=traceback.format_exc()
+198 |    try:capture(page,str(root/'evidence/browser-failure.png'));evidence['dom']=page.locator('body').inner_text()[:15000];evidence['err…
+199 |    except:pass
+    |    ^^^^^^
+200 |   finally:browser.close()
+201 | run()
+    |
+
+S110 `try`-`except`-`pass` detected, consider logging the exception
+   --> tools/browser-check.py:199:4
+    |
+197 |    evidence['exception']=traceback.format_exc()
+198 |    try:capture(page,str(root/'evidence/browser-failure.png'));evidence['dom']=page.locator('body').inner_text()[:15000];evidence['err…
+199 |    except:pass
+    |    ^^^^^^^^^^^
+200 |   finally:browser.close()
+201 | run()
+    |
+
+B023 Function definition does not bind loop variable `errors`
+  --> tools/cross-browser.py:23:33
+   |
+21 |    browser=engine.launch(headless=True,args=args)
+22 |    page=browser.new_page(viewport={'width':960,'height':600});errors=[]
+23 |    page.on('pageerror',lambda e:errors.append(str(e)))
+   |                                 ^^^^^^
+24 |    page.goto(release.as_uri()+'?test=1'+('' if kind=='webgpu' else '&backend=webgl'))
+25 |    page.wait_for_function("document.body.dataset.ready==='true'||document.body.dataset.error",timeout=60000)
+   |
+
+BLE001 Do not catch blind exception: `Exception`
+  --> tools/cross-browser.py:35:10
+   |
+33 |      check(kind+' state advances through production rules',model['x']==2 and model['encounter'] and not model['errors'],model)
+34 |      check(kind+' has no page exceptions',not errors,errors)
+35 |   except Exception as e:check(kind+' browser verification',False,str(e));results[kind]={'error':str(e)}
+   |          ^^^^^^^^^
+36 |   finally:
+37 |    if browser:browser.close()
+   |
+
+Found 10 errors (5 fixed, 5 remaining).

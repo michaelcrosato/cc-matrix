@@ -1,0 +1,7 @@
+
+## Verification update
+- `npm test -- rules campaign`: 43 passed, 0 failed. Includes three full ordinary-action seeded campaigns, Assist, two simultaneous pilots, final zero-resource respawn recovery, missed final shot recovery, edited-content campaign, exact replay, and drawn/undrawn hashes.
+- Official Hub smoke matrix: solo, 2-player standard, host-leave, server-only host all pass with latency 150 ms, jitter 50 ms, loss 5%. Reports: tests/artifacts/hub-smoke.json. No game/console/protocol errors.
+- `npm test -- browser`: 73 passed, 0 failed after repairs. Covers native menu/pad/key/mouse/rebinding flow, two-pad/shared-keyboard/keyboard+pad co-op, attract inputs/isolation, editor validation/sliders/freeze/step, offline audio/buses/mute/resume, CDP multitouch on iPhone 13 and iPad Mini profiles, rotation, WebKit.
+- Fixed game defects: title clipping; scaled modal max-height; mouse aim depending on stale renderer dimensions after resize; meaningful raw pointer activity detection. Also corrected test fixtures (idle clock start, synthetic vs real CDP touch IDs, semantic waits for slow WebKit, requesting actual draws before screenshots).
+- Current follow-ups: sparse touch HUD and real final/reflective screenshots; comprehensive final network suite with authority, loss/ack, non-host leave, hidden-host cancellation, time-up, zero post-end activity and full campaign; final docs/feedback metadata.

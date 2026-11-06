@@ -1,0 +1,14 @@
+# Evidence ledger
+
+Research completed 2026-11-06. Implementation is an original adaptation.
+
+| Source | Confirmed | Interpretation / unknown |
+|---|---|---|
+| https://odyssey2.info/library/manuals/us_kcmunchkin/K.C.%20Munchkin%20(USA).pdf | Twelve moving food agents, three enemies, four-direction steering, paired screen edges, rotating centre, power reversal, 1/3/5/10/20 scoring, fixed/random/invisible mazes, connected editable layouts with permanent pen. | Return-to-centre wording differs from contemporary visual account; this game explicitly uses graph-based return/recharge. |
+| https://law.justia.com/cases/federal/appellate-courts/F2/672/607/331150/ (visual observations only) | Eight ordinary plus four bright foods, survivor acceleration to player speed, quarter-turn pen, purple maze, horned blue-green smiling hero, directional enemy eyes, gobbling and victory chuckle. | New personalities, co-op, reveal chirp, stages and editor UX are adaptations. No legal discussion appears in game. |
+| https://www.odyssey2.info/media/videos/video.php?id=8 and its mp4/kc_commercial.mp4 | Downloaded 30.8267-second archival commercial; directly inspected a ten-frame contact sheet. Purple single-line paths on black, small bright rectangular moving food, horned rounded protagonist, a simple square centre and programmable maze are visible. | Commercial edits limit timing conclusions. Extracted media is research only, never part of the game. Human listening/timbre judgement is unknown in this headless environment. |
+| https://www.youtube.com/watch?v=EznzG5HpmuM | The supplied recording exists; web access returned only page scaffolding. | Playback/audio inspection unavailable through this route. No exact pitch or composition claims. |
+| https://github.com/michaelcrosato/my-3d2dge/tree/8ecc2f62353761187bdfe226f327b7ea5d2eb691/dist/handoff | Read handoff README, API/asset cards, arcade maze kit and relevant GridMover, Blob, Shell, Settings, Audio and Game source. Actual local HEAD matches this SHA, v0.89.1. | Native GridMover lacks expiring turns, seam edges and mid-edge reversal; game supplies GraphMover subclass and authoritative Board graph. Distribution remains unchanged. |
+| https://github.com/michaelcrosato/ai-hub/tree/35a1047f2067b2af3de3943f0fe452f39105d869/lib/hub | Actual local HEAD matches SHA; protocol 1, unmodified client 1.4.0. Read protocol, client, arena example, round/harness and official checker. | Hub transport is available inside Hub only; standalone co-op is couch co-op. |
+
+The native arcade slice supplies the design foundation: overhead full board, native Grid/GridMover, pixel cabinet rendering, Blob rigs, native input/settings/TV Shell and code synthesis. Static food/four wisps and alternating-turn arcade flow were replaced with the twelve-target shared-world simulation. No imported character art, sample files or source layouts are used.

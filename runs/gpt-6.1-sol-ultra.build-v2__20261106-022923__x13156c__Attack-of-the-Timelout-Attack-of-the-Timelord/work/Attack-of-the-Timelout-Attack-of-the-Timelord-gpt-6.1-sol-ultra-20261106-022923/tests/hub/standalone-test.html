@@ -1,0 +1,12 @@
+<!doctype html><meta charset="utf-8"><title>Timelout transport verification</title>
+<body>Transport verification uses the same simulation and adapter as the game.</body>
+<script type="module">
+import {NetworkSession} from '../../src/network/session.js';
+import {createWorld,stepWorld} from '../../src/game/simulation.js';
+window.state={world:null,ends:[],errors:[],starts:0,roster:[]};
+window.net=new NetworkSession({onWorld:w=>state.world=w,onStart:({seed,players})=>{state.world=createWorld({seed,players});state.starts++;},onRoster:roster=>state.roster=roster,onEnd:e=>state.ends.push(e),onError:e=>state.errors.push(e),onLeave:id=>{const p=state.world?.players.find(p=>String(p.id)===String(id));if(p)p.connected=false;}});
+window.action={move:0,fire:false,brake:false};
+let last=performance.now(),acc=0;
+setInterval(()=>{const now=performance.now(),dt=Math.min(.05,(now-last)/1000);last=now;net.update(dt,action);if(net.isHost&&net.started&&state.world){acc+=dt;while(acc>=1/120){stepWorld(state.world,net.actions());acc-=1/120;}net.publish(state.world);}},1000/60);
+window.loaded=true;
+</script>
