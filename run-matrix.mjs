@@ -164,12 +164,14 @@ function runName(head, combo, rep, when, before = []) {
 // A run's name when it starts (runOne): with the date in it, the queue's names are only what they'd be now.
 const nameOf = (run, when) => runName(run.head, run.combo, run.rep, when, run.chain ? run.chain.slice(0, -1) : []);
 
+// Queued brief by brief (product() goes source first), and within one brief every model and effort, so all of one
+// game's combinations start together instead of one model working through every source before the next starts.
 const runs = [];
-for (const agent of cfg.agents) {
-  for (const e of agent.efforts?.length ? agent.efforts : ['default']) {
-    const pe = parseEffort(e), effort = pe.label;
-    if (pe.ultracode && agent.provider !== 'claude') continue; // Ultracode is Claude Code only
-    for (const combo of product()) {
+for (const combo of product()) {
+  for (const agent of cfg.agents) {
+    for (const e of agent.efforts?.length ? agent.efforts : ['default']) {
+      const pe = parseEffort(e), effort = pe.label;
+      if (pe.ultracode && agent.provider !== 'claude') continue; // Ultracode is Claude Code only
       const fields = { agent: agent.id, provider: agent.provider, effort, ultracode: pe.ultracode,
         ...Object.fromEntries(dimNames.map((d) => [d, combo[d].id])) };
       if (!matches(fields)) continue;

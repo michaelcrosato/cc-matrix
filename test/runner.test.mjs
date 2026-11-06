@@ -457,6 +457,21 @@ test('stages: a plan branches into builds and each build into content passes, ea
   assert.match(csv, /plan:opus-max > build:sol-max > content:sonnet-medium/);
 });
 
+test('stages: a finished plan\'s builds start before the next brief\'s plan, so a batch doesn\'t plan every brief before building any', (t) => {
+  const stages = [{ id: 'plan', text: 'Plan it. FAKE:plan FAKE:sleep=300', game: false }, { id: 'build', text: 'Build it. FAKE:sleep=300' }];
+  const sb = sandbox({ dimensions: { source: ['a', 'b', 'c', 'd'].map((id) => ({ id, text: id })) }, agents: stageAgents, stages, template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  const r = runner(sb, ['--stage', 'plan=opus:medium', '--stage', 'build=opus:medium,sol:max', '-j', '2']);
+  assert.equal(r.status, 0, r.all);
+  const all = allResults(sb), started = (x) => Date.parse(x.startedAt);
+  assert.ok(all.length === 12 && all.every((x) => x.status === 'ok'), r.all);
+  const plans = all.filter((x) => x.stage === 'plan').sort((x, y) => started(x) - started(y));
+  // Two slots: the first two plans start together; every build of those two starts before a third plan does.
+  const firstBuilds = all.filter((x) => x.stage === 'build' && plans.slice(0, 2).some((p) => p.id === x.parentId));
+  assert.equal(firstBuilds.length, 4);
+  for (const b of firstBuilds) assert.ok(started(b) <= started(plans[2]), `${b.id} started after the third plan\n${r.all}`);
+});
+
 test('stages: a later stage continues from runs of an earlier batch; a failed parent leaves its runs out; node_modules isn\'t copied', (t) => {
   const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }, { id: 'bad', text: 'FAKE:fail=plan broke' }] }, agents: stageAgents, stages: STAGES,
     template: 'SOURCE: {{source}}\n' });
