@@ -1,0 +1,17 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const dir=path.dirname(fileURLToPath(import.meta.url));
+const slug=path.basename(dir);
+const read=name=>readFileSync(path.join(dir,name),'utf8');
+const capsule=(source,names)=>`const {${names}}=(()=>{${source.replace(/^import[^;]+;\s*/gm,'').replace(/^export /gm,'')}\nreturn {${names}};})();`;
+const visual=read('visuals.js');
+const tslImports=visual.match(/import\s*\{[^}]+\}\s*from\s*['"]three\/tsl['"];?/s)?.[0]||'';
+let main=read('main.js');
+const imports=main.match(/^import[^;]+;/gm).join('\n')+'\n'+tslImports;
+main=main.replace(/^import[^;]+;\s*/gm,'');
+const report=readFileSync(path.join(dir,'..','exit-interview.json'),'utf8');
+const code=imports+'\nconst REPORT='+report+';\n'+capsule(read('audio.js'),'AudioSystem')+'\n'+capsule(read('net.js'),'createNetwork')+'\n'+capsule(visual,'createEnvironment,createSpeeder,createWalker,createProjectile,createExplosion')+'\n'+main;
+const html=read('shell.html').replace('<!-- HUB_SESSION -->','<script>\n'+read('hub/session.js').replaceAll('</script','<\\/script')+'\n</script>').replace('/* GAME_CSS */',read('style.css')).replace('/* GAME_MODULES */',code.replaceAll('</script','<\\/script'));
+const output=path.join(dir,'..',slug+'.html');
+writeFileSync(output,html);console.log(output);

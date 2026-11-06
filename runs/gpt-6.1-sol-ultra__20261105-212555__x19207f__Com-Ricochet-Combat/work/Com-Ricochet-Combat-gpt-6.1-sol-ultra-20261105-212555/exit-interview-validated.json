@@ -1,0 +1,58 @@
+{
+    "sourceInformation": {
+        "date": "2026-11-05 21:25:55",
+        "source": "Combat (Atari, 1977)",
+        "plan": "none",
+        "genre": "Arcade vehicle shooter; solo circuit and versus",
+        "perspective": "Tilted orthographic top-down shared arena",
+        "tech": "Three.js r180 (0.180.0), WebGPU, Rapier 3D 0.19.3, Gamepad API, Web Audio API, WebRTC, BroadcastChannel, AI Hub Session Protocol v1 / client 1.4.0; HTML/CSS/JavaScript",
+        "artDirection": "Procedural cel-shaded toy battlefield with ink outlines, warm paper terrain, mint and coral vehicles, miniature trees and cartographic markings",
+        "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for recoil, hit reactions and aircraft motion; procedural steering, particles and track marks",
+        "audio": "Code-generated chiptune music at 10% default volume; synthesized engines, firing, rebounds, explosions and radio-style gibberish voices; no audio files",
+        "online": "Authoritative shared-world AI Hub multiplayer for 1\u20134 seats; standalone 2-player direct/LAN WebRTC invite/answer and same-browser BroadcastChannel rooms; 2-player couch versus",
+        "testing": "Headless Chromium software WebGPU; deterministic fixed-step mechanics and five-field scripted progression; virtual standard gamepad; touch/multitouch phone profile; Web Audio analyser; standalone transport tests; official AI Hub harness with two/four players, 150 ms latency, 50 ms jitter, 5% packet loss, host departure and dedicated server; GPU readback visual checks. Physical hardware and listening tests: unknown.",
+        "research": "Atari official Combat rules, original 1977 instruction manual and Combat program disassembly; mechanics, playfield layouts, invisibility, guided and billiard shots, aircraft wrapping/cloud cover, visual palette and procedural sound routines. Exact perceived original sound timbre: unknown.",
+        "environment": "Codex CLI (headless); Linux / Ubuntu on WSL2",
+        "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+        "usage": "added on import"
+    },
+    "testingFeedback": [
+        "Testing and review caught 10 game issues; all were corrected. Test infrastructure also needed fixes for guided-shot timing, jet initial positioning and software GPU capture.",
+        "3 were game breaking: a Rapier descriptor API mismatch prevented boot, escaping round results could trap play, and the standalone multiplayer host could miss final results.",
+        "The deterministic real-physics bank-shot test: it verifies an unbanked hit scores nothing, a physical rebound arms the shell, and the returning shell scores.",
+        "Ordinary headless canvas screenshots were least helpful because software WebGPU could appear blank; GPU readback and game-state assertions provided useful evidence."
+    ],
+    "engineFeedback": [
+        "Three.js provides a flexible scene graph and native animation mixer; Rapier collision events make rebounding shells and vehicle contact straightforward.",
+        "I initially used RigidBody instance method names on RigidBodyDesc. Review and browser boot testing caught the mismatch. Software WebGPU adapter creation and screenshots also required investigation.",
+        "The vehicle-duel rules, controller-first menus, AI steering and bank-shot aiming, procedural art/audio, and authoritative multiplayer snapshot layer.",
+        "Coordinating browser WebGPU initialization, readback and multiple networked copies under software rendering was the hardest engine integration work.",
+        "none; no library source was modified. The application retains its WebGPU adapter/device and retries adapter discovery before reporting a load error.",
+        "I would add clearer WebGPU initialization diagnostics and a documented, reliable screenshot/readback workflow for automated browser testing."
+    ],
+    "promptFeedback": [
+        "The distinctive source, single-file deliverable, controller-first UX, attract mode and explicit multiplayer contract make the intended finished game concrete.",
+        "The requested feedback belongs both in chat and credits, while usage is supplied later. I interpreted this as a shared metadata record embedded in the game and saved separately. No external plan file was supplied.",
+        "Delivering and testing five distinct vehicle rules together with controller menus, assisted touch controls and shared-world multiplayer in one portable HTML file.",
+        "Specify whether direct internet matchmaking is required outside AI Hub, or whether a manual direct/LAN connection is sufficient; identify required feedback formatting and a reference target browser."
+    ],
+    "aiHub": {
+        "name": "Com-Ricochet",
+        "tagline": "Small tanks. Big bank shots.",
+        "description": "A friendly five-field vehicle feud inspired by Combat. Bank shells around inked toy arenas, steer guided shots, hunt invisible tanks and wrap through the clouds in jet fighters.",
+        "type": "Game",
+        "genre": "Shooter",
+        "source": "Combat (Atari, 1977)",
+        "series": "",
+        "players": "1\u20134",
+        "controls": "Left stick/WASD move; right stick/mouse aim; R2/click/Space fire; L2/Shift burst or radar; Options/Esc pause. Touch: left drag move, right drag aim, assisted fire.",
+        "tags": [
+            "3d",
+            "arcade",
+            "versus",
+            "top-down",
+            "vehicles",
+            "retro"
+        ]
+    }
+}

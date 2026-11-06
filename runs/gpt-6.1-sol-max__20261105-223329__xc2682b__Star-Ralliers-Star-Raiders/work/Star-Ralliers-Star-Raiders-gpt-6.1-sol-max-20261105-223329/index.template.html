@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/*HUB_CLIENT*/</script>
+<script>window.hubConnection=AIHub.connect({mode:'ghost',seats:[1,4]});</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#081b29">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="ghost">
+<meta name="hub:session-goal" content="Clear three invasion fleets, protect the relay bases, and dock to return. Highest mission score wins.">
+<meta name="hub:session-howto" content="Left stick steer, R2 fire, L2 boost, triangle target, square pulse, circle shields, D-pad up chart, cross jump/dock. Mouse aim, WASD fly, Space fire, Tab chart, E interact.">
+<meta name="hub:session-minutes" content="9">
+<title>Star Ralliers — The last light needs a wingman.</title>
+<style>/*STYLES*/</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"}}</script>
+</head>
+<body>
+<div id="viewport"></div><canvas id="hudCanvas" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div><div id="damageFlash" aria-hidden="true"></div>
+<div id="loading"><div class="loader-symbol">✦</div><div class="eyebrow">ORBITAL DEFENSE DIVISION</div><h2>Bringing the stars online.</h2><p id="loadStatus">Calibrating photon arrays…</p></div>
+<div id="ui">
+<section id="titleScreen" class="screen hidden">
+  <header class="masthead"><div class="brand"><svg viewBox="0 0 50 50"><path d="M25 3 31 18 47 25 31 31 25 47 19 31 3 25 19 18Z"/><path d="M8 10 18 18M32 32 42 42M42 8 32 18M18 32 8 42"/></svg><span>ORBITAL<br>DEFENSE DIVISION</span></div><div class="edition">FIELD MANUAL <b>№ 07</b><br><span>A SPACE-COMBAT ADVENTURE</span></div></header>
+  <main class="title-copy"><div class="chapter"><span></span> ALL STATIONS. ONE LAST STAND.</div><h1><span>STAR</span><br>RALLIERS<span class="title-dot">✦</span></h1><p class="tagline">The last light needs a wingman.</p><p class="title-description">Three fleets at the frontier. Two bases holding on.<br>One cockpit with your name on it.</p>
+    <nav class="title-nav"><button id="launchBtn" class="primary">Launch patrol <span class="button-end">↗</span></button><button id="wingBtn" class="secondary">Rally a wing <span class="tiny">1–4 PILOTS</span></button><div class="utility-nav"><button data-open="guide">Flight school</button><button data-open="settings">Settings</button><button data-open="about">About / credits</button></div></nav>
+  </main>
+  <div class="hero-caption"><span class="number-mark">07</span><div><span class="eyebrow">RALLIER-CLASS INTERCEPTOR</span><strong>Small ship. Unreasonable odds.</strong></div><div class="caption-line"></div></div>
+  <footer class="title-footer"><span><i class="status-dot"></i> FRONTIER WATCH / <b>READY</b></span><span id="titleHint">ENTER TO LAUNCH <i>·</i> MOUSE + KEYBOARD / CONTROLLER</span><span>INSPIRED BY STAR RAIDERS · 1982</span></footer>
+</section>
+<section id="briefScreen" class="screen backdrop hidden"><div class="wide-panel"><div class="eyebrow orange">YOUR ORDERS / OPERATION LAST LIGHT</div><h2>Bring the frontier home.</h2><p class="lead">Cadet, the Vex are closing on our relay bases. Seek their fleets, break the blockade, and live to tell us about it.</p><div class="brief-grid"><article><span class="step-number">01</span><h3>Seek.</h3><p>Open the galactic chart. Jump to the red fleet at <b>D3</b> first. Keep the warp beacon centered for an energy refund.</p></article><article><span class="step-number">02</span><h3>Strike.</h3><p>Steer into the target brackets and fire twin photons. Boost to evade. Get within <b>190 m</b> to crack the flagship’s shield.</p></article><article><span class="step-number">03</span><h3>Rally.</h3><p>Visit a blue relay base. Slow down, request docking, and let the shuttle repair you. Clear all fleets, then dock to finish.</p></article></div><div class="brief-bottom"><p id="briefControls"></p><button id="beginBtn" class="primary">Take the helm <span>↗</span></button></div></div></section>
+<section id="flightHUD" class="hidden">
+  <div class="flight-top"><div><div class="eyebrow">OPERATION LAST LIGHT</div><div class="sector-label"><span id="sectorName">KESTREL RELAY</span><b id="sectorCode">C3</b></div></div><div class="mission-track"><span id="missionObjective">BREAK THE BLOCKADE</span><b id="killCounter">0 / 11</b></div><button id="pauseBtn" class="icon-button" aria-label="Pause">Ⅱ</button></div>
+  <div id="toast" class="toast hidden"><span id="toastOverline">SUBSPACE / COMMAND</span><strong id="toastText"></strong></div>
+  <div id="comms" class="comms hidden"><span class="comms-icon">◈</span><div><span class="eyebrow">COMMANDER NOVA / OPEN CHANNEL</span><p id="commsText"></p></div></div>
+  <div id="targetInfo" class="target-info"><span id="targetType">CLEAR SPACE</span><b id="targetRange">—</b><div class="target-health"><i id="targetHP"></i></div><small id="targetNote">FIND YOUR NEXT SECTOR ON THE CHART</small></div>
+  <div id="contextPrompt" class="context-prompt hidden"></div>
+  <div id="warpUI" class="warp-ui hidden"><div class="eyebrow">DUAL HYPERWARP ENGINES</div><h2>HOLD THE BEACON</h2><p id="warpText">Keep the diamond inside your reticle.</p><div class="warp-meter"><i id="warpProgress"></i></div></div>
+  <div id="dockUI" class="dock-ui hidden"><div class="eyebrow">ORBIT ESTABLISHED</div><h2>Good to have you back.</h2><p id="dockText">Transfer shuttle inbound. Stand by.</p><div class="warp-meter"><i id="dockProgress"></i></div></div>
+  <div class="flight-bottom"><div class="resource-panel"><div class="resource-head"><span>HULL</span><b id="hullNumber">100</b></div><div class="bar"><i id="hullBar"></i></div><div class="resource-head sub"><span id="shieldLabel">SHIELDS / ON</span><b id="shieldNumber">100</b></div><div class="bar shield"><i id="shieldBar"></i></div></div><div class="radar-wrap"><canvas id="radar" width="200" height="150"></canvas><span>LOCAL SCAN</span></div><div class="energy-panel"><div class="resource-head"><span>ENERGY</span><b id="energyNumber">1000</b></div><div class="bar energy"><i id="energyBar"></i></div><div class="flight-metrics"><span>ION <b id="speedNumber">24</b></span><span id="pulseState">PULSE READY</span></div></div></div>
+  <div class="control-strip" id="controlStrip"></div><div id="wingScores" class="wing-scores"></div><div id="engineDamage" class="engine-damage hidden">ION DRIVE DAMAGED / DOCK TO REPAIR</div>
+</section>
+<section id="mapScreen" class="screen backdrop hidden"><div class="map-panel"><div class="panel-top"><div><div class="eyebrow orange">NAVIGATION / LONG RANGE SCAN</div><h2>Galactic chart<span class="muted">.</span></h2></div><button class="back-button" id="closeMap">Back to cockpit <span>↩</span></button></div><div class="map-layout"><div><div class="map-grid" id="mapGrid"></div><div class="map-legend"><span><i class="legend-dot blue"></i> RELAY BASE</span><span><i class="legend-dot orange-bg"></i> VEX FLEET</span><span>⌖ YOUR SHIP</span></div></div><aside class="sector-detail"><div id="mapSector" class="big-code">D3</div><div class="eyebrow" id="mapKind">HOSTILE SECTOR</div><h3 id="mapName">Kestrel blockade</h3><p id="mapDescription"></p><div class="map-stat"><span>HOSTILES</span><b id="mapTargets">3</b></div><div class="map-stat"><span>JUMP ENERGY</span><b id="mapCost">90</b></div><div id="baseStatus" class="base-status"></div><button id="jumpBtn" class="primary">Engage hyperwarp <span>↗</span></button><p class="fine" id="mapHint"></p></aside></div></div></section>
+<section id="pauseScreen" class="screen backdrop hidden"><div class="compact-panel"><div class="eyebrow orange">FLIGHT RECORDER / PAUSED</div><h2>Catch your breath.</h2><nav class="stack-menu"><button id="resumeBtn" class="primary">Return to the stars <span>↗</span></button><button data-pause-open="settings">Settings</button><button data-pause-open="guide">Flight school</button><button data-pause-open="dev">Developer tools</button><button id="quitBtn">End patrol</button></nav><p class="fine" id="pauseNote">The frontier can wait a moment.</p></div></section>
+<section id="modalScreen" class="screen backdrop hidden"><div id="modalPanel" class="modal-panel"><div class="panel-top"><div><div id="modalEyebrow" class="eyebrow orange"></div><h2 id="modalTitle"></h2></div><button id="modalBack" class="back-button">Back <span>↩</span></button></div><div id="modalBody" class="modal-body"></div><p class="modal-scroll-hint">Right stick / Mouse wheel / Page Up & Down · Scroll</p></div></section>
+<section id="resultScreen" class="screen backdrop hidden"><div class="result-panel"><div class="eyebrow orange" id="resultEyebrow">MISSION EVALUATION</div><div class="result-star">✦</div><h2 id="resultTitle">Frontier secured.</h2><p id="resultText" class="lead"></p><div class="rank-row"><span>FIELD COMMISSION</span><strong id="rankName">STAR COMMANDER</strong></div><div class="result-stats"><div><b id="resultScore">2400</b><span>MISSION SCORE</span></div><div><b id="resultKills">11</b><span>HOSTILES CLEARED</span></div><div><b id="resultBases">2 / 2</b><span>BASES SAVED</span></div><div><b id="resultTime">05:42</b><span>PATROL TIME</span></div></div><div class="result-buttons"><button id="retryBtn" class="primary">Another patrol <span>↗</span></button><button id="resultHome">Return to command</button></div></div></section>
+<div id="attractBanner" class="attract-banner hidden"><span><i class="status-dot"></i> LIVE FLIGHT DEMONSTRATION</span><b>Any input to return to command</b></div>
+<div id="hubWaiting" class="screen backdrop hidden"><div class="compact-panel"><div class="eyebrow orange">WING ASSEMBLING</div><h2>Star Ralliers</h2><p class="lead" id="hubWaitText">Calibrated and ready. Awaiting the Hub’s launch signal.</p></div></div>
+<div id="touchMenu" class="hidden"><button aria-label="Pause" id="touchPause">Ⅱ</button></div><button id="touchAction" class="hidden"></button>
+</div>
+<script type="module">/*GAME_CODE*/</script>
+</body></html>

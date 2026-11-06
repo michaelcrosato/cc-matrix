@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<!-- HUB_CLIENT -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#151a2e">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Team up to banish six waves of winged demons. Break the Big Flap’s seals, then dethrone it!">
+<meta name="hub:session-howto" content="Left stick / A D: slide. R2 / Space: fire. Square / E: pulse. Circle / Shift: dash. Touch: drag to slide; auto-fire and assisted pulse.">
+<meta name="hub:session-minutes" content="6">
+<title>Demon Bonanza — An ice-cold arcade expedition</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='24' fill='%23151a2e'/%3E%3Cpath d='M10 35L35 45 50 20 65 45 90 35 80 70 60 65 50 82 40 65 20 70Z' fill='%239ceaca'/%3E%3Cpath d='M35 49H45V58H35ZM55 49H65V58H55Z' fill='%23151a2e'/%3E%3C/svg%3E">
+<style>/* GAME_STYLE */</style>
+<script type="importmap">{"imports":{"three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier2d-compat@0.19.3/rapier.mjs"}}</script>
+<script>
+// Announce the session before downloading or compiling engine modules.
+window.__bonanzaHubLink = window.AIHub.active ? window.AIHub.connect({mode:'shared-world',seats:[1,4]}) : Promise.resolve(null);
+</script>
+</head>
+<body data-input="keyboard">
+<canvas id="world" aria-label="Demon Bonanza arcade game"></canvas>
+<div id="vignette" aria-hidden="true"></div>
+<div id="frame" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+<div id="loading"><span class="eyebrow">ICE MOON EXPEDITION / 01</span><div class="loader-mark">✦</div><h2>Waking the demons.</h2><p id="load-status">Loading the engine &amp; physics…</p></div>
+<div id="hud" hidden>
+  <div class="hud-top"><div class="score-block"><span class="eyebrow">BANISHMENT BOUNTY</span><strong id="score">000000</strong><span id="best">BEST 000000</span></div><div class="wave-block"><span class="eyebrow" id="act-label">EXPEDITION 01</span><strong id="wave-label">01 <small>/ 06</small></strong><div id="wave-pips"></div></div><div class="reserve-block"><span class="eyebrow">RESERVE BUNKERS</span><div id="bunkers"></div><button class="icon-button" id="pause-button" aria-label="Pause game">Ⅱ</button></div></div>
+  <div id="boss-hud" hidden><div><span>THE BIG FLAP</span><span id="boss-status">BREAK THE SEALS</span></div><div class="boss-track"><i id="boss-health"></i></div></div>
+  <div id="wave-banner"><span id="banner-kicker"></span><h2 id="banner-title"></h2><p id="banner-text"></p></div>
+  <div id="combat-callout" aria-live="polite"></div>
+  <div class="hud-bottom"><div id="player-strip"></div><div class="combat-help" id="combat-help"></div><span id="combo"></span></div>
+  <div id="attract-banner" hidden><strong>DEMONSTRATION</strong><span>Any input brings you back</span></div>
+</div>
+<div id="floating-text" aria-hidden="true"></div>
+<main id="overlay" aria-live="polite"></main>
+<div id="toast" role="status"></div>
+<div id="input-footer"></div>
+<script type="module">// GAME_MODULE</script>
+</body>
+</html>

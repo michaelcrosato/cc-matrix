@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-06 01:11:44",
+    "source": "Star Wars: The Empire Strikes Back (Parker Brothers, Atari 2600, 1982)",
+    "plan": "none",
+    "genre": "Arcade flight and defense shooter",
+    "perspective": "2.5D side-scrolling orthographic camera",
+    "tech": "Three.js 0.180.0 (r180), WebGPURenderer with WebGPU and automatic WebGL2 fallback, TSL, @dimforge/rapier3d-compat 0.19.3, Gamepad API, Web Audio API, WebRTC, BroadcastChannel, AI Hub session client 1.4.0; pinned CDN dependencies; single HTML",
+    "artDirection": "Procedural arctic comic diorama: three-band cel shading, ink edges, armor hatching, faceted snowy mountains, orange speeders and blue snow",
+    "animation": "Native Three.js AnimationMixer, AnimationClip and NumberKeyframeTrack for quadruped gaits, collapse, ion engines and rescue beacons; procedural banking, cable orbit and effects",
+    "audio": "Original code-generated adaptive minor-key music at 10% by default; synthesized blasters, engines, footsteps, impacts, explosions, cable, repairs and rescue effects; Animalese-style gibberish radio voices; no audio files",
+    "online": "AI Hub Protocol v1 ghost-wing score race for 1–4 players; standalone two-player direct WebRTC invitation/response; same-browser BroadcastChannel wing; seeded missions, remote ghost ships, scores, start, results, departures and time-up",
+    "testing": "Headless Chromium 153 with software WebGPU, full scripted missions with and without invulnerability, physics and combat checks, offline audio rendering, emulated standard gamepad, Pixel 7 touch profile with multitouch, file:// deployment, forced WebGL2 fallback, two-page WebRTC and BroadcastChannel, AI Hub 2-player and 4-player latency/jitter/5% loss and host-leave conformance, rendered screenshots. Physical controller, physical phone, real TV and internet NAT traversal: unknown.",
+    "research": "Original Parker Brothers 1982 manual via AtariAge, original manual scans and packaging via Atarimania and AtariAge, screenshots; confirmed scrolling flight, radar, advancing walkers, weak spots, repair pads, smart bombs and temporary Force protection. Read AI Hub protocol/client/harness, Three r180 source, pinned package manifests and official Rapier JS guide.",
+    "environment": "Codex CLI (headless); Linux, Ubuntu 26.04 on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and its accompanying review caught 7 implementation/environment issues: reactor hit projection, stale replay notices, transient graphics-resource cleanup, controller hover stealing focus, pairing interrupted by menu attract, overlapping touch notices, and headless WebGPU backend configuration. Timing-only test failures were corrected separately.",
+    "1 was game breaking in the headless test environment: the original Chromium flags destroyed the software WebGPU device. Adding the software ANGLE backend restored rendering. No known critical issues remain.",
+    "The complete normal-damage playthrough was most helpful: it finished all three waves with all three pilots rescued, reactor hits, cable takedowns and instinct activations, with lives remaining. The AI Hub stress harness separately validated multiplayer lifecycle handling.",
+    "The initial fixed-delay controller input test was least helpful because software rendering made wall-clock waits unreliable. State-based waits made the result meaningful."
+  ],
+  "engineFeedback": [
+    "Three.js TSL made the cel-shaded palette straightforward, and native AnimationMixer clips supported distinct walker gaits, collapse and engine motion. Rapier supplied reliable movement, ray queries and physical debris.",
+    "Yes. The first weak-point check stopped at the armor collider before reaching the visible port; projecting the shot direction through the hull fixed it. Headless WebGPU also needed an additional Chromium backend flag, and readback rows required padding handling.",
+    "The mission state machine, controller menu focus, contextual cable orbit, radar, touch assistance, procedural audio and ghost-network lifecycle were built in game code.",
+    "The hardest engine work was validating actual WebGPU rendering and capture in a headless software environment while keeping physics, animation and network state independently testable.",
+    "none; no engine or library source was modified. Custom cel materials and gameplay systems use public APIs.",
+    "I would add clearer WebGPU device-loss diagnostics and a screenshot/readback helper that returns tightly packed, display-ready pixels."
+  ],
+  "promptFeedback": [
+    "The source research, controller-first direction, procedural audio and complete vertical-slice requirement made a coherent game possible. The Hub protocol and headless test environment were especially useful.",
+    "The name could refer to several adaptations; the 1982 date resolved it to the Atari 2600 game. The desired multiplayer relationship and mission length were unspecified, so this demo uses ghost competition and a finite three-wave sortie.",
+    "The hardest part was making flight, armor weak spots, tow cables, rescues, controller focus, touch assistance and multiplayer feel consistent inside one shareable HTML file, then verifying the actual WebGPU scene.",
+    "Specify a preferred multiplayer mode and an approximate mission duration. Keep the single-file delivery, concrete test expectations and source/feedback requirements."
+  ],
+  "aiHub": {
+    "name": "The Empire Slips Back",
+    "tagline": "Cold planet. Long odds. One more pass.",
+    "description": "Pilot an inked snowspeeder across a frozen battlefield, crack walker reactors, sweep their legs with tow cables, and bring stranded pilots home. Hold the generator through three waves while the last transport escapes, or race ghost wingmates for the highest defense score.",
+    "type": "Game",
+    "genre": "Flight",
+    "source": "Star Wars: The Empire Strikes Back (1982)",
+    "series": "Star Wars",
+    "players": "1–4",
+    "controls": "WASD/left stick fly; mouse/right stick aim; LMB/Space/R2 fire; Shift/L2 boost; E/Square cable; Q/Triangle instinct; Esc/Options pause; touch left drag fly, right drag aim/fire, contextual action.",
+    "tags": [
+      "3d",
+      "arcade",
+      "sci-fi",
+      "vehicles",
+      "side-scrolling",
+      "multiplayer"
+    ]
+  }
+}

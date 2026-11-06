@@ -1,0 +1,142 @@
+"""End-to-end checks of the shipped single HTML file. No screenshot assertions."""
+import functools
+import http.server
+import json
+import threading
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+ROOT=Path(__file__).resolve().parent
+STEM='HERO-IN-A-HOLE-HERO-1984-gpt-6.1-sol-ultra-20261105-214718'
+failures=[];checks=0
+
+def check(ok,message):
+ global checks
+ checks+=1
+ if not ok:failures.append(message)
+
+def state(page,expression):return page.evaluate(expression)
+def ready(page):
+ page.wait_for_function('window.__game || window.__bootError',timeout=45000)
+ check(page.evaluate('!!window.__game'),'The bundled game failed to initialize: '+str(page.evaluate('window.__bootError||""')))
+ page.evaluate('__game.view.render=()=>{}')
+class Quiet(http.server.SimpleHTTPRequestHandler):
+ def log_message(self,*args):pass
+server=http.server.ThreadingHTTPServer(('127.0.0.1',0),functools.partial(Quiet,directory=str(ROOT)))
+threading.Thread(target=server.serve_forever,daemon=True).start()
+try:
+ with sync_playwright() as pw:
+  browser=pw.chromium.launch(headless=True,args=['--no-sandbox','--enable-unsafe-webgpu','--enable-features=Vulkan','--use-webgpu-adapter=swiftshader'])
+  context=browser.new_context(viewport={'width':1280,'height':720})
+  context.add_init_script('''window.fakePad={id:'DualSense emulation',index:0,connected:true,mapping:'standard',axes:[0,0,0,0],buttons:Array.from({length:18},()=>({pressed:false,touched:false,value:0}))}; Object.defineProperty(navigator,'getGamepads',{value:()=>[window.fakePad]});''')
+  page=context.new_page();errors=[]
+  page.on('pageerror',lambda e:errors.append(str(e)))
+  url=(ROOT.parent/(STEM+'.html')).as_uri()
+  page.goto(url);ready(page)
+  check(state(page,'__game.view.backend')=='WebGPU','WebGPU renderer did not initialize under supported Chromium')
+  check(state(page,'__game.sound.musicVolume')==.1,'Music default is not 10%')
+  check(page.locator('[data-screen="title"]').is_visible(),'Title menu does not appear')
+  check(state(page,'document.querySelector("head script").textContent.includes("AIHub")'),'AI Hub bootstrap is missing from first head script')
+  page.goto(url+'?renderer=webgl');ready(page)
+  page.wait_for_function('__game.view.root.children.length>100')
+  check(state(page,'__game.view.backend')=='WebGL 2 fallback','WebGL compatibility backend did not initialize')
+  check(state(page,'__game.view.mixers.length')>=5,'Native animation mixers are missing')
+  page.keyboard.press('Enter');page.wait_for_function('__game.mode==="play"')
+  check(state(page,'__game.ui.screen') is None,'Start did not clear the menu')
+  page.keyboard.down('KeyD');page.keyboard.down('Space')
+  page.wait_for_function('__game.sim.players[0].x>6',timeout=15000)
+  page.keyboard.up('KeyD');page.keyboard.up('Space')
+  check(state(page,'__game.sim.players[0].y')>19,'Keyboard thrust did not lift the operator')
+  page.keyboard.down('KeyJ');page.wait_for_function('__game.sim.stats.shots>0');page.keyboard.up('KeyJ')
+  check(state(page,'__game.sound.diagnostics().events.fire')>0,'Laser did not trigger procedural sound')
+  page.keyboard.press('Escape');page.wait_for_function('__game.ui.screen==="pause"')
+  t=state(page,'__game.sim.time');page.wait_for_timeout(120)
+  check(state(page,'__game.sim.time')==t,'Pause allows local simulation to advance')
+  page.locator('[data-show="dev"]').click()
+  page.locator('[data-tuning="speed"]').evaluate('(e)=>{e.value=10;e.dispatchEvent(new Event("input",{bubbles:true}))}')
+  check(state(page,'__game.sim.tuning.speed')==10,'Live tuning did not apply')
+  page.locator('[data-dev-toggle="godMode"]').check()
+  check(state(page,'__game.sim.godMode'),'Invulnerability toggle did not apply')
+  page.locator('[data-dev="reset"]').click()
+  check(state(page,'__game.sim.tuning.speed===7&&!__game.sim.godMode'),'Developer reset did not restore defaults')
+  page.evaluate('__game.sim.players[0].energy=3;__game.sim.players[0].hp=1;__game.sim.players[0].bombs=0')
+  page.locator('[data-dev="refill"]').click()
+  check(state(page,'__game.sim.players[0].energy===100&&__game.sim.players[0].hp===3&&__game.sim.players[0].bombs===9'),'Developer refill does not restore the kit')
+  page.locator('[data-dev="rescue"]').click();page.locator('[data-dev="exit"]').click();page.locator('[data-action="resume"]').filter(visible=True).click()
+  page.wait_for_function('__game.sim.state==="complete"')
+  check(page.locator('[data-screen="complete"]').is_visible(),'Mission results do not appear')
+  page.locator('[data-action="next"]').click();page.wait_for_function('__game.sim.levelIndex===1')
+  check(state(page,'__game.sim.rescuedTotal')==3,'Progression lost completed rescues')
+  page.keyboard.press('Escape');page.locator('[data-action="title"]').filter(visible=True).click()
+  page.evaluate('fakePad.buttons[0]={pressed:true,value:1}')
+  page.wait_for_function('__game.mode==="play"');page.evaluate('fakePad.buttons[0]={pressed:false,value:0}')
+  check(state(page,'__game.ui.input')=='controller','Standard gamepad did not become active input')
+  check('R2' in page.locator('#control-hints').inner_text(),'PlayStation prompts are missing')
+  page.evaluate('fakePad.buttons[2]={pressed:true,value:1}')
+  page.wait_for_function('__game.sim.players[0].bombs===5');page.evaluate('fakePad.buttons[2]={pressed:false,value:0}')
+  check(state(page,'__game.sim.players[0].bombs')==5,'Standard Square mapping did not plant dynamite')
+  page.evaluate('fakePad.axes[0]=1');page.wait_for_function('__game.sim.players[0].x>6');page.evaluate('fakePad.axes[0]=0')
+  check(state(page,'__game.sim.players[0].x')>6,'Standard left stick did not move the operator')
+  page.keyboard.press('Escape');page.locator('[data-show="settings"]').filter(visible=True).click()
+  page.locator('[data-setting="glyphs"]').select_option('xbox');page.evaluate('fakePad.axes[2]=.6');page.wait_for_function('__game.ui.input==="controller"');page.evaluate('fakePad.axes[2]=0')
+  check('RT' in page.locator('#control-hints').inner_text(),'Xbox prompts did not replace PlayStation prompts')
+  page.evaluate('__game.ui.show("about");fakePad.axes[3]=.7');page.wait_for_function('document.getElementById("credits-content").scrollTop>10');page.evaluate('fakePad.axes[3]=0')
+  check(state(page,'document.getElementById("credits-content").scrollTop')>10,'Controller right stick cannot scroll production credits')
+  page.evaluate('__game.title()')
+  page.wait_for_function('__game.mode==="attract"',timeout=18000)
+  check(state(page,'__game.ui.attract'),'Ten-second title inactivity did not start attract mode')
+  page.keyboard.press('KeyQ');page.wait_for_function('__game.mode==="title"')
+  check(state(page,'__game.ui.screen')=='title','Input did not exit attract mode to title')
+  # Complete the authored campaign using real physics and inputs, with developer survival assistance.
+  result=page.evaluate('''() => {const g=__game;g.start(false);const s=g.sim;s.godMode=true;s.infiniteEnergy=true;const visited=[];
+   function fly(x,y){const p=s.players[0];for(let i=0;i<1800&&s.state==='playing';i++){const dx=x-p.x,dy=y-p.y;if(Math.abs(dx)<.55&&Math.abs(dy)<.65&&Math.abs(p.vy)<2)return;const wanted=Math.max(-7,Math.min(7,dy*3));s.step(1/60,[{x:Math.max(-1,Math.min(1,dx*.9)),thrust:p.vy<wanted,aim:{x:1,y:0}}]);}if(!['complete','victory'].includes(s.state))throw Error('Unreachable physical target '+x+','+y);}
+   function demolish(w){const p=s.players[0];for(let i=0;i<330&&w.alive;i++){const desired=w.y>p.y?Math.min(w.y,p.y+1):Math.max(w.y,p.y-1);s.step(1/60,[{x:0,thrust:p.vy<0,fire:true,aim:{x:w.x-p.x,y:desired-p.y-.35}}]);}if(w.alive)throw Error('Uncleared gate');}
+   for(let level=0;level<5;level++){const [a,b,c]=s.miners,[w,z]=s.walls;fly(a.x,a.y+3);fly(a.x,a.y);fly(w.x-2.5,a.y+.3);demolish(w);fly(w.x-2.5,b.y+3);fly(b.x,b.y+3);fly(b.x,b.y);fly(z.x-3.5,b.y+.5);fly(z.x-3.5,8.5);fly(z.x-2.5,8.5);demolish(z);fly(z.x-2.5,c.y+2.8);fly(c.x,c.y+2.8);fly(c.x,c.y);if(s.state==='playing')fly(s.level.exit.x,s.level.exit.y);visited.push({level:s.levelIndex,state:s.state,rescued:s.miners.filter(m=>m.rescued).length});if(level<4)s.next();}return{visited,total:s.rescuedTotal,state:s.state,stats:s.stats};}''')
+  check(len(result['visited'])==5 and all(x['rescued']==3 for x in result['visited']),'Physical full-game playthrough did not reach every rescue')
+  check(result['total']==15 and result['state']=='victory','Physical campaign did not produce fifteen rescues and victory')
+  check(result['stats']['walls']>=10,'Campaign did not exercise demolition gates')
+  page.wait_for_function('__game.ui.screen==="victory"')
+  check(page.locator('[data-screen="victory"]').is_visible(),'Campaign victory screen is missing')
+  page.close()
+  # Real bundled two-page standalone co-op, not module mocks.
+  host=context.new_page();guest=context.new_page()
+  for pg in (host,guest):pg.on('pageerror',lambda e:errors.append(str(e)));pg.goto(f'http://127.0.0.1:{server.server_port}/index.html?renderer=webgl');ready(pg)
+  host.evaluate('__game.online.createRoom("FULLGAME")');guest.evaluate('__game.online.joinRoom("FULLGAME")')
+  host.wait_for_function('__game.online.active&&__game.sim.players.length===2');guest.wait_for_function('__game.online.counts.snapshots>1')
+  check(state(guest,'__game.sim.players.length')==2,'Bundled guest did not hydrate both operators')
+  x=state(host,'__game.sim.players[1].x')
+  guest.keyboard.down('KeyD');guest.keyboard.down('Space')
+  host.wait_for_function(f'__game.sim.players[1].x>{x+1}',timeout=15000)
+  guest.keyboard.up('KeyD');guest.keyboard.up('Space')
+  check(state(guest,'__game.sim.localPlayerIndex')==1,'Guest HUD does not select its local operator')
+  guest.keyboard.down('KeyJ');host.wait_for_function('__game.sim.stats.shots>0');guest.keyboard.up('KeyJ')
+  guest.wait_for_function('(__game.sound.counts.fire||0)>0')
+  check(state(guest,'__game.sound.counts.fire')>0,'Guest does not hear relayed laser effects')
+  host.evaluate('__game.sim.miners.forEach(m=>__game.sim.rescue(m));__game.sim.warp(__game.sim.level.exit.x,__game.sim.level.exit.y)')
+  host.wait_for_function('__game.sim.state==="complete"');guest.wait_for_function('__game.ui.screen==="complete"')
+  host.wait_for_function('__game.sim.levelIndex===1',timeout=20000);guest.wait_for_function('__game.sim.levelIndex===1&&__game.ui.screen===null',timeout=15000)
+  check(state(guest,'__game.ui.screen') is None,'Guest remains trapped in results after authority advances')
+  guest.evaluate('__game.online.disconnect();__game.start(false)')
+  before=state(guest,'__game.sim.time');guest.wait_for_function(f'__game.sim.time>{before+.1}')
+  check(not state(guest,'__game.online.isGuest'),'Disconnect retains guest role and freezes later solo play')
+  host.evaluate('__game.online.disconnect()');host.close();guest.close()
+  # Touch-only phone controls using real touch events, including an assisted target.
+  phone=browser.new_context(viewport={'width':844,'height':390},is_mobile=True,has_touch=True,device_scale_factor=1)
+  pg=phone.new_page();pg.on('pageerror',lambda e:errors.append(str(e)));pg.goto(url+'?renderer=webgl');ready(pg)
+  pg.locator('[data-action="start"]').filter(visible=True).tap();pg.wait_for_function('__game.mode==="play"')
+  cdp=phone.new_cdp_session(pg);cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[{'x':130,'y':220,'id':1}]});cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[{'x':210,'y':145,'id':1}]})
+  pg.wait_for_function('__game.sim.players[0].x>5',timeout=15000)
+  cdp.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+  check(state(pg,'__game.ui.input')=='touch','Touch gestures did not set touch mode')
+  check(not pg.locator('#hud').is_visible(),'Touch gameplay retains the dense desktop HUD')
+  check(state(pg,'__game.sim.players[0].x')>5,'Invisible touch stick did not move the operator')
+  pg.evaluate('__game.sim.warp(__game.sim.walls[0].x-2.5,12)');pg.wait_for_function('!document.getElementById("touch-bomb").hidden')
+  pg.locator('#touch-bomb').tap();pg.wait_for_function('__game.sim.players[0].bombs===5')
+  check(state(pg,'__game.sim.players[0].bombs')==5,'Contextual touch action did not plant dynamite')
+  pg.close();phone.close()
+  check(not errors,'Uncaught browser errors: '+str(errors))
+  browser.close()
+except Exception as error:failures.append(str(error))
+finally:server.shutdown();server.server_close()
+for failure in failures:print('FAIL:',failure)
+print(f'{checks} bundled-game checks, {len(failures)} failures')
+raise SystemExit(bool(failures))

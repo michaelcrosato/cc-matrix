@@ -1,0 +1,58 @@
+#!/home/micha/.local/share/pipx/venvs/playwright/bin/python
+"""One command for the full game verification, with quiet output."""
+import importlib.util
+import pathlib
+import json
+import sys
+from playwright.sync_api import sync_playwright
+ROOT=pathlib.Path(__file__).resolve().parent
+
+def package_checks():
+    count=0;failures=[]
+    def check(name,value):
+        nonlocal count
+        count+=1
+        if not value:failures.append(name)
+    try:
+        html=ROOT.parent/(ROOT.name+'.html')
+        raw=html.read_text()
+        info=json.loads((ROOT.parent/'exit-interview.json').read_text())
+        check('single-file deliverable exists and is substantial',len(raw)>100000)
+        check('exact technology versions pinned','three@0.180.0' in raw and 'rapier3d-compat@0.19.3' in raw)
+        check('no local runtime module imports',"from './" not in raw and 'src="./' not in raw)
+        check('session client placed before other scripts',raw.index('AIHub')<raw.index('type="importmap"'))
+        check('exit interview complete',list(info)==['sourceInformation','testingFeedback','engineFeedback','promptFeedback','aiHub'] and len(info['sourceInformation'])==15 and len(info['testingFeedback'])==4 and len(info['engineFeedback'])==6 and len(info['promptFeedback'])==4)
+        with sync_playwright() as p:
+            browser=p.chromium.launch(headless=True,args=['--enable-unsafe-webgpu','--enable-features=Vulkan','--use-webgpu-adapter=swiftshader'])
+            page=browser.new_page(ignore_https_errors=True)
+            errors=[];page.on('pageerror',lambda e:errors.append(str(e)))
+            page.goto(html.as_uri());page.wait_for_function('window.__gameReady',timeout=90000)
+            check('file URL boots the real game',page.title()=='Ice Hockey Puck Wild' and page.evaluate('__game.view.backend==="WebGPU"'))
+            check('in-game credits match root interview',page.evaluate('JSON.stringify(__game.interview)')==json.dumps(info,ensure_ascii=False,separators=(',',':')))
+            check('players use native Three.js animation mixers',page.evaluate('__game.view.players.size===6&&[...__game.view.players.values()].every(p=>p.mixer&&p.mixer._actions.length>=2)'))
+            report=page.evaluate('__game.audioAudit()')
+            check('synthesized audio produces sound',report['rms']>.001)
+            check('synthesized audio samples finite',report['finite'])
+            check('synthesized audio avoids clipping',0<report['peak']<=1)
+            check('music default is ten percent',report['musicDefault']==.1)
+            check('code-written voice synthesis runs',report['stats']['voices']>0)
+            check('code-written effect synthesis runs',report['stats']['effects']>=4)
+            check('no file-URL runtime errors',not errors)
+            browser.close()
+    except Exception as e:failures.append('packaging/audio: '+str(e).splitlines()[0])
+    return count,failures
+
+count=0;failures=[];results={}
+for filename,function in [('test-core.py','check_core'),('test-network.py','check_network'),('test-ui.py','check_ui'),('test-hub.py','check_hub'),('test-multiplayer.py','check_multiplayer')]:
+    try:
+        spec=importlib.util.spec_from_file_location(filename.replace('-','_'),ROOT/filename)
+        module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+        checks,problems=getattr(module,function)()
+    except Exception as error:checks,problems=0,[str(error).splitlines()[0]]
+    count+=checks;failures.extend(filename+': '+f for f in problems)
+    results[filename]={'checks':checks,'failures':problems}
+checks,problems=package_checks();count+=checks;failures.extend(problems);results['packaging/audio']={'checks':checks,'failures':problems}
+(ROOT/'test-results.json').write_text(json.dumps({'checks':count,'failures':failures,'suites':results},indent=2)+'\n')
+for failure in failures:print('FAIL '+failure)
+print(f'{count} checks; {len(failures)} failures')
+sys.exit(bool(failures))

@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>__HUB_SESSION__</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#eee8d8">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="ghost">
+<meta name="hub:session-minutes" content="8">
+<meta name="hub:session-goal" content="Break the four force fields. Highest score wins; live balls multiply points.">
+<meta name="hub:session-howto" content="Left stick or A/D to move. Cross / Space to serve and time a POP at impact. Options / Escape pauses.">
+<title>Super Bounceout — Make space.</title>
+<style>__STYLE__</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier2d-compat@0.19.3/rapier.mjs"}}</script>
+</head>
+<body>
+<div class="paper-grain" aria-hidden="true"></div>
+<div id="app" data-screen="title">
+  <header class="masthead">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>SUPER <em>BOUNCEOUT</em></span></div>
+    <div class="edition">ORBITAL DEMOLITION CLUB <span>VOL. 01 / EST. 1981</span></div>
+    <nav class="top-controls" aria-label="Quick controls">
+      <button id="soundButton" class="icon-button" aria-label="Toggle sound" title="Toggle sound">♫</button>
+      <button id="fullscreenButton" class="icon-button" aria-label="Fullscreen" title="Fullscreen">⛶</button>
+      <button id="menuButton" class="menu-button" data-action="pause">MENU <span class="key" data-prompt="pause">Esc</span></button>
+    </nav>
+  </header>
+  <main class="cabinet">
+    <aside class="left-rail">
+      <div class="title-only">
+        <div class="eyebrow"><span class="dot"></span> A SMALL SHIP. A BIG PROBLEM.</div>
+        <h1>MAKE<br><span>SPACE.</span></h1>
+        <p class="hero-copy">A mysterious wall of colour.<br>A paddle. A very bad idea.<br><strong>Blast ahead.</strong></p>
+        <div class="start-stack" id="titleActions">
+          <button class="primary" data-action="start">START A RUN <span>↗</span></button>
+          <button class="text-button" data-action="coop"><span class="mini-symbol">Ⅱ</span> COUCH CO-OP <small>2 PILOTS</small></button>
+          <button class="text-button" data-action="online"><span class="mini-symbol">◎</span> ONLINE RACE <small>1–4 PILOTS</small></button>
+        </div>
+        <div class="title-foot"><span class="key" data-prompt="confirm">Enter</span> GO <span class="key" data-prompt="nav">↑ ↓</span> CHOOSE</div>
+      </div>
+      <div class="play-only flight-plan">
+        <div class="eyebrow">YOUR FLIGHT PLAN</div>
+        <ol id="routeList"></ol>
+        <div class="mission-note"><span class="eyebrow">PILOT’S NOTE</span><p id="missionNote">Clear the field. Find your angle.</p></div>
+        <div class="crew-label" id="crewLabel">SOLO FLIGHT</div>
+      </div>
+    </aside>
+    <section class="board-shell" aria-label="Game playfield">
+      <div class="board-strip"><span id="sectorLabel">SECTOR 01</span><span id="modeLabel">CLASSIC</span><span class="signal-bars" aria-hidden="true">▂▄▆</span></div>
+      <div id="viewport">
+        <div class="board-watermark" aria-hidden="true">S / B<br><small>DEEP SPACE DEPARTMENT</small></div>
+        <div id="floatLayer" aria-hidden="true"></div>
+        <div id="boardMessage" class="board-message"><span class="smallcaps">SYSTEMS ONLINE</span><strong>STAND BY, PILOT.</strong></div>
+        <div id="announcement" class="announcement" role="status"></div>
+        <button id="touchPop" class="touch-pop" aria-label="Pop the ball">POP!</button>
+      </div>
+      <div class="board-bottom"><span id="boardStatus">INTERSTELLAR TEST TRANSMISSION</span><span id="progressLabel">64 BRICKS / 1 SMALL SHIP</span></div>
+      <div id="attractBadge" class="attract-badge" hidden><span class="dot"></span> AUTOPILOT DEMO <small>ANY INPUT TO RETURN</small></div>
+    </section>
+    <aside class="right-rail">
+      <div class="score-card"><div class="eyebrow">SCORE <span>✦</span></div><div id="score" class="score">00000</div><div class="best">PERSONAL BEST <strong id="bestScore">00000</strong></div></div>
+      <div class="title-only guide-teaser">
+        <div class="guide-line"><span>↔</span><p><strong>FIND YOUR ANGLE</strong>Where you hit matters.</p></div>
+        <div class="guide-line"><span>✳</span><p><strong>TIME YOUR POP</strong>Tap just before impact.</p></div>
+        <div class="guide-line"><span>◎</span><p><strong>MAKE A LITTLE SPACE</strong>Four fields. One way out.</p></div>
+        <div class="difficulty"><div class="eyebrow">PICK YOUR PACE</div><div class="segmented"><button data-action="arcade" class="selected">ARCADE</button><button data-action="cruise">CRUISE</button></div><p id="paceDetail">The full five-serve flight.</p></div>
+        <button class="underlined" data-action="guide">FLIGHT MANUAL ↗</button>
+        <button class="underlined" data-action="settings">SETTINGS ↗</button>
+        <button class="underlined" data-action="about">ABOUT & CREDITS ↗</button>
+      </div>
+      <div class="play-only instruments">
+        <div class="serves"><div class="eyebrow">SERVES REMAINING</div><div id="lifePips" class="life-pips"></div></div>
+        <div class="pop-card"><div class="eyebrow">CONTACT BOOST <span id="popState">READY</span></div><strong id="popWord">POP!</strong><div class="meter"><i id="popMeter"></i></div><p>Tap <span class="key" data-prompt="action">Space</span> just before the ball hits your paddle.</p></div>
+        <div class="field-progress"><div class="eyebrow">FIELD CLEARED <strong id="clearPercent">0%</strong></div><div class="meter"><i id="clearMeter"></i></div></div>
+        <div id="raceList" class="race-list"></div>
+      </div>
+    </aside>
+  </main>
+  <footer class="footer"><span class="footer-tag">GOOD LUCK OUT THERE.</span><div id="controlLegend"><span class="key" data-prompt="move">A D / ← →</span> MOVE <span class="key" data-prompt="action">Space</span> SERVE / POP <span class="key" data-prompt="pause">Esc</span> PAUSE</div><span class="footer-note">A NEW SPIN ON 1981.</span></footer>
+  <div id="mobileHud"><span id="mobileScore">00000</span><span id="mobileLives">●●●●●</span></div>
+</div>
+<div id="modal" class="modal" hidden><section class="modal-panel" role="dialog" aria-modal="true" aria-labelledby="modalTitle"><div class="modal-top"><span id="modalEyebrow" class="eyebrow">FLIGHT SYSTEMS</span><button id="closeModal" class="icon-button" aria-label="Back">×</button></div><h2 id="modalTitle"></h2><div id="modalBody"></div><div class="modal-footer"><span class="key" data-prompt="confirm">Enter</span> SELECT <span class="key" data-prompt="back">Esc</span> BACK <span id="modalExtra"></span></div></section></div>
+<div id="loading"><div class="loading-mark">✳</div><strong>SUPER BOUNCEOUT</strong><span id="loadingText">WARMING UP THE UNIVERSE…</span></div>
+<div id="toast" role="status" hidden></div>
+<script type="module">__GAME__</script>
+</body>
+</html>

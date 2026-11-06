@@ -1,0 +1,13 @@
+[**Play Ka-Whoosh!**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-191412__x039734/work/Ka-Whoosh-Kaboom-1981-gpt-6.1-sol-max-20261105-191412.html) — self-contained HTML, 4.71 MiB. Open locally; press Enter or Cross/A to start.
+
+Includes six shifts, couch co-op, online races, attract mode, synthesized audio, and pause-menu developer tools.
+
+**Validation:** 38/38 game checks, 45 AI Hub protocol assertions, and 7/7 final metadata checks passed. [exit-interview.json](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-191412__x039734/work/exit-interview.json) is saved and validated. All requested information also appears in-game under About.
+
+**Source Information:** Date: 2026-11-05 19:14:12. Source: Kaboom! (1981). Plan supplied: none. Genre: arcade action/reflex catching. Perspective: fixed orthographic side view, 2.5D. Tech: Three.js r180, WebGPU with WebGL 2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, WebRTC, AI Hub client 1.4.0/protocol v1, esbuild 0.25.11. Art: procedural cel-shaded rooftop with ink outlines. Animation: native Three.js AnimationMixer clips, physics and particles. Audio: code-generated music, effects and gibberish voices; music defaults to 10%. Online: 1–4-player Hub races and two-player direct WebRTC; local two-player co-op. Testing: headless gameplay, simulated controllers/touch, two-page networking and screenshots. Physical-controller feel and subjective audio quality: unknown. Research: none; required integration material and dependencies downloaded directly. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort max. Usage: added on import.
+
+**Testing Feedback:** Eight issues found and corrected; three potentially game breaking. Most helpful: the complete six-shift physics playthrough, which exposed accumulating wind forces. Least helpful: headless WebGPU pixel readback, which produced unreliable evidence.
+
+**Engine Feedback:** Liked native animation and toon materials most. Encountered persistent-force and renderer lifecycle pitfalls. Built the game rules, shared UI, audio and networking systems. GPU startup/recovery was hardest. Engine source changes: none. Desired improvement: a reliable renderer replacement API that preserves node materials.
+
+**Prompt Feedback:** Liked the concrete source and controller-first brief. The research restriction alongside a remote integration requirement needed interpretation. Combining polished gameplay, device controls and two network lifecycles was hardest. I would clarify standalone pairing and TURN-relay expectations.

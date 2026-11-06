@@ -1,0 +1,53 @@
+const fs = require("node:fs");
+const vm = require("node:vm");
+const path = require("node:path");
+const previous = fs.readFileSync("metadata.js", "utf8");
+const credits = vm.runInNewContext(previous + "\nCREDITS");
+credits.sourceInformation.testing =
+	"Allowed: headless browser and scripted state tests, complete mission playthroughs, emulated standard gamepad, phone / tablet profiles, Web Audio signal checks and multiple browser pages. Verified: Chromium software WebGPU, WebGL2 fallback, WebKit portrait touch, normal and invulnerable patrols, controller / mouse switching, touch controls, live tuning, loss / siege / flagship shields, attract mode, standalone BroadcastChannel and real WebRTC, and the official AI Hub 2-player and 4-player harness at 150 ms latency, 50 ms jitter, 5% loss and host departure. 18/18 automated checks passed. Physical controller, real mobile hardware and subjective listening: unknown.";
+credits.testingFeedback = [
+	"5 game/build issues were found and fixed: the font download path, short landscape layout, overlapping touch messages, idle-controller interference with mouse fire, and restart state. Verification tooling was also corrected. Final gameplay/platform/network run: 18/18 checks passed.",
+	"1 packaging blocker: an invalid font download URL. No remaining critical or game-breaking issues were observed.",
+	"The scripted complete patrol under normal damage and energy rules, using real physics collisions, sector jumps, flagship combat, docking and mission evaluation.",
+	"The software WebGPU screenshot showed a blank 3D canvas. State checks and WebGL2 captures supplied useful evidence instead.",
+];
+credits.engineFeedback = [
+	"Three.js procedural geometry, toon node materials and native AnimationMixer clips make a coherent visual style straightforward. The same scene also runs through the WebGL2 fallback.",
+	"Software WebGPU screenshot capture was blank despite a running scene. I used simulation state checks and the WebGL2 backend for visual review. No engine API blocker remained.",
+	"The flight and aiming model, sector strategy, energy / shield economy, controller-first interface, procedural audio and ghost networking.",
+	"Keeping flight input, Rapier collision events, target projection, camera orientation and native animation coordinated across both rendering backends.",
+	"none",
+	"More reliable software WebGPU screenshot/readback support and clearer diagnostics across rendering backends.",
+];
+credits.promptFeedback = [
+	"The source research, complete vertical slice, controller-first philosophy, attract mode and live balance tools make the intended experience concrete.",
+	"Star Raiders in 1982 can refer to Atari 2600 or Atari 5200 releases. The richer Atari 5200 systems were the main reference, with the 2600 manual also researched.",
+	"Delivering the cockpit, strategic chart, physics, animation, audio, touch, controller and multiplayer systems as one polished, shareable HTML file.",
+	"Specify the intended source platform and preferred multiplayer relationship when multiple interpretations are possible.",
+];
+const result = {
+	...credits,
+	aiHub: {
+		name: "Star Ralliers",
+		tagline: "The last light needs a wingman.",
+		description:
+			"Defend two frontier relays from three Vex fleets in a cel-shaded cockpit combat adventure. Chart hyperwarp jumps, guide twin photons, outmaneuver a shielded flagship, and rally with up to three ghost wingmates.",
+		type: "Game",
+		genre: "Flight",
+		source: "Star Raiders (1982)",
+		series: "Star Raiders",
+		players: "1–4",
+		controls:
+			"Pad: LS steer, RS throttle/roll, R2 fire, L2 boost, triangle target, square pulse, circle shields, D-pad up chart/left aft, cross jump/dock, Options pause. Mouse aim, WASD fly, Space/click fire, Tab chart, E interact, F target, Q pulse, C shields, R aft, Esc pause. Touch: left steer/right thrust; assisted fire and context action.",
+		tags: ["3d", "first-person", "sci-fi", "arcade", "retro", "multiplayer"],
+	},
+};
+fs.writeFileSync(
+	path.join("..", "exit-interview.json"),
+	JSON.stringify(result, null, 2) + "\n",
+);
+const questions = previous.slice(previous.indexOf("const FEEDBACK_QUESTIONS"));
+fs.writeFileSync(
+	"metadata.js",
+	"const CREDITS = " + JSON.stringify(credits, null, 2) + ";\n" + questions,
+);

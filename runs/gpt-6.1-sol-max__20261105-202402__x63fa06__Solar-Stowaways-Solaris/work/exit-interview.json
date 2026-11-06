@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:24:02",
+    "source": "Solaris (1986), the Atari 2600 space combat game",
+    "plan": "none",
+    "genre": "Arcade space shooter with rescue, navigation and tactical route selection",
+    "perspective": "First-person cockpit flight and a top-down tactical star chart",
+    "tech": "Three.js 0.180.0 (r180), WebGPURenderer with WebGPU and WebGL2 fallback; Rapier 0.19.3; Gamepad API; Web Audio API; WebRTC; AI Hub Session Protocol v1, client 1.4.0; bundled single-file HTML",
+    "artDirection": "Procedural cel shading with quantized TSL lighting, ink outlines, warm paper instruments, turquoise rescue beacons and coral enemy ships",
+    "animation": "Three.js AnimationMixer and AnimationClip keyframe tracks for ion drives, rescue beacons, navigation gates, station rotor and reactor; procedural flight, debris and camera motion",
+    "audio": "Code-generated Web Audio music, laser fire, impacts, explosions, warp and recovery effects; synthesized gibberish radio voices; music defaults to 10%; no audio files",
+    "online": "AI Hub 1–4 player ghost score races; standalone 2-player direct WebRTC offer/answer code exchange; same-sector ghost ships and score updates",
+    "testing": "Headless Chromium 153; software WebGPU pixel readback and forced device-loss recovery; WebGL2 visual review at 1920×1080 and portrait phone sizes; full real-physics campaign playthrough; keyboard, emulated standard gamepad and multitouch; Web Audio analyser samples; two-page WebRTC; official AI Hub harness at 2 and 4 seats, including 150 ms latency, 50 ms jitter, 5% packet loss and host departure. Physical controller, real mobile hardware, subjective listening and restrictive-NAT connectivity: unknown.",
+    "research": "none; native model knowledge for Solaris. Only the explicitly required AI Hub implementation files and npm dependencies were downloaded",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Six issues found by automated or visual testing: software WebGPU setup, portrait title clipping, carrier weakpoint visibility, controller audio initialization, and two test-harness assumptions (frame identity and controller sampling timing). A session-end controller-input guard was also corrected during protocol review. Five stylistic lint findings were corrected.",
+    "One blocked rendering in the original software WebGPU test configuration. The corrected launch configuration passes GPU pixel readback, and forced device loss recovers to WebGL2. No unresolved critical issue was found.",
+    "GPU pixel readback was the most helpful: state-only checks could not reveal that the headless canvas was failing to present the scene. The full real-physics campaign playthrough also verified every mission objective.",
+    "Headless WebGPU screenshots were least helpful because that canvas can be blank. WebGL2 screenshots were useful for TV and portrait-phone layout review."
+  ],
+  "engineFeedback": [
+    "TSL materials, procedural geometry and native AnimationMixer clips made it possible to build a consistent ink-and-cel world without downloaded art.",
+    "Yes. I initially used software Vulkan flags that lost the WebGPU device. I isolated the configuration with GPU readback, corrected the launch flags, and implemented and tested renderer recovery.",
+    "The flight and mission framework: combat, tractor recovery, docking, gate navigation, boss rules, controller-first menus, procedural audio and ghost-network adapters.",
+    "Coordinating WebGPU initialization, asynchronous pixel readback, device-loss recovery and a WebGL2 path using the same TSL materials.",
+    "none; application code configures and recovers the renderer, with no engine source modifications.",
+    "A documented, complete device-loss recovery example that preserves a live scene while changing renderer backends."
+  ],
+  "promptFeedback": [
+    "The explicit source, controller-first presentation, synthesized audio and single-file delivery requirements make a clear creative target.",
+    "Standalone multiplayer behavior is not specified by the AI Hub session protocol; I chose a direct two-player ghost score race.",
+    "Combining a complete five-mission campaign, TV-readable interface, multiple input methods and two multiplayer transports in one HTML.",
+    "Specify whether standalone online play should use a hosted lobby or manual peer codes, and provide a target demo length."
+  ],
+  "aiHub": {
+    "name": "Solar Stowaways",
+    "tagline": "Bring the lost ones home.",
+    "description": "A small ship. A very large wrong turn. Break a Corsair patrol, recover three stranded pilots, refuel at a lonely station and punch a way home through the carrier blockade.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Solaris (1986)",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD / left stick fly; mouse / right stick aim; click / Space / R2 fire; E / RMB / L2 tractor; Q / L1 pulse; Shift / R1 boost; Tab / Triangle chart; Esc / Options pause; assisted multitouch.",
+    "tags": [
+      "3d",
+      "arcade",
+      "sci-fi",
+      "first-person",
+      "vehicles",
+      "boss fights"
+    ]
+  }
+}

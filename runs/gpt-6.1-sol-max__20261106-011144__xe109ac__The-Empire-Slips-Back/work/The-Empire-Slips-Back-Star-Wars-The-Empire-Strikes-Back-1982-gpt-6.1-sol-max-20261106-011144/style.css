@@ -1,0 +1,1744 @@
+@import url("https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap");
+:root {
+	--ink: #112b3a;
+	--paper: #f1f0df;
+	--orange: #fa7044;
+	--ice: #b8e9e6;
+	--green: #bce896;
+	--muted: #91a8b0;
+	--font: "Barlow Condensed", Impact, "Arial Narrow", sans-serif;
+	--body: "DM Sans", Arial, sans-serif;
+}
+* {
+	box-sizing: border-box;
+}
+html,
+body {
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	overflow: hidden;
+	background: #142d3d;
+	color: var(--paper);
+	font-family: var(--body);
+	touch-action: none;
+}
+button,
+input,
+textarea,
+select {
+	font: inherit;
+}
+button {
+	cursor: pointer;
+	border: 0;
+	color: inherit;
+	background: none;
+	transition:
+		background 0.15s,
+		transform 0.15s,
+		color 0.15s;
+	touch-action: manipulation;
+}
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+	outline: 3px solid var(--ice);
+	outline-offset: 5px;
+}
+button:hover,
+button.focus {
+	color: var(--orange);
+}
+button.primary:hover,
+button.primary.focus {
+	background: #ff8e61;
+	color: var(--ink);
+	transform: translateY(-2px);
+}
+button:disabled {
+	opacity: 0.4;
+	cursor: wait;
+}
+button:active {
+	transform: translateY(2px);
+}
+a {
+	color: var(--ice);
+}
+#world {
+	position: fixed;
+	inset: 0;
+	width: 100%;
+	height: 100%;
+	display: block;
+}
+#grain {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	opacity: 0.045;
+	z-index: 4;
+	background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.87' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.8' d='M0 0h180v180H0z'/%3E%3C/svg%3E");
+}
+#vignette {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 3;
+	background: radial-gradient(
+		ellipse at 55% 45%,
+		transparent 40%,
+		#0b26394d 100%
+	);
+}
+#damageFlash {
+	position: fixed;
+	inset: 0;
+	pointer-events: none;
+	z-index: 7;
+	opacity: 0;
+	background: radial-gradient(ellipse, transparent 35%, #ff5c3577);
+	transition: opacity 0.08s;
+}
+.hidden {
+	display: none !important;
+}
+.screen {
+	position: fixed;
+	inset: 0;
+	z-index: 5;
+}
+.masthead {
+	position: absolute;
+	top: 5.5%;
+	left: 5%;
+	right: 5%;
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	font-family: var(--font);
+	font-size: 22px;
+	font-weight: 700;
+	letter-spacing: 2px;
+}
+.insignia {
+	font-size: 48px;
+	line-height: 1;
+	color: var(--orange);
+}
+.tiny {
+	display: block;
+	font: 10px var(--body);
+	letter-spacing: 3px;
+	margin-top: 3px;
+}
+.edition {
+	margin-left: auto;
+	font: 11px var(--body);
+	letter-spacing: 2px;
+	border-top: 1px solid #e6efe344;
+	padding-top: 10px;
+}
+.titlecopy {
+	position: absolute;
+	top: 25%;
+	left: 6.5%;
+	max-width: 65%;
+	text-shadow: 0 2px 15px #10253633;
+}
+.eyebrow {
+	font: 600 clamp(11px, 1vw, 15px) var(--body);
+	letter-spacing: 2.5px;
+	color: var(--ice);
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+.dash {
+	display: inline-block;
+	width: 24px;
+	height: 3px;
+	background: var(--orange);
+}
+h1 {
+	font-family: var(--font);
+	font-size: clamp(60px, 8.2vw, 150px);
+	line-height: 0.88;
+	letter-spacing: -1.8px;
+	font-weight: 800;
+	margin: 20px 0 20px;
+}
+h1 em {
+	font-style: normal;
+	color: var(--orange);
+}
+.title-dot {
+	color: var(--orange);
+}
+.tagline {
+	font-size: clamp(15px, 1.35vw, 22px);
+	letter-spacing: 0.3px;
+	color: #dfebdf;
+	margin-bottom: 32px;
+}
+.primary {
+	display: flex;
+	align-items: center;
+	gap: 20px;
+	background: var(--orange);
+	color: var(--ink);
+	padding: 18px 24px;
+	min-width: 290px;
+	font: 700 clamp(19px, 1.6vw, 28px) var(--font);
+	letter-spacing: 1.5px;
+	box-shadow: 4px 4px 0 #0c2734;
+	position: relative;
+}
+.primary .arrow {
+	margin-left: auto;
+	font: 30px var(--body);
+	line-height: 1;
+}
+.prompt {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	min-width: 23px;
+	font: 700 17px var(--body);
+	letter-spacing: 0;
+}
+.titleactions .primary {
+	width: 360px;
+	max-width: 100%;
+}
+.secondary-row {
+	display: flex;
+	gap: 23px;
+	margin-top: 23px;
+	align-items: center;
+}
+.secondary-row button {
+	padding: 7px 0;
+	font: 700 15px var(--font);
+	letter-spacing: 1.6px;
+}
+.tinybadge {
+	font: 10px var(--body);
+	padding: 2px 4px;
+	border: 1px solid #edf3df66;
+	vertical-align: 2px;
+	margin-left: 3px;
+}
+.best {
+	font-size: 10px;
+	letter-spacing: 1.7px;
+	margin-top: 20px;
+	color: #bad3d2;
+}
+.title-caption {
+	position: absolute;
+	right: 6%;
+	bottom: 15%;
+	display: flex;
+	flex-direction: column;
+	align-items: flex-end;
+	gap: 7px;
+	border-right: 3px solid var(--orange);
+	padding: 3px 16px 3px 0;
+}
+.title-caption .coordinate {
+	font-size: 11px;
+	letter-spacing: 3px;
+	color: var(--ice);
+}
+.title-caption strong {
+	font: 700 27px var(--font);
+	letter-spacing: 2px;
+}
+.title-caption > span:last-child {
+	font-size: 11px;
+	letter-spacing: 0.2px;
+	color: #c3dbd7;
+}
+.titlefooter {
+	position: absolute;
+	bottom: 4%;
+	left: 5%;
+	right: 5%;
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	border-top: 1px solid #d9e6dd44;
+	padding-top: 17px;
+	font-size: 10px;
+	letter-spacing: 1.2px;
+	color: #d3e3dc;
+}
+.statuslight {
+	display: inline-block;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--green);
+	margin-right: 8px;
+	box-shadow: 0 0 9px #bce89644;
+}
+.title-shade {
+	position: fixed;
+	inset: 0;
+	background: linear-gradient(
+		90deg,
+		#142d3df2 0%,
+		#142d3d88 34%,
+		transparent 74%
+	);
+	pointer-events: none;
+}
+#title:before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: linear-gradient(
+		90deg,
+		#122b3aeb 0%,
+		#122b3a99 27%,
+		#122b3a11 62%,
+		transparent 100%
+	);
+	pointer-events: none;
+}
+#loading {
+	position: fixed;
+	z-index: 30;
+	inset: 0;
+	background: var(--ink);
+	display: flex;
+	justify-content: center;
+	align-items: flex-start;
+	flex-direction: column;
+	padding: 10%;
+}
+#loading h1 {
+	font-size: clamp(50px, 7vw, 110px);
+}
+#loading h1 span {
+	color: var(--orange);
+}
+#loading p {
+	font-size: 14px;
+	color: var(--muted);
+}
+.loadtrack {
+	height: 3px;
+	background: #f1f0df22;
+	width: 300px;
+	max-width: 80%;
+	margin: 16px 0;
+}
+.loadtrack i {
+	display: block;
+	width: 40%;
+	height: 100%;
+	background: var(--orange);
+	animation: load 1.6s ease-in-out infinite;
+}
+@keyframes load {
+	0%,
+	100% {
+		transform: translateX(0);
+	}
+	50% {
+		transform: translateX(150%);
+	}
+}
+#hud {
+	position: fixed;
+	inset: 0;
+	z-index: 5;
+	pointer-events: none;
+}
+.hudtop {
+	position: absolute;
+	top: 4%;
+	left: 4%;
+	right: 4%;
+	display: flex;
+	align-items: flex-start;
+	gap: 24px;
+}
+.missionblock {
+	border-left: 3px solid var(--orange);
+	padding-left: 15px;
+	background: linear-gradient(90deg, #112b3ab3, transparent);
+	min-width: 35%;
+}
+.missionblock .eyebrow {
+	font-size: 11px;
+	letter-spacing: 2px;
+}
+#objective {
+	font: 700 clamp(23px, 2.5vw, 40px) var(--font);
+	letter-spacing: 0.8px;
+	line-height: 1.1;
+	margin-top: 6px;
+}
+#subObjective {
+	font-size: 12px;
+	color: #d0e4de;
+	margin-top: 5px;
+}
+.evacblock {
+	margin-left: auto;
+	text-align: right;
+	background: #112b3a9c;
+	padding: 10px 15px;
+	min-width: 135px;
+}
+.evacblock > span {
+	display: block;
+	font-size: 9px;
+	letter-spacing: 2px;
+	color: var(--ice);
+}
+.evacblock strong {
+	font: 600 35px var(--font);
+	letter-spacing: 2px;
+}
+.evactrack {
+	height: 3px;
+	background: #ffffff22;
+	margin-top: 4px;
+}
+.evactrack i {
+	display: block;
+	height: 100%;
+	background: var(--green);
+	width: 0;
+}
+.iconbutton {
+	pointer-events: auto;
+	font: 700 20px var(--body);
+	width: 45px;
+	height: 45px;
+	background: #112b3ab3;
+	border: 1px solid #ecf1df44;
+}
+.hudbottom {
+	position: absolute;
+	bottom: 3.5%;
+	left: 4%;
+	right: 4%;
+	display: flex;
+	align-items: flex-end;
+	gap: 4%;
+	text-shadow: 0 1px 5px #102536;
+}
+.shipstats {
+	width: 21%;
+	max-width: 290px;
+	background: linear-gradient(90deg, #112b3acc, #112b3a55);
+	padding: 12px 13px;
+}
+.statrow {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	font: 600 13px var(--font);
+	letter-spacing: 2px;
+}
+.statrow strong {
+	font: 600 28px var(--font);
+	margin-left: 8px;
+	color: var(--paper);
+}
+#lives {
+	font-size: 12px;
+	color: var(--orange);
+	letter-spacing: 4px;
+}
+.hulltrack {
+	height: 7px;
+	background: #d6e6dd33;
+	margin-top: 4px;
+}
+.hulltrack i {
+	height: 100%;
+	width: 100%;
+	display: block;
+	background: var(--ice);
+	transition: width 0.15s;
+}
+.heatrow {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-top: 10px;
+	font-size: 8px;
+	letter-spacing: 1px;
+}
+.heatrow > div {
+	flex: 1;
+	height: 3px;
+	background: #d6e6dd33;
+}
+.heatrow i {
+	display: block;
+	height: 100%;
+	background: var(--orange);
+	width: 0;
+}
+.basehealth {
+	font-size: 9px;
+	letter-spacing: 1px;
+	display: flex;
+	gap: 8px;
+	margin-top: 13px;
+	flex-wrap: wrap;
+	color: #d5e8df;
+}
+.basehealth span:nth-child(2) {
+	margin-left: auto;
+}
+.basehealth > div {
+	width: 100%;
+	height: 3px;
+	background: #d6e6dd33;
+}
+.basehealth i {
+	display: block;
+	background: var(--green);
+	height: 100%;
+	width: 100%;
+}
+.radarblock {
+	width: 45%;
+	margin: 0 auto;
+	max-width: 680px;
+	background: #112b3aaf;
+	border: 1px solid #b8e9e633;
+	padding: 9px 14px;
+}
+.radarhead {
+	display: flex;
+	justify-content: space-between;
+	font-size: 8px;
+	letter-spacing: 1.5px;
+	color: var(--ice);
+}
+.radarhead b {
+	font-weight: 400;
+	color: var(--paper);
+}
+#radar {
+	display: block;
+	width: 100%;
+	height: 54px;
+}
+.radarlegend {
+	display: flex;
+	gap: 16px;
+	justify-content: space-between;
+	font-size: 8px;
+	letter-spacing: 1.3px;
+	color: #c5ddd8;
+}
+.cyan {
+	color: var(--ice);
+}
+.orange {
+	color: var(--orange);
+}
+.green {
+	color: var(--green);
+}
+.scoreblock {
+	min-width: 20%;
+	text-align: right;
+	background: linear-gradient(270deg, #112b3aaa, transparent);
+	padding: 10px 12px;
+}
+.scoreblock > span {
+	font-size: 9px;
+	letter-spacing: 2px;
+	color: var(--ice);
+}
+#score {
+	display: block;
+	font: 600 clamp(30px, 3.2vw, 52px) var(--font);
+	letter-spacing: 2px;
+	line-height: 1.1;
+}
+.ability {
+	display: inline-flex;
+	gap: 6px;
+	align-items: center;
+	font-size: 9px;
+	letter-spacing: 0.8px;
+	margin: 6px 0 0 12px;
+	color: var(--paper);
+}
+.ability .prompt {
+	font-size: 11px;
+	background: #eff0df11;
+	border: 1px solid #f1f0df44;
+	padding: 2px;
+	min-width: 18px;
+}
+.ability.ready {
+	color: var(--green);
+}
+#radio {
+	position: absolute;
+	top: 21%;
+	left: 4%;
+	display: flex;
+	gap: 12px;
+	max-width: 410px;
+	background: #102836d9;
+	border: 1px solid #b8e9e633;
+	padding: 12px 18px;
+	border-left: 3px solid var(--ice);
+	animation: radio 0.25s ease-out;
+}
+@keyframes radio {
+	from {
+		transform: translateX(-25px);
+		opacity: 0;
+	}
+	to {
+		transform: translateX(0);
+		opacity: 1;
+	}
+}
+.radioicon {
+	font-size: 30px;
+	color: var(--orange);
+}
+#radioName {
+	font-size: 9px;
+	letter-spacing: 2px;
+	color: var(--orange);
+}
+#radio p {
+	font-size: 14px;
+	line-height: 1.5;
+	margin: 5px 0;
+}
+#context {
+	position: absolute;
+	left: 50%;
+	bottom: 24%;
+	transform: translateX(-50%);
+	font: 600 19px var(--font);
+	letter-spacing: 1.5px;
+	color: var(--ink);
+	background: var(--ice);
+	padding: 10px 20px;
+	border: 2px solid var(--ink);
+	box-shadow: 3px 3px 0 #112b3a77;
+	white-space: nowrap;
+}
+#context small {
+	display: block;
+	font: 10px var(--body);
+	text-align: center;
+	letter-spacing: 0.5px;
+	margin-top: 3px;
+}
+#toast {
+	position: absolute;
+	left: 50%;
+	top: 24%;
+	transform: translateX(-50%);
+	font: 700 24px var(--font);
+	letter-spacing: 1px;
+	background: #112b3ad9;
+	border-bottom: 2px solid var(--orange);
+	padding: 10px 20px;
+	text-align: center;
+}
+#banner {
+	position: absolute;
+	left: 50%;
+	top: 39%;
+	transform: translate(-50%, -50%) rotate(-2deg);
+	text-align: center;
+	background: var(--paper);
+	color: var(--ink);
+	border: 3px solid var(--ink);
+	padding: 18px 42px;
+	box-shadow: 7px 7px 0 #112b3a66;
+	min-width: 350px;
+}
+#banner span {
+	display: block;
+	font-size: 11px;
+	letter-spacing: 3px;
+	color: #627680;
+}
+#banner strong {
+	font: 800 54px / 0.96 var(--font);
+	letter-spacing: 1px;
+	display: block;
+	margin-top: 7px;
+}
+#aimMark {
+	position: absolute;
+	width: 24px;
+	height: 24px;
+	border: 1px solid #f1f0dfb3;
+	border-radius: 50%;
+	transform: translate(-50%, -50%);
+	pointer-events: none;
+}
+#aimMark:after,
+#aimMark:before {
+	content: "";
+	position: absolute;
+	background: var(--orange);
+}
+#aimMark:after {
+	width: 32px;
+	height: 1px;
+	top: 11px;
+	left: -5px;
+}
+#aimMark:before {
+	height: 32px;
+	width: 1px;
+	left: 11px;
+	top: -5px;
+}
+#hitMark {
+	position: absolute;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%) rotate(45deg);
+	width: 22px;
+	height: 22px;
+	border: 3px solid var(--orange);
+	opacity: 0;
+	transition: opacity 0.1s;
+}
+#worldLabels {
+	position: absolute;
+	inset: 0;
+}
+.worldlabel {
+	position: absolute;
+	transform: translate(-50%, -100%);
+	text-align: center;
+	pointer-events: none;
+}
+.worldlabel .name {
+	font: 600 12px var(--font);
+	letter-spacing: 1.7px;
+	color: var(--paper);
+	padding: 3px 7px;
+	background: #112b3a99;
+}
+.worldlabel .bar {
+	height: 3px;
+	width: 78px;
+	background: #102836aa;
+	margin: 4px auto;
+}
+.worldlabel .bar i {
+	display: block;
+	height: 100%;
+	background: var(--orange);
+}
+.worldlabel.pilot {
+	font: 600 12px var(--font);
+	letter-spacing: 2px;
+	color: var(--green);
+	text-shadow: 0 2px 4px var(--ink);
+}
+.worldlabel.pilot:after {
+	content: "⌄";
+	display: block;
+	font-size: 25px;
+	line-height: 1;
+}
+#wingScores {
+	position: absolute;
+	right: 4%;
+	top: 23%;
+	font: 600 13px var(--font);
+	letter-spacing: 1px;
+	background: #112b3a88;
+	padding: 8px;
+	max-width: 200px;
+}
+#wingScores:empty {
+	display: none;
+}
+.wingrow {
+	padding: 5px;
+	border-left: 3px solid var(--ice);
+	display: flex;
+	gap: 18px;
+}
+.wingrow span {
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 120px;
+}
+.wingrow b {
+	margin-left: auto;
+}
+#attractBadge {
+	position: fixed;
+	z-index: 8;
+	bottom: 21%;
+	left: 50%;
+	transform: translateX(-50%);
+	background: #112b3ad9;
+	border: 1px solid #b8e9e644;
+	padding: 13px 22px;
+	font: 700 15px var(--font);
+	letter-spacing: 2px;
+	white-space: nowrap;
+}
+#attractBadge b {
+	margin-left: 25px;
+	color: var(--orange);
+}
+#overlay {
+	position: fixed;
+	inset: 0;
+	background: #0a202bc9;
+	backdrop-filter: blur(7px);
+	z-index: 10;
+	display: flex;
+	justify-content: center;
+	align-items: center;
+	padding: 3%;
+}
+.panel {
+	background: #153240;
+	box-shadow: 10px 10px 0 #081f2977;
+	border: 1px solid #b8e9e644;
+	border-top: 4px solid var(--orange);
+	padding: 32px 40px;
+	max-height: 94vh;
+	overflow: auto;
+	width: 750px;
+	max-width: 95vw;
+}
+.panel h2 {
+	font: 800 clamp(35px, 4vw, 56px) / 1 var(--font);
+	letter-spacing: 0.5px;
+	margin: 12px 0 22px;
+}
+.panel p {
+	font-size: 15px;
+	line-height: 1.65;
+	color: #c9ddd8;
+}
+.panel .menu {
+	display: grid;
+	gap: 8px;
+	margin: 24px 0;
+}
+.panel .menu > button {
+	text-align: left;
+	font: 600 24px var(--font);
+	letter-spacing: 1px;
+	padding: 13px 17px;
+	border: 1px solid #b8e9e622;
+	background: #edf4e908;
+}
+.panel .menu > button:hover,
+.panel .menu > button.focus {
+	border-color: var(--orange);
+	background: #fa704411;
+}
+.panel .menu > button.primary {
+	background: var(--orange);
+	color: var(--ink);
+}
+.panel .back {
+	font: 600 16px var(--font);
+	letter-spacing: 1px;
+	margin-top: 15px;
+	padding: 10px 0;
+	display: inline-flex;
+	gap: 12px;
+	color: var(--ice);
+}
+.panel .back:hover {
+	color: var(--orange);
+}
+.schoolgrid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+}
+.schoolcard {
+	padding: 17px;
+	background: #e6f3e408;
+	border: 1px solid #b8e9e622;
+}
+.schoolcard strong {
+	font: 700 23px var(--font);
+	color: var(--orange);
+	letter-spacing: 1px;
+}
+.schoolcard p {
+	font-size: 12px;
+	line-height: 1.6;
+	margin: 8px 0;
+}
+.keyline {
+	color: var(--ice);
+	font-size: 12px;
+	letter-spacing: 1px;
+}
+.settingrow {
+	padding: 13px 0;
+	border-bottom: 1px solid #b8e9e622;
+	display: grid;
+	grid-template-columns: 1fr 48%;
+	align-items: center;
+	gap: 20px;
+}
+.settingrow > label {
+	font: 600 20px var(--font);
+	letter-spacing: 0.7px;
+}
+.settingrow small {
+	display: block;
+	font: 11px var(--body);
+	color: var(--muted);
+	margin-top: 5px;
+}
+.settingrow input[type="range"] {
+	width: 100%;
+	accent-color: var(--orange);
+}
+.settingrow select {
+	background: var(--ink);
+	color: var(--paper);
+	border: 1px solid var(--muted);
+	padding: 8px;
+	font-size: 14px;
+	max-width: 100%;
+}
+.settingrow .rangevalue {
+	font-size: 10px;
+	color: var(--ice);
+	float: right;
+}
+.settingspair {
+	display: flex;
+	gap: 12px;
+	align-items: center;
+}
+.settingspair input {
+	flex: 1;
+	min-width: 40px;
+}
+.devgrid {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 10px;
+}
+.devgrid button {
+	padding: 11px;
+	border: 1px solid #b8e9e644;
+	background: #ffffff08;
+	text-align: left;
+	font: 600 17px var(--font);
+	letter-spacing: 0.5px;
+}
+.devstats {
+	font: 11px / 1.8 monospace;
+	color: var(--muted);
+	margin-top: 20px;
+}
+.credits {
+	display: grid;
+	grid-template-columns: 120px 1fr;
+	gap: 10px 20px;
+	font-size: 12px;
+	line-height: 1.6;
+}
+.credits dt {
+	color: var(--ice);
+}
+.credits dd {
+	margin: 0;
+	color: #d6e2da;
+}
+.creditsection {
+	font: 700 27px var(--font);
+	color: var(--orange);
+	margin: 25px 0 13px;
+}
+.feedback {
+	font-size: 12px !important;
+	line-height: 1.7 !important;
+	margin: 8px 0;
+}
+.resultgrid {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 16px;
+	margin: 25px 0;
+}
+.resultgrid > div {
+	background: #edf3e408;
+	padding: 16px;
+	border-bottom: 2px solid #b8e9e644;
+}
+.resultgrid span {
+	font-size: 10px;
+	letter-spacing: 1px;
+	color: var(--ice);
+	display: block;
+}
+.resultgrid strong {
+	font: 700 37px var(--font);
+	display: block;
+	margin-top: 7px;
+}
+.missionstamp {
+	font: 600 11px var(--body);
+	letter-spacing: 3px;
+	color: var(--orange);
+}
+textarea {
+	width: 100%;
+	height: 90px;
+	resize: vertical;
+	background: #0e2633;
+	border: 1px solid #b8e9e644;
+	color: var(--paper);
+	padding: 10px;
+	font: 11px monospace;
+	user-select: text;
+	touch-action: auto;
+}
+input[type="text"] {
+	background: #0e2633;
+	border: 1px solid #b8e9e644;
+	color: var(--paper);
+	padding: 12px;
+	width: 100%;
+}
+.netactions {
+	display: flex;
+	gap: 12px;
+	margin: 12px 0;
+}
+.netactions button {
+	padding: 12px 18px;
+	background: #b8e9e611;
+	border: 1px solid #b8e9e655;
+	font: 600 18px var(--font);
+	letter-spacing: 1px;
+}
+.netstatus {
+	font-size: 12px;
+	color: var(--green);
+	margin: 12px 0;
+}
+.netstep {
+	font-size: 11px;
+	color: var(--ice);
+	margin: 15px 0 7px;
+	letter-spacing: 1px;
+}
+#hubWaiting {
+	position: fixed;
+	z-index: 8;
+	left: 50%;
+	top: 50%;
+	transform: translate(-50%, -50%);
+	text-align: center;
+	background: #112b3add;
+	padding: 35px;
+	border-top: 3px solid var(--orange);
+	width: 600px;
+	max-width: 90vw;
+}
+#hubWaiting .eyebrow {
+	justify-content: center;
+}
+#hubWaiting h2 {
+	font: 700 46px var(--font);
+	margin: 16px 0;
+}
+#hubWaiting p {
+	font-size: 15px;
+	line-height: 1.6;
+}
+#touchAction {
+	pointer-events: auto;
+	position: absolute;
+	right: 5%;
+	bottom: 24%;
+	width: 90px;
+	height: 90px;
+	background: #b8e9e6dd;
+	border: 2px solid var(--ink);
+	border-radius: 50%;
+	font: 700 19px var(--font);
+	color: var(--ink);
+}
+body.touch #titleControls,
+body.touch .heatrow,
+body.touch .radarlegend {
+	display: none;
+}
+body.touch #aimMark {
+	display: none;
+}
+body.touch .hudbottom {
+	bottom: 3%;
+	gap: 2%;
+}
+body.touch .shipstats {
+	width: 23%;
+	padding: 8px;
+}
+body.touch .radarblock {
+	width: 43%;
+	padding: 8px;
+}
+body.touch .scoreblock {
+	width: 25%;
+	padding: 8px;
+}
+body.touch .hudtop {
+	top: 3%;
+}
+body.touch #radio {
+	top: 24%;
+	max-width: 300px;
+}
+body.touch #radio p {
+	font-size: 12px;
+}
+body.touch #context {
+	bottom: 22%;
+	font-size: 15px;
+}
+.panel::-webkit-scrollbar {
+	width: 5px;
+}
+.panel::-webkit-scrollbar-thumb {
+	background: #b8e9e655;
+}
+.disconnected {
+	position: fixed;
+	top: 13%;
+	right: 4%;
+	z-index: 9;
+	padding: 10px;
+	background: var(--orange);
+	color: var(--ink);
+	font: 600 17px var(--font);
+}
+@media (min-width: 1800px) {
+	.panel {
+		width: 900px;
+		padding: 40px 50px;
+	}
+	.panel p {
+		font-size: 18px;
+	}
+	.panel .menu > button {
+		font-size: 29px;
+		padding: 16px 21px;
+	}
+	.settingrow > label {
+		font-size: 24px;
+	}
+	.schoolcard p,
+	.keyline {
+		font-size: 15px;
+	}
+	.schoolcard strong {
+		font-size: 28px;
+	}
+	.credits,
+	.feedback {
+		font-size: 15px !important;
+	}
+	#radio {
+		max-width: 480px;
+	}
+	#radio p {
+		font-size: 18px;
+	}
+	.missionblock .eyebrow {
+		font-size: 14px;
+	}
+	#subObjective {
+		font-size: 16px;
+	}
+	.radarhead,
+	.radarlegend,
+	.scoreblock > span,
+	.basehealth {
+		font-size: 11px;
+	}
+	.radarblock {
+		padding: 12px 18px;
+	}
+	#radar {
+		height: 65px;
+	}
+	.statrow {
+		font-size: 17px;
+	}
+	.heatrow {
+		font-size: 10px;
+	}
+	.titlefooter {
+		font-size: 12px;
+	}
+	.secondary-row button {
+		font-size: 19px;
+	}
+	.tiny {
+		font-size: 12px;
+	}
+	.edition {
+		font-size: 13px;
+	}
+	.best {
+		font-size: 12px;
+	}
+}
+@media (max-width: 850px) {
+	.titlecopy {
+		top: 25%;
+		max-width: 78%;
+		left: 6%;
+	}
+	h1 {
+		font-size: clamp(56px, 10vw, 90px);
+	}
+	.masthead {
+		top: 5%;
+		font-size: 17px;
+	}
+	.edition {
+		font-size: 8px;
+	}
+	.title-caption {
+		bottom: 16%;
+		right: 4%;
+	}
+	.title-caption strong {
+		font-size: 19px;
+	}
+	.title-caption > span:last-child {
+		display: none;
+	}
+	.tagline {
+		font-size: 13px;
+		margin-bottom: 21px;
+	}
+	.primary {
+		padding: 12px 18px;
+		min-width: 230px;
+	}
+	.titleactions .primary {
+		width: 280px;
+	}
+	.secondary-row {
+		gap: 18px;
+		margin-top: 15px;
+	}
+	.secondary-row button {
+		font-size: 12px;
+	}
+	.titlefooter {
+		font-size: 8px;
+	}
+	.best {
+		font-size: 8px;
+		margin-top: 12px;
+	}
+	.title-caption .coordinate {
+		font-size: 8px;
+	}
+	.hudbottom {
+		gap: 2%;
+		left: 3%;
+		right: 3%;
+	}
+	.radarblock {
+		width: 42%;
+		padding: 8px;
+	}
+	.radarhead {
+		font-size: 7px;
+		letter-spacing: 0.7px;
+	}
+	.radarlegend {
+		font-size: 6px;
+		letter-spacing: 0;
+		gap: 5px;
+	}
+	.shipstats {
+		width: 24%;
+		padding: 8px;
+	}
+	.scoreblock {
+		width: 25%;
+		padding: 8px;
+	}
+	.heatrow {
+		font-size: 6px;
+		gap: 6px;
+	}
+	.basehealth {
+		font-size: 7px;
+	}
+	.statrow {
+		font-size: 10px;
+	}
+	.ability {
+		font-size: 7px;
+		margin-left: 6px;
+	}
+	.ability .prompt {
+		font-size: 9px;
+	}
+	.missionblock {
+		min-width: 45%;
+	}
+	#subObjective {
+		font-size: 10px;
+	}
+	.missionblock .eyebrow {
+		font-size: 9px;
+	}
+	#objective {
+		font-size: 25px;
+	}
+	.evacblock {
+		padding: 8px;
+		min-width: 100px;
+	}
+	.evacblock strong {
+		font-size: 28px;
+	}
+	#radio {
+		top: 24%;
+		max-width: 300px;
+		padding: 8px 12px;
+	}
+	#radio p {
+		font-size: 12px;
+	}
+	.panel {
+		padding: 22px 26px;
+		width: 640px;
+	}
+	.schoolgrid {
+		gap: 10px;
+	}
+	.schoolcard {
+		padding: 12px;
+	}
+	.schoolcard p {
+		font-size: 11px;
+	}
+	#attractBadge {
+		font-size: 11px;
+		letter-spacing: 1px;
+	}
+	#attractBadge b {
+		margin-left: 12px;
+	}
+	#context {
+		font-size: 16px;
+	}
+	.radarlegend span:last-child {
+		display: none;
+	}
+	.worldlabel .name {
+		font-size: 10px;
+	}
+}
+@media (max-height: 620px) {
+	.masthead {
+		top: 4%;
+	}
+	.titlecopy {
+		top: 23%;
+	}
+	h1 {
+		font-size: clamp(50px, 7.8vw, 85px);
+		margin: 14px 0;
+	}
+	.tagline {
+		margin: 10px 0 17px;
+	}
+	.titleactions .primary {
+		padding: 11px 17px;
+		font-size: 20px;
+		width: 290px;
+	}
+	.secondary-row {
+		margin-top: 10px;
+	}
+	.best {
+		margin-top: 8px;
+	}
+	.titlefooter {
+		bottom: 3%;
+		padding-top: 10px;
+	}
+	.title-caption {
+		bottom: 15%;
+	}
+	.panel {
+		padding: 22px 28px;
+	}
+	.panel h2 {
+		font-size: 36px;
+		margin: 9px 0 16px;
+	}
+	.schoolcard p {
+		margin: 5px 0;
+	}
+	.schoolcard {
+		padding: 11px;
+	}
+	.hudbottom {
+		bottom: 3%;
+	}
+	.hudtop {
+		top: 3%;
+	}
+	#radio {
+		top: 24%;
+	}
+	#radio p {
+		font-size: 12px;
+		margin: 2px 0;
+	}
+	.shipstats {
+		padding: 7px 10px;
+	}
+	#radar {
+		height: 38px;
+	}
+	#score {
+		font-size: 32px;
+	}
+	.statrow strong {
+		font-size: 24px;
+	}
+	.basehealth {
+		margin-top: 8px;
+	}
+	.radarlegend {
+		font-size: 7px;
+	}
+	#banner strong {
+		font-size: 42px;
+	}
+	.titlecopy .eyebrow {
+		font-size: 9px;
+	}
+	.title-caption .coordinate {
+		font-size: 9px;
+	}
+}
+@media (max-width: 550px) and (orientation: portrait) {
+	.edition {
+		display: none;
+	}
+	.titlecopy {
+		top: 22%;
+		max-width: 93%;
+	}
+	h1 {
+		font-size: 17vw;
+	}
+	.tagline {
+		font-size: 14px;
+	}
+	.title-caption {
+		bottom: 18%;
+		left: 6%;
+		right: auto;
+		align-items: flex-start;
+		border-right: 0;
+		border-left: 3px solid var(--orange);
+		padding: 3px 0 3px 12px;
+	}
+	.titlefooter > span:nth-child(2) {
+		display: none;
+	}
+	.titlefooter {
+		font-size: 7px;
+	}
+	.secondary-row {
+		gap: 20px;
+	}
+	.secondary-row button {
+		font-size: 13px;
+	}
+	.titleactions .primary {
+		width: 310px;
+	}
+	.hudtop {
+		left: 4%;
+		right: 4%;
+		gap: 9px;
+	}
+	.missionblock {
+		padding-left: 9px;
+	}
+	.missionblock .eyebrow {
+		font-size: 8px;
+		letter-spacing: 1px;
+	}
+	#objective {
+		font-size: 22px;
+	}
+	.evacblock {
+		min-width: 73px;
+	}
+	.evacblock > span {
+		font-size: 7px;
+		letter-spacing: 1px;
+	}
+	.evacblock strong {
+		font-size: 24px;
+	}
+	.iconbutton {
+		width: 34px;
+		height: 36px;
+	}
+	#subObjective {
+		max-width: 180px;
+		font-size: 9px;
+	}
+	.hudbottom {
+		flex-wrap: wrap;
+		justify-content: space-between;
+		gap: 10px;
+	}
+	.radarblock,
+	body.touch .radarblock {
+		order: -1;
+		width: 100%;
+		height: 66px;
+		max-width: none;
+	}
+	.shipstats,
+	body.touch .shipstats {
+		width: 45%;
+	}
+	.scoreblock,
+	body.touch .scoreblock {
+		width: 45%;
+	}
+	.radarlegend {
+		display: none;
+	}
+	.scoreblock > span {
+		font-size: 8px;
+	}
+	#radio {
+		top: 20%;
+		left: 4%;
+		max-width: 280px;
+	}
+	#radio p {
+		font-size: 12px;
+	}
+	#context {
+		bottom: 30%;
+		font-size: 15px;
+		max-width: 90vw;
+		white-space: normal;
+		width: max-content;
+		text-align: center;
+	}
+	#attractBadge {
+		bottom: 28%;
+		font-size: 10px;
+	}
+	#attractBadge b {
+		display: block;
+		margin: 5px 0 0;
+	}
+	.panel {
+		padding: 20px;
+	}
+	.schoolgrid {
+		grid-template-columns: 1fr;
+	}
+	.schoolcard {
+		padding: 11px;
+	}
+	.panel h2 {
+		font-size: 36px;
+	}
+	.panel p {
+		font-size: 13px;
+	}
+	.settingrow {
+		grid-template-columns: 1fr 45%;
+		gap: 15px;
+	}
+	.settingrow > label {
+		font-size: 17px;
+	}
+	.settingrow small {
+		font-size: 9px;
+	}
+	.credits {
+		grid-template-columns: 90px 1fr;
+		gap: 8px;
+		font-size: 11px;
+	}
+	.resultgrid {
+		gap: 8px;
+	}
+	.resultgrid > div {
+		padding: 10px;
+	}
+	.resultgrid span {
+		font-size: 8px;
+	}
+	.resultgrid strong {
+		font-size: 27px;
+	}
+	#banner {
+		padding: 16px 20px;
+		min-width: 300px;
+	}
+	#banner strong {
+		font-size: 40px;
+	}
+	#wingScores {
+		top: 35%;
+		right: 3%;
+		font-size: 11px;
+	}
+	#touchAction {
+		bottom: 30%;
+		width: 70px;
+		height: 70px;
+		font-size: 16px;
+	}
+}
+@media (prefers-reduced-motion: reduce) {
+	button {
+		transition: none;
+	}
+	.loadtrack i {
+		animation: none;
+	}
+}
+/* Finishing pass: the title caption lives in the sky; touch keeps only the essential gauges. */
+@media (min-width: 851px) {
+	.title-caption {
+		top: 19%;
+		bottom: auto;
+		background: linear-gradient(270deg, #112b3a55, transparent);
+		padding: 12px 16px 12px 25px;
+	}
+}
+body.touch .radarblock,
+body.touch .scoreblock,
+body.touch .heatrow,
+body.touch .statrow #lives {
+	display: none;
+}
+body.touch .shipstats {
+	width: 165px;
+	max-width: 35%;
+	background: #112b3ab3;
+}
+body.touch .hudbottom {
+	bottom: 4%;
+}
+@media (min-width: 1800px) {
+	.ability {
+		font-size: 13px;
+		margin-left: 16px;
+	}
+	.ability .prompt {
+		font-size: 16px;
+		min-width: 25px;
+	}
+	.worldlabel .name {
+		font-size: 16px;
+	}
+	.worldlabel.pilot {
+		font-size: 15px;
+	}
+	.radioicon {
+		font-size: 37px;
+	}
+	#radioName {
+		font-size: 12px;
+	}
+	.radarhead,
+	.radarlegend {
+		font-size: 12px;
+	}
+	.statrow {
+		font-size: 19px;
+	}
+	.statrow strong {
+		font-size: 36px;
+	}
+	.basehealth {
+		font-size: 12px;
+	}
+	.heatrow {
+		font-size: 11px;
+	}
+	.worldlabel .bar {
+		width: 100px;
+		height: 4px;
+	}
+	.titlefooter {
+		font-size: 13px;
+	}
+}
+body.touch #banner,
+body.touch .evacblock,
+body.touch #subObjective {
+	display: none !important;
+}
+body.touch .missionblock {
+	flex: 1;
+}
+body.touch #toast {
+	top: 18%;
+	max-width: 88%;
+	width: max-content;
+	font-size: 17px;
+	padding: 9px 14px;
+}
+body.touch #context {
+	font-size: 15px;
+	padding: 9px 13px;
+	bottom: 22%;
+}
+body.touch #context small {
+	display: none;
+}
+body.touch #radio {
+	top: 17%;
+	max-width: 86%;
+	padding: 9px 13px;
+}

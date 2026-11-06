@@ -1,0 +1,4311 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script><meta name="hub:session" content="1"><meta name="hub:session-players" content="1-2"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-goal" content="Rescue Mina and Marmalade and recover the Sunstone together."><meta name="hub:session-howto" content="Stick/WASD: move, climb, swim. Cross/Space: jump or release balloon."><meta name="hub:session-minutes" content="8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#102b31">
+<title>Pit &amp; Away: Lost Caverns</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs"}}</script>
+<style>
+:root{color-scheme:dark;--ink:#102b31;--cream:#f4e7ca;--gold:#efbd62;--muted:#abbeb5;--teal:#68d5c7;font-family:Arial,Helvetica,sans-serif;color:var(--cream)}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#102b31}button,input{font:inherit}button{cursor:pointer;color:inherit}button:focus-visible,input:focus-visible{outline:3px solid var(--teal);outline-offset:5px}button:disabled{opacity:.4;cursor:default}canvas#game{position:absolute;inset:0;width:100%;height:100%;touch-action:none}.grain{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 65% 38%,transparent 30%,#061a2266 100%);z-index:1}.topline{position:absolute;top:30px;left:42px;right:42px;display:flex;justify-content:space-between;font-size:11px;font-weight:bold;letter-spacing:3px;color:#e4dfc8aa;z-index:6;pointer-events:none}.brand-mark{display:inline-flex;align-items:center;gap:12px}.brand-mark b{font-size:24px;color:var(--gold)}#loading{position:absolute;inset:0;display:grid;place-content:center;text-align:center;background:#102b31;z-index:100}#loading b{font-family:Georgia,serif;font-size:44px;font-weight:normal}#loading p{color:var(--muted);letter-spacing:2px}#loading .bar{height:3px;width:240px;background:#356266;margin:24px auto;overflow:hidden}#loading .bar:after{content:'';display:block;background:var(--gold);height:100%;width:60%;animation:loading 1.5s infinite alternate}@keyframes loading{to{transform:translateX(100%)}}.hidden{display:none!important}
+#title{position:absolute;inset:0;z-index:4;background:linear-gradient(90deg,#0b262df5 0%,#0b262de8 22%,#0b262d88 44%,transparent 72%);display:flex;align-items:center;padding:80px 6vw}.title-inner{width:540px;max-width:48vw}.eyebrow{font-size:11px;letter-spacing:4px;color:var(--gold);font-weight:bold;margin-bottom:25px;display:flex;align-items:center;gap:16px}.eyebrow:before{content:'';width:34px;height:1px;background:var(--gold)}h1{font-family:Georgia,'Times New Roman',serif;font-size:clamp(66px,7.8vw,122px);font-weight:normal;line-height:.85;letter-spacing:-5px;margin:0;text-shadow:3px 5px 0 #061d23}h1 span{display:block;font-size:.62em;letter-spacing:-3px;margin-top:7px}h1 i{font-style:normal;color:var(--gold)}.subtitle{font-size:18px;letter-spacing:8px;margin:27px 0 25px;text-transform:uppercase;font-weight:normal}.description{font:italic 18px/1.65 Georgia,serif;color:#d2d8c7;max-width:350px;margin:0 0 32px}.primary,.menu-button{display:flex;align-items:center;justify-content:space-between;border:1px solid #829b8b44;background:#173a3de0;border-radius:3px;min-height:53px;padding:14px 20px;width:100%;text-align:left;font-size:17px;letter-spacing:.4px;transition:background .15s,transform .15s}.primary{background:var(--gold);color:var(--ink);border-color:var(--gold);font-weight:bold;box-shadow:4px 4px 0 #050e1477;max-width:340px}.primary:hover,.primary.focus{background:#ffe0a0;transform:translateX(4px)}.menu-button:hover,.menu-button.focus{background:#295253;border-color:var(--gold)}.primary em,.menu-button em{font-style:normal;opacity:.75}.title-links{display:flex;gap:24px;margin-top:23px}.text-button{background:none;border:0;padding:8px 0;font-size:12px;letter-spacing:1px;color:#c0d0c3}.text-button:hover,.text-button.focus{color:var(--gold)}.title-footer{position:absolute;bottom:30px;left:6vw;font-size:11px;letter-spacing:1.4px;color:#93aca4}.title-stamp{position:absolute;right:5vw;bottom:44px;display:flex;align-items:center;gap:16px;transform:rotate(-5deg);color:#ecd09b;font-family:Georgia,serif;font-style:italic;line-height:1.4;font-size:17px}.stamp-icon{border:1px solid #e1c58a99;border-radius:50%;width:68px;height:68px;display:grid;place-items:center;font-size:35px}
+#hud{position:absolute;inset:0;z-index:3;pointer-events:none}.hud-top{display:flex;justify-content:space-between;align-items:start;margin:30px 36px}.hud-left{display:flex;gap:14px;align-items:center}.avatar-badge{height:54px;width:54px;background:#efbd62;border:2px solid #102b31;outline:1px solid #c2bc8b88;transform:rotate(-5deg);display:grid;place-items:center;color:#17383b;font-size:26px}.hud-name{font-size:10px;letter-spacing:2.4px;color:#e5daba}.hud-relics{display:flex;gap:14px;margin-top:8px;font-size:14px;font-weight:bold}.hud-relics .found{color:#8ce5cb}.hud-relics .waiting{color:#b7c0a6aa}.hud-zone{font-size:12px;text-transform:uppercase;letter-spacing:3px;padding:12px 23px;border-top:1px solid #efbd6277;background:linear-gradient(90deg,transparent,#0b252c99,transparent)}.hud-right{display:flex;align-items:center;gap:18px}.gold-value{font-size:26px;letter-spacing:2px;color:var(--gold);font-family:Georgia,serif}.gold-value small{font:10px Arial;letter-spacing:2px;display:block;text-align:right;color:#c7ccb6}.icon-button{width:48px;height:48px;border:1px solid #92a89388;border-radius:50%;background:#112f34bb;font-size:20px;pointer-events:auto}.icon-button:hover{background:#41605c}.hud-bottom{position:absolute;bottom:30px;left:36px;right:36px;display:flex;align-items:end;justify-content:space-between}.mission{padding:13px 18px;background:#0d282fd6;border-left:2px solid var(--gold);max-width:440px;box-shadow:0 3px 15px #06151933}.mission small{font-size:9px;color:var(--gold);letter-spacing:2px}.mission p{margin:7px 0 0;font:17px Georgia,serif}.controls{display:flex;gap:22px;font-size:12px;align-items:center;color:#e1e6d3;text-shadow:1px 1px 3px #000}.key{display:inline-grid;min-width:28px;height:28px;place-content:center;border:1px solid #d4dfc2aa;background:#173b3fcc;border-radius:5px;font:bold 11px Arial;padding:0 5px;margin-right:7px}.key.round{border-radius:50%;font-size:17px}.context{position:absolute;left:50%;bottom:110px;transform:translateX(-50%);background:#efbd62;color:#102b31;padding:12px 22px;border-radius:3px;box-shadow:3px 3px 0 #071b22;font-size:16px;white-space:nowrap}.context .key{color:#f4e7ca}.toast{position:absolute;left:50%;top:116px;transform:translateX(-50%);text-align:center;background:#102f34ef;border:1px solid #dabd7788;padding:16px 35px;font:22px Georgia,serif;z-index:8;max-width:80vw}.toast small{font:11px Arial;display:block;letter-spacing:2px;color:var(--teal);margin-top:7px}#attract{position:absolute;bottom:32px;left:50%;transform:translateX(-50%);z-index:5;text-align:center;pointer-events:none;background:#0c2730dd;padding:15px 32px;border:1px solid #b6c7a844}#attract b{font-size:13px;letter-spacing:3px;color:var(--gold)}#attract span{display:block;margin-top:7px;font-size:12px;color:#d1ddc4}
+#modal{position:absolute;inset:0;z-index:20;background:#061c23b8;backdrop-filter:blur(12px);display:grid;place-items:center;padding:44px}.panel{width:600px;max-width:100%;max-height:90vh;background:linear-gradient(145deg,#1c4144,#102c32);border:1px solid #7c978477;padding:36px 42px;box-shadow:12px 12px 0 #03171d66;overflow:auto;scrollbar-color:#65837c #18373a}.panel.wide{width:940px}.panel .eyebrow{margin-bottom:17px;font-size:10px}.panel h2{font:normal 44px/1.1 Georgia,serif;margin:0 0 23px}.panel p{font:16px/1.6 Arial;color:#c2d0bd}.menu-stack{display:flex;flex-direction:column;gap:10px}.panel-footer{display:flex;align-items:center;justify-content:space-between;margin-top:22px;color:#9ab3a7;font-size:11px;letter-spacing:1px}.back{border:0;background:none;color:var(--gold);padding:12px 0;text-align:left;cursor:pointer;font-size:15px}.setting{display:flex;align-items:center;justify-content:space-between;gap:24px;padding:16px 0;border-bottom:1px solid #b9c4a922;font-size:16px}.setting label{flex:1}.setting small{display:block;font-size:11px;color:#9bb5aa;margin-top:5px}.setting input[type=range]{accent-color:var(--gold);width:180px;height:24px}.setting output{width:48px;color:var(--gold);text-align:right}.setting button{background:#284c4c;border:1px solid #76978a77;border-radius:3px;padding:8px 14px}.guide-grid{display:grid;grid-template-columns:1fr 1fr;gap:20px}.guide-item{border-top:1px solid #708a7255;padding-top:14px}.guide-item strong{font-family:Georgia,serif;color:var(--gold);font-size:21px;font-weight:normal}.guide-item p{font-size:14px;margin-bottom:4px}.credit-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px 24px}.credit-grid div{font:12px/1.5 Arial;padding:7px 0;border-bottom:1px solid #67847933;color:#c5d0bd}.credit-grid b{color:var(--gold);display:block;font-size:10px;text-transform:uppercase;letter-spacing:1px;margin-bottom:3px}.feedback details{padding:12px 0;border-bottom:1px solid #67847944}.feedback summary{cursor:pointer;color:var(--gold);font:18px Georgia}.feedback ol{padding-left:20px;color:#bed0c0;font:12px/1.8 Arial}.map-visual{height:300px;width:100%;background:#0c2830;border:1px solid #6a8b7755;position:relative;overflow:hidden}.map-visual svg{width:100%;height:100%}.map-key{font-size:12px;color:#bbccbb;display:flex;gap:20px;margin:15px 0}.map-dot{color:var(--gold)}.room-code{font:bold 30px monospace;letter-spacing:4px;background:#0d292e;border:1px solid #71958d88;padding:14px;color:var(--gold);text-align:center;width:100%;margin:15px 0}.join-input{width:100%;background:#0e2c32;border:1px solid #71958d88;padding:14px;color:var(--cream);font:20px monospace;text-align:center;letter-spacing:3px}.code-digits{display:flex;justify-content:center;gap:16px;margin:18px 0}.code-digits button{width:64px;min-height:70px;border:1px solid #71958d88;border-radius:4px;background:#23494a;color:var(--gold);font:bold 34px monospace}.code-digits button:hover,.code-digits button.focus{background:#efbd62;color:#102b31;border-color:#ffe0a0;box-shadow:0 0 0 2px #efbd6255}.result-score{font:70px Georgia,serif;color:var(--gold);margin:15px 0 5px}.result-stat{display:flex;gap:28px;font-size:13px;margin:25px 0}.result-stat b{display:block;font-size:25px;color:var(--teal);margin-bottom:6px}#touch-menu{display:none;position:absolute;top:16px;right:16px;z-index:9}#touch-action{display:none;position:absolute;right:22px;bottom:26px;background:#efbd62d9;color:#102b31;border:1px solid #f7dfa6;width:72px;height:72px;border-radius:50%;font-size:12px;z-index:7;touch-action:none}.touch-ring{position:absolute;pointer-events:none;border:1px solid #d6eac166;background:#cce6ce11;border-radius:50%;width:100px;height:100px;z-index:7}.touch-ring:after{content:'';position:absolute;left:35px;top:35px;width:30px;height:30px;background:#d6eac188;border-radius:50%}#net-status{position:absolute;left:36px;top:94px;z-index:4;font:10px Arial;letter-spacing:1px;color:#8cd6c6;pointer-events:none}.flash{position:absolute;inset:0;pointer-events:none;background:#eab474;opacity:0;z-index:2;transition:opacity .15s}.error-text{max-width:600px;padding:24px;line-height:1.6;font-size:16px;color:#eacaa5}
+@media(min-width:1800px){.hud-top{margin:42px 50px}.hud-bottom{bottom:42px;left:50px;right:50px}.hud-zone{font-size:16px}.mission p{font-size:21px}.controls{font-size:16px}.panel{transform:scale(1.1)}}
+@media(max-height:700px){.topline{top:18px}.title-inner{transform:scale(.88);transform-origin:left center}.title-footer{bottom:18px}.panel{padding:24px 32px}.panel h2{font-size:34px;margin-bottom:16px}.setting{padding:10px 0}.title-stamp{bottom:24px}.hud-top{margin:18px 24px}.hud-bottom{bottom:20px;left:24px;right:24px}.hud-zone{font-size:10px}.toast{top:90px}}
+#touch-action:active{transform:scale(.94)}
+@media(pointer:coarse){.hud-top,.hud-bottom{display:none}#touch-menu{display:block}#hud .icon-button,.controls{display:none}.hud-top{margin:18px}.hud-zone{display:none}.hud-right{margin-right:60px}.hud-left .avatar-badge{width:38px;height:38px;font-size:20px}.hud-relics{font-size:11px;gap:8px}.gold-value{font-size:20px}.hud-bottom{left:18px;bottom:18px;right:100px}.mission{padding:10px 12px}.mission small{font-size:8px}.mission p{font-size:14px}.context{bottom:85px;font-size:13px;padding:10px 16px}.topline{left:24px;right:24px;font-size:8px;letter-spacing:2px}.title-inner{max-width:75vw;width:460px}.title-inner h1{font-size:70px}.title-stamp{display:none}.description{font-size:16px}.subtitle{font-size:15px}.title-links{gap:20px}.title-footer{font-size:9px}.panel{max-height:92vh;padding:22px}.panel h2{font-size:30px}.setting input[type=range]{width:120px}.guide-grid{gap:12px}.guide-item p{font-size:12px}.credit-grid{gap:4px 15px}.credit-grid div{font-size:10px}.toast{top:80px;font-size:17px}#net-status{left:18px;top:72px}}
+@media(max-width:600px){.topline span:last-child{display:none}#title{padding-left:7vw}.title-inner{max-width:90vw}.title-inner h1{font-size:74px}.title-inner .description{max-width:280px}.title-footer{max-width:80vw;line-height:1.8}.hud-relics span{font-size:10px}.hud-name{font-size:8px}.hud-zone{display:none}.guide-grid,.credit-grid{grid-template-columns:1fr}.panel{width:100%;}.panel.wide{width:100%}.title-links{gap:22px}.setting{font-size:13px;gap:10px}.setting input[type=range]{width:90px}.result-stat{gap:15px;font-size:11px}}
+</style></head><body>
+<canvas id="game" aria-label="Pit and Away cavern adventure"></canvas><div class="grain"></div><div class="flash" id="flash"></div>
+<div id="loading"><b>Pit &amp; Away</b><p>PACKING THE EXPEDITION</p><div class="bar"></div><span id="load-note">Lighting the caverns…</span></div>
+<div class="topline" id="topline"><span class="brand-mark"><b>✧</b> THE LOST CAVERNS EXPEDITION</span><span>FIELD JOURNAL &nbsp; / &nbsp; VOL. 01</span></div>
+<main id="title"><div class="title-inner"><div class="eyebrow">A LITTLE FURTHER DOWN</div><h1>PIT <i>&amp;</i><span>AWAY</span></h1><h2 class="subtitle">Lost Caverns</h2><p class="description">Two missing friends. One very shiny stone.<br>What could possibly go down?</p><button class="primary" data-action="start">Begin expedition <em>→</em></button><div class="title-links"><button class="text-button" data-action="coop">PLAY TOGETHER</button><button class="text-button" data-action="guide">FIELD GUIDE</button><button class="text-button" data-action="settings">SETTINGS</button></div></div><div class="title-footer">NO LIVES TO LOSE. &nbsp; ONLY YOUR DIGNITY. &nbsp; <button class="text-button" data-action="about">ABOUT</button></div><div class="title-stamp"><span class="stamp-icon">↟</span><span>Take the scenic route.<br>Bring a spare balloon.</span></div></main>
+<div id="hud" class="hidden"><div class="hud-top"><div class="hud-left"><div class="avatar-badge">♜</div><div><div class="hud-name">THE EXPEDITION</div><div class="hud-relics" id="relic-hud"></div></div></div><div class="hud-zone" id="zone">Fernlight Landing</div><div class="hud-right"><div class="gold-value"><span id="score">4,000</span><small>EXPEDITION POINTS</small></div><button class="icon-button" data-action="map" aria-label="Expedition map">⌖</button><button class="icon-button" data-action="pause" aria-label="Pause">Ⅱ</button></div></div><div class="hud-bottom"><div class="mission"><small id="mission-label">ENTRY 01 / FIND YOUR FOOTING</small><p id="mission">Follow the gold. Mind the wildlife.</p></div><div class="controls" id="controls"></div></div><div id="context" class="context hidden"></div></div>
+<div id="attract" class="hidden"><b>AN EXPEDITION IN PROGRESS</b><span>Press any button to pack your own bag</span></div><div id="toast" class="toast hidden"></div><div id="modal" class="hidden"></div><div id="net-status"></div><button id="touch-menu" class="icon-button" data-action="pause" aria-label="Menu">☰</button><button id="touch-action">JUMP</button><div id="touch-ring" class="touch-ring hidden"></div>
+<script type="module">
+// main.js
+import * as THREE2 from "three";
+
+// credits.js
+var credits_default = { "sourceInformation": { "date": "2026-11-05 22:12:13", "source": "Pitfall II: Lost Caverns (1984), David Crane / Activision", "plan": "none", "genre": "Exploration platformer / adventure", "perspective": "2.5D side view; tracking orthographic camera", "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL2 fallback, TSL cel lighting; Rapier 0.19.3; Gamepad API; Web Audio; AI Hub session client 1.4.0", "artDirection": "Procedural cel-shaded 3D diorama with ink outlines, faceted stone, jade foliage, amber ruins and turquoise water", "animation": "Three.js AnimationMixer with original idle, run, jump, fall, climb, swim and balloon clips; procedural creatures and scenery", "audio": "Original code-synthesized adaptive adventure music, effects and Animalese-style gibberish voices; music defaults to 10%; no audio files", "online": "1\u20132 cooperative players; AI Hub host-authoritative shared world; standalone same-browser BroadcastChannel and direct WebRTC invitation/reply; no relay supplied", "testing": "Unlimited headless testing allowed; one quiet command; screenshots for visual review only; no FPS target. Chromium153 WebGPU/SwiftShader and WebGL2; complete scripted route with invulnerability, separate hazards, keyboard, virtual standard gamepad, emulated touch, same-file and two-page co-op, real WebRTC, offline audio analysis, official Hub latency/loss/host-leave/playerless-server harness. Physical controller, real mobile hardware and human listening: unknown.", "research": "1984 Atari 2600 manual via AtariAge; AtariAge screenshots; AtariOnline soundtrack/gameplay overview; official AI Hub protocol, session client and harness; Rapier character-controller documentation", "environment": "Codex CLI (headless); Linux", "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra", "usage": "added on import" }, "testingFeedback": ["122/122 final checks passed. 15 game issues caught and fixed: 3 by automated runs and 12 during review. Test-script mistakes are excluded.", "2 progression-breaking issues: blocked riverbank ladder descent and co-op replay not resuming the guest. Both fixed.", "The full scripted cavern route, which caught the blocked descent and verifies every movement mode, all three objectives and the ending. Multiplayer restart and native file-launch checks cover the packaged release.", "Syntax-only checks; they cannot verify physics, controls, graphics or progression."], "engineFeedback": ["Three.js native animation clips and TSL made it possible to combine a layered 3D illustration with stepped cel lighting.", "An unsupported flatShading property on MeshBasicNodeMaterial emitted warnings; removed it and retained the geometry normals and quantized lighting.", "The movement state machine, expedition progression, controller menus, cooperative authority and procedural audio.", "Combining ladder, swimming and balloon movement with Rapier character-controller queries for two independent explorers.", "none", "Provide a WebGPU-ready toon material and a small input/character-controller framework in the standard examples."], "promptFeedback": ["The distinctive source, controller-first philosophy, single-file deliverable and explicit testing requirements.", "No plan file was supplied, so plan is none. Cross-device multiplayer specifies no lobby or relay service.", "Delivering all movement modes, co-op authority, attract play, controller menus and procedural art/audio as one portable file.", "Specify a multiplayer lobby/relay, or explicitly accept manual direct-peer invitations and their network limitations."], "aiHub": { "name": "Pit & Away: Lost Caverns", "tagline": "A little further down.", "description": "Descend through inked ruins, swim a glowing archive and ride a balloon to the Sunstone Vault. Rescue two wayward friends in a forgiving solo or two-player cavern expedition.", "type": "Game", "genre": "Platformer", "source": "Pitfall II: Lost Caverns (1984)", "series": "Pitfall!", "players": "1\u20132", "controls": "Stick/WASD/arrows: move, climb and swim; Cross/A/Space: jump or release balloon; Triangle/Y/M: map; Options/Escape: pause; touch: left drag and contextual right action.", "tags": ["2.5d", "side-scrolling", "exploration", "co-op", "retro", "low-poly"] } };
+
+// main.js
+import { WebGPURenderer, MeshBasicNodeMaterial } from "three/webgpu";
+import { normalWorld, vec3, materialColor } from "three/tsl";
+import RAPIER from "rapier";
+
+// world.js
+import * as THREE from "three";
+var INK = 599339;
+var mats = /* @__PURE__ */ new Map();
+function mat(color, emissive = 0) {
+  const key = color + ":" + emissive;
+  if (!mats.has(key))
+    mats.set(
+      key,
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness: 1,
+        metalness: 0,
+        flatShading: true,
+        emissive,
+        emissiveIntensity: emissive ? 0.42 : 0
+      })
+    );
+  return mats.get(key);
+}
+var inkMat = new THREE.MeshBasicMaterial({
+  color: INK,
+  side: THREE.BackSide
+});
+function mesh(g, color, parent, x = 0, y = 0, z = 0, outline = false, emissive = 0) {
+  let m = new THREE.Mesh(g, mat(color, emissive));
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  parent.add(m);
+  if (outline) {
+    let o = new THREE.Mesh(g, inkMat);
+    o.scale.setScalar(1.065);
+    m.add(o);
+  }
+  return m;
+}
+function box(parent, w, h, d, c, x = 0, y = 0, z = 0, outline = false) {
+  return mesh(new THREE.BoxGeometry(w, h, d), c, parent, x, y, z, outline);
+}
+function ball(parent, r, c, x = 0, y = 0, z = 0, scale = [1, 1, 1], outline = false) {
+  let m = mesh(
+    new THREE.IcosahedronGeometry(r, 1),
+    c,
+    parent,
+    x,
+    y,
+    z,
+    outline
+  );
+  m.scale.set(...scale);
+  return m;
+}
+function rod(parent, a, b, r, c, segments = 7) {
+  let av = new THREE.Vector3(...a), bv = new THREE.Vector3(...b), d = bv.clone().sub(av);
+  let m = mesh(
+    new THREE.CylinderGeometry(r, r * 0.92, d.length(), segments),
+    c,
+    parent
+  );
+  m.position.copy(av.add(bv).multiplyScalar(0.5));
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+  return m;
+}
+function rand(seed = 12345) {
+  return () => {
+    seed |= 0;
+    seed = seed + 1831565813 | 0;
+    let t = Math.imul(seed ^ seed >>> 15, 1 | seed);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+function fern(parent, x, y, z, size = 1, seed = 1) {
+  let r = rand(seed), g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.scale.setScalar(size);
+  parent.add(g);
+  for (let k = 0; k < 5; k++) {
+    let angle = (k - 2) * 0.38, tip = [Math.sin(angle) * 1.5, Math.cos(angle) * 1.5, 0.02];
+    rod(g, [0, 0, 0], tip, 0.026, 5011796);
+    for (let j = 1; j < 7; j++) {
+      let t = j / 7;
+      for (let side of [-1, 1]) {
+        let leaf = ball(
+          g,
+          0.4,
+          [4750161, 6660190, 3568475][Math.floor(r() * 3)],
+          tip[0] * t + side * 0.14,
+          tip[1] * t,
+          0,
+          [0.85 * (1 - t * 0.6), 0.2, 0.18]
+        );
+        leaf.rotation.z = angle + side * 0.6;
+      }
+    }
+  }
+  return g;
+}
+function hangingVine(parent, x, y, z, length, seed) {
+  let r = rand(seed);
+  let g = new THREE.Group();
+  parent.add(g);
+  g.position.set(x, y, z);
+  let prev = [0, 0, 0];
+  for (let i = 1; i <= Math.ceil(length / 0.45); i++) {
+    let t = i * 0.45, next = [Math.sin(t * 0.7) * 0.23, -t, Math.cos(t * 0.5) * 0.1];
+    rod(g, prev, next, 0.025, 3629897);
+    if (i % 2 === 0) {
+      for (let s of [-1, 1]) {
+        let l = ball(
+          g,
+          0.22,
+          5080408,
+          next[0] + s * 0.16,
+          next[1] + 0.05,
+          next[2],
+          [1.3, 0.5, 0.18]
+        );
+        l.rotation.z = s * 0.55;
+      }
+    }
+    prev = next;
+  }
+  return g;
+}
+function stalactite(parent, x, y, z, h, w, c) {
+  let m = mesh(
+    new THREE.ConeGeometry(w, h, 5),
+    c,
+    parent,
+    x,
+    y - h / 2,
+    z,
+    true
+  );
+  m.rotation.z = Math.PI;
+  m.rotation.y = x * 0.3;
+  return m;
+}
+function arch(parent, x, y, z, w, h, color) {
+  const g = new THREE.Group();
+  g.position.set(x, y, z);
+  parent.add(g);
+  let depth = 0.9;
+  for (let side of [-1, 1]) {
+    for (let i = 0; i < Math.ceil(h); i++) {
+      let b = box(
+        g,
+        w * 0.2,
+        0.94,
+        depth,
+        color,
+        side * w * 0.47,
+        i + 0.45,
+        0,
+        true
+      );
+      b.rotation.z = i % 2 ? 8e-3 : -8e-3;
+    }
+  }
+  let crown = box(g, w * 1.16, 0.65, depth * 1.15, color, 0, h + 0.12, 0, true);
+  for (let i = -1; i <= 1; i++)
+    box(g, 0.65, 0.5, depth * 1.12, 12622951, i * 0.9, h + 0.64, 0, true);
+  let shape = new THREE.Shape();
+  shape.moveTo(-w * 0.32, 0);
+  shape.lineTo(w * 0.32, 0);
+  shape.lineTo(w * 0.32, h - 0.4);
+  shape.lineTo(0, h + 0.1);
+  shape.lineTo(-w * 0.32, h - 0.4);
+  shape.closePath();
+  let opening = new THREE.Mesh(
+    new THREE.ShapeGeometry(shape),
+    new THREE.MeshBasicMaterial({ color: 1060659 })
+  );
+  opening.position.z = -0.48;
+  g.add(opening);
+  return g;
+}
+function rune(parent, x, y, z, scale = 1, color = 8382149) {
+  let g = new THREE.Group();
+  g.position.set(x, y, z);
+  g.scale.setScalar(scale);
+  parent.add(g);
+  for (let [a, b] of [
+    [
+      [-0.3, 0, 0],
+      [0, 0.5, 0]
+    ],
+    [
+      [0, 0.5, 0],
+      [0.3, 0, 0]
+    ],
+    [
+      [0.3, 0, 0],
+      [0, -0.5, 0]
+    ],
+    [
+      [0, -0.5, 0],
+      [-0.3, 0, 0]
+    ],
+    [
+      [0, -0.2, 0],
+      [0, 0.2, 0]
+    ]
+  ])
+    rod(g, a, b, 0.035, color, 4);
+  return g;
+}
+function torch(parent, x, y, z) {
+  rod(parent, [x, y, z], [x, y + 0.6, z], 0.09, 4931632);
+  let fire = ball(parent, 0.23, 16767355, x, y + 0.8, z, [0.8, 1.6, 0.7]);
+  fire.material = mat(16768121, 16755234);
+  let light = new THREE.PointLight(16754762, 6, 8, 2);
+  light.position.set(x, y + 0.8, z + 0.8);
+  parent.add(light);
+  return fire;
+}
+function buildWorld(scene2) {
+  const group = new THREE.Group();
+  group.name = "Cavern illustration";
+  scene2.add(group);
+  const r = rand(1984), animated = [], torches = [];
+  box(group, 160, 85, 2, 864310, 53, -15, -22);
+  for (let layer = 0; layer < 3; layer++) {
+    const points2 = [];
+    for (let x = -20; x <= 135; x += 3)
+      points2.push([x, 12.4 + layer * 2.1 + r() * 3]);
+    const shape = new THREE.Shape();
+    shape.moveTo(-20, 30);
+    shape.lineTo(135, 30);
+    for (let i = points2.length - 1; i >= 0; i--) shape.lineTo(...points2[i]);
+    shape.closePath();
+    let m = new THREE.Mesh(
+      new THREE.ShapeGeometry(shape),
+      mat([1195328, 1525321, 1986896][layer])
+    );
+    m.position.z = -14 + layer * 3;
+    group.add(m);
+  }
+  for (let i = 0; i < 150; i++) {
+    let x = -18 + r() * 154, y = -42 + r() * 60;
+    let rock = mesh(
+      new THREE.IcosahedronGeometry(1 + r() * 3.4, 0),
+      [1458247, 1853772, 2118737, 1194560, 2774868][i % 5],
+      group,
+      x,
+      y,
+      -13 + r() * 3
+    );
+    rock.scale.set(1 + r() * 2, 1 + r() * 2, 0.45);
+    rock.rotation.z = r() * 3;
+  }
+  for (let i = 0; i < 64; i++) {
+    let x = -8 + r() * 133, h = 1 + r() * 4;
+    stalactite(
+      group,
+      x,
+      13.7,
+      -6 - r() * 3,
+      h,
+      0.4 + r() * 0.75,
+      [3234901, 2707278, 2247500][i % 3]
+    );
+  }
+  arch(group, 8, 0.1, -5.1, 5.1, 5.8, 10125398);
+  for (let i = 0; i < 5; i++) {
+    box(group, 1.05, 0.52, 1.2, 9007951, 7.5 + i * 1.05, 0.2, -4.3, true);
+  }
+  for (let side of [-1, 1]) {
+    box(group, 1.25, 5.5, 1.1, 4810331, 8 + side * 5, 2.75, -7, true);
+    box(group, 1.8, 0.5, 1.4, 7373674, 8 + side * 5, 5.55, -7, true);
+  }
+  for (let i = 0; i < 13; i++) {
+    let x = -4 + i * 2.8;
+    hangingVine(group, x, 12.5, -3.3 - r() * 3, 1 + r() * 7, i + 44);
+  }
+  for (let x of [-2, 1.5, 5, 11, 15, 19, 22, 27, 30])
+    fern(group, x, 0.1, -1.6, 0.65 + r() * 0.7, Math.floor(x * 123 + 2e3));
+  for (let i = 0; i < 4; i++)
+    box(
+      group,
+      5 - i * 0.6,
+      0.45,
+      2,
+      7238496,
+      16,
+      -0.4 + i * 0.42,
+      -5 - i * 0.4,
+      true
+    );
+  let face = new THREE.Group();
+  face.position.set(19, 5, -7);
+  group.add(face);
+  box(face, 2.2, 2.8, 0.7, 6980208, 0, 0, 0, true);
+  box(face, 2.65, 0.65, 0.9, 8689275, 0, 1.5, 0.1, true);
+  for (let s of [-1, 1])
+    box(face, 0.47, 0.18, 0.16, 1523260, s * 0.55, 0.45, 0.44);
+  box(face, 0.33, 0.8, 0.5, 10132600, 0, -0.05, 0.5, true);
+  box(face, 0.8, 0.2, 0.2, 1588795, 0, -0.8, 0.45);
+  rune(group, 8, 3, -4.55, 0.8);
+  torches.push(torch(group, 4, 1.1, -3.7));
+  torches.push(torch(group, 12, 1.1, -3.7));
+  const entrySun = new THREE.Group();
+  entrySun.position.set(25, 6.6, -6.4);
+  group.add(entrySun);
+  let outer = mesh(
+    new THREE.CylinderGeometry(2.75, 2.75, 0.4, 12),
+    10848853,
+    entrySun,
+    0,
+    0,
+    0,
+    true
+  );
+  outer.rotation.x = Math.PI / 2;
+  let inner = mesh(
+    new THREE.CylinderGeometry(2.13, 2.13, 0.46, 12),
+    3893600,
+    entrySun,
+    0,
+    0,
+    0.1,
+    true
+  );
+  inner.rotation.x = Math.PI / 2;
+  let pupil = mesh(
+    new THREE.CylinderGeometry(1.1, 1.1, 0.5, 8),
+    13019233,
+    entrySun,
+    0,
+    0,
+    0.17,
+    true
+  );
+  pupil.rotation.x = Math.PI / 2;
+  rune(entrySun, 0, 0, 0.5, 1.6, 15915670);
+  for (let i = 0; i < 16; i++) {
+    let a = i / 16 * Math.PI * 2;
+    rod(
+      entrySun,
+      [Math.cos(a) * 2.9, Math.sin(a) * 2.9, 0.1],
+      [Math.cos(a) * 3.35, Math.sin(a) * 3.35, 0.1],
+      0.09,
+      12230245,
+      4
+    );
+  }
+  for (let side of [-1, 1]) {
+    box(group, 0.85, 5.2, 1.1, 8224087, 25 + side * 2.1, 2.55, -6.4, true);
+    box(group, 1.3, 0.35, 1.3, 10654307, 25 + side * 2.1, 5.2, -6.3, true);
+    fern(group, 25 + side * 2.4, 0.1, -3.7, 1.3, side + 321);
+  }
+  hangingVine(group, 27.4, 11, -4, 4.2, 477);
+  const titleDecor = new THREE.Group();
+  titleDecor.name = "title expedition balloon";
+  titleDecor.position.set(25.8, 0, 0.25);
+  group.add(titleDecor);
+  const airship = new THREE.Group();
+  airship.position.y = 6.35;
+  titleDecor.add(airship);
+  const fabric = mesh(
+    new THREE.SphereGeometry(1.14, 12, 8),
+    15709535,
+    airship,
+    0,
+    0,
+    0,
+    true
+  );
+  fabric.scale.y = 1.22;
+  for (let i = 0; i < 4; i++) {
+    let a = i * Math.PI / 2;
+    let stripe = mesh(
+      new THREE.SphereGeometry(1.153, 12, 8, a, 0.12),
+      16242317,
+      airship
+    );
+    stripe.scale.y = 1.22;
+  }
+  let neck = mesh(
+    new THREE.CylinderGeometry(0.28, 0.12, 0.3, 8),
+    11036477,
+    airship,
+    0,
+    -1.34,
+    0,
+    true
+  );
+  for (let side of [-1, 1])
+    rod(
+      airship,
+      [side * 0.3, -1.3, 0],
+      [side * 0.22, -2.17, 0],
+      0.018,
+      15848346,
+      4
+    );
+  rod(airship, [-0.35, -2.17, 0], [0.35, -2.17, 0], 0.055, 6575938, 5);
+  const titleExplorer = makeExplorer();
+  titleExplorer.group.position.y = 2.62;
+  titleExplorer.group.rotation.y = 0.15;
+  titleExplorer.setAction("float");
+  titleDecor.add(titleExplorer.group);
+  const titleShadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.9, 20),
+    new THREE.MeshBasicMaterial({
+      color: 1060396,
+      transparent: true,
+      opacity: 0.2,
+      depthWrite: false
+    })
+  );
+  titleShadow.rotation.x = -Math.PI / 2;
+  titleShadow.position.set(0, 0.1, -0.1);
+  titleShadow.scale.set(1.5, 0.55, 1);
+  titleDecor.add(titleShadow);
+  for (let [x, y, h] of [
+    [23, -6, 8],
+    [33, -7, 9],
+    [50, -18, 8],
+    [78, -28, 8],
+    [88, -20, 21]
+  ]) {
+    for (let i = 0; i < 7; i++) {
+      let m = mesh(
+        new THREE.IcosahedronGeometry(1.3 + r() * 1.5, 0),
+        i % 2 ? 2709846 : 2182735,
+        group,
+        x + (r() - 0.5) * 2.5,
+        y + (r() - 0.5) * h,
+        -7 - r() * 2
+      );
+      m.scale.set(0.7, 1.5, 0.5);
+    }
+  }
+  arch(group, 43, -11.85, -4.6, 4.3, 5.3, 9009754);
+  for (let x of [14, 21, 28, 38, 52]) {
+    box(group, 1, 5, 1.3, 7042912, x, -9.4, -7, true);
+    box(group, 1.6, 0.5, 1.7, 9671021, x, -6.8, -7, true);
+    fern(group, x + 0.8, -11.8, -2, 0.75, x * 67);
+  }
+  for (let i = 0; i < 24; i++) {
+    let x = 13 + r() * 42;
+    stalactite(group, x, -5.4, -4.5, 1 + r() * 1.9, 0.23 + r() * 0.4, 3958107);
+  }
+  for (let x of [17, 26, 40, 46]) {
+    rune(group, x, -8.7, -4.8, 0.7, 15121522);
+    torches.push(torch(group, x, -10.8, -2.8));
+  }
+  for (let i = 0; i < 33; i++) {
+    let x = 44 + r() * 36, y = -28 + r() * 8, z = -2.5 - r() * 4;
+    let crystal = mesh(
+      new THREE.ConeGeometry(0.18 + r() * 0.16, 0.6 + r() * 0.8, 5),
+      6804674,
+      group,
+      x,
+      y,
+      z,
+      true,
+      1742218
+    );
+    crystal.rotation.z = (r() - 0.5) * 0.75;
+    animated.push({ mesh: crystal, base: y, phase: r() * 6, type: "crystal" });
+  }
+  arch(group, 64, -28, -6, 7, 6.8, 5273457);
+  for (let i = 0; i < 6; i++)
+    box(group, 3.2, 0.8, 1.6, 4286308, 53 + i * 4.2, -28.4, -4, true);
+  const waterMat = new THREE.MeshStandardMaterial({
+    color: 1482142,
+    transparent: true,
+    opacity: 0.35,
+    roughness: 0.22,
+    metalness: 0.1,
+    emissive: 747893,
+    emissiveIntensity: 0.7,
+    side: THREE.DoubleSide,
+    depthWrite: false
+  });
+  let water = new THREE.Mesh(new THREE.PlaneGeometry(28, 8), waterMat);
+  water.position.set(63, -25, -0.9);
+  group.add(water);
+  const waterTop = new THREE.Mesh(
+    new THREE.PlaneGeometry(28, 0.1),
+    new THREE.MeshBasicMaterial({
+      color: 9561551,
+      transparent: true,
+      opacity: 0.7
+    })
+  );
+  waterTop.position.set(63, -21, -0.74);
+  group.add(waterTop);
+  for (let i = 0; i < 32; i++) {
+    let w = box(
+      group,
+      0.25 + r() * 1.4,
+      0.025,
+      0.03,
+      7655365,
+      49 + r() * 28,
+      -21 + (r() - 0.5) * 0.13,
+      -0.7
+    );
+    animated.push({
+      mesh: w,
+      base: w.position.x,
+      phase: r() * 7,
+      type: "ripple"
+    });
+  }
+  for (let i = 0; i < 18; i++) {
+    let bubble = new THREE.Mesh(
+      new THREE.RingGeometry(0.055, 0.072, 12),
+      new THREE.MeshBasicMaterial({
+        color: 9693398,
+        transparent: true,
+        opacity: 0.45,
+        side: THREE.DoubleSide
+      })
+    );
+    bubble.position.set(50 + r() * 26, -29 + r() * 8, -0.5);
+    group.add(bubble);
+    animated.push({
+      mesh: bubble,
+      base: bubble.position.y,
+      phase: r() * 8,
+      type: "bubble"
+    });
+  }
+  for (let i = 0; i < 20; i++) {
+    let x = 48 + r() * 30;
+    let stalk = rod(
+      group,
+      [x, -29, -0.3],
+      [x + (r() - 0.5), -27 - r() * 1.5, -0.3],
+      0.04,
+      2326129
+    );
+    stalk.rotation.z = (r() - 0.5) * 0.15;
+  }
+  for (let side of [-1, 1]) {
+    for (let y = -34; y < -3; y += 3.2) {
+      let b = box(
+        group,
+        1.1,
+        2.95,
+        1.7,
+        6650467,
+        85 + side * 4.1,
+        y + 1.5,
+        -6,
+        true
+      );
+      b.rotation.z = side * 0.013;
+      box(
+        group,
+        1.7,
+        0.25,
+        1.95,
+        9605998,
+        85 + side * 4.1,
+        y + 2.7,
+        -5.9,
+        true
+      );
+    }
+  }
+  for (let y = -31; y < -5; y += 6) rune(group, 85, y, -7, 0.8, 14008956);
+  let geyser = new THREE.Mesh(
+    new THREE.ConeGeometry(0.75, 7, 12, 1, true),
+    new THREE.MeshBasicMaterial({
+      color: 7268050,
+      transparent: true,
+      opacity: 0.07,
+      side: THREE.DoubleSide,
+      depthWrite: false
+    })
+  );
+  geyser.position.set(85, -30.5, -1.7);
+  group.add(geyser);
+  arch(group, 109, -4.9, -4.2, 5.4, 6.4, 11506523);
+  const sun = new THREE.Group();
+  sun.position.set(102.5, 0.6, -5);
+  group.add(sun);
+  let disk = mesh(new THREE.CylinderGeometry(2, 2, 0.25, 12), 13151077, sun);
+  disk.rotation.x = Math.PI / 2;
+  let center = mesh(
+    new THREE.CylinderGeometry(1.35, 1.35, 0.3, 8),
+    4089952,
+    sun,
+    0,
+    0,
+    0.2,
+    true
+  );
+  center.rotation.x = Math.PI / 2;
+  rune(sun, 0, 0, 0.45, 1.6, 15849099);
+  for (let i = 0; i < 12; i++) {
+    let a = i / 12 * Math.PI * 2;
+    rod(
+      sun,
+      [Math.cos(a) * 2.1, Math.sin(a) * 2.1, 0],
+      [Math.cos(a) * 2.65, Math.sin(a) * 2.65, 0],
+      0.12,
+      13676388,
+      4
+    );
+  }
+  for (let x of [93, 98, 114]) {
+    fern(group, x, -4.8, -1.8, 0.9, x * 91);
+    torches.push(torch(group, x, -3.9, -2.6));
+  }
+  for (let [x, y, w, h, color] of [
+    [5, 9, 3, 13, 12708021],
+    [20, 8, 2.8, 14, 8181186],
+    [45, -5, 2.3, 14, 14336135],
+    [62, -16, 4, 15, 7005654],
+    [85, -14, 3, 27, 15124098],
+    [109, 2, 3, 12, 16768140]
+  ]) {
+    let s = new THREE.Shape();
+    s.moveTo(-w * 0.22, h * 0.5);
+    s.lineTo(w * 0.22, h * 0.5);
+    s.lineTo(w, h * -0.5);
+    s.lineTo(-w * 0.5, h * -0.5);
+    s.closePath();
+    let m = new THREE.Mesh(
+      new THREE.ShapeGeometry(s),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.045,
+        side: THREE.DoubleSide,
+        depthWrite: false
+      })
+    );
+    m.position.set(x, y, -3.9);
+    m.rotation.z = -0.18;
+    group.add(m);
+  }
+  const points = [];
+  for (let i = 0; i < 650; i++)
+    points.push(-8 + r() * 132, -37 + r() * 52, -1.8 - r() * 8);
+  let geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.Float32BufferAttribute(points, 3));
+  let dust = new THREE.Points(
+    geom,
+    new THREE.PointsMaterial({
+      color: 14997657,
+      size: 0.035,
+      transparent: true,
+      opacity: 0.45,
+      depthWrite: false
+    })
+  );
+  group.add(dust);
+  return {
+    group,
+    titleDecor,
+    update(dt, time) {
+      titleDecor.position.y = Math.sin(time * 0.85) * 0.22;
+      airship.rotation.z = Math.sin(time * 0.65) * 0.045;
+      titleExplorer.mixer.update(dt);
+      for (const a of animated) {
+        if (a.type === "ripple")
+          a.mesh.position.x = a.base + Math.sin(time * 0.6 + a.phase) * 0.3;
+        else if (a.type === "bubble")
+          a.mesh.position.y = -29 + (a.base + 29 + time * 0.28) % 8;
+        else
+          a.mesh.material.emissiveIntensity = 0.4 + Math.sin(time * 1.3 + a.phase) * 0.12;
+      }
+      for (let i = 0; i < torches.length; i++) {
+        let fire = torches[i];
+        fire.scale.y = 1.6 + Math.sin(time * 10 + i * 3) * 0.15;
+        fire.scale.x = 0.8 + Math.sin(time * 13 + i) * 0.08;
+      }
+      dust.rotation.z = Math.sin(time * 0.015) * 3e-3;
+    }
+  };
+}
+function makeExplorer(color = 15316044) {
+  const group = new THREE.Group();
+  group.name = "explorer";
+  let torso = new THREE.Group();
+  torso.name = "torso";
+  torso.position.y = 0.91;
+  group.add(torso);
+  box(torso, 0.54, 0.61, 0.36, color, 0, 0, 0, true);
+  box(torso, 0.57, 0.14, 0.39, 6308659, 0, -0.28, 0, true);
+  box(torso, 0.12, 0.11, 0.05, 16174716, 0.12, -0.28, 0.22, true);
+  const head = ball(torso, 0.3, 15317131, 0.02, 0.6, 0, [0.9, 1.02, 0.9], true);
+  head.name = "head";
+  let hair = ball(torso, 0.29, 4799020, -0.03, 0.69, -0.03, [1, 0.7, 1]);
+  let brim = mesh(
+    new THREE.CylinderGeometry(0.48, 0.48, 0.075, 12),
+    12620367,
+    torso,
+    0.01,
+    0.83,
+    0,
+    true
+  );
+  let crown = mesh(
+    new THREE.CylinderGeometry(0.27, 0.33, 0.3, 9),
+    13081690,
+    torso,
+    -0.04,
+    1.01,
+    0,
+    true
+  );
+  box(torso, 0.59, 0.09, 0.55, 6965556, -0.04, 0.91, 0, true);
+  for (let s of [-1, 1]) {
+    ball(torso, 0.043, 1190444, 0.18, 0.64, s * 0.225, [0.75, 1, 1]);
+    ball(torso, 0.022, 16774353, 0.2, 0.65, s * 0.242);
+  }
+  ball(torso, 0.1, 15317131, 0.28, 0.55, 0, [1.2, 0.8, 0.75]);
+  box(torso, 0.48, 0.13, 0.4, 12997442, 0, 0.28, 0, true);
+  let scarf = box(torso, 0.45, 0.12, 0.08, 14968137, -0.38, 0.24, 0.05, true);
+  scarf.rotation.z = 0.3;
+  scarf.name = "scarf";
+  box(torso, 0.28, 0.4, 0.23, 7951162, -0.08, -0.02, -0.29, true);
+  rod(torso, [-0.2, 0.2, 0.22], [0.2, -0.24, 0.23], 0.035, 6900015, 5);
+  for (let [name, x, z] of [
+    ["armL", -0.02, 0.28],
+    ["armR", -0.02, -0.28]
+  ]) {
+    let pivot = new THREE.Group();
+    pivot.name = name;
+    pivot.position.set(x, 0.17, z);
+    torso.add(pivot);
+    let sleeve = box(pivot, 0.2, 0.28, 0.22, color, 0, -0.12, 0, true);
+    box(pivot, 0.14, 0.29, 0.16, 15317131, 0, -0.35, 0, true);
+    ball(pivot, 0.105, 15317131, 0, -0.51, 0, [0.8, 1, 1], true);
+  }
+  for (let [name, z] of [
+    ["legL", 0.15],
+    ["legR", -0.15]
+  ]) {
+    let pivot = new THREE.Group();
+    pivot.name = name;
+    pivot.position.set(0, 0.59, z);
+    group.add(pivot);
+    box(pivot, 0.22, 0.47, 0.22, 4349262, 0, -0.22, 0, true);
+    box(pivot, 0.3, 0.18, 0.25, 4471340, 0.04, -0.48, 0, true);
+  }
+  const mixer = new THREE.AnimationMixer(group), actions = {};
+  const swing = (name, values, times = [0, 0.25, 0.5, 0.75, 1]) => new THREE.NumberKeyframeTrack(name + ".rotation[z]", times, values);
+  const clips = {
+    idle: new THREE.AnimationClip("idle", 2, [
+      new THREE.NumberKeyframeTrack(
+        "torso.position[y]",
+        [0, 1, 2],
+        [0.91, 0.94, 0.91]
+      ),
+      swing("armL", [0.08, 0.04, 0.08], [0, 1, 2]),
+      swing("armR", [-0.08, -0.04, -0.08], [0, 1, 2])
+    ]),
+    run: new THREE.AnimationClip("run", 0.65, [
+      swing("legL", [-0.65, 0.65, -0.65], [0, 0.325, 0.65]),
+      swing("legR", [0.65, -0.65, 0.65], [0, 0.325, 0.65]),
+      swing("armL", [0.7, -0.7, 0.7], [0, 0.325, 0.65]),
+      swing("armR", [-0.7, 0.7, -0.7], [0, 0.325, 0.65]),
+      new THREE.NumberKeyframeTrack(
+        "torso.position[y]",
+        [0, 0.1625, 0.325, 0.4875, 0.65],
+        [0.91, 0.98, 0.91, 0.98, 0.91]
+      ),
+      swing("scarf", [0.25, 0.5, 0.25], [0, 0.325, 0.65])
+    ]),
+    jump: new THREE.AnimationClip("jump", 0.8, [
+      swing("armL", [-1.2, -1, -0.8], [0, 0.4, 0.8]),
+      swing("armR", [-0.7, -0.4, -0.6], [0, 0.4, 0.8]),
+      swing("legL", [-0.9, -0.5, -0.3], [0, 0.4, 0.8]),
+      swing("legR", [0.9, 0.6, 0.2], [0, 0.4, 0.8])
+    ]),
+    fall: new THREE.AnimationClip("fall", 1, [
+      swing("armL", [-1.6, -1.4, -1.6], [0, 0.5, 1]),
+      swing("armR", [-1.4, -1.6, -1.4], [0, 0.5, 1]),
+      swing("legL", [-0.35, -0.2, -0.35], [0, 0.5, 1]),
+      swing("legR", [0.3, 0.1, 0.3], [0, 0.5, 1])
+    ]),
+    climb: new THREE.AnimationClip("climb", 0.85, [
+      swing("armL", [-2.65, -0.8, -2.65], [0, 0.425, 0.85]),
+      swing("armR", [-0.8, -2.65, -0.8], [0, 0.425, 0.85]),
+      swing("legL", [-0.55, 0.45, -0.55], [0, 0.425, 0.85]),
+      swing("legR", [0.45, -0.55, 0.45], [0, 0.425, 0.85])
+    ]),
+    swim: new THREE.AnimationClip("swim", 1.1, [
+      swing("torso", [-0.8, -0.88, -0.8], [0, 0.55, 1.1]),
+      swing("armL", [-2.2, 0.6, -2.2], [0, 0.55, 1.1]),
+      swing("armR", [0.6, -2.2, 0.6], [0, 0.55, 1.1]),
+      swing("legL", [-0.2, 0.45, -0.2], [0, 0.55, 1.1]),
+      swing("legR", [0.45, -0.2, 0.45], [0, 0.55, 1.1])
+    ]),
+    float: new THREE.AnimationClip("float", 1.8, [
+      swing("armL", [-2.8, -2.65, -2.8], [0, 0.9, 1.8]),
+      swing("armR", [-2.65, -2.8, -2.65], [0, 0.9, 1.8]),
+      swing("legL", [-0.18, 0.15, -0.18], [0, 0.9, 1.8]),
+      swing("legR", [0.15, -0.18, 0.15], [0, 0.9, 1.8]),
+      new THREE.NumberKeyframeTrack(
+        "torso.position[y]",
+        [0, 0.9, 1.8],
+        [0.91, 0.95, 0.91]
+      )
+    ])
+  };
+  for (let [name, clip] of Object.entries(clips))
+    actions[name] = mixer.clipAction(clip);
+  let current = "";
+  const setAction = (name) => {
+    if (name === current || !actions[name]) return;
+    let next = actions[name];
+    next.reset().fadeIn(0.18).play();
+    if (actions[current]) actions[current].fadeOut(0.18);
+    current = name;
+  };
+  setAction("idle");
+  return { group, mixer, actions, setAction };
+}
+function makeCreature(type) {
+  const group = new THREE.Group();
+  group.name = type;
+  group.userData.wings = [];
+  if (type === "bat" || type === "condor") {
+    let color = type === "bat" ? 9205130 : 5924467;
+    ball(group, 0.22, color, 0, 0, 0, [0.65, 1, 0.8], true);
+    ball(
+      group,
+      0.18,
+      type === "bat" ? 11702954 : 11772794,
+      0,
+      0.21,
+      0.03,
+      [1, 0.85, 1],
+      true
+    );
+    for (let s of [-1, 1]) {
+      let shape = new THREE.Shape();
+      shape.moveTo(0, 0);
+      shape.lineTo(s * 0.7, 0.22);
+      shape.lineTo(s * 1.15, -0.18);
+      shape.lineTo(s * 0.75, -0.06);
+      shape.lineTo(s * 0.5, -0.27);
+      shape.lineTo(s * 0.22, -0.2);
+      shape.closePath();
+      let wing = new THREE.Mesh(
+        new THREE.ExtrudeGeometry(shape, { depth: 0.045, bevelEnabled: false }),
+        mat(color)
+      );
+      wing.name = s === 1 ? "wingR" : "wingL";
+      group.add(wing);
+      group.userData.wings.push(wing);
+      if (type === "bat") {
+        let ear = mesh(
+          new THREE.ConeGeometry(0.09, 0.23, 4),
+          11702954,
+          group,
+          s * 0.12,
+          0.4,
+          0.04,
+          true
+        );
+      }
+      ball(group, 0.035, 16764790, s * 0.075, 0.22, 0.18);
+    }
+    if (type === "condor") {
+      ball(group, 0.12, 14858090, 0.19, 0.2, 0.06, [1.4, 0.6, 0.7]);
+      group.scale.setScalar(1.25);
+    }
+  } else if (type === "frog") {
+    ball(group, 0.3, 8628058, 0, 0.25, 0, [1.2, 0.8, 0.8], true);
+    for (let s of [-1, 1]) {
+      ball(group, 0.15, 10666604, s * 0.2, 0.44, 0.15, [1, 1, 0.8], true);
+      ball(group, 0.065, 1190697, s * 0.2, 0.46, 0.255);
+      ball(group, 0.18, 7246668, s * 0.31, 0.12, 0, [1.2, 0.5, 1], true);
+      rod(group, [s * 0.1, 0.22, 0.16], [s * 0.28, 0.04, 0.27], 0.05, 9746787);
+    }
+  } else if (type === "scorpion") {
+    ball(group, 0.28, 15260093, 0, 0.22, 0, [1.35, 0.6, 0.8], true);
+    for (let i = 0; i < 4; i++) {
+      let x = -0.35 - i * 0.1, y = 0.28 + i * 0.14;
+      ball(group, 0.09, 14929840, x, y, 0, [1, 1.1, 0.9], true);
+    }
+    let sting = mesh(
+      new THREE.ConeGeometry(0.1, 0.22, 5),
+      11172188,
+      group,
+      -0.71,
+      0.83,
+      0,
+      true
+    );
+    sting.rotation.z = -0.5;
+    for (let i = 0; i < 3; i++)
+      for (let s of [-1, 1])
+        rod(
+          group,
+          [-0.17 + i * 0.15, 0.2, s * 0.14],
+          [-0.26 + i * 0.15, 0.03, s * 0.41],
+          0.025,
+          15523009,
+          4
+        );
+    for (let s of [-1, 1]) {
+      rod(
+        group,
+        [0.18, 0.23, s * 0.12],
+        [0.45, 0.27, s * 0.28],
+        0.045,
+        15062712
+      );
+      ball(group, 0.12, 15260093, 0.5, 0.3, s * 0.29, [1.4, 0.7, 0.7], true);
+    }
+  } else if (type === "eel") {
+    for (let i = 0; i < 8; i++) {
+      let p = ball(
+        group,
+        0.15,
+        10339744,
+        -i * 0.17,
+        Math.sin(i * 0.8) * 0.12,
+        0,
+        [1.15, 0.8, 0.8],
+        i === 0
+      );
+      p.name = "segment" + i;
+    }
+    ball(group, 0.04, 16770190, 0.03, 0.06, 0.13);
+    let fin = mesh(
+      new THREE.ConeGeometry(0.12, 0.3, 3),
+      8053194,
+      group,
+      -1.36,
+      0.03,
+      0
+    );
+    fin.rotation.z = Math.PI / 2;
+  }
+  group.userData.animate = (time) => {
+    if (type === "eel") {
+      for (let i = 0; i < 8; i++) {
+        const segment = group.getObjectByName("segment" + i);
+        if (segment) segment.position.y = Math.sin(time * 5 - i * 0.7) * 0.1;
+      }
+    }
+  };
+  return group;
+}
+function makePickup(kind) {
+  const group = new THREE.Group();
+  group.name = kind;
+  if (kind === "gold") {
+    let ingot = box(group, 0.8, 0.3, 0.4, 16041829, 0, 0.26, 0, true);
+    ingot.rotation.z = 0.06;
+    box(group, 0.6, 0.035, 0.32, 16770466, 0, 0.43, 0.01);
+    box(group, 0.19, 0.045, 0.12, 12289848, 0.04, 0.46, 0.1);
+    const star = new THREE.Shape();
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4, r = i % 2 ? 0.035 : 0.14;
+      const x = Math.cos(a) * r, y = Math.sin(a) * r;
+      if (!i) star.moveTo(x, y);
+      else star.lineTo(x, y);
+    }
+    star.closePath();
+    const glint = new THREE.Mesh(
+      new THREE.ShapeGeometry(star),
+      new THREE.MeshBasicMaterial({
+        color: 16773047,
+        side: THREE.DoubleSide,
+        transparent: true,
+        opacity: 0.85
+      })
+    );
+    glint.position.set(0.42, 0.69, 0.12);
+    group.add(glint);
+  } else if (kind === "diamond") {
+    let gem = mesh(
+      new THREE.OctahedronGeometry(0.65),
+      8776408,
+      group,
+      0,
+      0.75,
+      0,
+      true,
+      3118732
+    );
+    gem.scale.set(1, 1.35, 1);
+    let band = mesh(
+      new THREE.TorusGeometry(0.72, 0.045, 5, 24),
+      14860144,
+      group,
+      0,
+      0.75,
+      -0.1,
+      true
+    );
+    band.rotation.x = 0.28;
+    box(group, 1.15, 0.32, 0.75, 10456416, 0, 0.05, -0.08, true);
+  } else if (kind === "researcher") {
+    let who = makeExplorer(7709601);
+    group.add(who.group);
+    who.group.scale.setScalar(0.94);
+    let book = box(group, 0.4, 0.5, 0.09, 14067306, 0.36, 0.85, 0.35, true);
+    book.rotation.z = -0.15;
+    group.userData.mixer = who.mixer;
+    group.userData.setAction = who.setAction;
+  } else if (kind === "cat") {
+    ball(group, 0.3, 14002789, 0, 0.38, 0, [1.3, 0.8, 0.8], true);
+    ball(group, 0.25, 14859385, 0.24, 0.72, 0, [0.9, 1, 0.9], true);
+    for (let s of [-1, 1]) {
+      let ear = mesh(
+        new THREE.ConeGeometry(0.11, 0.24, 4),
+        12751185,
+        group,
+        0.24,
+        0.96,
+        s * 0.16,
+        true
+      );
+      ball(group, 0.035, 2113847, 0.39, 0.78, s * 0.13);
+      rod(
+        group,
+        [s * 0.12, 0.22, 0.14],
+        [s * 0.12, 0.05, 0.14],
+        0.065,
+        14002789
+      );
+    }
+    ball(group, 0.055, 6243633, 0.46, 0.66, 0);
+    let tail = rod(group, [-0.3, 0.4, 0], [-0.65, 0.76, 0], 0.065, 13146454);
+    ball(group, 0.075, 13146454, -0.65, 0.8, 0);
+    box(group, 0.24, 0.07, 0.38, 11816771, 0.24, 0.51, 0, true);
+  }
+  return group;
+}
+
+// audio.js
+var MIDI = (n) => 440 * 2 ** ((n - 69) / 12);
+var MELODY = [
+  0,
+  4,
+  7,
+  12,
+  11,
+  7,
+  4,
+  2,
+  0,
+  4,
+  9,
+  7,
+  4,
+  2,
+  4,
+  7,
+  12,
+  7,
+  4,
+  2,
+  5,
+  9,
+  7,
+  4,
+  2,
+  7,
+  4,
+  2,
+  0,
+  4,
+  7,
+  12
+];
+var WALTZ = [
+  0,
+  7,
+  12,
+  11,
+  7,
+  4,
+  2,
+  7,
+  11,
+  12,
+  9,
+  5,
+  4,
+  9,
+  12,
+  14,
+  12,
+  7,
+  5,
+  9,
+  12,
+  11,
+  7,
+  2
+];
+var CavernAudio = class _CavernAudio {
+  constructor({ context = null } = {}) {
+    this.ctx = context;
+    this.musicVolume = 0.1;
+    this.sfxVolume = 0.65;
+    this.mode = "explore";
+    this.active = false;
+    this.started = false;
+    this.beat = 0;
+    this.nextBeat = 0;
+    this.nodes = /* @__PURE__ */ new Set();
+    this.stats = {
+      notes: 0,
+      effects: 0,
+      voices: 0,
+      peak: 0,
+      rms: 0,
+      musicVolume: 0.1
+    };
+  }
+  async start() {
+    if (!this.ctx) {
+      const Context = window.AudioContext || window.webkitAudioContext;
+      if (!Context) return false;
+      this.ctx = new Context();
+    }
+    if (!this.started) {
+      this.started = true;
+      const c = this.ctx;
+      this.master = c.createGain();
+      this.master.gain.value = 0.8;
+      this.musicGain = c.createGain();
+      this.musicGain.gain.value = this.musicVolume;
+      this.sfxGain = c.createGain();
+      this.sfxGain.gain.value = this.sfxVolume;
+      this.compressor = c.createDynamicsCompressor();
+      this.compressor.threshold.value = -16;
+      this.compressor.knee.value = 14;
+      this.compressor.ratio.value = 4;
+      this.analyser = c.createAnalyser();
+      this.analyser.fftSize = 1024;
+      this.musicGain.connect(this.master);
+      this.sfxGain.connect(this.master);
+      this.master.connect(this.compressor);
+      this.compressor.connect(this.analyser);
+      this.analyser.connect(c.destination);
+      this.samples = new Float32Array(this.analyser.fftSize);
+      this.noise = c.createBuffer(
+        1,
+        Math.floor(c.sampleRate * 0.25),
+        c.sampleRate
+      );
+      const values = this.noise.getChannelData(0);
+      let seed = 56789;
+      for (let i = 0; i < values.length; i++) {
+        seed = Math.imul(seed, 1664525) + 1013904223 >>> 0;
+        values[i] = (seed / 2147483648 - 1) * (1 - i / values.length);
+      }
+      this.nextBeat = c.currentTime + 0.04;
+    }
+    if (this.ctx.state === "suspended" && !(typeof OfflineAudioContext !== "undefined" && this.ctx instanceof OfflineAudioContext)) {
+      await this.ctx.resume();
+    }
+    return true;
+  }
+  setMusic(value) {
+    this.musicVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    this.stats.musicVolume = this.musicVolume;
+    if (this.musicGain)
+      this.musicGain.gain.setTargetAtTime(
+        this.musicVolume,
+        this.ctx.currentTime,
+        0.025
+      );
+  }
+  setSfx(value) {
+    this.sfxVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    if (this.sfxGain)
+      this.sfxGain.gain.setTargetAtTime(
+        this.sfxVolume,
+        this.ctx.currentTime,
+        0.025
+      );
+  }
+  _tone(hz, when, duration, volume, shape = "triangle", destination = this.sfxGain, endHz = null) {
+    if (!this.started || !Number.isFinite(hz)) return;
+    const c = this.ctx;
+    const osc = c.createOscillator();
+    const gain = c.createGain();
+    osc.type = shape;
+    osc.frequency.setValueAtTime(hz, when);
+    if (endHz)
+      osc.frequency.exponentialRampToValueAtTime(
+        Math.max(10, endHz),
+        when + duration
+      );
+    gain.gain.setValueAtTime(1e-4, when);
+    gain.gain.exponentialRampToValueAtTime(
+      Math.max(2e-4, volume),
+      when + 8e-3
+    );
+    gain.gain.exponentialRampToValueAtTime(1e-4, when + duration);
+    osc.connect(gain);
+    gain.connect(destination);
+    osc.start(when);
+    osc.stop(when + duration + 0.015);
+    this.nodes.add(osc);
+    osc.onended = () => {
+      this.nodes.delete(osc);
+      osc.disconnect();
+      gain.disconnect();
+    };
+  }
+  _noise(when, duration, volume, filterHz = 1800, destination = this.sfxGain) {
+    if (!this.started) return;
+    const source = this.ctx.createBufferSource();
+    const filter = this.ctx.createBiquadFilter();
+    const gain = this.ctx.createGain();
+    source.buffer = this.noise;
+    filter.type = "bandpass";
+    filter.frequency.value = filterHz;
+    filter.Q.value = 0.7;
+    gain.gain.setValueAtTime(volume, when);
+    gain.gain.exponentialRampToValueAtTime(1e-4, when + duration);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(destination);
+    source.start(when);
+    source.stop(when + duration);
+    this.nodes.add(source);
+    source.onended = () => {
+      this.nodes.delete(source);
+      source.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }
+  _scheduleBeat(when) {
+    const balloon2 = this.mode === "balloon";
+    const sad = this.mode === "sad";
+    const swim = this.mode === "swim";
+    const phrase = balloon2 ? WALTZ : MELODY;
+    let interval = phrase[this.beat % phrase.length];
+    if (sad && [4, 9, 11].includes(interval % 12)) interval--;
+    const root = sad ? 57 : swim ? 62 : 60;
+    const tempo = balloon2 ? 0.21 : sad ? 0.29 : swim ? 0.24 : 0.185;
+    this._tone(
+      MIDI(root + interval + 12),
+      when,
+      tempo * 1.8,
+      0.14,
+      "triangle",
+      this.musicGain
+    );
+    this._tone(
+      MIDI(root + interval + 24),
+      when + 0.013,
+      tempo,
+      0.025,
+      "sine",
+      this.musicGain
+    );
+    const meter = balloon2 ? 3 : 4;
+    if (this.beat % meter === 0) {
+      const bass = [0, 5, 7, 0][Math.floor(this.beat / (meter * 2)) % 4];
+      this._tone(
+        MIDI(root + bass - 12),
+        when,
+        tempo * 2.5,
+        0.18,
+        "triangle",
+        this.musicGain
+      );
+      this._tone(95, when, 0.13, 0.13, "sine", this.musicGain, 42);
+    } else {
+      const chord = this.beat % meter === 1 ? sad ? 3 : 4 : 7;
+      this._tone(
+        MIDI(root + chord),
+        when,
+        tempo * 0.8,
+        0.06,
+        "triangle",
+        this.musicGain
+      );
+    }
+    if (!swim && this.beat % 2 === 1)
+      this._noise(when, 0.045, 0.045, 4e3, this.musicGain);
+    if (swim && this.beat % 4 === 2)
+      this._tone(240, when, 0.25, 0.045, "sine", this.musicGain, 750);
+    this.stats.notes++;
+    this.beat++;
+    return tempo;
+  }
+  update(dt, state = {}) {
+    if (!this.started) return;
+    this.mode = ["explore", "balloon", "swim", "sad"].includes(state.mode) ? state.mode : this.mode;
+    const active = state.active !== false;
+    if (active !== this.active) {
+      this.active = active;
+      this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+      this.master.gain.setTargetAtTime(0.8, this.ctx.currentTime, 0.035);
+      this.musicGain.gain.setTargetAtTime(
+        active ? this.musicVolume : 0,
+        this.ctx.currentTime,
+        0.035
+      );
+      if (active) this.nextBeat = this.ctx.currentTime + 0.02;
+    }
+    if (active && this.ctx.state === "running") {
+      if (this.nextBeat < this.ctx.currentTime - 0.5)
+        this.nextBeat = this.ctx.currentTime;
+      while (this.nextBeat < this.ctx.currentTime + 0.1)
+        this.nextBeat += this._scheduleBeat(this.nextBeat);
+    }
+    this.analyser.getFloatTimeDomainData(this.samples);
+    let square = 0, peak = 0;
+    for (const sample of this.samples) {
+      square += sample * sample;
+      peak = Math.max(peak, Math.abs(sample));
+    }
+    this.stats.rms = Math.sqrt(square / this.samples.length);
+    this.stats.peak = Math.max(this.stats.peak, peak);
+  }
+  effect(name) {
+    if (!this.started) return;
+    const t = this.ctx.currentTime + 5e-3;
+    this.stats.effects++;
+    switch (name) {
+      case "jump":
+        this._tone(210, t, 0.14, 0.12, "triangle", this.sfxGain, 460);
+        break;
+      case "land":
+        this._noise(t, 0.08, 0.1, 350);
+        break;
+      case "gold":
+      case "collect":
+        [79, 84, 88].forEach(
+          (n, i) => this._tone(MIDI(n), t + i * 0.06, 0.2, 0.13, "sine")
+        );
+        break;
+      case "checkpoint":
+        [60, 67, 72, 76].forEach(
+          (n, i) => this._tone(MIDI(n), t + i * 0.1, 0.38, 0.12)
+        );
+        break;
+      case "rescue":
+      case "diamond":
+        [72, 76, 79, 84, 79, 84, 88].forEach(
+          (n, i) => this._tone(MIDI(n), t + i * 0.1, 0.3, 0.13)
+        );
+        this.voice(name === "rescue" ? 73 : 38);
+        break;
+      case "hit":
+        this._tone(180, t, 0.4, 0.2, "sawtooth", this.sfxGain, 45);
+        this._noise(t, 0.2, 0.13, 650);
+        break;
+      case "pop":
+        this._noise(t, 0.11, 0.22, 1800);
+        this._tone(620, t, 0.1, 0.08, "sine", this.sfxGain, 90);
+        break;
+      case "splash":
+        this._noise(t, 0.24, 0.14, 1700);
+        [0, 0.06, 0.13].forEach(
+          (offset, i) => this._tone(
+            220 + i * 100,
+            t + offset,
+            0.12,
+            0.08,
+            "sine",
+            this.sfxGain,
+            650 + i * 120
+          )
+        );
+        break;
+      case "balloon":
+        this._tone(170, t, 0.3, 0.1, "sine", this.sfxGain, 610);
+        break;
+      case "win":
+        [60, 64, 67, 72, 67, 72, 76, 79, 84].forEach(
+          (n, i) => this._tone(MIDI(n), t + i * 0.15, i === 8 ? 1.1 : 0.3, 0.15)
+        );
+        this.voice(318);
+        break;
+      case "pause":
+      case "menu":
+        this._tone(580, t, 0.07, 0.07, "sine");
+        break;
+      default:
+        this._tone(440, t, 0.08, 0.06, "sine");
+    }
+  }
+  voice(seed = 1) {
+    if (!this.started) return;
+    this.stats.voices++;
+    const c = this.ctx;
+    let random = (Number(seed) || 1) >>> 0;
+    const rng = () => {
+      random = Math.imul(random, 1664525) + 1013904223 >>> 0;
+      return random / 4294967296;
+    };
+    const t = c.currentTime + 0.02;
+    for (let i = 0; i < 6; i++) {
+      const syllable = 0.07 + rng() * 0.035;
+      const frequency = 170 + rng() * 180;
+      const osc = c.createOscillator();
+      const vowel = c.createBiquadFilter();
+      const gain = c.createGain();
+      const at = t + i * 0.11;
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(frequency, at);
+      osc.frequency.linearRampToValueAtTime(
+        frequency * (0.85 + rng() * 0.45),
+        at + syllable
+      );
+      vowel.type = "bandpass";
+      vowel.frequency.value = [650, 900, 1400, 1800][Math.floor(rng() * 4)];
+      vowel.Q.value = 4;
+      gain.gain.setValueAtTime(1e-4, at);
+      gain.gain.linearRampToValueAtTime(0.16, at + 0.012);
+      gain.gain.exponentialRampToValueAtTime(1e-4, at + syllable);
+      osc.connect(vowel);
+      vowel.connect(gain);
+      gain.connect(this.sfxGain);
+      osc.start(at);
+      osc.stop(at + syllable + 0.01);
+      this.nodes.add(osc);
+      osc.onended = () => {
+        this.nodes.delete(osc);
+        osc.disconnect();
+        vowel.disconnect();
+        gain.disconnect();
+      };
+    }
+  }
+  stop() {
+    this.active = false;
+    if (!this.started) return;
+    this.master.gain.cancelScheduledValues(this.ctx.currentTime);
+    this.master.gain.setValueAtTime(0, this.ctx.currentTime);
+    for (const node of this.nodes) {
+      try {
+        node.stop();
+      } catch {
+      }
+    }
+    this.nodes.clear();
+  }
+  getStats() {
+    return {
+      ...this.stats,
+      active: this.active,
+      contextState: this.ctx?.state || "not-started",
+      liveNodes: this.nodes.size
+    };
+  }
+  static async auditOffline() {
+    const context = new OfflineAudioContext(2, 44100 * 3, 44100);
+    const audio2 = new _CavernAudio({ context });
+    await audio2.start();
+    for (let time = 0.02; time < 2.5; ) time += audio2._scheduleBeat(time);
+    audio2.effect("gold");
+    audio2.voice(17);
+    const buffer = await context.startRendering();
+    const values = buffer.getChannelData(0);
+    let peak = 0, square = 0;
+    for (const value of values) {
+      peak = Math.max(peak, Math.abs(value));
+      square += value * value;
+    }
+    return {
+      peak,
+      rms: Math.sqrt(square / values.length),
+      finite: values.every(Number.isFinite),
+      musicVolume: audio2.musicVolume,
+      notes: audio2.stats.notes,
+      voices: audio2.stats.voices,
+      duration: buffer.duration
+    };
+  }
+};
+
+// hub.js
+var encodeSignal = (data) => btoa(JSON.stringify(data));
+var decodeSignal = (text) => JSON.parse(atob(text.trim()));
+var safeInput = (value) => ({
+  x: Math.max(-1, Math.min(1, Number(value?.x) || 0)),
+  y: Math.max(-1, Math.min(1, Number(value?.y) || 0)),
+  jump: !!value?.jump,
+  action: !!value?.action
+});
+var ExpeditionNetwork = class {
+  constructor(onInput = () => {
+  }, onSnapshot = () => {
+  }, onStatus = () => {
+  }) {
+    this.onInput = onInput;
+    this.onSnapshot = onSnapshot;
+    this.onStatus = onStatus;
+    this.role = "solo";
+    this.playerId = 0;
+    this.players = [{ id: 0, name: "Pip", color: "#ffc35b" }];
+    this.status = "Solo expedition";
+    this.isServer = false;
+    this.ended = false;
+    this.started = false;
+    this.hub = false;
+    this.connected = false;
+    this.stats = { sent: 0, received: 0, snapshots: 0, inputs: 0 };
+    this._nextInput = 0;
+    this._nextSnapshot = 0;
+    this._lastMessage = 0;
+    this._sequence = 0;
+    this._receivedSequence = -1;
+    this._unsub = [];
+    this._score = 0;
+    this._won = false;
+    this._peerToken = typeof crypto?.randomUUID === "function" ? crypto.randomUUID() : String(Math.random());
+    this._timer = setInterval(() => this._heartbeat(), 1e3);
+  }
+  async init() {
+    if (!window.AIHub?.active) return null;
+    const info = await AIHub.connect({ mode: "shared-world", seats: [1, 2] });
+    if (!info) return null;
+    this.hub = true;
+    this.info = info;
+    this.playerId = info.me;
+    this.players = [...info.players];
+    this.role = info.isHost ? "host" : "guest";
+    this.isServer = !!info.server;
+    this.connected = true;
+    this._setStatus("AI Hub \xB7 preparing expedition");
+    this._unsub.push(
+      AIHub.on("message", (data, from) => this._receive(data, from))
+    );
+    this._unsub.push(
+      AIHub.on("start", () => {
+        this.started = true;
+        this._setStatus("AI Hub \xB7 expedition underway");
+      })
+    );
+    this._unsub.push(
+      AIHub.on("time-up", () => this.finish(this._score, this._won))
+    );
+    this._unsub.push(
+      AIHub.on("leave", ({ id }) => {
+        this.players = this.players.filter((p) => p.id !== id);
+        this.onInput(
+          { x: 0, y: 0, jump: false, action: false, left: true },
+          id
+        );
+        this._setStatus("AI Hub \xB7 expedition continues");
+      })
+    );
+    this._unsub.push(
+      AIHub.on("end", ({ reason }) => {
+        this.ended = true;
+        this.connected = false;
+        this._setStatus(
+          `AI Hub \xB7 ${reason === "finished" ? "expedition complete" : "round ended"}`
+        );
+      })
+    );
+    return info;
+  }
+  get running() {
+    return !this.ended && (!this.hub || this.started && AIHub.time() >= 0);
+  }
+  ready() {
+    if (this.hub && !this._ready) {
+      this._ready = true;
+      AIHub.ready();
+    }
+  }
+  setScore(score, won = false) {
+    this._score = Number(score) || 0;
+    this._won = !!won;
+  }
+  finish(score = this._score, won = this._won) {
+    this.setScore(score, won);
+    if (!this.hub || this.role !== "host" || this._finished || this.ended)
+      return;
+    this._finished = true;
+    const ids = this.players.map((p) => p.id);
+    AIHub.finish({
+      standings: [ids],
+      scores: Object.fromEntries(ids.map((id) => [id, this._score])),
+      won: this._won,
+      stats: Object.fromEntries(
+        ids.map((id) => [id, { "Team score": this._score }])
+      )
+    });
+  }
+  _setStatus(status) {
+    this.status = status;
+    this.onStatus(status, this);
+  }
+  _send(data, reliable = false) {
+    if (this.ended || !this.connected) return false;
+    if (this.hub) {
+      const options = { reliable };
+      if (this.role === "guest") options.to = this.info.host;
+      if (!AIHub.send(data, options)) return false;
+    } else if (this.channel?.readyState === "open") {
+      this.channel.send(JSON.stringify(data));
+    } else if (this.broadcast) {
+      this.broadcast.postMessage({
+        ...data,
+        token: this._peerToken,
+        from: this.playerId
+      });
+    } else return false;
+    this.stats.sent++;
+    return true;
+  }
+  sendInput(input) {
+    if (this.role !== "guest" || !this.running) return;
+    const now = performance.now();
+    const clean = safeInput(input);
+    const edge = clean.jump && !this._oldInput?.jump || clean.action && !this._oldInput?.action;
+    if (now < this._nextInput && !edge) return;
+    this._nextInput = now + 80;
+    this._oldInput = clean;
+    this._send({ type: "input", input: clean, seq: ++this._sequence });
+  }
+  sendSnapshot(world2, force = false) {
+    if (this.role !== "host" || !this.running || this.ended) return;
+    const now = performance.now();
+    if (!force && now < this._nextSnapshot) return;
+    this._nextSnapshot = now + 80;
+    this._send({ type: "world", world: world2, seq: ++this._sequence }, true);
+  }
+  _receive(data, from) {
+    if (this.ended || !data || typeof data !== "object") return;
+    this._lastMessage = performance.now();
+    this.stats.received++;
+    if (data.type === "input" && this.role === "host" && this.players.some((p) => p.id === from)) {
+      this.stats.inputs++;
+      this.onInput(safeInput(data.input), from);
+    }
+    if (data.type === "world" && this.role === "guest" && (!this.hub || from === this.info.host)) {
+      if (!Number.isFinite(data.seq) || data.seq <= this._receivedSequence)
+        return;
+      this._receivedSequence = data.seq;
+      this.stats.snapshots++;
+      this.onSnapshot(data.world);
+    }
+    if (data.type === "ping") this._send({ type: "pong" });
+  }
+  _heartbeat() {
+    if (this.ended || this.hub || !this.connected) return;
+    if (this.broadcast && this.role === "guest" && !this._paired)
+      this._send({ type: "join" });
+    else if (this._paired) this._send({ type: "ping" });
+    if (this._paired && this._lastMessage && performance.now() - this._lastMessage > 8e3) {
+      this._setStatus("Companion connection interrupted");
+    }
+  }
+  _closeTransport() {
+    this.broadcast?.close();
+    this.broadcast = null;
+    this.channel?.close();
+    this.channel = null;
+    this.peer?.close();
+    this.peer = null;
+    this._paired = false;
+    this._remoteToken = null;
+    this.connected = false;
+    this._receivedSequence = -1;
+  }
+  hostLocal(room = "CAVERN") {
+    if (this.hub) return false;
+    this._openLocal(room, "host");
+    return this.room;
+  }
+  joinLocal(room = "CAVERN") {
+    if (this.hub) return false;
+    this._openLocal(room, "guest");
+    this._send({ type: "join" });
+    return this.room;
+  }
+  _openLocal(room, role) {
+    this._closeTransport();
+    this.room = String(room).toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 24) || "CAVERN";
+    this.role = role;
+    this.playerId = role === "host" ? 0 : 1;
+    this.players = [
+      { id: 0, name: "Pip", color: "#ffc35b" },
+      { id: 1, name: "Rue", color: "#73e7d2" }
+    ];
+    this.broadcast = new BroadcastChannel(`pit-away-v1-${this.room}`);
+    this.connected = true;
+    this.broadcast.onmessage = ({ data }) => {
+      if (!data || data.token === this._peerToken || data.from === this.playerId)
+        return;
+      if (this._remoteToken && data.token !== this._remoteToken) return;
+      if (data.type === "join" && this.role === "host") {
+        this._remoteToken = data.token;
+        this._paired = true;
+        this._setStatus(`Two explorers \xB7 room ${this.room}`);
+        this._send({ type: "welcome" });
+      }
+      if (data.type === "welcome" && this.role === "guest") {
+        this._remoteToken = data.token;
+        this._paired = true;
+        this._setStatus(`Two explorers \xB7 room ${this.room}`);
+      }
+      this._receive(data, data.from);
+    };
+    this._setStatus(
+      `${role === "host" ? "Hosting" : "Joining"} room ${this.room} \xB7 same browser`
+    );
+  }
+  async _makePeer(role) {
+    if (this.hub) throw new Error("AI Hub supplies the session network.");
+    if (!window.RTCPeerConnection)
+      throw new Error("This browser does not support peer connections.");
+    this._closeTransport();
+    this.role = role;
+    this.playerId = role === "host" ? 0 : 1;
+    this.players = [
+      { id: 0, name: "Pip", color: "#ffc35b" },
+      { id: 1, name: "Rue", color: "#73e7d2" }
+    ];
+    const peer = new RTCPeerConnection({
+      iceServers: [{ urls: "stun:stun.l.google.com:19302" }]
+    });
+    this.peer = peer;
+    peer.onconnectionstatechange = () => {
+      if (this.peer !== peer) return;
+      if (["disconnected", "failed", "closed"].includes(peer.connectionState)) {
+        this.connected = false;
+        this._setStatus("Companion disconnected \xB7 reconnect from the menu");
+      }
+    };
+    const wire = (channel) => {
+      this.channel = channel;
+      channel.onopen = () => {
+        if (this.channel !== channel) return;
+        this.connected = true;
+        this._paired = true;
+        this._lastMessage = performance.now();
+        this._setStatus("Two explorers \xB7 direct peer connection");
+      };
+      channel.onmessage = (event) => {
+        if (this.channel !== channel) return;
+        try {
+          this._receive(JSON.parse(event.data), this.role === "host" ? 1 : 0);
+        } catch {
+        }
+      };
+      channel.onclose = () => {
+        if (this.channel !== channel) return;
+        this.connected = false;
+        this._setStatus("Companion disconnected");
+      };
+    };
+    if (role === "host")
+      wire(this.peer.createDataChannel("expedition", { ordered: true }));
+    else this.peer.ondatachannel = (event) => wire(event.channel);
+    return this.peer;
+  }
+  async _gather() {
+    if (this.peer.iceGatheringState !== "complete")
+      await new Promise((resolve) => {
+        const peer = this.peer;
+        const done = () => {
+          if (peer.iceGatheringState === "complete") {
+            peer.removeEventListener("icegatheringstatechange", done);
+            clearTimeout(timer);
+            resolve();
+          }
+        };
+        const timer = setTimeout(() => {
+          peer.removeEventListener("icegatheringstatechange", done);
+          resolve();
+        }, 5e3);
+        peer.addEventListener("icegatheringstatechange", done);
+        done();
+      });
+    return encodeSignal(this.peer.localDescription.toJSON());
+  }
+  async createOffer() {
+    const peer = await this._makePeer("host");
+    await peer.setLocalDescription(await peer.createOffer());
+    this._setStatus("Send your invitation to your companion");
+    return this._gather();
+  }
+  async answerOffer(code) {
+    const signal = decodeSignal(code);
+    if (signal.type !== "offer")
+      throw new Error("Paste the host invitation first.");
+    const peer = await this._makePeer("guest");
+    await peer.setRemoteDescription(signal);
+    await peer.setLocalDescription(await peer.createAnswer());
+    this._setStatus("Send this reply back to the host");
+    return this._gather();
+  }
+  async acceptAnswer(code) {
+    const signal = decodeSignal(code);
+    if (signal.type !== "answer" || !this.peer)
+      throw new Error(
+        "Create an invitation, then paste your companion\u2019s reply."
+      );
+    await this.peer.setRemoteDescription(signal);
+    this._setStatus("Connecting to your companion\u2026");
+  }
+  solo() {
+    if (this.hub) return;
+    this._closeTransport();
+    this.role = "solo";
+    this.playerId = 0;
+    this.players = [{ id: 0, name: "Pip", color: "#ffc35b" }];
+    this._remoteToken = null;
+    this._setStatus("Solo expedition");
+  }
+  dispose() {
+    clearInterval(this._timer);
+    this._closeTransport();
+    for (const off of this._unsub) off();
+    this.ended = true;
+  }
+};
+
+// main.js
+var $ = (id) => document.getElementById(id);
+var TITLE = "Pit & Away: Lost Caverns";
+var defaults = {
+  speed: 6.4,
+  jump: 10.8,
+  gravity: 23,
+  swimSpeed: 5.2,
+  balloonSpeed: 3.5,
+  enemySpeed: 1,
+  penalty: 500
+};
+var tuning = { ...defaults };
+var settings = { music: 0.1, sfx: 0.65, glyphs: "playstation", assist: false };
+try {
+  Object.assign(
+    settings,
+    JSON.parse(localStorage.getItem("pit-away-settings") || "{}")
+  );
+} catch {
+}
+var saveSettings = () => {
+  try {
+    localStorage.setItem("pit-away-settings", JSON.stringify(settings));
+  } catch {
+  }
+};
+var audio = new CavernAudio();
+audio.setMusic(settings.music);
+audio.setSfx(settings.sfx);
+var scene;
+var camera;
+var renderer;
+var world;
+var environment;
+var hero;
+var friend;
+var controller;
+var body;
+var collider;
+var network;
+var mode = "title";
+var modalPage = "";
+var returnPage = "";
+var elapsed = 0;
+var worldTime = 0;
+var accumulator = 0;
+var lastTime = 0;
+var lastInput = performance.now();
+var inputDevice = "keyboard";
+var keys = /* @__PURE__ */ new Set();
+var pressed = /* @__PURE__ */ new Set();
+var padPrevious = [];
+var padIndex = -1;
+var touch = { x: 0, y: 0, jump: false };
+var touchOrigin = null;
+var manual = false;
+var testInput = null;
+var dev = { invulnerable: false, noclip: false, showPhysics: false };
+var physicsLines;
+var physicsMat;
+var playing = false;
+var attract = false;
+var attractTime = 0;
+var toastTimer = 0;
+var sadTimer = 0;
+var netTimer = 0;
+var lastHud = 0;
+var physicsFor = /* @__PURE__ */ new WeakMap();
+var actorPhysics = /* @__PURE__ */ new Set();
+var actorColliders = /* @__PURE__ */ new Set();
+var remoteInputs = /* @__PURE__ */ new Map();
+var renderFrames = 0;
+var stats;
+var player;
+var items;
+var enemies;
+var checkpoints;
+var balloon;
+var balloonMesh;
+var exitMesh;
+var particles = [];
+var remoteInput = { x: 0, y: 0, jump: false };
+var remotePlayer = null;
+var remoteHeroState = null;
+var runStarted = 0;
+var focusIndex = 0;
+var menuAxis = 0;
+var activeContext = "";
+var cameraTarget = new THREE2.Vector3(14, 4.5, 0);
+var target = new THREE2.Vector3();
+var platforms = [
+  [-5, 11.8, 0],
+  [16.2, 23.05, 0],
+  [24.95, 31, 0],
+  [12, 32, -12],
+  [36.3, 48.05, -12],
+  [49.95, 55, -12],
+  [42, 48.9, -24],
+  [77, 79.05, -24],
+  [80.95, 86, -24],
+  [48, 78, -29],
+  [77, 91, -34],
+  [90, 117, -5]
+];
+var ladders = [
+  { x: 24, top: 0, bottom: -12 },
+  { x: 49, top: -12, bottom: -24 },
+  { x: 80, top: -24, bottom: -34 }
+];
+var itemDefinitions = [
+  { kind: "gold", x: 7, y: 1 },
+  { kind: "gold", x: 18.8, y: 1 },
+  { kind: "gold", x: 28, y: 1 },
+  { kind: "gold", x: 20, y: -11 },
+  { kind: "gold", x: 29, y: -11 },
+  { kind: "gold", x: 38.5, y: -11 },
+  { kind: "researcher", id: "mina", x: 45.5, y: -12 },
+  { kind: "gold", x: 46.4, y: -23 },
+  { kind: "gold", x: 54, y: -25 },
+  { kind: "gold", x: 60, y: -23 },
+  { kind: "gold", x: 65.5, y: -26 },
+  { kind: "gold", x: 71.5, y: -23 },
+  { kind: "cat", id: "marmalade", x: 77.8, y: -24 },
+  { kind: "gold", x: 82.5, y: -33 },
+  { kind: "gold", x: 85, y: -24 },
+  { kind: "gold", x: 87, y: -15 },
+  { kind: "gold", x: 95, y: -4 },
+  { kind: "diamond", id: "sunstone", x: 105, y: -3.6 }
+];
+var checkpointDefs = [
+  { x: 3, y: 0, name: "Fernlight Landing" },
+  { x: 22, y: -12, name: "Echo Galleries" },
+  { x: 47, y: -24, name: "The Flooded Archive" },
+  { x: 80.8, y: -34, name: "The Updraft" },
+  { x: 93, y: -5, name: "Sunstone Vault" }
+];
+var enemyDefs = [
+  { type: "frog", x: 10, y: 0.05, range: 2.1, speed: 1.3 },
+  { type: "condor", x: 20.5, y: 3.7, range: 3, speed: 1.1 },
+  { type: "bat", x: 26, y: -4.7, range: 3.2, speed: 1.2 },
+  { type: "scorpion", x: 28, y: -11.9, range: 2.4, speed: 0.9 },
+  { type: "bat", x: 40, y: -9, range: 3.3, speed: 1.3 },
+  { type: "frog", x: 45, y: -11.9, range: 1.2, speed: 1.7 },
+  { type: "eel", x: 57, y: -25, range: 3, speed: 1.1 },
+  { type: "eel", x: 68, y: -24.5, range: 3.1, speed: 1.4 },
+  { type: "scorpion", x: 87, y: -33.9, range: 2.4, speed: 1 },
+  { type: "bat", x: 85, y: -20, range: 3, speed: 1.4 },
+  { type: "bat", x: 87, y: -10.5, range: 2.5, speed: 1.6 },
+  { type: "scorpion", x: 99, y: -4.9, range: 2.2, speed: 0.8 }
+];
+function material(color, opts = {}) {
+  return new THREE2.MeshStandardMaterial({
+    color,
+    roughness: 1,
+    flatShading: true,
+    ...opts
+  });
+}
+var inkMat2 = new THREE2.MeshBasicMaterial({
+  color: 1059120,
+  side: THREE2.BackSide
+});
+function mesh2(geometry, mat2, x = 0, y = 0, z = 0, ink = false) {
+  const m = new THREE2.Mesh(geometry, mat2);
+  m.position.set(x, y, z);
+  m.castShadow = true;
+  m.receiveShadow = true;
+  scene.add(m);
+  if (ink) {
+    const line = new THREE2.Mesh(geometry, inkMat2);
+    line.scale.setScalar(1.045);
+    m.add(line);
+  }
+  return m;
+}
+function applyCelInk() {
+  const cache = /* @__PURE__ */ new Map();
+  scene.traverse((o) => {
+    if (!o.isMesh || !o.material?.isMeshStandardMaterial || o.material.transparent)
+      return;
+    const old = o.material;
+    if (!cache.has(old)) {
+      const m = new MeshBasicNodeMaterial({ color: old.color, side: old.side });
+      const light = normalWorld.dot(vec3(-0.3, 0.65, 0.8).normalize()).clamp(0, 1).mul(3).floor().div(3).mul(0.52).add(0.48);
+      m.colorNode = materialColor.mul(light).add(
+        vec3(old.emissive.r, old.emissive.g, old.emissive.b).mul(
+          old.emissiveIntensity || 0
+        )
+      );
+      cache.set(old, m);
+    }
+    o.material = cache.get(old);
+  });
+}
+function makeTerrain() {
+  const stone = material(10454619), rim = material(14136442), moss = material(4747355), dark = material(5466197);
+  for (const [a, b, y] of platforms) {
+    world.createCollider(
+      RAPIER.ColliderDesc.cuboid((b - a) / 2, 0.6, 1).setTranslation(
+        (a + b) / 2,
+        y - 0.6,
+        0
+      )
+    );
+    mesh2(
+      new THREE2.BoxGeometry(b - a, 1.2, 2.8),
+      stone,
+      (a + b) / 2,
+      y - 0.6,
+      -0.2,
+      true
+    );
+    mesh2(
+      new THREE2.BoxGeometry(b - a, 0.13, 2.94),
+      rim,
+      (a + b) / 2,
+      y - 0.04,
+      -0.16
+    );
+    for (let x = a + 0.7; x < b; x += 1.7) {
+      let rock = mesh2(
+        new THREE2.DodecahedronGeometry(0.65, 0),
+        x % 3 > 1 ? moss : dark,
+        x,
+        y - 0.95,
+        -0.1
+      );
+      rock.scale.set(1.5, 0.7, 1);
+      rock.rotation.z = x;
+    }
+    for (let x = a + 0.35; x < b; x += 1.35)
+      mesh2(new THREE2.BoxGeometry(0.035, 0.6, 0.02), dark, x, y - 0.4, 1.22);
+  }
+  const wood = material(14265961), rung = material(15912586);
+  for (const l of ladders) {
+    for (const x of [l.x - 0.42, l.x + 0.42])
+      mesh2(
+        new THREE2.CylinderGeometry(0.065, 0.065, l.top - l.bottom, 6),
+        wood,
+        x,
+        (l.top + l.bottom) / 2,
+        -0.23
+      );
+    for (let y = l.bottom + 0.35; y < l.top + 0.4; y += 0.56)
+      mesh2(new THREE2.BoxGeometry(0.95, 0.09, 0.14), rung, l.x, y, -0.18);
+  }
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(0.5, 3.5, 1).setTranslation(48.2, -27.6, 0)
+  );
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(0.4, 3.7, 1).setTranslation(78.1, -28.8, 0)
+  );
+  world.createCollider(
+    RAPIER.ColliderDesc.cuboid(0.4, 1.5, 1).setTranslation(-5.5, -0.7, 0)
+  );
+}
+function addLabel(text, x, y, size = 0.5, color = "#e9cb8b") {
+  const c = document.createElement("canvas");
+  c.width = 1024;
+  c.height = 128;
+  const ctx = c.getContext("2d");
+  ctx.fillStyle = color;
+  ctx.font = "bold 42px Georgia";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(text, 512, 64);
+  const tex = new THREE2.CanvasTexture(c);
+  const m = new THREE2.Mesh(
+    new THREE2.PlaneGeometry(size * 8, size),
+    new THREE2.MeshBasicMaterial({
+      map: tex,
+      transparent: true,
+      depthWrite: false
+    })
+  );
+  m.position.set(x, y, 0.5);
+  scene.add(m);
+  return m;
+}
+function createObjects() {
+  items = itemDefinitions.map((def, i) => {
+    const visual = makePickup(def.kind);
+    scene.add(visual);
+    visual.position.set(def.x, def.y, 0);
+    return { ...def, i, visual, collected: false };
+  });
+  enemies = enemyDefs.map((def, i) => {
+    const visual = makeCreature(def.type);
+    scene.add(visual);
+    return { ...def, visual, phase: i * 1.71, px: def.x, py: def.y };
+  });
+  checkpoints = checkpointDefs.map((def, i) => {
+    const g = new THREE2.Group();
+    scene.add(g);
+    g.position.set(def.x, def.y + 0.03, 0.08);
+    const base = new THREE2.Mesh(
+      new THREE2.CylinderGeometry(0.6, 0.8, 0.15, 8),
+      material(4348749)
+    );
+    base.rotation.x = 0;
+    g.add(base);
+    const ring = new THREE2.Mesh(
+      new THREE2.TorusGeometry(0.43, 0.06, 6, 16),
+      material(10283206, { emissive: 3696219, emissiveIntensity: 1 })
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.13;
+    g.add(ring);
+    const pole = new THREE2.Mesh(
+      new THREE2.CylinderGeometry(0.045, 0.045, 1.7, 6),
+      material(11310442)
+    );
+    pole.position.set(-0.6, 0.8, -0.6);
+    g.add(pole);
+    const flag = new THREE2.Mesh(
+      new THREE2.BoxGeometry(0.65, 0.4, 0.045),
+      material(14922326)
+    );
+    flag.position.set(-0.26, 1.5, -0.6);
+    g.add(flag);
+    return { ...def, visual: g, ring, index: i };
+  });
+  balloonMesh = new THREE2.Group();
+  scene.add(balloonMesh);
+  const bulb = new THREE2.Mesh(
+    new THREE2.SphereGeometry(1.02, 12, 8),
+    material(15775839)
+  );
+  bulb.scale.y = 1.2;
+  balloonMesh.add(bulb);
+  const stripe = new THREE2.Mesh(
+    new THREE2.SphereGeometry(1.03, 12, 8, 0, Math.PI * 0.23),
+    material(16309410)
+  );
+  stripe.scale.y = 1.2;
+  balloonMesh.add(stripe);
+  for (let i = 0; i < 3; i++) {
+    const rope = new THREE2.Mesh(
+      new THREE2.CylinderGeometry(0.02, 0.02, 1, 4),
+      material(12428666)
+    );
+    rope.position.set((i - 1) * 0.33, -1.15, 0);
+    balloonMesh.add(rope);
+  }
+  const grip = new THREE2.Mesh(
+    new THREE2.BoxGeometry(0.8, 0.12, 0.2),
+    material(7234113)
+  );
+  grip.position.y = -1.65;
+  balloonMesh.add(grip);
+  exitMesh = new THREE2.Group();
+  exitMesh.position.set(113, -5, 0);
+  scene.add(exitMesh);
+  const portalMat = material(15520416);
+  for (const x of [-1.35, 1.35]) {
+    const p = new THREE2.Mesh(new THREE2.BoxGeometry(0.65, 4, 1.1), portalMat);
+    p.position.set(x, 2, -0.5);
+    exitMesh.add(p);
+  }
+  const top = new THREE2.Mesh(new THREE2.BoxGeometry(3.6, 0.7, 1.3), portalMat);
+  top.position.set(0, 4, -0.5);
+  exitMesh.add(top);
+  const glow = new THREE2.Mesh(
+    new THREE2.PlaneGeometry(2, 3.5),
+    new THREE2.MeshBasicMaterial({
+      color: 8313021,
+      transparent: true,
+      opacity: 0.2,
+      side: THREE2.DoubleSide
+    })
+  );
+  glow.position.set(0, 1.8, -0.9);
+  exitMesh.add(glow);
+  addLabel("FERNLIGHT LANDING", 10, 7, 0.6);
+  addLabel("MIND THE GAP", 14, 1.8, 0.34);
+  addLabel("ECHO GALLERIES", 34, -5.5, 0.55);
+  addLabel("FLOODED ARCHIVE", 64, -16.8, 0.6);
+  addLabel("THE UPDRAFT", 84, -29.8, 0.48);
+  addLabel("SUNSTONE VAULT", 102, 1, 0.6);
+  addLabel("WAY OUT", 113, -0.1, 0.32);
+}
+function newPlayer(x = 3, y = 0.04, id = 0) {
+  return {
+    id,
+    x,
+    y,
+    vx: 0,
+    vy: 0,
+    grounded: false,
+    coyote: 0,
+    jumpBuffer: 0,
+    jumpHeld: false,
+    mode: "walk",
+    ladder: -1,
+    face: 1,
+    invuln: 1,
+    checkpoint: 0,
+    balloonLock: 0,
+    action: "idle"
+  };
+}
+function createActorPhysics(p) {
+  const b = world.createRigidBody(
+    RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y + 0.8, 0).lockRotations()
+  );
+  const c = world.createCollider(
+    RAPIER.ColliderDesc.capsule(0.48, 0.28).setFriction(0),
+    b
+  );
+  const k = world.createCharacterController(0.025);
+  k.enableSnapToGround(0.15);
+  k.enableAutostep(0.25, 0.2, true);
+  const data = { body: b, collider: c, controller: k };
+  physicsFor.set(p, data);
+  actorPhysics.add(data);
+  actorColliders.add(c.handle);
+  return data;
+}
+function configureSeats() {
+  if (!network) return;
+  player.id = network.players[0]?.id ?? 0;
+  if (network.role === "host" && network.players.length > 1) {
+    remotePlayer = newPlayer(4.2, 0.04, network.players[1].id);
+    createActorPhysics(remotePlayer);
+  }
+}
+function resetGame() {
+  for (const old of actorPhysics) {
+    world.removeCharacterController(old.controller);
+    world.removeRigidBody(old.body);
+  }
+  actorPhysics.clear();
+  actorColliders.clear();
+  player = newPlayer();
+  Object.assign({});
+  const phys = createActorPhysics(player);
+  body = phys.body;
+  collider = phys.collider;
+  controller = phys.controller;
+  stats = {
+    score: 4e3,
+    gold: 0,
+    found: { mina: false, marmalade: false, sunstone: false },
+    deaths: 0,
+    time: 0,
+    checkpoints: 1,
+    visited: { walk: true, climb: false, swim: false, float: false },
+    finished: false
+  };
+  items.forEach((it) => {
+    it.collected = false;
+    it.visual.visible = true;
+  });
+  checkpoints.forEach(
+    (c, i) => c.ring.material.color.setHex(i ? 7316883 : 15385439)
+  );
+  balloon = { x: 85, y: -30.8, attached: false, ownerId: null, cooldown: 0 };
+  remotePlayer = null;
+  remoteHeroState = null;
+  remoteInputs.clear();
+  configureSeats();
+  body.setTranslation({ x: 3, y: 0.84, z: 0 }, true);
+  body.setNextKinematicTranslation({ x: 3, y: 0.84, z: 0 });
+  particles.forEach((p) => scene.remove(p.mesh));
+  particles = [];
+  elapsed = 0;
+  runStarted = performance.now();
+  sadTimer = 0;
+  updateHUD();
+}
+function startGame() {
+  if (network?.role === "guest" && network.running) {
+    playing = true;
+    mode = "play";
+    attract = false;
+    hideModal();
+    $("title").classList.add("hidden");
+    $("hud").classList.remove("hidden");
+    $("topline").classList.add("hidden");
+    audio.start();
+    return;
+  }
+  resetGame();
+  playing = true;
+  mode = "play";
+  attract = false;
+  manual = false;
+  hideModal();
+  $("title").classList.add("hidden");
+  $("attract").classList.add("hidden");
+  $("hud").classList.remove("hidden");
+  $("topline").classList.add("hidden");
+  audio.start();
+  audio.voice(4);
+  toast("Well, down we go.", "FIND MINA, MARMALADE & THE SUNSTONE");
+  cameraTarget.set(8, 4, 0);
+  network?.ready?.();
+}
+function toTitle() {
+  if (network?.hub) return;
+  network?.solo();
+  if (remotePlayer) {
+    const old = physicsFor.get(remotePlayer);
+    if (old) {
+      world.removeCharacterController(old.controller);
+      world.removeRigidBody(old.body);
+      actorPhysics.delete(old);
+      actorColliders.delete(old.collider.handle);
+    }
+  }
+  remotePlayer = null;
+  remoteHeroState = null;
+  remoteInputs.clear();
+  playing = false;
+  attract = false;
+  mode = "title";
+  hideModal();
+  $("hud").classList.add("hidden");
+  $("title").classList.remove("hidden");
+  $("topline").classList.remove("hidden");
+  $("attract").classList.add("hidden");
+  $("context").classList.add("hidden");
+  $("touch-action").style.display = "none";
+  lastInput = performance.now();
+  cameraTarget.set(16, 4.5, 0);
+  updatePrompts();
+}
+function startAttract() {
+  if (network?.hub) return;
+  resetGame();
+  playing = true;
+  mode = "attract";
+  attract = true;
+  attractTime = 0;
+  $("title").classList.add("hidden");
+  $("topline").classList.add("hidden");
+  $("hud").classList.add("hidden");
+  $("attract").classList.remove("hidden");
+}
+function activity(device = "keyboard") {
+  lastInput = performance.now();
+  if (inputDevice !== device) {
+    inputDevice = device;
+    updatePrompts();
+  }
+  if (attract) {
+    toTitle();
+    return true;
+  }
+  return false;
+}
+function toast(message, caption = "", seconds = 3.5) {
+  $("toast").innerHTML = `${message}${caption ? `<small>${caption}</small>` : ""}`;
+  $("toast").classList.remove("hidden");
+  toastTimer = seconds;
+}
+function burst(x, y, color = 15711586, n = 14) {
+  for (let i = 0; i < n; i++) {
+    let m = new THREE2.Mesh(
+      new THREE2.OctahedronGeometry(0.07 + Math.random() * 0.05),
+      new THREE2.MeshBasicMaterial({ color, transparent: true })
+    );
+    m.position.set(x, y, 0.4);
+    scene.add(m);
+    particles.push({
+      mesh: m,
+      vx: (Math.random() - 0.5) * 5,
+      vy: Math.random() * 4,
+      life: 0.7 + Math.random() * 0.5,
+      max: 1.2
+    });
+  }
+}
+function damage(p = player) {
+  const phys = physicsFor.get(p);
+  const body2 = phys?.body;
+  if (attract || dev.invulnerable || p.invuln > 0) return;
+  const c = checkpointDefs[p.checkpoint];
+  stats.score = Math.max(0, stats.score - tuning.penalty);
+  stats.deaths++;
+  p.x = c.x;
+  p.y = c.y + 0.1;
+  p.vx = 0;
+  p.vy = 0;
+  p.mode = "walk";
+  p.ladder = -1;
+  p.invuln = 2;
+  if (balloon.ownerId === p.id) {
+    balloon.attached = false;
+    balloon.cooldown = 2;
+    balloon.ownerId = null;
+  }
+  body2?.setTranslation({ x: p.x, y: p.y + 0.8, z: 0 }, true);
+  body2?.setNextKinematicTranslation({ x: p.x, y: p.y + 0.8, z: 0 });
+  sadTimer = 6;
+  audio.effect("hit");
+  $("flash").style.opacity = ".25";
+  setTimeout(() => $("flash").style.opacity = "0", 140);
+  toast(
+    "A small setback. A splendid view.",
+    "BACK TO YOUR LAST CAMP \u2022 \u2212" + tuning.penalty + " POINTS",
+    2.4
+  );
+}
+function collect(it) {
+  if (it.collected) return;
+  it.collected = true;
+  it.visual.visible = false;
+  if (it.kind === "gold") {
+    stats.gold++;
+    stats.score += 5e3;
+    audio.effect("gold");
+    burst(it.x, it.y, 15711586);
+  } else {
+    stats.found[it.id] = true;
+    stats.score += it.kind === "diamond" ? 2e4 : 1e4;
+    audio.effect("rescue");
+    audio.voice(it.i);
+    burst(it.x, it.y + 1, 9364416, 30);
+    const text = {
+      mina: ["Mina found!", "\u201CTHE GOOD NEWS? I FOUND THE RIVER.\u201D"],
+      marmalade: ["Marmalade rescued!", "BRAVE CAT. QUESTIONABLE NAVIGATION."],
+      sunstone: [
+        "The Sunstone is ours!",
+        "TWO FRIENDS. ONE SHINY STONE. FIND THE WAY OUT."
+      ]
+    }[it.id];
+    toast(...text, 4.5);
+  }
+  sadTimer = 0;
+  updateHUD();
+}
+function zoneFor(p) {
+  if (p.x >= 90 && p.y > -10) return 4;
+  if (p.y < -29 || p.x > 80 && p.y < -8) return 3;
+  if (p.y < -18) return 2;
+  if (p.y < -5) return 1;
+  return 0;
+}
+function updateHUD() {
+  if (!stats) return;
+  const f = stats.found;
+  $("score").textContent = Math.round(stats.score).toLocaleString("en-US");
+  $("relic-hud").innerHTML = `<span class="${f.mina ? "found" : "waiting"}">${f.mina ? "\u25C6" : "\u25C7"} MINA</span><span class="${f.marmalade ? "found" : "waiting"}">${f.marmalade ? "\u25C6" : "\u25C7"} CAT</span><span class="${f.sunstone ? "found" : "waiting"}">${f.sunstone ? "\u25C6" : "\u25C7"} STONE</span>`;
+  const z = zoneFor(player);
+  $("zone").textContent = checkpointDefs[z].name;
+  let descriptions = [
+    ["ENTRY 01 / A LEAP OF FAITH", "Follow the gold. Find the ladder down."],
+    [
+      "ENTRY 02 / FAMILIAR FACES",
+      f.mina ? "Mina is safe. The river lies below." : "Mina\u2019s waiting beyond the broken ledge."
+    ],
+    [
+      "ENTRY 03 / TAKE THE PLUNGE",
+      f.marmalade ? "Marmalade is safe. Find the balloon below." : "Swim through the archive. Find Marmalade."
+    ],
+    [
+      "ENTRY 04 / A LIFT, PLEASE",
+      "Catch a balloon. Ride the shaft to the light."
+    ],
+    [
+      "ENTRY 05 / ALL THAT GLITTERS",
+      Object.values(f).every(Boolean) ? "Everyone\u2019s here. Head for the way out." : f.sunstone ? "Someone\u2019s still below. Check your map." : "Claim the Sunstone. Then find the way out."
+    ]
+  ];
+  $("mission-label").textContent = descriptions[z][0];
+  $("mission").textContent = descriptions[z][1];
+}
+function controlsGlyph(name) {
+  let pad = inputDevice === "gamepad";
+  const ps = settings.glyphs === "playstation";
+  const map = pad ? {
+    jump: ps ? "\xD7" : "A",
+    interact: ps ? "\u25A1" : "X",
+    map: ps ? "\u25B3" : "Y",
+    pause: "\u2630",
+    move: "L",
+    climb: "L",
+    release: ps ? "\xD7" : "A"
+  } : {
+    jump: "SPACE",
+    interact: "E",
+    map: "M",
+    pause: "ESC",
+    move: "A D",
+    climb: "W S",
+    release: "SPACE"
+  };
+  return `<span class="key ${pad ? "round" : ""}">${map[name] || name}</span>`;
+}
+function updatePrompts() {
+  const pad = inputDevice === "gamepad";
+  $("controls").innerHTML = `<span>${controlsGlyph("move")}Move</span><span>${controlsGlyph("jump")}Jump</span><span>${controlsGlyph("climb")}Climb / swim</span>`;
+  if (modalPage === "guide") renderModal("guide");
+}
+function readPad() {
+  if (network?.hub && (network.ended || network.isServer))
+    return { x: 0, y: 0, jump: false };
+  let pads = [];
+  try {
+    pads = Array.from(navigator.getGamepads?.() || []);
+  } catch {
+  }
+  const pad = pads.find((p) => p?.connected);
+  let result = { x: 0, y: 0, jump: false };
+  if (!pad) return result;
+  padIndex = pad.index;
+  const b = pad.buttons.map((b2) => b2.pressed);
+  const edge = (i) => b[i] && !padPrevious[i];
+  let x = pad.axes[0] || 0, y = -(pad.axes[1] || 0);
+  if (b[14]) x = -1;
+  if (b[15]) x = 1;
+  if (b[12]) y = 1;
+  if (b[13]) y = -1;
+  x = Math.abs(x) > 0.18 ? x : 0;
+  y = Math.abs(y) > 0.18 ? y : 0;
+  if (x || y || b.some(Boolean)) {
+    const exited = activity("gamepad");
+    if (exited) {
+      padPrevious = b;
+      return result;
+    }
+  }
+  if (mode === "title" || modalPage) {
+    let axis = Math.abs(y) > 0.5 ? Math.sign(y) : 0;
+    const now = performance.now();
+    if (axis && (axis !== menuAxis || now - lastHud > 240)) {
+      moveFocus(-axis);
+      lastHud = now;
+    }
+    menuAxis = axis;
+    if (edge(0)) activateFocused();
+    if (edge(1)) goBack();
+    if (edge(9) && !b[8] && modalPage === "pause") resumeGame();
+    if (modalPage === "settings" || modalPage === "dev") {
+      if (Math.abs(x) > 0.5 && (!padPrevious._axis || performance.now() - lastHud > 140)) {
+        adjustFocused(Math.sign(x));
+        lastHud = performance.now();
+      }
+      b._axis = Math.abs(x) > 0.5;
+    }
+  } else if (mode === "play") {
+    if (edge(9) && !b[8]) pauseGame();
+    if (edge(3)) renderModal("map");
+    result = { x, y, jump: !!b[0], interact: !!b[2] };
+  }
+  padPrevious = b;
+  return result;
+}
+function getInput(pad) {
+  if (testInput) return { ...testInput };
+  let x = (keys.has("KeyD") || keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || keys.has("ArrowLeft") ? 1 : 0), y = (keys.has("KeyW") || keys.has("ArrowUp") ? 1 : 0) - (keys.has("KeyS") || keys.has("ArrowDown") ? 1 : 0);
+  return {
+    x: Math.max(-1, Math.min(1, x + pad.x + touch.x)),
+    y: Math.max(-1, Math.min(1, y + pad.y + touch.y)),
+    jump: keys.has("Space") || pad.jump || touch.jump,
+    interact: keys.has("KeyE") || pad.interact
+  };
+}
+function updatePlayer(dt, inp, p = player, isRemote = false) {
+  const { body: body2, collider: collider2, controller: controller2 } = physicsFor.get(p) || createActorPhysics(p);
+  const assist = settings.assist || inputDevice === "touch";
+  if (assist && p.grounded && inp.x && p.mode === "walk") {
+    const ledge = platforms.find(
+      ([a, b, h]) => Math.abs(p.y - h) < 0.3 && p.x > a && p.x < b
+    );
+    if (ledge && (inp.x > 0 && ledge[1] - p.x < 1.15 || inp.x < 0 && p.x - ledge[0] < 1.15) && !ladders.some((l) => Math.abs(l.x - p.x) < 1.7) && Math.abs(inp.y) < 0.25)
+      p.autoJump = 0.85;
+  }
+  if (p.autoJump > 0) {
+    inp = { ...inp, jump: true };
+    p.autoJump -= dt;
+  }
+  p.invuln = Math.max(0, p.invuln - dt);
+  p.balloonLock = Math.max(0, p.balloonLock - dt);
+  let jumpEdge = inp.jump && !p.jumpHeld;
+  p.jumpHeld = inp.jump;
+  if (inp.x) p.face = Math.sign(inp.x);
+  if (dev.noclip) {
+    p.x += inp.x * tuning.speed * 2 * dt;
+    p.y += inp.y * tuning.speed * 2 * dt;
+    p.mode = "walk";
+    p.vy = 0;
+    body2.setNextKinematicTranslation({ x: p.x, y: p.y + 0.8, z: 0 });
+    return;
+  }
+  let inWater = p.x > 49 && p.x < 77.5 && p.y < -21.05 && p.y > -29;
+  if (inWater && p.mode !== "float") {
+    p.mode = "swim";
+    p.ladder = -1;
+  }
+  if (p.mode === "swim" && !inWater && p.y > -21.15) {
+    p.mode = "walk";
+    p.vy = 2;
+  }
+  if (p.mode === "walk") {
+    for (let i = 0; i < ladders.length; i++) {
+      let l = ladders[i];
+      if (Math.abs(p.x - l.x) < 1.25 && p.y >= l.bottom - 0.5 && p.y <= l.top + 0.5 && Math.abs(inp.y) > 0.3 && !(p.y >= l.top - 0.1 && inp.y > 0) && !(p.y <= l.bottom + 0.1 && inp.y < 0)) {
+        p.mode = "climb";
+        p.ladder = i;
+        p.x = l.x;
+        p.y = Math.max(l.bottom, Math.min(l.top, p.y));
+        p.vy = 0;
+        stats.visited.climb = true;
+        audio.effect("climb");
+        break;
+      }
+    }
+  }
+  if (p.mode === "climb") {
+    const l = ladders[p.ladder];
+    p.x = l.x;
+    p.y += inp.y * 4.3 * dt;
+    p.vy = 0;
+    if (jumpEdge) {
+      p.mode = "walk";
+      p.ladder = -1;
+      p.vy = tuning.jump * 0.75;
+      p.x += p.face * 0.6;
+    } else if (p.y >= l.top + 0.05) {
+      p.x = l.x + 1.35;
+      p.y = l.top + 0.07;
+      p.mode = "walk";
+      p.ladder = -1;
+    } else if (p.y <= l.bottom + 0.04) {
+      p.x = l.x - 1.25;
+      p.y = l.bottom + 0.07;
+      p.mode = "walk";
+      p.ladder = -1;
+    }
+    body2.setNextKinematicTranslation({ x: p.x, y: p.y + 0.8, z: 0 });
+  } else if (p.mode === "float") {
+    stats.visited.float = true;
+    p.x += inp.x * tuning.speed * 0.58 * dt;
+    p.y += (tuning.balloonSpeed + inp.y * 1.8) * dt;
+    p.vy = 0;
+    p.x = Math.max(81.8, Math.min(95, p.x));
+    if (p.y > -4.8 && p.x < 90.5) p.x += 1.8 * dt;
+    balloon.x = p.x;
+    balloon.y = p.y + 3.2;
+    if (jumpEdge || p.y > -0.5) {
+      p.mode = "walk";
+      p.vy = 1;
+      p.balloonLock = 1.2;
+      balloon.attached = false;
+      balloon.cooldown = 3;
+      audio.effect("pop");
+      burst(p.x, p.y + 3.2, 15843171);
+    }
+    body2.setNextKinematicTranslation({ x: p.x, y: p.y + 0.8, z: 0 });
+  } else {
+    let vx = inp.x * (p.mode === "swim" ? tuning.swimSpeed : tuning.speed);
+    p.vx = THREE2.MathUtils.damp(p.vx, vx, p.grounded ? 18 : 9, dt);
+    if (p.mode === "swim") {
+      stats.visited.swim = true;
+      p.vy = THREE2.MathUtils.damp(
+        p.vy,
+        inp.y * tuning.swimSpeed + (inp.jump ? 3 : 0),
+        8,
+        dt
+      );
+      if (p.y > -21.3 && inp.jump) {
+        p.mode = "walk";
+        p.vy = tuning.jump * 0.8;
+        audio.effect("splash");
+      }
+      if (p.x > 75.8 && inp.x > 0.2) {
+        p.x = 78;
+        p.y = -23.8;
+        p.mode = "walk";
+        p.vy = 3;
+      }
+      if (p.x < 49.5 && inp.x < -0.2) {
+        p.x = 47.6;
+        p.y = -23.8;
+        p.mode = "walk";
+        p.vy = 3;
+      }
+    } else {
+      p.coyote = p.grounded ? 0.12 : Math.max(0, p.coyote - dt);
+      p.jumpBuffer = jumpEdge ? 0.14 : Math.max(0, p.jumpBuffer - dt);
+      if (p.jumpBuffer > 0 && p.coyote > 0) {
+        p.vy = tuning.jump;
+        p.grounded = false;
+        p.coyote = 0;
+        p.jumpBuffer = 0;
+        audio.effect("jump");
+      }
+      p.vy -= tuning.gravity * dt;
+      if (!inp.jump && p.vy > 4) p.vy -= tuning.gravity * 0.8 * dt;
+      p.vy = Math.max(p.vy, -24);
+    }
+    {
+      const bt = body2.translation();
+      if (Math.abs(bt.x - p.x) > 0.3 || Math.abs(bt.y - p.y - 0.8) > 0.3)
+        body2.setTranslation({ x: p.x, y: p.y + 0.8, z: 0 }, true);
+      controller2.computeColliderMovement(
+        collider2,
+        { x: p.vx * dt, y: p.vy * dt, z: 0 },
+        void 0,
+        void 0,
+        (c) => !actorColliders.has(c.handle)
+      );
+      const mv = controller2.computedMovement();
+      p.x += mv.x;
+      p.y += mv.y;
+      p.grounded = controller2.computedGrounded();
+      if (p.grounded && p.vy < 0) p.vy = -0.1;
+      body2.setNextKinematicTranslation({ x: p.x, y: p.y + 0.8, z: 0 });
+    }
+  }
+  p.x = Math.max(-4, Math.min(117, p.x));
+  if (p.y < -38) damage(p);
+  if (!balloon.attached && p.mode !== "float" && p.balloonLock <= 0 && balloon.cooldown <= 0 && Math.abs(p.x - balloon.x) < 1.15 && Math.abs(p.y + 2.7 - balloon.y) < 1.7 && (inp.jump || inp.y > 0.2 || p.y < -31)) {
+    p.mode = "float";
+    balloon.attached = true;
+    balloon.ownerId = p.id;
+    p.vy = 0;
+    stats.visited.float = true;
+    audio.effect("balloon");
+    toast(
+      "A little lift goes a long way.",
+      "STEER UP THE SHAFT \u2022 JUMP TO LET GO",
+      3
+    );
+  }
+  for (const it of items) {
+    const oy = it.kind === "gold" || it.kind === "diamond" ? it.y : it.y + 0.8;
+    if (!it.collected && Math.abs(p.x - it.x) < (assist ? 1.5 : 1.05) && Math.abs(p.y + 0.8 - oy) < (assist ? 1.9 : 1.45))
+      collect(it);
+  }
+  for (const c of checkpoints) {
+    if (Math.abs(p.x - c.x) < 1.3 && Math.abs(p.y - c.y) < 1.4 && p.checkpoint !== c.index) {
+      p.checkpoint = c.index;
+      {
+        stats.checkpoints++;
+        c.ring.material.color.setHex(15711586);
+        audio.effect("checkpoint");
+        burst(c.x, c.y + 0.2, 8315588, 18);
+        toast(
+          "Camp made. Boots optional.",
+          "CHECKPOINT \u2022 " + c.name.toUpperCase(),
+          2.5
+        );
+      }
+    }
+  }
+  if (!attract && !dev.invulnerable) {
+    for (const e of enemies) {
+      let ey = e.py + (e.type === "scorpion" ? 0.24 : e.type === "frog" ? 0.35 : 0);
+      if (p.mode === "float" && e.type === "bat" && Math.hypot(p.x - e.px, p.y + 3.2 - ey) < 1.3) {
+        p.mode = "walk";
+        p.balloonLock = 2;
+        balloon.attached = false;
+        balloon.cooldown = 3;
+        audio.effect("pop");
+        burst(p.x, p.y + 3.2);
+        continue;
+      }
+      if (Math.abs(p.x - e.px) < (e.type === "eel" ? 0.95 : 0.7) && Math.abs(p.y + 0.8 - ey) < (e.type === "frog" ? 0.6 : 0.65)) {
+        damage(p);
+        break;
+      }
+    }
+  }
+  if (p.x > 111 && p.y > -6 && p.y < -2) {
+    if (Object.values(stats.found).every(Boolean)) {
+      if (!stats.finished) finish();
+    } else if (!toastTimer)
+      toast(
+        "A splendid exit. A premature exit.",
+        "FIND BOTH FRIENDS AND THE SUNSTONE FIRST.",
+        3
+      );
+  }
+  p.action = p.mode === "float" ? "float" : p.mode === "swim" ? "swim" : p.mode === "climb" ? "climb" : !p.grounded ? p.vy > 0 ? "jump" : "fall" : Math.abs(p.vx) > 0.5 ? "run" : "idle";
+}
+function updateEnemies(dt) {
+  for (const e of enemies) {
+    let t = worldTime * e.speed * tuning.enemySpeed + e.phase;
+    e.px = e.x + Math.sin(t) * e.range;
+    e.py = e.y;
+    if (e.type === "frog") e.py += Math.max(0, Math.sin(t * 2.8)) * 1.5;
+    else if (e.type === "bat" || e.type === "condor")
+      e.py += Math.sin(t * 1.8) * 0.75;
+    else if (e.type === "eel") e.py += Math.sin(t * 2) * 0.5;
+    e.visual.position.set(e.px, e.py, 0);
+    e.visual.scale.x = Math.cos(t) > 0 ? 1 : -1;
+    e.visual.userData.animate?.(worldTime);
+    e.visual.rotation.z = e.type === "bat" || e.type === "condor" ? Math.sin(t) * 0.12 : 0;
+    const wings = e.visual.userData.wings || [];
+    wings.forEach(
+      (wing, i) => wing.rotation.z = Math.sin(worldTime * 10) * 0.55 * (i ? 1 : -1)
+    );
+  }
+}
+function animateHero(h, p, dt) {
+  h.group.position.set(p.x, p.y, 0);
+  h.group.rotation.y = p.face < 0 ? -0.25 : 0.25;
+  h.group.scale.x = p.face;
+  h.group.visible = !(p.invuln > 0 && Math.floor(p.invuln * 12) % 2);
+  h.setAction(p.action);
+  h.mixer.update(dt);
+}
+function remoteInputFor(id) {
+  const value = remoteInputs.get(id);
+  return value && (!value.receivedAt || performance.now() - value.receivedAt < 650) ? value : { x: 0, y: 0, jump: false };
+}
+function fixedUpdate(dt, inp) {
+  if (network?.hub && !network.running) return;
+  const frozen = playing && modalPage && !network?.connected && !attract;
+  if (!frozen) {
+    worldTime += dt;
+    environment.update(dt, worldTime);
+    updateEnemies(dt);
+  }
+  if (playing && (!modalPage || attract || network?.connected) && !stats.finished) {
+    if (attract) updateAttract(dt);
+    else if (network?.role === "guest") {
+      network.sendInput(
+        modalPage ? { x: 0, y: 0, jump: false } : { ...inp, action: inp.interact }
+      );
+    } else {
+      const localInput = modalPage ? { x: 0, y: 0, jump: false } : inp;
+      updatePlayer(
+        dt,
+        network?.isServer ? remoteInputFor(player.id) : localInput
+      );
+      if (remotePlayer)
+        updatePlayer(dt, remoteInputFor(remotePlayer.id), remotePlayer, true);
+      stats.time += dt;
+      network?.setScore(stats.score, stats.finished);
+    }
+    if (network?.role !== "guest") {
+      world.timestep = dt;
+      world.step();
+    }
+    if (network?.role !== "guest" && !balloon.attached) {
+      balloon.cooldown = Math.max(0, balloon.cooldown - dt);
+      if (balloon.cooldown <= 0) {
+        balloon.x = 85;
+        balloon.y = -30.8 + Math.sin(worldTime * 1.2) * 0.3;
+      }
+    }
+    balloonMesh.visible = balloon.cooldown <= 0 || balloon.attached;
+    balloonMesh.position.set(balloon.x, balloon.y, 0);
+    balloonMesh.rotation.z = Math.sin(worldTime * 2) * 0.06;
+  }
+  if (player) animateHero(hero, player, dt);
+  if (remotePlayer) {
+    friend.group.visible = true;
+    animateHero(friend, remotePlayer, dt);
+  } else if (remoteHeroState) {
+    friend.group.visible = true;
+    animateHero(friend, remoteHeroState, dt);
+  } else friend.group.visible = false;
+  for (const it of items) {
+    if (it.collected) continue;
+    if (it.kind === "gold" || it.kind === "diamond") {
+      it.visual.rotation.y += dt * 0.7;
+      it.visual.position.y = it.y + Math.sin(worldTime * 2 + it.i) * 0.12;
+    }
+  }
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    p.vy -= 5 * dt;
+    p.mesh.position.x += p.vx * dt;
+    p.mesh.position.y += p.vy * dt;
+    p.mesh.rotation.x += dt * 2;
+    p.mesh.material.opacity = Math.max(0, p.life / p.max);
+    if (p.life <= 0) {
+      scene.remove(p.mesh);
+      p.mesh.geometry.dispose();
+      p.mesh.material.dispose();
+      particles.splice(i, 1);
+    }
+  }
+  if (toastTimer > 0) {
+    toastTimer -= dt;
+    if (toastTimer <= 0) $("toast").classList.add("hidden");
+  }
+  sadTimer = Math.max(0, sadTimer - dt);
+  audio.update(dt, {
+    mode: sadTimer ? "sad" : player?.mode === "float" ? "balloon" : player?.mode === "swim" ? "swim" : "explore",
+    active: playing && !modalPage && !attract && !stats.finished && (!network || !network.ended)
+  });
+  if (playing && !attract) {
+    netTimer += dt;
+    if (netTimer > 0.08) {
+      netTimer = 0;
+      if (network?.role !== "guest") network?.sendSnapshot(makeSnapshot());
+      updateHUD();
+      updateContext();
+    }
+  }
+}
+function makeSnapshot() {
+  return {
+    player: { ...player },
+    remote: remotePlayer ? { ...remotePlayer } : null,
+    stats: JSON.parse(JSON.stringify(stats)),
+    collected: items.filter((i) => i.collected).map((i) => i.i),
+    balloon: { ...balloon },
+    worldTime,
+    mode: stats.finished ? "won" : "play"
+  };
+}
+function applySnapshot(s) {
+  if (!s?.player || network.role !== "guest") return;
+  if (!playing && mode === "title") startGame();
+  const wasWon = mode === "won";
+  player = { ...s.remote?.id === network.playerId ? s.remote : s.player };
+  remoteHeroState = {
+    ...s.remote?.id === network.playerId ? s.player : s.remote || s.player
+  };
+  stats = s.stats;
+  if (wasWon && !stats.finished) {
+    mode = "play";
+    playing = true;
+    hideModal();
+  }
+  worldTime = s.worldTime;
+  balloon = s.balloon;
+  items.forEach((it) => {
+    it.collected = s.collected.includes(it.i);
+    it.visual.visible = !it.collected;
+  });
+  if (s.mode === "won" && mode !== "won") showResults();
+}
+function updateContext() {
+  if (inputDevice === "touch") {
+    $("touch-action").style.display = mode === "play" && !modalPage ? "block" : "none";
+    $("touch-action").textContent = player.mode === "float" ? "LET GO" : player.mode === "swim" ? "SURFACE" : "JUMP";
+  }
+  let text = "";
+  if (player.mode === "float")
+    text = `${controlsGlyph("move")} Steer &nbsp; ${controlsGlyph("release")} Let go`;
+  else if (player.mode === "swim")
+    text = `${controlsGlyph("climb")} Swim &nbsp; ${controlsGlyph("jump")} Rise`;
+  else {
+    const near = ladders.find(
+      (l) => Math.abs(player.x - l.x) < 2.5 && player.y < l.top + 1 && player.y > l.bottom - 1
+    );
+    if (near) text = `${controlsGlyph("climb")} Climb the ladder`;
+    else if (player.x > 81 && player.y < -30)
+      text = `${controlsGlyph("jump")} Catch the balloon`;
+    else if (player.x > 9 && player.x < 17 && player.y > -3)
+      text = `${controlsGlyph("jump")} Hold for a longer leap`;
+  }
+  if (inputDevice === "touch")
+    text = player.mode === "climb" ? "Drag up or down to climb" : player.mode === "swim" ? "Drag to swim \u2022 tap right to rise" : player.x > 81 && player.y < -30 ? "Tap to catch a balloon" : ladders.some(
+      (l) => Math.abs(player.x - l.x) < 2.5 && player.y < l.top + 1 && player.y > l.bottom - 1
+    ) ? "Drag up or down by the ladder" : "";
+  $("context").classList.toggle("hidden", !text || modalPage);
+  if (text !== activeContext) {
+    $("context").innerHTML = text;
+    activeContext = text;
+  }
+}
+function finish() {
+  stats.finished = true;
+  stats.score += Math.max(0, 5e3 - stats.deaths * 250);
+  audio.effect("win");
+  network?.sendSnapshot(makeSnapshot(), true);
+  network?.finish?.(stats.score, true);
+  try {
+    const old = Number(localStorage.getItem("pit-away-best") || 0);
+    if (stats.score > old) localStorage.setItem("pit-away-best", stats.score);
+  } catch {
+  }
+  showResults();
+}
+function showResults() {
+  mode = "won";
+  stats.finished = true;
+  renderModal("results");
+}
+var demoRoute = [
+  [3, 0.05],
+  [9, 0.05],
+  [14, 2.6],
+  [19, 0.05],
+  [24, 0.1],
+  [24, -11.8],
+  [29, -11.9],
+  [34, -9],
+  [39, -11.9],
+  [45.5, -11.9],
+  [49, -12],
+  [49, -23.8],
+  [55, -25],
+  [63, -24],
+  [71, -25],
+  [77.8, -23.9],
+  [80, -24],
+  [80, -33.8],
+  [85, -33],
+  [85, -25],
+  [87, -15],
+  [90, -4],
+  [98, -4.9],
+  [105, -3.6],
+  [113, -4.9]
+];
+function updateAttract(dt) {
+  attractTime += dt;
+  const duration = 2.2;
+  let phase = attractTime / duration, i = Math.floor(phase) % demoRoute.length, next = (i + 1) % demoRoute.length, t = phase % 1;
+  if (i === demoRoute.length - 1 && t > 0.8) {
+    resetGame();
+    attractTime = 0;
+    return;
+  }
+  let a = demoRoute[i], b = demoRoute[next];
+  player.x = THREE2.MathUtils.lerp(a[0], b[0], t);
+  player.y = THREE2.MathUtils.lerp(a[1], b[1], t);
+  player.face = b[0] < a[0] ? -1 : 1;
+  player.vx = 3;
+  player.invuln = 0;
+  player.mode = i >= 18 && i <= 20 ? "float" : i >= 11 && i <= 14 ? "swim" : Math.abs(a[0] - b[0]) < 0.2 ? "climb" : "walk";
+  player.action = player.mode === "float" ? "float" : player.mode === "swim" ? "swim" : player.mode === "climb" ? "climb" : "run";
+  balloon.attached = player.mode === "float";
+  if (balloon.attached) {
+    balloon.x = player.x;
+    balloon.y = player.y + 3.2;
+  }
+  for (const it of items)
+    if (Math.hypot(player.x - it.x, player.y - it.y) < 2) collect(it);
+}
+function pauseGame() {
+  if (mode === "play" && !modalPage) {
+    renderModal("pause");
+    audio.effect("pause");
+  }
+}
+function resumeGame() {
+  hideModal();
+  keys.clear();
+  touch.x = touch.y = 0;
+  audio.start();
+}
+function hideModal() {
+  modalPage = "";
+  $("modal").classList.add("hidden");
+  $("modal").innerHTML = "";
+  if (playing && !attract) $("hud").classList.remove("hidden");
+}
+function backButton() {
+  return '<button class="back" data-action="back">\u2190 Back</button>';
+}
+function button(text, action2, extra = "") {
+  return `<button class="menu-button" data-action="${action2}" ${extra}>${text}<em>\u2192</em></button>`;
+}
+function range(id, label, min, max, step, value, unit = "", hint = "") {
+  return `<div class="setting"><label for="${id}">${label}${hint ? `<small>${hint}</small>` : ""}</label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${value}" data-range="${id}" aria-label="${label}"><output for="${id}">${unit === "%" ? Math.round(value * 100) : value}${unit}</output></div>`;
+}
+function toggle(id, label, value, hint = "") {
+  return `<div class="setting"><label>${label}${hint ? `<small>${hint}</small>` : ""}</label><button data-action="toggle-${id}">${value ? "ON" : "OFF"}</button></div>`;
+}
+function mapSVG() {
+  let x = (p) => 20 + (p + 5) * 6.5, y = (p) => 28 + (5 - p) * 5;
+  return `<div class="map-visual"><svg viewBox="0 0 850 280" role="img" aria-label="Connected map of all five cavern regions"><defs><pattern id="grid" width="20" height="20" patternUnits="userSpaceOnUse"><path d="M20 0H0V20" fill="none" stroke="#25474a" stroke-width=".5"/></pattern></defs><rect width="850" height="280" fill="url(#grid)"/><rect x="${x(49)}" y="${y(-21)}" width="182" height="40" fill="#176f73" opacity=".55"/>${platforms.map(([a, b, h]) => `<path d="M${x(a)} ${y(h)}H${x(b)}" stroke="#bdac77" stroke-width="4"/>`).join("")}${ladders.map((l) => `<path d="M${x(l.x)} ${y(l.top)}V${y(l.bottom)}" stroke="#e5c383" stroke-width="3" stroke-dasharray="4 3"/>`).join("")}<path d="M${x(85)} ${y(-33)}V${y(-4)}H${x(91)}" fill="none" stroke="#d8aa58" stroke-width="2" stroke-dasharray="5 4"/>${checkpointDefs.map((c, i) => `<circle cx="${x(c.x)}" cy="${y(c.y) - 5}" r="3" fill="#7ce6c6"/><text x="${x(c.x) - 8}" y="${y(c.y) - 15}" font-family="Arial" font-size="10" fill="#a0bbad">${i + 1}</text>`).join("")}${items.filter((it) => it.id).map(
+    (it) => `<text x="${x(it.x) - 18}" y="${y(it.y) - 14}" fill="${it.collected ? "#81c9b0" : "#e9ba66"}" font-family="Arial" font-size="10">${it.id === "mina" ? "MINA" : it.id === "marmalade" ? "CAT" : "STONE"} ${it.collected ? "\u2713" : "\u25C7"}</text>`
+  ).join(
+    ""
+  )}<circle cx="${x(player.x)}" cy="${y(player.y) - 4}" r="5" fill="#f7d287" stroke="#fff2cc" stroke-width="2"/><text x="30" y="24" font-size="10" fill="#c4bb93" font-family="Arial" letter-spacing="2">NOT TO SCALE. NEITHER IS THE DANGER.</text></svg></div>`;
+}
+var feedbackData = credits_default;
+function aboutHTML() {
+  const info = feedbackData.sourceInformation;
+  return `<div class="credit-grid">${Object.entries(info).map(
+    ([k, v]) => `<div><b>${k.replace(/[A-Z]/g, (m) => " " + m)}</b>${v}</div>`
+  ).join(
+    ""
+  )}</div><p style="font-size:12px">An original tribute. Source game: David Crane / Activision. No original game assets or recordings are used. Procedural art, animation, music and game code created for this expedition.</p><p style="font-size:12px"><a style="color:var(--teal)" href="https://atariage.com/manual_html_page.php?SoftwareLabelID=359" target="_blank" rel="noopener">Source manual</a> \xB7 <a style="color:var(--teal)" href="https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub" target="_blank" rel="noopener">AI Hub protocol</a></p><div class="feedback">${["testingFeedback", "engineFeedback", "promptFeedback"].map((k) => `<details><summary>${k.replace("Feedback", " Feedback").replace(/^./, (c) => c.toUpperCase())}</summary><ol>${feedbackData[k].map((v) => `<li>${v}</li>`).join("")}</ol></details>`).join("")}</div>`;
+}
+function renderModal(page) {
+  const previousPage = modalPage, previousFocus = focusIndex;
+  if (attract) toTitle();
+  if (!modalPage) returnPage = mode === "title" ? "title" : "pause";
+  modalPage = page;
+  let wide = false, title = "", content = "", eye = "EXPEDITION JOURNAL";
+  if (page === "pause") {
+    title = "Take a breather.";
+    content = `<div class="menu-stack">${button("Continue expedition", "resume")}${button("Expedition map", "map")}${button("Field guide", "guide")}${button("Settings", "settings")}${button("Developer kit", "dev")}${button("About & credits", "about")}${!network?.hub ? button("Return to title", "title") : ""}</div>`;
+  }
+  if (page === "settings") {
+    title = "Pack to your liking.";
+    content = range("music", "Music", 0, 1, 0.05, settings.music, "%") + range("sfx", "Effects & voices", 0, 1, 0.05, settings.sfx, "%") + `<div class="setting"><label>Controller glyphs</label><button data-action="glyphs">${settings.glyphs === "playstation" ? "PlayStation  \xD7 \u25CB \u25A1 \u25B3" : "Xbox  A B X Y"}</button></div>` + toggle(
+      "assist",
+      "Trail assist",
+      settings.assist,
+      "Wider pickups and automatic jumps at ledges."
+    ) + `<p style="font-size:12px">${renderer?.backend?.isWebGPUBackend ? "WebGPU renderer active" : "WebGL2 compatibility renderer active"} \xB7 Keyboard, controller and touch switch automatically.</p>` + backButton();
+  }
+  if (page === "guide") {
+    title = "A field guide to getting lost.";
+    wide = true;
+    content = `<div class="guide-grid"><div class="guide-item"><strong>01. Travel light.</strong><p>${controlsGlyph("move")} Move. ${controlsGlyph("jump")} Jump. Hold jump for a longer leap. Gold is optional; excellent stories are not.</p></div><div class="guide-item"><strong>02. Mind the wildlife.</strong><p>Hop over frogs and pale scorpions. Time your run under bats and condors. There\u2019s no fighting in a respectable expedition.</p></div><div class="guide-item"><strong>03. The way is down.</strong><p>${controlsGlyph("climb")} Climb beside a ladder. Follow the turquoise camps; a tumble returns you to the last camp and costs points. Unlimited tries.</p></div><div class="guide-item"><strong>04. Take a dip.</strong><p>Move in any direction underwater. ${controlsGlyph("jump")} Rise. Eels prefer their personal space. Swim into a bank to climb out.</p></div><div class="guide-item"><strong>05. A balloon? Naturally.</strong><p>Jump at the balloon above the geyser. Steer up and right. ${controlsGlyph("jump")} Let go above the upper ledge. Bats may pop your ride!</p></div><div class="guide-item"><strong>06. Leave no friend behind.</strong><p>Find Mina, Marmalade the cat, and the Sunstone. Reach the upper vault\u2019s way out together. ${controlsGlyph("map")} Check the map.</p></div></div><p style="font-size:12px">On touch: drag anywhere on the left to move, climb or swim. Tap on the right to jump. The action button changes with your situation.</p>` + backButton();
+  }
+  if (page === "map") {
+    title = "There\u2019s a way through.";
+    wide = true;
+    content = mapSVG() + `<div class="map-key"><span class="map-dot">\u25CF You</span><span>\u25C7 Objective</span><span style="color:var(--teal)">\u25CF Camp</span><span>\u22EE Ladder / updraft</span></div><p>01 Landing \u2192 02 Galleries \u2192 03 Archive \u2192 04 Updraft \u2192 05 Vault</p>` + backButton();
+  }
+  if (page === "dev") {
+    title = "The developer\u2019s satchel.";
+    wide = true;
+    eye = "LIVE BALANCE & TEST TOOLS";
+    content = `<div class="guide-grid"><div>${range("speed", "Run speed", 3, 12, 0.2, tuning.speed)}${range("jump", "Jump strength", 7, 17, 0.2, tuning.jump)}${range("gravity", "Gravity", 12, 38, 0.5, tuning.gravity)}${range("swimSpeed", "Swim speed", 2, 10, 0.2, tuning.swimSpeed)}</div><div>${range("balloonSpeed", "Balloon lift", 1, 7, 0.1, tuning.balloonSpeed)}${range("enemySpeed", "Wildlife speed", 0.2, 2.5, 0.1, tuning.enemySpeed)}${range("penalty", "Checkpoint penalty", 0, 2e3, 100, tuning.penalty)}${toggle("invulnerable", "Invulnerability", dev.invulnerable)}${toggle("noclip", "Free flight", dev.noclip, "Move in all directions. Collisions disabled.")}</div></div>${toggle("showPhysics", "Collision geometry", dev.showPhysics)}<div class="setting"><label>Warp to camp</label><button data-action="warp-next">Next camp \u2192</button></div><div class="menu-stack">${button("Reset balance defaults", "reset-tuning")}${button("Restart expedition", "restart")}</div><p style="font-size:12px">Changes apply immediately. Test tools do not overwrite your saved settings.</p>` + backButton();
+  }
+  if (page === "about") {
+    title = "About this expedition.";
+    wide = true;
+    content = aboutHTML() + backButton();
+  }
+  if (page === "coop") {
+    title = "Better lost together.";
+    eye = "ONE CAVERN \u2022 TWO EXPLORERS";
+    content = `<p>Share the expedition, treasure and checkpoints. Each explorer has their own camera.</p><div class="menu-stack">${button("Host in this browser", "host-local")}${button("Join in this browser", "join-local")}${button("Connect another device", "peer")}</div><p style="font-size:12px">Same-browser rooms use two tabs on the same site. Other devices connect directly with invitation and reply codes. AI Hub supplies its own lobby.</p>` + backButton();
+  }
+  if (page === "host-local") {
+    title = "Camp is open.";
+    network.hostLocal("CAVE-" + Math.floor(1e3 + Math.random() * 9e3));
+    content = `<p>Open this same game in a second tab, choose Join, and enter:</p><div class="room-code">${network.room}</div><div class="menu-stack">${button("Begin together", "start")}</div><p style="font-size:12px">Your companion can join at any time.</p>` + backButton();
+  }
+  if (page === "join-local") {
+    title = "Find your companion.";
+    content = `<p>Enter the host\u2019s room code. Both tabs must use the same browser and site.</p><input class="join-input" id="room-input" maxlength="9" value="CAVE-0000" tabindex="-1" aria-label="Room code"><div class="code-digits" role="group" aria-label="Room code digits">${Array.from({ length: 4 }, (_, i) => `<button data-action="room-digit-${i}" data-room-digit="${i}" aria-label="Room digit ${i + 1}: 0">0</button>`).join("")}</div><p style="font-size:12px">Select a digit and press ${controlsGlyph("jump")} to cycle 0\u20139. Up/down selects a digit or Join. You can also click the digits or type the full code above.</p><div class="menu-stack" style="margin-top:20px">${button("Join expedition", "connect-local")}</div>` + backButton();
+  }
+  if (page === "peer") {
+    title = "A longer rope.";
+    content = `<p>Connect two devices directly. Send the invitation to your companion, then paste their reply. Direct connections depend on your networks.</p><div class="menu-stack">${button("Create invitation", "make-offer")}${button("I have an invitation", "answer-offer")}</div>` + backButton();
+  }
+  if (page === "make-offer" || page === "answer-offer" || page === "accept-answer") {
+    title = page === "make-offer" ? "Preparing your invitation\u2026" : page === "answer-offer" ? "An invitation to adventure." : "One last knot.";
+    content = `<p id="signal-help">${page === "make-offer" ? "Finding a direct connection. This can take a few seconds." : page === "answer-offer" ? "Paste your companion\u2019s invitation below." : "Paste the reply your companion sent you."}</p><textarea class="join-input" id="signal" style="font-size:12px;letter-spacing:0;height:120px;resize:vertical" aria-label="Connection code" ${page === "make-offer" ? "readonly" : ""}></textarea><div class="menu-stack" style="margin-top:16px">${page === "make-offer" ? button("Copy invitation", "copy-signal") + button("Enter companion\u2019s reply", "accept-answer") : button(page === "answer-offer" ? "Create reply" : "Connect expedition", page === "answer-offer" ? "create-reply" : "finish-peer")}</div><p style="font-size:12px" id="signal-status"></p>` + backButton();
+    if (page === "make-offer")
+      network.createOffer().then((code) => {
+        if (modalPage === "make-offer") {
+          $("signal").value = code;
+          $("signal-help").textContent = "Send this invitation to your companion. Ask them to choose \u201CI have an invitation\u201D and send you their reply.";
+          $("modal").querySelector("h2").textContent = "Invitation ready.";
+        }
+      }).catch((e) => {
+        $("signal-help").textContent = e.message;
+      });
+  }
+  if (page === "results") {
+    title = "Everyone accounted for.";
+    eye = "EXPEDITION COMPLETE";
+    content = `<p>Two friends, one Sunstone, and enough gold to buy a very comfortable pair of socks.</p><div class="result-score">${stats.score.toLocaleString("en-US")}</div><div style="font-size:11px;letter-spacing:3px;color:var(--gold)">EXPEDITION POINTS</div><div class="result-stat"><span><b>${stats.gold}/15</b>GOLD BARS</span><span><b>${Math.floor(stats.time / 60)}:${String(Math.floor(stats.time % 60)).padStart(2, "0")}</b>TRAIL TIME</span><span><b>${stats.deaths}</b>SMALL SETBACKS</span></div><div class="menu-stack">${!network?.hub ? (network?.role === "guest" ? "<p>The host can begin another expedition.</p>" : button("One more expedition", "restart")) + button("Return to title", "title") : button("Read the field notes", "about")}</div>`;
+  }
+  if (page === "dev" && network?.role === "guest")
+    content = "<p>The expedition host controls balance, free flight, invulnerability and camp warps. Ask them to open the Developer kit in their pause menu.</p>" + backButton();
+  $("modal").innerHTML = `<section class="panel ${wide ? "wide" : ""}" role="dialog" aria-modal="true" aria-label="${title}"><div class="eyebrow">${eye}</div><h2>${title}</h2>${content}<div class="panel-footer"><span>PIT & AWAY / LOST CAVERNS</span><span>${controlsGlyph("pause")} MENU</span></div></section>`;
+  $("modal").classList.remove("hidden");
+  focusIndex = previousPage === page ? previousFocus : 0;
+  setFocus(focusIndex);
+  $("context").classList.add("hidden");
+  $("touch-action").style.display = "none";
+}
+function focusables() {
+  return Array.from(
+    (modalPage ? $("modal") : $("title")).querySelectorAll(
+      "button:not(:disabled),input,textarea,summary,a"
+    )
+  ).filter(
+    (element) => !(inputDevice === "gamepad" && element.id === "room-input")
+  );
+}
+function setFocus(index) {
+  const list = focusables();
+  if (!list.length) return;
+  focusIndex = (index + list.length) % list.length;
+  list.forEach((e, i) => e.classList.toggle("focus", i === focusIndex));
+  if (inputDevice === "gamepad")
+    list[focusIndex].focus({ preventScroll: false });
+}
+function moveFocus(dir) {
+  setFocus(focusIndex + dir);
+  audio.effect("menu");
+}
+function activateFocused() {
+  const e = focusables()[focusIndex];
+  if (["BUTTON", "SUMMARY", "A"].includes(e?.tagName)) e.click();
+  else e?.focus();
+}
+function adjustFocused(dir) {
+  const e = focusables()[focusIndex];
+  if (e?.type === "range") {
+    e.value = Number(e.value) + Number(e.step) * dir;
+    e.dispatchEvent(new Event("input", { bubbles: true }));
+  } else if (["BUTTON", "SUMMARY", "A"].includes(e?.tagName)) e.click();
+}
+function goBack() {
+  if (mode === "won" && modalPage === "results") return;
+  if (!modalPage) {
+    if (mode === "play") pauseGame();
+    return;
+  }
+  if (mode === "won") {
+    renderModal("results");
+    return;
+  }
+  if (modalPage === "pause" || returnPage === "title") {
+    hideModal();
+    return;
+  }
+  renderModal("pause");
+}
+function warpCamp(index) {
+  const c = checkpointDefs[index];
+  Object.assign(player, newPlayer(c.x, c.y + 0.1, player.id));
+  player.checkpoint = index;
+  body.setTranslation({ x: player.x, y: player.y + 0.8, z: 0 }, true);
+  body.setNextKinematicTranslation({ x: player.x, y: player.y + 0.8, z: 0 });
+  cameraTarget.set(player.x, player.y + 3, 0);
+  updateHUD();
+}
+async function action(name) {
+  if (network?.hub && (network.ended && !["about", "back", "pause"].includes(name) || [
+    "start",
+    "restart",
+    "title",
+    "host-local",
+    "join-local",
+    "peer",
+    "make-offer",
+    "answer-offer",
+    "accept-answer",
+    "connect-local",
+    "finish-peer"
+  ].includes(name)))
+    return;
+  activity(inputDevice);
+  audio.start();
+  if (name === "start" || name === "restart") {
+    startGame();
+    return;
+  }
+  if (name === "pause") {
+    if (mode === "title") renderModal("settings");
+    else if (modalPage) goBack();
+    else pauseGame();
+    return;
+  }
+  if (name === "resume") {
+    resumeGame();
+    return;
+  }
+  if (name === "title") {
+    toTitle();
+    return;
+  }
+  if (name === "back") {
+    goBack();
+    return;
+  }
+  if (name === "glyphs") {
+    settings.glyphs = settings.glyphs === "playstation" ? "xbox" : "playstation";
+    saveSettings();
+    renderModal("settings");
+    return;
+  }
+  if (name.startsWith("toggle-")) {
+    let k = name.slice(7);
+    if (k in settings) {
+      settings[k] = !settings[k];
+      saveSettings();
+    } else dev[k] = !dev[k];
+    renderModal(modalPage);
+    return;
+  }
+  if (name === "reset-tuning") {
+    tuning = { ...defaults };
+    dev = { invulnerable: false, noclip: false, showPhysics: false };
+    renderModal("dev");
+    return;
+  }
+  if (name === "warp-next") {
+    warpCamp((player.checkpoint + 1) % checkpointDefs.length);
+    renderModal("dev");
+    return;
+  }
+  if (name.startsWith("room-digit-")) {
+    const index = Number(name.slice("room-digit-".length));
+    const input = $("room-input");
+    if (!input || !Number.isInteger(index) || index < 0 || index > 3) return;
+    const digits = (input.value.replace(/^CAVE-/i, "").replace(/\D/g, "") + "0000").slice(0, 4).split("");
+    digits[index] = String((Number(digits[index]) + 1) % 10);
+    input.value = "CAVE-" + digits.join("");
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    if (inputDevice === "gamepad") setFocus(index);
+    return;
+  }
+  if (name === "connect-local") {
+    const room = $("room-input").value;
+    network.joinLocal(room);
+    startGame();
+    toast("Following your companion\u2019s trail.", "WAITING FOR THE HOST TO BEGIN");
+    return;
+  }
+  if (name === "copy-signal") {
+    try {
+      await navigator.clipboard.writeText($("signal").value);
+      $("signal-status").textContent = "Invitation copied.";
+    } catch {
+      $("signal").select();
+      $("signal-status").textContent = "Select and copy this code.";
+    }
+    return;
+  }
+  if (name === "create-reply") {
+    try {
+      const code = await network.answerOffer($("signal").value);
+      $("signal").value = code;
+      $("signal").readOnly = true;
+      $("signal-help").textContent = "Send this reply back to the host. Keep this page open.";
+      $("signal-status").textContent = "Waiting for your companion\u2026";
+      const b = $("modal").querySelector('[data-action="create-reply"]');
+      b.textContent = "Copy reply";
+      b.dataset.action = "copy-signal";
+    } catch (e) {
+      $("signal-status").textContent = e.message;
+    }
+    return;
+  }
+  if (name === "finish-peer") {
+    try {
+      await network.acceptAnswer($("signal").value);
+      startGame();
+      toast("The rope is tied.", "TWO EXPLORERS \u2022 ONE EXPEDITION");
+    } catch (e) {
+      $("signal-status").textContent = e.message;
+    }
+    return;
+  }
+  renderModal(name);
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-action]");
+  if (b) action(b.dataset.action);
+});
+document.addEventListener("pointerover", (e) => {
+  let b = e.target.closest("button");
+  if (b && e.pointerType !== "touch") {
+    const i = focusables().indexOf(b);
+    if (i >= 0) {
+      activity("keyboard");
+      setFocus(i);
+    }
+  }
+});
+document.addEventListener("input", (e) => {
+  if (e.target.id === "room-input") {
+    const digits = (e.target.value.replace(/^CAVE-/i, "").replace(/\D/g, "") + "0000").slice(0, 4);
+    $("modal").querySelectorAll("[data-room-digit]").forEach((button2) => {
+      const index = Number(button2.dataset.roomDigit);
+      button2.textContent = digits[index];
+      button2.setAttribute(
+        "aria-label",
+        `Room digit ${index + 1}: ${digits[index]}`
+      );
+    });
+    return;
+  }
+  const k = e.target.dataset.range;
+  if (!k) return;
+  const value = Number(e.target.value);
+  if (k in settings) {
+    settings[k] = value;
+    saveSettings();
+    if (k === "music") audio.setMusic(value);
+    if (k === "sfx") audio.setSfx(value);
+  } else tuning[k] = value;
+  const out = e.target.parentElement.querySelector("output");
+  out.textContent = k === "music" || k === "sfx" ? Math.round(value * 100) + "%" : value;
+});
+document.addEventListener("keydown", (e) => {
+  if (network?.hub && (network.ended || network.isServer)) return;
+  if (["INPUT", "TEXTAREA"].includes(e.target.tagName) && e.target.type !== "range") {
+    if (e.code === "Escape") goBack();
+    return;
+  }
+  const exited = activity("keyboard");
+  if (exited) {
+    e.preventDefault();
+    return;
+  }
+  if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(
+    e.code
+  ))
+    e.preventDefault();
+  if (e.repeat) return;
+  keys.add(e.code);
+  pressed.add(e.code);
+  audio.start();
+  if (e.code === "Escape" || e.code === "KeyP") {
+    if (modalPage) goBack();
+    else if (mode === "play") pauseGame();
+    return;
+  }
+  if (e.code === "KeyM" && mode === "play") {
+    if (modalPage === "map") hideModal();
+    else renderModal("map");
+    return;
+  }
+  if (modalPage || mode === "title") {
+    if (e.code === "ArrowDown" || e.code === "KeyS") moveFocus(1);
+    if (e.code === "ArrowUp" || e.code === "KeyW") moveFocus(-1);
+    if ((e.code === "ArrowLeft" || e.code === "ArrowRight") && (modalPage === "settings" || modalPage === "dev"))
+      adjustFocused(e.code === "ArrowRight" ? 1 : -1);
+    if (e.code === "Enter" || e.code === "Space") {
+      e.preventDefault();
+      activateFocused();
+    }
+  }
+});
+document.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => {
+  keys.clear();
+  touch.x = touch.y = 0;
+  touch.jump = false;
+  pointers.clear();
+  touchOrigin = null;
+  $("touch-ring").classList.add("hidden");
+  if (mode === "play" && !network?.connected) pauseGame();
+});
+document.addEventListener(
+  "pointerdown",
+  (e) => {
+    const exited = activity(e.pointerType === "touch" ? "touch" : "keyboard");
+    if (exited) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  },
+  true
+);
+document.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "mouse" && (Math.abs(e.movementX) > 3 || Math.abs(e.movementY) > 3))
+    activity("keyboard");
+});
+var pointers = /* @__PURE__ */ new Map();
+$("game").addEventListener("pointerdown", (e) => {
+  const exited = activity(e.pointerType === "touch" ? "touch" : "keyboard");
+  if (exited) return;
+  if (e.pointerType !== "touch") {
+    if (mode === "play" && !modalPage) {
+      touch.jump = true;
+      audio.start();
+    }
+    return;
+  }
+  audio.start();
+  $("game").setPointerCapture(e.pointerId);
+  if (mode !== "play" || modalPage) return;
+  if (e.clientX < innerWidth * 0.6 && !touchOrigin) {
+    touchOrigin = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    $("touch-ring").style.left = e.clientX - 50 + "px";
+    $("touch-ring").style.top = e.clientY - 50 + "px";
+    $("touch-ring").classList.remove("hidden");
+  } else {
+    pointers.set(e.pointerId, "jump");
+    touch.jump = true;
+  }
+});
+$("game").addEventListener("pointermove", (e) => {
+  if (touchOrigin?.id === e.pointerId) {
+    touch.x = Math.max(-1, Math.min(1, (e.clientX - touchOrigin.x) / 45));
+    touch.y = Math.max(-1, Math.min(1, (touchOrigin.y - e.clientY) / 45));
+  } else if (e.pointerType === "mouse" && (Math.abs(e.movementX) > 3 || Math.abs(e.movementY) > 3))
+    activity("keyboard");
+});
+function releasePointer(e) {
+  if (touchOrigin?.id === e.pointerId) {
+    touchOrigin = null;
+    touch.x = touch.y = 0;
+    $("touch-ring").classList.add("hidden");
+  }
+  if (pointers.has(e.pointerId) || e.pointerType === "mouse") {
+    pointers.delete(e.pointerId);
+    touch.jump = false;
+  }
+}
+window.addEventListener("pointerup", releasePointer);
+window.addEventListener("pointercancel", releasePointer);
+$("touch-action").addEventListener("pointerdown", (e) => {
+  e.preventDefault();
+  activity("touch");
+  audio.start();
+  touch.jump = true;
+  pointers.set(e.pointerId, "jump");
+});
+function resize() {
+  if (!renderer) return;
+  renderer.setSize(innerWidth, innerHeight);
+  const aspect = innerWidth / innerHeight;
+  const height = aspect < 1 ? 25 : 21;
+  camera.left = -height * aspect / 2;
+  camera.right = height * aspect / 2;
+  camera.top = height / 2;
+  camera.bottom = -height / 2;
+  camera.updateProjectionMatrix();
+}
+window.addEventListener("resize", resize);
+function updateCamera(dt) {
+  let tx, ty;
+  if (mode === "title") {
+    tx = 18 + Math.sin(worldTime * 0.15) * 0.7;
+    ty = 4.7;
+  } else {
+    tx = player.x + player.face * 2.7;
+    ty = player.y + 3.3;
+    tx = Math.max(9, Math.min(107, tx));
+    if (player.mode === "float") ty += 1.1;
+  }
+  target.set(tx, ty, 0);
+  cameraTarget.lerp(target, 1 - Math.exp(-dt * 3));
+  camera.position.set(cameraTarget.x, cameraTarget.y + 1.5, 37);
+  camera.lookAt(cameraTarget.x, cameraTarget.y, 0);
+}
+function animate(time) {
+  if (environment?.titleDecor)
+    environment.titleDecor.visible = mode === "title";
+  const dt = Math.min((time - lastTime) / 1e3 || 1 / 60, 0.07);
+  lastTime = time;
+  let pad = readPad();
+  if (mode === "title" && !modalPage && performance.now() - lastInput > 1e4 && !network?.hub)
+    startAttract();
+  let inp = getInput(pad);
+  if (!manual) {
+    accumulator += dt;
+    let count = 0;
+    while (accumulator >= 1 / 60 && count < 5) {
+      if (!network?.hub || network.running) {
+        if (network?.ended) {
+          audio.stop();
+          playing = false;
+        } else fixedUpdate(1 / 60, inp);
+      }
+      accumulator -= 1 / 60;
+      count++;
+    }
+  }
+  if (network?.hub && network.ended) {
+    playing = false;
+    audio.stop();
+  }
+  if (!network?.isServer) updateCamera(dt);
+  if (dev.showPhysics) {
+    const data = world.debugRender();
+    if (!physicsLines) {
+      physicsMat = new THREE2.LineBasicMaterial({
+        vertexColors: true,
+        depthTest: false
+      });
+      physicsLines = new THREE2.LineSegments(
+        new THREE2.BufferGeometry(),
+        physicsMat
+      );
+      physicsLines.renderOrder = 100;
+      scene.add(physicsLines);
+    }
+    physicsLines.visible = true;
+    physicsLines.geometry.setAttribute(
+      "position",
+      new THREE2.BufferAttribute(data.vertices, 3)
+    );
+    physicsLines.geometry.setAttribute(
+      "color",
+      new THREE2.BufferAttribute(data.colors, 4)
+    );
+  } else if (physicsLines) physicsLines.visible = false;
+  if (!network?.isServer) {
+    renderer.render(scene, camera);
+    if (renderFrames === 0) lastInput = performance.now();
+    renderFrames++;
+  }
+  pressed.clear();
+}
+async function init() {
+  scene = new THREE2.Scene();
+  scene.background = new THREE2.Color(1060148);
+  scene.fog = new THREE2.Fog(1391424, 45, 110);
+  camera = new THREE2.OrthographicCamera(-16, 16, 10.5, -10.5, 0.1, 150);
+  renderer = new WebGPURenderer({
+    canvas: $("game"),
+    antialias: true,
+    alpha: false,
+    powerPreference: "high-performance",
+    forceWebGL: new URLSearchParams(location.search).has("compat")
+  });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.outputColorSpace = THREE2.SRGBColorSpace;
+  renderer.toneMapping = THREE2.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.45;
+  await renderer.init();
+  resize();
+  $("load-note").textContent = "Unfolding the field map\u2026";
+  const hemi = new THREE2.HemisphereLight(13824219, 2374974, 2.5);
+  scene.add(hemi);
+  let sunlight = new THREE2.DirectionalLight(16768426, 3.2);
+  sunlight.position.set(-5, 20, 20);
+  scene.add(sunlight);
+  let cool = new THREE2.DirectionalLight(6869964, 1.6);
+  cool.position.set(35, 5, 15);
+  scene.add(cool);
+  await RAPIER.init();
+  world = new RAPIER.World({ x: 0, y: -23, z: 0 });
+  controller = world.createCharacterController(0.025);
+  controller.enableSnapToGround(0.15);
+  controller.enableAutostep(0.25, 0.2, true);
+  controller.setApplyImpulsesToDynamicBodies(true);
+  environment = buildWorld(scene);
+  makeTerrain();
+  createObjects();
+  hero = makeExplorer();
+  friend = makeExplorer(6932668);
+  scene.add(hero.group, friend.group);
+  friend.group.visible = false;
+  applyCelInk();
+  resetGame();
+  network = new ExpeditionNetwork(
+    (inp, id) => {
+      if (inp.left) {
+        remoteInputs.delete(id);
+        if (remotePlayer?.id === id) {
+          const old = physicsFor.get(remotePlayer);
+          if (old) {
+            actorColliders.delete(old.collider.handle);
+            world.removeCharacterController(old.controller);
+            world.removeRigidBody(old.body);
+            actorPhysics.delete(old);
+          }
+          remotePlayer = null;
+        }
+        return;
+      }
+      remoteInputs.set(id, { ...inp, receivedAt: performance.now() });
+      if (network?.isServer) return;
+      if (!remotePlayer) {
+        remotePlayer = newPlayer(player.x + 1, player.y, id);
+        createActorPhysics(remotePlayer);
+      }
+      remoteInput = inp;
+    },
+    applySnapshot,
+    (status, n) => {
+      $("net-status").textContent = n?.role === "solo" ? "" : status;
+      if (n?.connected && n.role === "guest" && n._paired && !playing)
+        startGame();
+    }
+  );
+  await network.init();
+  configureSeats();
+  if (network.hub) {
+    $("title").classList.add("hidden");
+    $("topline").classList.add("hidden");
+    $("hud").classList.remove("hidden");
+    playing = true;
+    mode = "play";
+    network.ready();
+  }
+  $("loading").classList.add("hidden");
+  updatePrompts();
+  renderer.setAnimationLoop(animate);
+  window.__game = {
+    ready: true,
+    get state() {
+      return {
+        title: TITLE,
+        mode,
+        modal: modalPage,
+        playing,
+        attract,
+        player: { ...player },
+        remote: remotePlayer ? { ...remotePlayer } : null,
+        stats: JSON.parse(JSON.stringify(stats)),
+        tuning: { ...tuning },
+        settings: { ...settings },
+        dev: { ...dev },
+        network: {
+          role: network.role,
+          hub: network.hub,
+          running: network.running,
+          ended: network.ended,
+          players: network.players,
+          stats: network.stats
+        },
+        worldTime,
+        renderFrames,
+        backend: renderer.backend.isWebGPUBackend ? "WebGPU" : "WebGL2",
+        colliders: world.colliders.len(),
+        objects: scene.children.length,
+        balloon: { ...balloon },
+        audio: audio.getStats()
+      };
+    },
+    start: startGame,
+    title: toTitle,
+    pause: pauseGame,
+    warp: warpCamp,
+    setManual(v) {
+      manual = v;
+    },
+    advance(frames, inp = null) {
+      manual = true;
+      for (let i = 0; i < frames; i++)
+        fixedUpdate(1 / 60, inp || getInput(readPad()));
+      updateHUD();
+      return this.state;
+    },
+    setInput(v) {
+      testInput = v;
+    },
+    getActor(id) {
+      return id === player.id ? player : remotePlayer;
+    },
+    setRemoteInput(id, inp) {
+      remoteInputs.set(id, inp);
+    },
+    setDev(v) {
+      Object.assign(dev, v);
+    },
+    damage,
+    collect(index) {
+      collect(items[index]);
+    },
+    snapshot: makeSnapshot,
+    applySnapshot,
+    network,
+    audio,
+    CavernAudio,
+    get camera() {
+      return { x: cameraTarget.x, y: cameraTarget.y };
+    },
+    setFeedback(v) {
+      feedbackData = v;
+    },
+    attract: startAttract,
+    get feedback() {
+      return feedbackData;
+    },
+    get items() {
+      return items.map((i) => ({
+        kind: i.kind,
+        id: i.id,
+        x: i.x,
+        y: i.y,
+        collected: i.collected
+      }));
+    }
+  };
+}
+init().catch((error) => {
+  console.error(error);
+  $("loading").innerHTML = `<div class="error-text"><b>The lantern needs a spark.</b><p>The game could not finish loading. Check your internet connection for the Three.js and Rapier libraries, then reload. A current WebGPU or WebGL2 browser is required.</p><p>${String(error.message).replace(/[<>]/g, "")}</p><button class="primary" onclick="location.reload()">Try again \u2192</button></div>`;
+});
+
+</script></body></html>

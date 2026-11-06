@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:25:01",
+    "source": "Solaris (1986), Atari 2600; created by Doug Neubauer",
+    "plan": "none",
+    "genre": "Arcade space shooter with strategic sector navigation",
+    "perspective": "Third-person chase view, with a galactic scanner",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer, TSL, Rapier 3D 0.19.3, Gamepad API, Web Audio API, AI Hub session client 1.4.0, WebRTC, BroadcastChannel; esbuild 0.25.12 for packaging",
+    "artDirection": "Procedural 3D cel shading, geometric ink outlines, lavender alien landscapes, mint thrusters and warm coral enemies; space-comic typography",
+    "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for thrusters, barrel rolls, cadet waving, enemy limbs, ion doors and reactor pulses; procedural flight and particle motion",
+    "audio": "Code-only Web Audio arpeggiated synth music at 10% default volume, synthesized cannons, explosions, pickups, engines and UI sounds; Animalese-style gibberish radio",
+    "online": "AI Hub Protocol v1 ghost races for 1–4 pilots; standalone BroadcastChannel wing races for up to four tabs on the same origin, and direct two-device WebRTC invitation/answer exchange",
+    "testing": "Headless Chromium 153 with software WebGPU; scripted full campaign; simulated standard gamepad; landscape touch profile; Web Audio analyser; offline file URL; two-page BroadcastChannel and WebRTC; AI Hub two- and four-player harness with latency, jitter, packet loss and host departure. WebGL2 screenshots for visual review. Physical controller, native mobile hardware and wide-area NAT compatibility unknown. No FPS target.",
+    "research": "Original Atari Solaris manual, Doug Neubauer's Atari history, AtariAge screenshots and gameplay captures; documented alarm and combat sound cues; exact original sound timbres unknown. Official Three.js and Rapier docs, local versioned APIs, and AI Hub Protocol v1 README and harness.",
+    "environment": "Codex CLI (headless); Linux on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and visual review caught five distinct game issues: a Rapier lifetime crash, a multi-canvas shader warmup hang, an unstarted music sequencer, a weak flagship silhouette and small flight prompts. Two test fixture mistakes also caused false failures. All were corrected.",
+    "Two were game breaking: the long-playthrough physics crash and multiplayer startup hang.",
+    "The scripted six-sector playthrough through real Rapier hits and pickups, followed by the AI Hub four-pilot lossy-network and host-leave checks.",
+    "The headless WebGPU screenshot was blank despite the game running. State checks verified WebGPU; WebGL2 screenshots were useful for visual review."
+  ],
+  "engineFeedback": [
+    "Three.js TSL made the same cel-shading materials work on WebGPU and the WebGL2 fallback; AnimationMixer gave the procedural models a reusable animation base.",
+    "Yes. Reusing a physics world across encounter changes failed in the long playthrough, and awaiting shader warmup stalled simultaneous WebGPU copies. Fresh encounter worlds, collision filters and first-render shader compilation resolved the tested failures.",
+    "The encounter-driven campaign, sector progression, controller-focus navigation, assisted touch input and ghost-race state management.",
+    "Coordinating GPU startup, fixed-step physics lifetimes and multiple game copies in headless tests.",
+    "none",
+    "Clearer diagnostics and a more predictable shader-compilation lifecycle for several simultaneous WebGPU canvases."
+  ],
+  "promptFeedback": [
+    "The concrete controller, touch, attract-mode, developer-tools and Hub requirements made the intended finish line clear.",
+    "The expected standalone multiplayer connection method was unspecified. I provided same-origin tab races and direct WebRTC invitations. Exact original sound timbres remain unknown.",
+    "Combining six distinct encounters, procedural cel-shaded art, code-only audio and verified networking in one self-contained HTML file.",
+    "Specify the intended demo length and the desired standalone multiplayer connection workflow."
+  ],
+  "aiHub": {
+    "name": "Solar Mayhem",
+    "tagline": "Six sectors to sunrise",
+    "description": "A cel-shaded chase-view space adventure inspired by Solaris. Break a raiding fleet, rescue cadets, slip through an ion corridor and take the stolen sun back from the Nightjar.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Solaris (1986)",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD / left stick / mouse / touch drag to fly; Space / click / R2 fire; Shift / Cross boost; E / Square pulse; Q / Circle roll; Tab / Triangle scanner; Esc / Options pause.",
+    "tags": [
+      "3d",
+      "arcade",
+      "sci-fi",
+      "third-person",
+      "vehicles",
+      "boss fights"
+    ]
+  }
+}

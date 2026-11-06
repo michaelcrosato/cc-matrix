@@ -1,0 +1,30 @@
+Californiroll network integration
+
+hub/session.js is official unmodified client v1.4.0. Insert its text in a classic script immediately after <meta charset>, BEFORE other scripts. Do not bundle or change it. Required head tags:
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-2">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Bank the biggest combined score across six coastal sports.">
+<meta name="hub:session-howto" content="Left stick or arrows move; Cross / Space performs the event action; Square / X adds style.">
+<meta name="hub:session-minutes" content="6">
+
+import {CoastNetwork} from './network.js';
+const net = new CoastNetwork({onState: applySnapshot, onStatus: showNetworkStatus});
+net.onAction = (action, sender) => { /* AUTHORITATIVE HOST: check sender===currentPlayer, then apply */ };
+net.onStart = () => startTournament(); // scene can start rendering, but gameplay must wait net.time()>=0
+net.onTimeUp = () => net.finish(totalsByPlayerId);
+net.onEnd = () => { disableInput(); muteSound(); };
+const info=await net.connect();
+if(info) { /* hide ALL normal menus; automatic straight round. Only host simulates. */ }
+net.ready(); // call only once renderer/physics/world loaded, with no gesture
+
+Every host frame: net.publish(compactSnapshot); // sent at 10Hz automatically
+Non-host frames: never simulate physics or update score; render snapshots. net.submit({kind:'controls',...}) sends controls to host. Host uses net.onAction. onAction receives local submit too. Inputs must be authorized against current player and clamped by host.
+
+active: true only AI Hub session. connected: established room. transport: hub / local-room / none. server: host copy has no local player; still simulate, render optional. isHost: simulation authority. me: own player id. players: current [{id,name,color}]. Hub names need textContent (never HTML). time(): Hub shared clock ms; negative before start.
+
+The module sends automatic idle input heartbeats clients→host at 10Hz so the harness observes both directions. Host must publish snapshots. Ignore game Options while Create/button8 held. No restart/quit/dev mode controls in Hub sessions. Hub-only time-up and end are enforced by callbacks. finish(score array or numeric-key object) builds valid tie-aware standings for current players.
+
+Standalone: normal single-player and couch pass-the-pad need no module setup. Optional same-browser two-tab practice uses net.createRoom('CODE') on host and net.joinRoom('CODE') on guest. Explicitly label this "Browser room — same browser only", not internet multiplayer. Both pages must have same origin. net.start() starts this room and net.finish(totals) completes it. net.leaveRoom() returns solo. AI Hub supplies true cross-device online play. No external broker or server is used.
+
+Harness: official files are in hub/{harness.html,bridge.js,round.js}. Serve folder root on 127.0.0.1 OS-assigned port and open hub/harness.html?game=../GAME.html&players=2&auto=1. Mandatory checks include scenario=server and scenario=host-leave. Poll window.__hubCheck and document.body.dataset.complete. No harness test has been run by this module author; root agent will run it against complete game.

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:18:22",
+    "source": "Pressure Cooker (Activision, 1983), designed by Garry Kitchen for Atari 2600",
+    "plan": "none",
+    "genre": "Arcade action / time-management cooking",
+    "perspective": "Fixed oblique overhead 3D / orthographic diorama",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL2 compatibility, Rapier 3D 0.19.3, Gamepad API, Web Audio API, PeerJS 1.5.5, AI Hub Session Protocol v1 client 1.4.0; bundled with esbuild 0.25.12",
+    "artDirection": "Procedural cel-shaded geometry, ink silhouettes, warm mid-century diner palette, printed signs and checkerboard tiles",
+    "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for chef scurry, breathing, squash, dispenser chug and wrapping; procedural steering and physics confetti",
+    "audio": "Original code-generated swing jingle, bass and percussion, synthesized kitchen effects and formant-filtered gibberish voices; music defaults to 10%; no audio files",
+    "online": "1–4-player host-authoritative co-op through AI Hub; standalone PeerJS WebRTC rooms and same-origin BroadcastChannel rooms; 1–2 local co-op",
+    "testing": "146-check headless suite: complete three-shift services on three seeds, keyboard, emulated standard gamepad, landscape and portrait touch, scoring, loss states, physics, procedural audio samples, two-page rooms, real WebRTC between isolated contexts, four AI Hub harness scenarios, WebGPU submission and GPU-loss recovery; 1920×1080 visual review. Physical controller, real mobile hardware and cross-network NAT traversal: unknown.",
+    "research": "Read Activision’s 1983 manual via AtariAge for catching, rejecting, recipe combinations, waves, eight difficulty/player variants, belt losses, rating and three chutes; inspected an Atari screenshot and descriptions of the oven, chef, bright colors and jingle; read Three.js r180 source, Rapier documentation, PeerJS documentation and AI Hub Session Protocol v1.",
+    "environment": "Codex CLI (headless); Linux (Ubuntu on WSL2)",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "13 distinct issues were found by automated tests, screenshots and review, including input timing, controller room-code entry, floor visibility, world picking, departed seats, reused render IDs, event tags, GPU recovery cleanup, portrait framing, Hub timeout results, pre-round navigation and two test setup/counter problems. All were corrected.",
+    "Three could interrupt or prevent a service: unreliable keyboard handling, a departed same-device guest retaining a required order/seat, and a cleanup error after deliberate GPU loss. All were corrected.",
+    "The end-to-end keyboard sequence that places a topping, carries a burger and serves it; it exposed event timing bugs that the deterministic simulation tests could not. The AI Hub dedicated-server scenario also verified authority without a local player.",
+    "Reading instantaneous render statistics after taking a screenshot. Three.js resets those counters each animation frame; retaining the counters and waiting for GPU submission gave useful evidence."
+  ],
+  "engineFeedback": [
+    "Three.js makes a custom cel-shaded kitchen and native keyframe animation straightforward, while WebGPURenderer also provides a WebGL2 compatibility path.",
+    "Headless Chromium needed --use-angle=swiftshader in addition to the supplied WebGPU flags. Three.js r180 also required releasing material and geometry listeners before retiring a lost renderer so recovery cleanup remained valid.",
+    "The entire kitchen simulation, order logic, controller navigation, accessible prompts, procedural audio and host-authoritative multiplayer.",
+    "Combining browser GPU initialization with physics, controller-first menus and replicated game state in a portable single file.",
+    "none",
+    "Provide a smaller built-in arcade UI and input layer with controller focus navigation."
+  ],
+  "promptFeedback": [
+    "The specific 1983 reference, controller-first presentation, attract mode and complete-slice requirement gave the game a clear identity.",
+    "The standalone signaling service was unspecified, and SOURCE in the filename could mean the title alone or title plus year. I used embedded libraries, PeerJS signaling and the full source title and year.",
+    "Delivering a readable, complete kitchen game with offline packaging and both standalone and hub multiplayer in one HTML.",
+    "Specify a preferred standalone signaling service and desired session length, while retaining freedom over genre and interpretation."
+  ],
+  "aiHub": {
+    "name": "Press for Burgers",
+    "tagline": "Good food. Fast hands.",
+    "description": "Catch flying toppings, stack exact orders and hustle every burger to the right window. Work three increasingly hectic shifts alone or share the kitchen in four-player co-op.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "Pressure Cooker (1983)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Move: left stick / WASD / arrows; interact: Cross / E; reject: Circle / R; dash: Square / Shift; belt brake: R1 / Q; pause: Options / Esc; touch: drag and tap with assisted handling",
+    "tags": [
+      "3d",
+      "arcade",
+      "co-op",
+      "retro",
+      "top-down",
+      "comedy"
+    ]
+  }
+}

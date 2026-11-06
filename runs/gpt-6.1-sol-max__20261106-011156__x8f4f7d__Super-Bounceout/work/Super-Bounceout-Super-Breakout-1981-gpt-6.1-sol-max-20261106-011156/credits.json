@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-06 01:11:56",
+    "source": "Super Breakout (Atari, 1981 home version; original arcade game 1978).",
+    "plan": "none",
+    "genre": "Arcade action; paddle-and-ball brick breaker.",
+    "perspective": "Fixed front-facing orthographic 2.5D playfield.",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGPU and automatic WebGL 2 fallback; Rapier 2D 0.19.3; Gamepad API; Web Audio API; PeerJS 1.5.5; AI Hub Session Protocol 1, unmodified session client 1.4.0; HTML/CSS/JavaScript.",
+    "artDirection": "Cel-shaded extruded bricks, ink outlines, astronomical line art, warm paper, coral, mint, saffron and lilac. All scene art is code-generated geometry.",
+    "animation": "Three.js native AnimationMixer, AnimationClip and keyframe tracks for orbital drift, sector arrival, paddle squash and ink impact rings; procedural ball trails and debris.",
+    "audio": "All audio synthesized in code using Web Audio: 108 BPM orbital music, collision and menu effects, filtered Animalese-style gibberish crew voices. Music defaults to 10%. No audio files.",
+    "online": "AI Hub ghost score races for 1–4 players with progress, results and remote paddles. Standalone private PeerJS/WebRTC score races for 2–4 players. Same-device two-player cooperative campaign.",
+    "testing": "Headless Chromium 153 with software WebGPU and GPU pixel readback; deterministic Rapier full-campaign AI playthrough; scripted standard gamepad, keyboard, mouse and mobile touch controls; WebGL 2 visual checks at 1920×1080 and phone portrait; OfflineAudioContext signal checks; file:// startup with real CDN dependencies; real two-page PeerJS/WebRTC race, results and rematch; official AI Hub harness with two players, four players under 150 ms latency/50 ms jitter/5% loss, and host departure. Physical controller, human listening, real iOS and remote-network connectivity: unknown.",
+    "research": "Atari Super Breakout instruction manual: space-shuttle force-field premise, angle-based paddle returns, eight scoring rows, five serves, top-wall paddle shrink, Double, Cavity and Progressive variants, and eight programmed sound choices. Three.js r180 WebGPURenderer source, Rapier JavaScript documentation, PeerJS documentation, and AI Hub protocol/client/harness. Source has no character enemies; brick walls are the obstacles. Manual: https://atariage.com/2600/manuals_old/super_breakout.html . Hub: https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub . Title chosen with node:crypto.randomInt from 50 silently brainstormed candidates: draw 23, Super Bounceout.",
+    "environment": "Codex CLI (headless); Linux, Ubuntu 26.04 on WSL2.",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "43 automated checks passed, including three official AI Hub harness scenarios. Testing caught 2 game issues: the stacked-paddle collision trap and an outline mesh covering brick faces. Both were fixed. Additional review corrected narrow-screen framing and completed online result/rematch controls.",
+    "1 critical game-breaking issue: an upward-moving ball could become trapped between the twin paddles, preventing the Cavity and Double stages from progressing.",
+    "The automated Rapier pilot played all four sectors to victory and verified captive-ball releases, POP hits, scoring, finite physics state and campaign progression. It exposed the stacked-paddle trap.",
+    "The first direct headless WebGPU screenshot was least useful because the compositor omitted the canvas. GPU pixel readback and screenshots through the engine’s WebGL 2 fallback gave useful evidence instead."
+  ],
+  "engineFeedback": [
+    "Three.js made native animation tracks, orthographic 3D geometry and a consistent cel-shaded look straightforward. Rapier supplied real continuous collision detection and contact events.",
+    "I initially placed an ink backing mesh slightly in front of the coloured brick face and used two-sided paddle collision response. Visual and full-playthrough tests exposed both assumptions; depth ordering and one-way paddle contacts fixed them.",
+    "The complete game layer: paddle return rules, four stage variants, menus, input switching, procedural audio, attract AI and multiplayer lifecycle.",
+    "Coordinating fixed-step physics, arcade-directed paddle rebounds and animated rendering while preserving consistent controls across devices.",
+    "none",
+    "A simpler built-in path for combining WebGPU materials, ink outlines and screen-space effects would reduce setup."
+  ],
+  "promptFeedback": [
+    "The source research, controller-first direction, attract mode and concrete shipping requirements made the intended experience clear.",
+    "The source year does not identify a platform; I used the 1981 home release and its manual. The relationship between standalone multiplayer and Hub multiplayer required a design choice.",
+    "Delivering a polished single-file game while verifying four source variants, three input families, synthesized sound and two multiplayer transports.",
+    "Specify the source platform and the required standalone online mode, and distinguish mandatory browser coverage from stand-in coverage."
+  ],
+  "aiHub": {
+    "name": "Super Bounceout",
+    "tagline": "Make a little space.",
+    "description": "A small ship meets a very colourful problem. Angle your paddle, time a perfect POP, free captive signals and break through four ink-drawn force fields, solo, with a couch crewmate or in an online score race.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "Super Breakout (1981)",
+    "series": "Breakout",
+    "players": "1–4",
+    "controls": "Left stick / A,D / arrows / mouse / touch drag: move; Cross / A / Space / click / tap: serve and POP; Options / Esc: pause. Couch P2: arrows + Enter or second pad.",
+    "tags": [
+      "2.5d",
+      "arcade",
+      "co-op",
+      "versus",
+      "retro",
+      "sci-fi"
+    ]
+  }
+}

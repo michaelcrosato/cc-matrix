@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:31:44",
+    "source": "Star Raiders (1982)",
+    "plan": "none",
+    "genre": "Space combat simulation; tactical arcade shooter",
+    "perspective": "First-person cockpit, with optional third-person chase camera",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with native WebGL2 fallback; Rapier 0.19.3; Web Audio; Gamepad API; WebRTC; AI Hub Session Protocol v1 client 1.4.0; bundled single HTML",
+    "artDirection": "Procedural cel-shaded spacecraft and planets, ink outlines, print grain, ivory and amber flight instruments",
+    "animation": "Three.js AnimationMixer / AnimationClip keyframe tracks for station rings, enemy reactors, engine pulses, weapon recoil and explosions; procedural flight motion",
+    "audio": "Code-generated synthesizer music at 10% default music volume; synthesized effects; formant-filtered Animalese-style gibberish radio voices; no audio files",
+    "online": "AI Hub ghost patrol races for 1–4 pilots; standalone two-pilot WebRTC link-code race; BroadcastChannel same-browser link",
+    "testing": "Unrestricted headless testing; screenshots only for visual composition. 74/74 checks: Chromium 153 WebGPU framebuffer/readback and WebGL2, complete scripted patrol, standard gamepad stub, Pixel 7 multitouch, WebKit iPhone stand-in, offline Web Audio, real two-page WebRTC, local tab link, and three official AI Hub harness scenarios.",
+    "research": "none; no internet research. Downloaded only dependencies and the user-supplied AI Hub integration contract and harness",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "5 game issues found and fixed: toon-material setup warnings, live-tuning units, renderer recovery disposal, an unconnected radio voice trigger, and a clipped portrait title. Test-script setup corrections are excluded.",
+    "1 game-breaking issue: restarting gameplay after a lost graphics device could throw during resource disposal. Recovery now retires the old renderer’s resources before switching to WebGL2.",
+    "The fixed-step full-operation playthrough: actual Rapier cannon hits cleared all 15 enemies, broke both relays, destroyed the command ship and returned to a repaired dock. The official multiplayer harness added network lifecycle coverage.",
+    "Early WebGPU screenshots: the headless compositor could show a blank/white canvas despite submitted draws. Native offscreen framebuffer readback and state assertions are more reliable; WebGL2 screenshots were used to judge composition."
+  ],
+  "engineFeedback": [
+    "Native scene graphs, toon materials and AnimationMixer support a consistent procedural art style.",
+    "Yes. MeshToonNodeMaterial does not accept flatShading as a constructor option, and renderer replacement required disposing live scene resources before retiring the old backend. Software WebGPU also needed both ANGLE and Vulkan launch flags.",
+    "The cockpit flight model, tactical campaign, combat systems, user interface and multiplayer race logic.",
+    "Managing WebGPU device loss, render-resource lifetimes and headless presentation while keeping the flight simulation independent.",
+    "none",
+    "Make backend replacement dispose its listeners safely, and expose a clearer first-frame/readback readiness API for headless verification."
+  ],
+  "promptFeedback": [
+    "The source, controller-first constraints and complete vertical-slice requirement gave the game a clear identity.",
+    "Standalone multiplayer transport was unspecified; I chose peer-to-peer link codes and an optional local tab link.",
+    "Making tactical navigation, free flight, combat, docking and multiplayer feel coherent in one self-contained file.",
+    "Specify whether standalone multiplayer needs automatic room discovery or whether manual peer-to-peer pairing is acceptable."
+  ],
+  "aiHub": {
+    "name": "Star Reclaimers",
+    "tagline": "The void doesn’t patrol itself.",
+    "description": "Defend Kestrel in an ink-stroked space patrol. Manage energy, jump six sectors, dock for repairs, and tear down the Crown command ship; compare scores with wingmates in a ghost patrol race.",
+    "type": "Game",
+    "genre": "Flight",
+    "source": "Star Raiders (1982)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Mouse aim, WASD fly, click/Space fire, Shift boost, C shield, X nova, T target, F dock, M chart, J jump, V camera, Esc pause; standard gamepad; assisted touch.",
+    "tags": [
+      "3d",
+      "sci-fi",
+      "first-person",
+      "arcade",
+      "vehicles",
+      "boss fights"
+    ]
+  }
+}

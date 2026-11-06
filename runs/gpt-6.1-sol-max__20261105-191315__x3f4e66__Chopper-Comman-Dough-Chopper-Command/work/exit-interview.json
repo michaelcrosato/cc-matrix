@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 19:13:15",
+    "source": "Chopper Command (Activision, Atari 2600, 1982), designed by Bob Whitehead.",
+    "plan": "none",
+    "genre": "Arcade convoy-defense shooter",
+    "perspective": "Side-scrolling orthographic 2.5D",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL 2 compatibility, Rapier 3D 0.19.3, Web Audio, Gamepad API, WebRTC, BroadcastChannel, AI Hub Session Protocol v1 client 1.4.0; bundled with Bun 1.3.14.",
+    "artDirection": "Procedural cel-shaded and inked 3D aircraft, warm desert illustration, paper grain, condensed arcade lettering.",
+    "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for main/tail rotors, carrier rotors, hovering, truck suspension and supply rotation; procedural banking and combat effects.",
+    "audio": "Code-generated Web Audio pulse/triangle music, percussion, rotor, cannon, impacts and explosions; formant-filtered Animalese-style radio gibberish. No audio files. Music defaults to 10%.",
+    "online": "1–4 player authoritative shared-world co-op through AI Hub Session Protocol v1. Standalone: 1–2 local co-op, 1–4 BroadcastChannel radio rooms and 1–2 manual WebRTC pairing. Two-page pairing tested locally; cross-network NAT behavior: unknown.",
+    "testing": "22 automated checks passed, including the complete campaign and all four AI Hub scenarios (53 harness assertions). Headless Chromium 153 / Playwright 1.63.0; native WebGPU and rendered pixels, emulated pad, touch, offline/live audio, two-page radio/WebRTC, screenshots and file:// launch. No FPS target. Physical controller, real touch hardware, human listening and cross-network hardware: unknown.",
+    "research": "Original 1982 Activision manual (mechanics, ten waves, scanner, twelve attackers/trucks, split missiles, scoring/reserves and desert screen diagram); contemporary Electronic Games November 1982 convoy-defense article; source gameplay/sound descriptions. Exact original audio synthesis: unknown. AI Hub protocol and pinned Three.js/Rapier source/docs inspected.",
+    "environment": "Codex CLI (headless); Linux, Ubuntu 26.04.1 on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "9 issues: 4 game issues (short-landscape launch clipping, delayed menu focus, late Hub hello, delayed first world packet) and 5 test/environment issues (headless compositor, padded GPU rows, immutable gamepad stub, attract-mode fixture isolation, overly strict assertions about a fast AI pilot). All fixed.",
+    "2 game-breaking cases: launch on short landscape screens and an intermittent dedicated-server handshake timeout. The other game issues affected controller responsiveness and initial network traffic.",
+    "The AI Hub conformance harness, especially four-player host departure and a host with no player, caught multiplayer lifecycle timing that a solo playthrough could not.",
+    "The initial state-only WebGPU startup check reported the backend name while its device was already lost. Native GPU and rendered-pixel checks were much more useful."
+  ],
+  "engineFeedback": [
+    "Native AnimationMixer clips, toon node materials and WebGPURenderer let one procedural scene work across WebGPU and the WebGL 2 compatibility backend.",
+    "Headless WebGPU canvas presentation initially destroyed its device. A native GPU probe isolated the browser setup; software ANGLE and row-stride-aware pixel readback made verification work.",
+    "The convoy/combat simulation, input and menu focus, procedural music/SFX/voices, and authoritative shared-world synchronization.",
+    "Validating WebGPU rendering and multiplayer lifecycle timing across several headless browser copies.",
+    "none; Three.js, Rapier and the AI Hub client are unmodified. Renderer configuration and pixel validation are application code.",
+    "Return tightly packed render-target pixels consistently across WebGPU and WebGL, or expose the readback row stride explicitly."
+  ],
+  "promptFeedback": [
+    "The source research requirement and ten-foot controller-first brief gave the mechanics, art and interface a clear identity.",
+    "The relationship between standalone multiplayer and AI Hub sessions needed interpretation; local co-op, browser radio, direct WebRTC pairing and Hub sessions are implemented.",
+    "Building and validating the campaign, original procedural art/audio and shared-world multiplayer as one portable HTML file.",
+    "Specify whether standalone online play needs automatic matchmaking or whether manual offer/answer pairing is acceptable, and give a target campaign length."
+  ],
+  "aiHub": {
+    "name": "Chopper Comman-Dough",
+    "tagline": "Hot cargo. Cold nerves.",
+    "description": "Keep the dough rolling in a sunbaked, ink-lined convoy-defense shooter. Protect twelve flour trucks through four dispatches, dodge splitting missiles and bring down the Crumb Collector solo or with your wingmen.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Chopper Command (1982)",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD/arrows fly; mouse/Space fire; Shift boost; E/right click flare; Esc pause. Pad: sticks fly/aim, R2 fire, L2 boost, Circle flare. Touch: drag to fly, auto-fire, contextual flare.",
+    "tags": [
+      "arcade",
+      "side-scrolling",
+      "co-op",
+      "vehicles",
+      "retro",
+      "boss fights"
+    ]
+  }
+}

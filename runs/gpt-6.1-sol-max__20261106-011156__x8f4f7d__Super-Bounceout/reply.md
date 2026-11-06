@@ -1,0 +1,11 @@
+[Play **Super Bounceout**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261106-011156__x8f4f7d/work/Super-Bounceout-Super-Breakout-1981-gpt-6.1-sol-max-20261106-011156.html) — one HTML file with four sectors, couch co-op, online races, attract mode, and developer tools. Internet is required for CDN dependencies.
+
+**Source Information:** Date: 2026-11-06 01:11:56. Inspired by [Super Breakout (1981)](https://atariage.com/2600/manuals_old/super_breakout.html); plan: none. Arcade action with a fixed orthographic 2.5D camera. Uses Three.js r180/WebGPU, Rapier 2D 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, and [AI Hub](https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub) Protocol v1/client 1.4.0. Procedural cel/ink art, native Three.js animation clips, synthesized effects and gibberish voices; music defaults to 10%. Research covered the source manual and engine/network documentation. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort max. Usage: added on import.
+
+**Testing Feedback:** **43/43 checks passed.** Testing caught two game issues, including one game-breaking paddle trap; both were fixed. Most helpful: the complete AI campaign playthrough. Least helpful: blank headless WebGPU screenshots; GPU readback and WebGL screenshots supplied verification. Coverage included emulated controllers/touch, audio samples, direct-file launch, online rematches, and three official Hub scenarios. Physical controllers, human listening, real iOS, and cross-network connectivity remain unknown.
+
+**Engine Feedback:** Native animation and orthographic rendering worked well. Initial mistakes involved mesh depth and paddle contacts. I built the arcade rules, UI, audio, and networking; physics/render coordination was hardest. Engine changes: none. I would simplify ink-effect setup.
+
+**Prompt Feedback:** The controller and shipping requirements were useful. Source platform and standalone multiplayer scope were ambiguous. Cross-input and multiplayer verification was hardest. I would specify those two choices explicitly.
+
+Full answers are in [exit-interview.json](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261106-011156__x8f4f7d/work/exit-interview.json) and the in-game About/Credits screen.

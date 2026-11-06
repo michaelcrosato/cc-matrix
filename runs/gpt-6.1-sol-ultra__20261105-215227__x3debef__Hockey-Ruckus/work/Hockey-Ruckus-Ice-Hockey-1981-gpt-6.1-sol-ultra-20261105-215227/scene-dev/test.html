@@ -1,0 +1,7 @@
+<!doctype html><html><head><meta charset="utf-8"><style>body{margin:0;background:#102e3b}canvas{display:block}</style><script type="importmap">{"imports":{"three":"../node_modules/three/build/three.webgpu.js","three/webgpu":"../node_modules/three/build/three.webgpu.js","three/tsl":"../node_modules/three/build/three.tsl.js"}}</script></head><body><script type="module">
+import * as THREE from 'three/webgpu';import {HockeyScene} from '../scene.js';
+const renderer=new THREE.WebGPURenderer({antialias:true,forceWebGL:location.hash==='#webgl'});renderer.setSize(innerWidth,innerHeight);renderer.setPixelRatio(1);await renderer.init();document.body.appendChild(renderer.domElement);const hs=new HockeyScene(renderer);hs.resize(innerWidth,innerHeight);let t=0;window.ready=false;
+const state={phase:'play',selected:[1,3],puck:{x:1.1,z:0},players:[{x:-14,z:0,angle:0,team:0,index:0,speed:4,stun:0},{x:-3,z:1.5,angle:0,team:0,index:1,speed:4,hasPuck:true},{x:14,z:0,angle:Math.PI,team:1,index:2,speed:3,stun:0},{x:5,z:-2,angle:Math.PI+.2,team:1,index:3,speed:4}]};
+window.hs=hs;window.state=state;window.errors=[];
+renderer.setAnimationLoop(()=>{t+=1/60;hs.update(state,1/60);renderer.render(hs.scene,hs.camera);window.ready=t>.15;});
+</script></body></html>

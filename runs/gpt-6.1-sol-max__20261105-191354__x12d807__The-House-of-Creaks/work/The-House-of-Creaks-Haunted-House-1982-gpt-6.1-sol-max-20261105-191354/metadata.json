@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 19:13:54",
+    "source": "Haunted House (Atari, 1982)",
+    "plan": "none",
+    "genre": "Survival horror, exploration adventure, cooperative puzzle adventure",
+    "perspective": "Third-person isometric cutaway with a fixed camera angle; full-floor desktop view and portrait camera follow",
+    "tech": "Three.js 0.180.0 (r180), WebGPURenderer with TSL cel materials; Rapier 0.19.3; Web Audio; Gamepad API; WebRTC; BroadcastChannel; AI Hub session client 1.4.0. Single HTML with pinned CDN libraries.",
+    "artDirection": "Procedural low-poly mansion diorama, cel-shaded teal and plum surfaces, ink outlines, parchment and amber matchlight",
+    "animation": "Three.js AnimationMixer and authored AnimationClip / NumberKeyframeTrack animations for explorers, ghosts, bats, spiders and clocks; procedural particles and camera drift",
+    "audio": "Original code-synthesized chamber-style music (10% default), synthesized sound effects and Animalese-style gibberish voices; no audio files",
+    "online": "1–4 player shared-world co-op through AI Hub; standalone same-browser rooms using BroadcastChannel and cross-device WebRTC invitation/reply codes",
+    "testing": "Headless tests allowed: scripted full physical playthrough, mechanics assertions, browser state, virtual standard gamepad, real emulated touch events, Web Audio analyser, file deployment, two-page co-op and official AI Hub harness; screenshots for visual composition. Chromium WebGPU is used for solo/input/file checks, Chromium WebGL2 for direct WebRTC, and WebKit WebGL2 for same-browser rooms and Hub checks. Physical controller, real mobile hardware and cross-network NAT compatibility: unknown.",
+    "research": "none; native model knowledge only. Supplied AI Hub integration files read and pinned dependencies downloaded.",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "9 game issues found and corrected: two timing/interaction faults, two packaging faults, three visual proportion/framing faults, a Hub startup-order fault and an attract-state leak into cooperative starts. Test-script mistakes and browser/environment restrictions were tracked separately. Final validation: 110/110 checks passed, including all four AI Hub conformance scenarios.",
+    "4 blockers: a duplicate bundled identifier, the wrong Rapier CDN module filename, graphics initialization delaying the Hub welcome handshake, and stale attract replay state consuming cooperative input.",
+    "The official AI Hub conformance harness: it caught the startup ordering bug and checks time-up, departures, simulated network loss and server-only hosts.",
+    "Headless WebGPU screenshots were least useful because capture was corrupted on this machine. I used state checks and the WebGL2 backend for visual inspection."
+  ],
+  "engineFeedback": [
+    "Three.js TSL gave all procedural objects a consistent cel palette, and AnimationMixer made reusable creature clips straightforward.",
+    "Yes. I initially used an obsolete Rapier module filename and let graphics startup delay the Hub handshake. Headless WebGPU contexts required isolated browser runs; direct WebRTC was verified in Chromium after WebKit did not connect.",
+    "The authoritative room, inventory, enemy, light and cooperative simulation, plus input-aware menus, procedural models and synthesized audio.",
+    "Coordinating asynchronous startup, fixed-step Rapier movement, native animation and replicated state in one HTML deliverable.",
+    "none",
+    "Add a first-party controller focus and navigation layer, including scrollable overlays."
+  ],
+  "promptFeedback": [
+    "The source, controller-first direction and complete-demo requirements gave the game a clear identity.",
+    "The request to avoid internet research also supplies an online integration contract; I treated reading that contract and downloading libraries as implementation, with no source research.",
+    "Making one polished experience cover solo play, cooperative networking, controller, mouse, touch, kiosk replay and a single-file package.",
+    "Specify whether standalone multiplayer should require cross-device discovery or allow manual WebRTC invitation codes."
+  ],
+  "aiHub": {
+    "name": "The House of Creaks",
+    "tagline": "A small flame. A very bad address.",
+    "description": "Explore a matchlit, four-floor mansion, recover a shattered urn, and escape its uninvited guests. Carry one object at a time and brave the dark alone or with up to three friends.",
+    "type": "Game",
+    "genre": "Horror",
+    "source": "Haunted House (1982)",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD / left stick move; Space / R2 match; E / Cross interact; Q / Circle drop; Shift / L1 hush; F / Square ward; Tab / Triangle map; Esc / Options pause; mouse aim and use; touch drag and tap.",
+    "tags": [
+      "3d",
+      "horror",
+      "co-op",
+      "exploration",
+      "isometric",
+      "retro"
+    ]
+  }
+}

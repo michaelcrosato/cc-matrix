@@ -1,0 +1,15 @@
+import {readFile} from 'node:fs/promises';
+let count=0,fail=0;
+const test=(name,result)=>{count++;if(!result){fail++;console.error('FAIL '+name);}};
+const stem='Super-Breakbeat-Super-Breakout-gpt-6.1-sol-ultra-20261106-011159';
+const html=await readFile('../'+stem+'.html','utf8'),session=await readFile('vendor/hub/session.js','utf8');
+const interview=JSON.parse(await readFile('../exit-interview.json','utf8'));
+test('single HTML includes the exact official first session script',html.match(/<script>([\s\S]*?)<\/script>/)?.[1]===session);
+test('Hub player/mode/session metadata correct',html.includes('name="hub:session-players" content="1-2"')&&html.includes('name="hub:session-mode" content="shared-world"')&&html.includes('name="hub:session" content="1"'));
+test('bundle has no module imports or external javascript dependencies',!/<script[^>]+src=/.test(html)&&!/^import\s/m.test(html));
+test('complete exit interview exact top-level shape',JSON.stringify(Object.keys(interview))===JSON.stringify(['sourceInformation','testingFeedback','engineFeedback','promptFeedback','aiHub']));
+test('source information filled and usage marker correct',Object.values(interview.sourceInformation).every(v=>typeof v==='string'&&v.length)&&interview.sourceInformation.usage==='added on import');
+test('all exit questions answered',interview.testingFeedback.length===4&&interview.engineFeedback.length===6&&interview.promptFeedback.length===4);
+test('catalogue title and 1-2 player contract match',interview.aiHub.name==='Super Breakbeat'&&interview.aiHub.players==='1–2'&&interview.aiHub.genre==='Action'&&interview.aiHub.tags.length>=3);
+test('root interview and in-game data are identical',JSON.stringify(interview)===JSON.stringify(JSON.parse(await readFile('exit-data.json','utf8'))));
+console.log(`${count-fail}/${count} package checks passed`);process.exitCode=fail?1:0;

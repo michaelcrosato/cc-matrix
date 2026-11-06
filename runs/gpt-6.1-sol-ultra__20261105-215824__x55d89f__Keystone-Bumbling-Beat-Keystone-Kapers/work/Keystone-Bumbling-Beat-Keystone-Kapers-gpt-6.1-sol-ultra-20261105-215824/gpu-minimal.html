@@ -1,0 +1,7 @@
+<!doctype html><title>Keystone GPU diagnostic</title><script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js';
+const renderer=new THREE.WebGPURenderer({antialias:false});renderer.setSize(640,400);document.body.appendChild(renderer.domElement);await renderer.init();
+const scene=new THREE.Scene();scene.background=new THREE.Color(0xf0dfb9);const camera=new THREE.PerspectiveCamera(50,640/400,.1,20);camera.position.z=4;
+scene.add(new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshBasicMaterial({color:0xe77962})));
+let frames=0;function loop(){frames++;renderer.render(scene,camera);requestAnimationFrame(loop);}loop();window.debug=()=>({frames,drawCalls:renderer.info.render.drawCalls,deviceLost:renderer._isDeviceLost,isWebGPU:renderer.backend.isWebGPUBackend});
+</script>

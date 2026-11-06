@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 22:11:50",
+    "source": "Mario Bros. (Nintendo, arcade, 1983)",
+    "plan": "none",
+    "genre": "Arcade action platformer; cooperative arena platformer",
+    "perspective": "Fixed side view, orthographic 2.5D",
+    "tech": "Three.js r180 (0.180.0), WebGPU with automatic WebGL2 recovery, Rapier 3D compat 0.19.3, Gamepad API, Web Audio, AI Hub Session v1 client 1.4.0, PeerJS 1.5.5 / WebRTC. esbuild 0.25.12 bundles the single HTML.",
+    "artDirection": "Procedural cel-shaded 3D diorama, heavy ink contours, copper machinery, warm paper, coral and teal. Bungee and Barlow fonts by David Jonathan Ross and Jeremy Tribby, SIL Open Font License.",
+    "animation": "Three.js AnimationMixer / AnimationClip / NumberKeyframeTrack for idle, running, jumping, kicking, scuttling and wing beats; procedural secondary motion and effects.",
+    "audio": "Original code-written Web Audio swing score, synthesized effects, formant-filtered Animalese-style gibberish. Music defaults to 10%; no audio files.",
+    "online": "1–2 player shared-world co-op via AI Hub host-authority snapshots and events; standalone six-character WebRTC rooms through PeerJS signaling, synchronized rematches, and BroadcastChannel for local tabs. Local co-op also included.",
+    "testing": "Headless physics and full-campaign playthroughs; assembled file:// game; standard-pad stubs; touch profile; individual synthesized audio waveform checks; real WebRTC; actual two-page co-op, results and rematches; upstream Hub harness with 150 ms latency, 50 ms jitter and 5% loss. Visual screenshots. Physical controller, hardware WebGPU, real iOS and human listening: unknown.",
+    "research": "Nintendo and HAMSTER Arcade Archives pages, archived Atari Mario Bros. manual, arcade phase/enemy references, source screenshots, Three.js r180 code and official docs, and AI Hub Session specification. Original arcade sound characteristics researched; direct listening: unknown.",
+    "environment": "Codex CLI (headless); Linux / Ubuntu on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "25 distinct findings from scripted tests, visual checks and integration review were fixed or handled with recovery, including one external software-WebGPU device-loss fault.",
+    "Two game-breaking failure modes: malformed inline JavaScript prevented startup; software WebGPU device loss left the arena blank. The bundle is now syntax-checked, and device loss triggers graphics recovery.",
+    "The full six-shift physics playthrough plus actual two-page co-op test: these verified traversal, enemy rules, the complete finale, remote inputs, shared effects, final scores, rematches and disconnects.",
+    "Syntax-only checks had the least coverage; they could not detect dropped taps, menu return bugs, remote-player lifecycle problems or GPU device loss."
+  ],
+  "engineFeedback": [
+    "Native toon node materials, an orthographic 3D scene and AnimationMixer clips made it straightforward to give a compact arcade arena a coherent ink-and-copper look.",
+    "The software Chromium WebGPU device was lost even in a raw WebGPU clear-pass probe. Recovery required preserving Three.js’s loss handler, replacing the canvas, waiting for graphics restart and keeping label canvases on the CPU.",
+    "The arcade rules, enemy state machines, designed six-shift campaign, controller focus and room-code entry, and host-authoritative multiplayer with shared effects.",
+    "Keeping Rapier’s solid underside collisions compatible with forgiving arcade traversal, then verifying graphics recovery and multiplayer lifecycle behavior in headless browsers.",
+    "none — engine source was not modified; recovery and all game systems are application code.",
+    "A public, built-in device-loss recovery path that can replace the canvas and restore resources across WebGPU and WebGL2 would remove a difficult integration step."
+  ],
+  "promptFeedback": [
+    "The source, controller-first screens, synthesized audio, single-file delivery and complete vertical-slice requirement gave the game a clear identity.",
+    "The requested Hub integration did not explicitly choose a standalone signaling service or describe the expected fallback for an unavailable software WebGPU device.",
+    "Making the bump-then-kick game, six shifts, controller menus, touch gestures, procedural audio and two forms of online co-op behave consistently in one portable file.",
+    "Specify the standalone room-signaling preference and the expected treatment of software WebGPU failures in headless testing."
+  ],
+  "aiHub": {
+    "name": "Boiler Buddies",
+    "tagline": "Pipe up. Clock in.",
+    "description": "Bump the decks and boot the pests in a warm, ink-outlined boiler room. Tackle six night shifts, a frantic coin rush and the Kettle King, solo or with a buddy on the couch or online.",
+    "type": "Game",
+    "genre": "Platformer",
+    "source": "Mario Bros. (1983)",
+    "series": "Mario",
+    "players": "1–2",
+    "controls": "Move: left stick / A D / arrows; jump: Cross / Space; kick: Square / X; pulse: Triangle / Shift; drop: Circle / Down; pause: Options / Esc. P2: F H / T / R / Y / G. Touch: left drag, right tap or swipe.",
+    "tags": [
+      "2.5d",
+      "arcade",
+      "co-op",
+      "retro",
+      "comedy",
+      "boss fights"
+    ]
+  }
+}

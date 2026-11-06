@@ -1,0 +1,14 @@
+<!doctype html><meta charset="utf-8"><title>ComBop network transport test</title>
+<script type="module">
+import { createOnline } from './hub.js';
+window.events = { input: [], snapshot: [], start: [], end: [], peer: [], status: [] };
+window.net = createOnline({
+  onStatus: x => events.status.push(x),
+  onInput: (x, seat) => events.input.push({x, seat}),
+  onSnapshot: x => events.snapshot.push(x),
+  onStart: x => events.start.push(x),
+  onEnd: x => events.end.push(x),
+  onPeer: x => events.peer.push(x)
+});
+window.ready = true;
+</script>

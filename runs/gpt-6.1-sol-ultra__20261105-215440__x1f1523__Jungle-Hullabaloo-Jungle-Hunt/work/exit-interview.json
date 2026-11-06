@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 21:54:40",
+    "source": "Jungle Hunt (1983 home versions; Taito arcade original, 1982)",
+    "plan": "none",
+    "genre": "Arcade action platformer / adventure",
+    "perspective": "Side-scrolling 2.5D with an orthographic camera",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGPU and WebGL 2 fallback; Rapier 0.19.3; Gamepad API; Web Audio API; AI Hub session client 1.4.0; PeerJS 1.5.5; single bundled HTML",
+    "artDirection": "Procedural stylized cel shading, banded toon lighting, ink silhouettes, layered jungle scenery, warm expedition-paper UI",
+    "animation": "Three.js AnimationMixer, AnimationClip and NumberKeyframeTrack; seven authored explorer actions; procedural vines, jaws, guards, water, bells and rescue",
+    "audio": "Original code-generated marimba/percussion music at 10% default volume, synthesized sound effects and Animalese-style gibberish voices; no audio files",
+    "online": "1-2 player shared-world cooperative play: couch, standalone WebRTC rooms via PeerJS, same-origin BroadcastChannel, and AI Hub host-authoritative multiplayer with dedicated-server support",
+    "testing": "175 checks passed, 0 failed: physics and full-game playthroughs, four-scene/native animation checks, controller stubs, phone touch emulation, Web Audio signal analysis, real public WebRTC and two-page networking, AI Hub lifecycle with latency/jitter/loss, file loading, and forced WebGPU device-loss recovery. Visual screenshots inspected through WebGL fallback. Physical controller, real mobile hardware and human listening: unknown.",
+    "research": "Atari original instruction manual; arcade look, four-stage mechanics and audio/history references; pinned Three.js and Rapier sources; live AI Hub integration documentation. Exact source audio listening: unknown",
+    "environment": "Codex CLI (headless); Linux (Ubuntu on WSL2)",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Automated tests and integration review found 12 issues: attract progression, first-vine interception, duplicate co-op rewards, boulder scale, river banks, controller prompts, contextual touch jumping, touch HUD density, guest touch context, repeated swim swats, graphics/startup recovery, and mouse focus. All were fixed.",
+    "3 confirmed blocking issues: attract/autopilot stalled in chapter one, a delayed first jump could miss the first vine, and a render pending during WebGPU device loss could stop subsequent frames.",
+    "Most helpful: the complete four-chapter scripted physics playthrough, which caught the attract-mode progression stall; AI Hub lifecycle tests also verified real multiplayer boundaries.",
+    "Least helpful: headless software-WebGPU screenshots were blank after device loss; state assertions and WebGL fallback screenshots provided useful verification instead."
+  ],
+  "engineFeedback": [
+    "Most liked: Three.js native animation clips and toon materials made a coherent procedural cast and four connected scenes straightforward.",
+    "Stuck or wrong guesses: headless software WebGPU lost its device during rendering, and a pending render could prevent the next frame. Interruptible rendering and automatic WebGL2 recovery now preserve the live game and network session; AI Hub readiness follows a completed render.",
+    "Most important custom system: the four-phase arcade gameplay model, including assisted ballistic vine transfers, river oxygen, mixed boulder timing, rescue bells, and host-authoritative cooperative state.",
+    "Hardest engine work: coordinating Rapier body positions, native animation poses and readable 2.5D geometry across four different movement rules.",
+    "Engine changes: none. Game-level automatic WebGL compatibility recovery preserves the game and network session when the WebGPU device is lost.",
+    "One desired engine change: a built-in WebGPU device-loss recovery path with an explicit fallback renderer and reliable headless capture."
+  ],
+  "promptFeedback": [
+    "Most liked: the source research requirement, controller-first presentation, procedural audio, and mandatory attract mode gave the vertical slice a clear arcade identity.",
+    "Confusing: 'Jungle Hunt - 1983' does not name a platform; I treated the 1983 home versions and 1982 arcade structure as the reference.",
+    "Hardest: delivering four distinct game mechanics, real cooperative networking, and a complete controller/touch interface in one shareable HTML.",
+    "Suggested change: specify the source platform and a compact expected integration test matrix, including how to report headless GPU limitations."
+  ],
+  "aiHub": {
+    "name": "Jungle Hullabaloo",
+    "tagline": "Four perilous chapters. One very loud bird.",
+    "description": "Swing through the canopy, outswim hungry crocodiles, dodge a rolling hillside and outwit two tin guards to rescue Pip the toucan. A cel-shaded arcade expedition for one or two explorers, with original synthesized music and a mischievous teatime spirit.",
+    "type": "Game",
+    "genre": "Platformer",
+    "source": "Jungle Hunt (1983)",
+    "series": "",
+    "players": "1–2",
+    "controls": "Move: left stick / WASD / arrows; jump or release vine: Cross / A / Space; swat or ring: Square / X / E; duck: Circle / B / S; pause: Options / Esc; P2: IJKL, U, O or second pad; touch: left drag and contextual tap.",
+    "tags": [
+      "3d",
+      "arcade",
+      "co-op",
+      "side-scrolling",
+      "retro",
+      "low-poly"
+    ]
+  }
+}

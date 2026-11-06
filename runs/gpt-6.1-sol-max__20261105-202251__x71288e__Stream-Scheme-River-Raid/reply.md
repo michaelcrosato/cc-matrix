@@ -1,0 +1,13 @@
+[Play **Stream Scheme**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-202251__x71288e/work/Stream-Scheme-River-Raid-gpt-6.1-sol-max-20261105-202251.html) · [Exit interview JSON](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-202251__x71288e/work/exit-interview.json)
+
+Complete three-sector sortie with fuel stops, bridge checkpoints, flagship combat, attract mode, developer sliders, and solo/couch/network co-op. **73/73 checks passed.** Open the HTML directly; engine dependencies load from CDN.
+
+**Source Information:** Date: 2026-11-05 20:22:51. Source: River Raid (1982). Plan: none. Genre: arcade scrolling shooter / flight action. Perspective: tilted overhead orthographic 3D. Tech: Three.js r180, WebGPU with WebGL2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, WebRTC, AI Hub protocol v1/client 1.4.0. Art: procedural cel shading and ink silhouettes. Animation: native AnimationMixer clips plus procedural motion. Audio: synthesized music, effects, and gibberish radio; music defaults to 10%. Online: shared-world AI Hub and direct WebRTC co-op. Testing: headless browser, physics, controller/touch emulation, audio analysis, complete mission, and multiplayer harness. Research: none; supplied integration files and dependency code read for implementation. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort max. Usage: added on import. Physical hardware, listening quality, and public-internet connectivity: unknown.
+
+**Testing Feedback:** Five game issues caught and fixed; one blocked startup. Most helpful: the complete mission and two-page multiplayer tests. Least helpful: blank headless WebGPU screenshots; WebGL2 captures supplied visual verification.
+
+**Engine Feedback:** Liked procedural geometry, TSL shading, and native animation. Wrong guesses involved Rapier’s module filename and camera framing. Built the simulation, UI/input system, and authoritative networking. Coordinating physics, rendering, and network timing was hardest. Engine changes: none. Desired improvement: built-in controller UI navigation and a unified simulation clock.
+
+**Prompt Feedback:** The source, procedural audio, and TV-first controls gave clear direction. The research restriction alongside required online documentation needed interpretation. Packaging complete co-op and multiple input methods into one HTML was hardest. I would clarify whether standalone online play may use hosted signaling.
+
+These details are also included in the game’s About/Credits screen.

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 19:13:18",
+    "source": "Combat (1977)",
+    "plan": "none",
+    "genre": "Arcade vehicular arena shooter; ricochet duels and dogfighting",
+    "perspective": "Elevated orthographic three-dimensional view",
+    "tech": "Three.js r180 (0.180.0), native node materials and WebGPURenderer (WebGPU primary, WebGL 2 fallback); Rapier 0.19.3; Gamepad API; Web Audio API; WebRTC; AI Hub Session Protocol v1 client 1.4.0; esbuild 0.25.11",
+    "artDirection": "Stylized cel-shaded paper-and-ink tabletop diorama; procedural low-poly tanks and biplanes, warm sand, teal shadows, ink outlines",
+    "animation": "Three.js AnimationMixer and AnimationClip keyframe tracks for tank rumble, cannon recoil, propellers, and barrel rolls; procedural movement and particles",
+    "audio": "Code-generated Web Audio chiptune march, synthesized sound effects and Animalese-style gibberish; music defaults to 10%",
+    "online": "Host-authoritative AI Hub shared-world sessions for 1–4 players; standalone two-player WebRTC direct-link duel with manual invitation/reply; two-player couch versus",
+    "testing": "Headless Chromium 153 with software WebGPU and WebGL 2; 68 automated checks covering a four-heat playthrough, swept collisions, ricochets, pickups, respawn, ghost tanks, aircraft wrapping, menus, live tuning, standard-mapped controller emulation, 390 x 844 multitouch, Web Audio signal analysis, two-page WebRTC, and AI Hub conformance. Hub scenarios include 2 and 4 players, 150 ms latency, 50 ms jitter, 5% packet loss, host departure and a playerless server; normal rendered sessions and graphics-free protocol stress tests. Screenshots used only for visual review. Physical controller, physical touch device and real-world cross-network connectivity: unknown.",
+    "research": "none; native model knowledge only. Supplied AI Hub integration files fetched as implementation requirements; no internet searches.",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Four implementation defects were caught and fixed during verification: duplicate Enter activation, an invalid texture binding after repeated arena transitions, delayed Hub readiness during shader warm-up, and slow standalone peer-departure detection. Two test-fixture mistakes were also corrected; those were not game defects.",
+    "Two were game breaking: the texture binding could stop rendering, and delayed readiness could prevent a Hub round from starting.",
+    "The complete four-heat browser playthrough combined with the supplied Hub conformance harness. The final suite passed 68 of 68 checks, including normal rendered two- and four-player sessions.",
+    "Initial software-WebGPU screenshots: the canvas could be blank or lose the device during capture. State checks verified WebGPU; WebGL fallback captures were more useful for visual review."
+  ],
+  "engineFeedback": [
+    "Three.js native AnimationMixer clips and node-based cel materials fit the toy-diorama style well, and WebGPURenderer shares scene code across WebGPU and its WebGL fallback.",
+    "Yes. Legacy material translation produced a missing texture binding after repeated transitions. Native node materials and explicit texture nodes resolved it. Shader warm-up also had to be separated from Hub readiness.",
+    "The complete combat simulation and host-authoritative multiplayer layer, including swept Rapier queries for ricochets, scoring, respawns, snapshots, input transport and round lifecycle.",
+    "Managing texture and scene lifetimes across tank, ghost and air rounds, and testing multiple software-rendered browser copies without confusing graphics stalls with protocol failures.",
+    "none; the engine packages were not modified. All adaptations are in application code.",
+    "Provide texture-binding errors that identify the material, object and missing property, with a clearer asynchronous readiness path for embedded multiplayer games."
+  ],
+  "promptFeedback": [
+    "The precise controller-first requirements, attract mode, reproducible environment details and supplied multiplayer contract made the intended finished experience clear.",
+    "The ban on internet research sits alongside a required online integration repository. I treated the supplied integration files and pinned dependency downloads as implementation requirements, and performed no internet searches.",
+    "Making keyboard, mouse, controller and assisted multitouch behave consistently across solo, couch, direct-link and Hub play, then exercising those paths without physical devices.",
+    "Clarify the expected standalone connection method and whether a TURN relay should be supplied. Explicitly distinguish required integration-document retrieval from internet research."
+  ],
+  "aiHub": {
+    "name": "Combrisk",
+    "tagline": "Little tanks. Big nerve.",
+    "description": "A pocket-sized ricochet rivalry inspired by Combat (1977). Battle through four arcade heats with bank-shot scoring, ghost tanks and biplanes, or settle a score in couch and online duels.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Combat (1977)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Left stick move, right stick aim, R2/RT fire, L1/LB or Cross/A boost; WASD + mouse, click/Space fire, Shift boost; touch: invisible dual sticks with assisted aim and fire.",
+    "tags": [
+      "3d",
+      "arcade",
+      "versus",
+      "top-down",
+      "vehicles",
+      "retro"
+    ]
+  }
+}

@@ -1,0 +1,13 @@
+import {build} from 'esbuild';
+import fs from 'node:fs';
+import path from 'node:path';
+const dir=path.dirname(new URL(import.meta.url).pathname);
+const name=JSON.parse(fs.readFileSync(path.join(dir,'title-selection.json'))).slug;
+const result=await build({entryPoints:[path.join(dir,'main.js')],bundle:true,format:'esm',minify:true,target:'es2022',write:false,legalComments:'none'});
+let html=fs.readFileSync(path.join(dir,'index.html'),'utf8').replace('/*EMBED_FONTS*/',fs.readFileSync(path.join(dir,'fonts.css'),'utf8'));
+html=html.replace('<!--HUB_SESSION-->','<script>\n'+fs.readFileSync(path.join(dir,'hub/session.js'),'utf8').replace(/<\/script/gi,'<\\/script')+'\n</script>');
+html=html.replace('/*GAME_SCRIPT*/',result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script'));
+const notices=fs.readdirSync(path.join(dir,'licenses')).map(n=>n+'\n'+fs.readFileSync(path.join(dir,'licenses',n),'utf8')).join('\n\n');
+html=html.replace('</body>','<script type="text/plain" id="third-party-notices">'+notices.replace(/<\/script/gi,'<\\/script')+'</script></body>');
+fs.writeFileSync(path.join(dir,'../',name+'.html'),html);
+console.log(name+'.html ('+(Buffer.byteLength(html)/1024/1024).toFixed(2)+' MB)');

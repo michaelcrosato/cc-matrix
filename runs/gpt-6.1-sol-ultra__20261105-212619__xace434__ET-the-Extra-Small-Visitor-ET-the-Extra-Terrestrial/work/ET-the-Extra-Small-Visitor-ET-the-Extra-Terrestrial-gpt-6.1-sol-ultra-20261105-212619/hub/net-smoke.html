@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8">
+<script src="session.js"></script>
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-2">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Help a little visitor find home.">
+<meta name="hub:session-howto" content="Move with the stick or WASD; Cross or E to help.">
+<title>Extra-Small Visitor transport conformance</title></head><body>
+<script type="module">
+import {GameNetwork} from '../net.js';
+const net = new GameNetwork({onState:()=>{}, onInput:()=>{}});
+await net.init();
+net.ready();
+const tick = setInterval(()=>{
+  if (net.ended) {clearInterval(tick);return;}
+  if (!net.canPlay()) return;
+  if (net.isHost) net.sendState({stage:'neighborhood',heart:100});
+  else net.sendInput({x:0,z:0});
+},16);
+</script></body></html>

@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 21:26:07",
+    "source": "Demon Attack (1982), Imagic; Rob Fulop. Original interpretation; no source assets.",
+    "plan": "none",
+    "genre": "Arcade fixed-screen shooter",
+    "perspective": "Front-facing orthographic 2.5D arena",
+    "tech": "Three.js r180 WebGPURenderer (WebGPU, WebGL compatibility fallback); Rapier 0.19.3; Web Audio; Gamepad API; AI Hub session client 1.4.0; optional PeerJS 1.5.5; bundled with esbuild 0.28.2",
+    "artDirection": "Procedural cel-shaded / ink illustration: faceted paper-wing demons, heavy outlines, icy crags and an eclipsed moon",
+    "animation": "Three.js AnimationMixer, AnimationClip and NumberKeyframeTrack wing and thruster cycles; procedural movement, recoil and impact animation",
+    "audio": "Code-only Web Audio music, percussion, laser and impact effects, and formant-based gibberish voices; music defaults to 10%",
+    "online": "1–2 player shared-world AI Hub co-op; standalone PeerJS WebRTC room codes; local simultaneous co-op",
+    "testing": "Headless Chromium153 software WebGPU; full six-wave AI patrol; two full attract loops; keyboard, emulated standard gamepad, touch profile, live sliders, OfflineAudioContext; 2-page co-op and official AI Hub harness at150ms latency/50ms jitter/5% loss; render-free Rapier stress and WebGL visual checks. No physical controller or listener.",
+    "research": "Original Atari 2600 manual and AtariAge audiovisual notes; MobyGames mechanics and port descriptions; AI Hub protocol/client/harness; official Three.js and Rapier documentation",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "5 gameplay issues fixed; networking review identified 5 additional integration issues. Test-only expectation mistakes are excluded.",
+    "2 critical issues: an initial mouse click could be lost, and collider churn could crash the physics simulation.",
+    "The complete scripted six-wave patrol exposed the Rapier crash; repeated full attract loops verified the fix and replay behavior.",
+    "Headless software WebGPU screenshots were blank. State checks and WebGL compatibility screenshots supplied the useful evidence."
+  ],
+  "engineFeedback": [
+    "Three.js native AnimationMixer clips and the scene graph made procedural winged characters and a layered ink illustration straightforward.",
+    "Rapier 0.19.3 reproduced an upstream collider-churn crash. Disabling CCD did not fix it; persistent physics-body pools did.",
+    "The combat rules, host-authoritative shared world, controller focus, procedural art and synthesized audio.",
+    "Diagnosing the Rapier broadphase failure and coordinating collision lifetimes with wave progression and network results.",
+    "none; application-level collider pooling avoids the version-specific issue without modifying engine source.",
+    "A first-party cel material with consistent WebGPU and WebGL behavior, plus clearer diagnostics for native physics failures."
+  ],
+  "promptFeedback": [
+    "The specific source, controller-first direction and complete-demo requirement gave the design a clear identity.",
+    "The word Online supplied a library URL rather than defining whether standalone internet rooms were required; both were implemented.",
+    "Finishing and verifying standalone and AI Hub co-op within a single self-contained HTML artifact.",
+    "Define the minimum standalone network transport and clarify whether WebGL fallback is welcome on browsers without WebGPU."
+  ],
+  "aiHub": {
+    "name": "Demon Pecking Order",
+    "tagline": "Little cannon. Very big birds.",
+    "description": "Hold the moon against a flock of ink-winged troublemakers. Bend your shots, dash through volleys and scatter the sky across six waves and a vulnerable-core boss, solo or with a wingmate.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Demon Attack (1982)",
+    "series": "",
+    "players": "1–2",
+    "controls": "Left stick / A D / arrows: move; Cross / RT / Space / click: fire; Circle / Shift: dash; Square / L1 / Q: pulse; Options / Esc: pause; touch: drag, auto-fire, double-tap dash.",
+    "tags": [
+      "arcade",
+      "2.5d",
+      "co-op",
+      "retro",
+      "sci-fi",
+      "boss fights"
+    ]
+  }
+}

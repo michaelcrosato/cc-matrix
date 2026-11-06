@@ -1,0 +1,2721 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1726">
+<meta name="description" content="An ink-drawn cockpit space adventure. Defend the frontier, hunt the raider fleet, and bring your ship home.">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="ghost">
+<meta name="hub:session-goal" content="Stop the incursion. Destroy the raider fleet and its flagship; score command points while keeping the frontier starbases alive.">
+<meta name="hub:session-howto" content="Stick / mouse: steer. R2 / left click: fire. R1 / R / right click: torpedo. Circle / H: context. L1 / E: shields. Triangle / M: sector map. Options / Esc: pause.">
+<meta name="hub:session-minutes" content="8">
+<title>Stellar Raiders</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22%3E%3Crect width=%2264%22 height=%2264%22 rx=%2214%22 fill=%22%230c1726%22/%3E%3Cpath d=%22M32 6L40 24L58 32L40 40L32 58L24 40L6 32L24 24Z%22 fill=%22%23ffcd75%22 stroke=%22%23060810%22 stroke-width=%223%22/%3E%3C/svg%3E">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","@dimforge/rapier3d-compat":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm"}}</script>
+<style>:root{--ink:#080f1c;--navy:#111d2e;--panel:#101c2be8;--paper:#f3f1dc;--muted:#8fabb2;--cyan:#85e2de;--lime:#d8e98c;--coral:#f87759;--line:#c5e0d22b;--thin:1px solid var(--line);--sans:Arial,Helvetica,sans-serif;--mono:'Courier New',monospace;color-scheme:dark}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:var(--ink);color:var(--paper);font-family:var(--sans);font-size:18px}body{touch-action:none;user-select:none}canvas{display:block}body>canvas,#gameCanvas{position:fixed;inset:0;width:100%;height:100%;z-index:0}button,input,select{font:inherit}button{color:inherit;cursor:pointer;touch-action:manipulation}button:disabled{opacity:.35;cursor:default}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--lime);outline-offset:5px}button:focus{scroll-margin:20px}[hidden],.hidden{display:none!important}.visible{display:block}.screen-vignette{position:fixed;inset:0;z-index:1;pointer-events:none;background:radial-gradient(ellipse at 65% 42%,transparent 30%,#050b1736 70%,#030816cc 120%)}.screen-grain{position:fixed;inset:0;z-index:12;pointer-events:none;opacity:.05;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.93' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath filter='url(%23n)' opacity='.6' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}.panel{position:fixed;inset:0;z-index:3}.title-screen{padding:40px 5.1% 28px;background:linear-gradient(90deg,#07101af5 0%,#07101ae0 24%,#07101a77 45%,transparent 67%)}.title-topline{display:flex;align-items:center;gap:15px;font:700 11px/1.2 var(--mono);letter-spacing:2px;color:#d4e0d2}.insignia{font-size:31px;color:var(--lime);line-height:1}.title-topline i,.title-footer i{font-style:normal;color:var(--coral);margin:0 10px}.registration{margin-left:auto;opacity:.7}.title-content{position:absolute;top:22%;left:8%;width:43%;max-width:650px}.eyebrow{font:700 11px/1.5 var(--mono);letter-spacing:2.3px;color:var(--cyan);text-transform:uppercase}.title-kicker{font-size:10px;letter-spacing:2px;color:var(--lime);display:flex;align-items:center;gap:9px;margin-bottom:21px}.live-dot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--lime);box-shadow:0 0 12px #d8e98c44;flex-shrink:0}h1{font-family:Impact,'Arial Narrow',var(--sans);font-size:clamp(75px,7.6vw,142px);font-weight:900;letter-spacing:-.035em;line-height:.86;margin:0 0 26px;transform:scaleX(.96);transform-origin:left;display:flex;flex-direction:column}.title-outline{color:var(--paper);-webkit-text-stroke:1.5px var(--paper);color:transparent}.title-period{-webkit-text-stroke:0;color:var(--coral)}.tagline{font-size:clamp(18px,1.6vw,28px);font-weight:400;line-height:1.35;letter-spacing:-.4px;margin:0 0 34px;color:#c1d0cb}.title-actions{width:352px;max-width:100%}.button{position:relative;min-height:52px;background:#102332cc;border:1px solid #c2e2d747;padding:13px 21px;color:var(--paper);font-size:17px;font-weight:600;text-align:left;transition:background .15s,border-color .15s,transform .15s}.button:hover,.button.focused,.button.selected,.title-small-actions button:hover{background:#d8e98c19;border-color:var(--lime);color:var(--lime)}.button:hover{transform:translateX(3px)}.button.primary{background:var(--lime);border-color:var(--lime);color:var(--ink)}.button.primary:hover,.button.primary:focus-visible{background:#edf6be;border-color:#edf6be;box-shadow:0 0 26px #d8e98c22}.launch{width:100%;min-height:60px;display:flex;align-items:center;gap:15px;font-size:20px;box-shadow:5px 5px 0 #040a13}.button-mark{font-size:26px;font-weight:400}.button-trail{font:12px var(--mono);margin-left:auto;opacity:.55}.title-secondary{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:11px}.title-secondary .button{font-size:14px;min-height:49px;padding:12px 16px}.link-symbol{float:right;font-size:21px;line-height:18px;color:var(--cyan)}.title-small-actions{display:flex;gap:12px;align-items:center;margin-top:17px;padding-left:2px}.title-small-actions button{border:0;background:transparent;padding:9px 0;font-size:12px;color:#9eb1b1;transition:color .15s}.title-small-actions>span{font-size:11px;color:#40575c}.title-scene-label{position:absolute;right:7%;bottom:21%;display:flex;flex-direction:column;gap:8px;font:10px var(--mono);letter-spacing:2px;color:var(--cyan)}.title-scene-label .label-rule{height:1px;width:95px;background:var(--cyan);margin-bottom:9px}.title-scene-label b{font:700 16px var(--sans);letter-spacing:1px;color:var(--paper)}.title-scene-label small{font:8px var(--mono);letter-spacing:2px;color:#809f9f}.title-footer{position:absolute;left:5.1%;right:5.1%;bottom:30px;border-top:var(--thin);padding-top:20px;display:flex;justify-content:space-between;align-items:flex-end;font:9px var(--mono);letter-spacing:1.4px;color:#829a9d}.title-footer #bootStatus{font-size:9px;display:flex;gap:10px;align-items:center}.title-footer-right{text-align:right;color:#c1d2c4;font-size:9px;line-height:1.8}.title-footer-right span{display:block;color:#697e83;font-size:8px;letter-spacing:2px}.hud{position:fixed;inset:0;z-index:2;pointer-events:none}.hud-top{position:absolute;left:4%;right:4%;top:35px;display:flex;justify-content:space-between;gap:25px}.mission-block{border-left:3px solid var(--lime);padding:0 0 0 17px;text-shadow:0 2px 7px #000}.mission-block .eyebrow{font-size:10px;color:var(--lime);display:flex;align-items:center;gap:9px}.mission-block #missionProgress{margin-left:20px;color:#8ca29d;font-size:9px}#objective{font-size:22px;font-weight:600;letter-spacing:-.3px;margin:7px 0 9px}.mission-sub{display:flex;gap:13px;font:10px var(--mono);letter-spacing:1.4px;color:#a3b7b8}.mission-sub #sectorLabel{color:var(--cyan)}.separator{color:#57717c}.navigation-block{display:flex;flex-direction:column;gap:8px;align-items:flex-end;padding:3px 0;text-shadow:0 2px 8px #000}.navigation-block .eyebrow{font-size:9px;color:#8ba9af}.navigation-block strong{font:600 15px var(--sans);letter-spacing:1px}.navigation-block #threatValue{font:9px var(--mono);letter-spacing:1.7px;color:var(--coral)}.reticle{position:absolute;left:50%;top:46%;width:110px;height:110px;transform:translate(-50%,-50%);opacity:.8}.reticle:before,.reticle:after{content:'';position:absolute;inset:22px;border:1px solid #9be6d585;border-top-color:transparent;border-bottom-color:transparent;border-radius:50%}.reticle:after{inset:38px;border:0;border-top:1px solid #9be6d585;border-bottom:1px solid #9be6d585;border-radius:0}.reticle-cross:before,.reticle-cross:after{position:absolute;content:'';background:var(--cyan);opacity:.5;left:54px;top:48px;width:1px;height:14px}.reticle-cross:after{transform:rotate(90deg)}.reticle-dot{position:absolute;width:3px;height:3px;left:54px;top:54px;background:var(--paper)}.reticle-left,.reticle-right{position:absolute;width:16px;height:1px;top:55px;left:0;background:var(--cyan)}.reticle-right{left:auto;right:0}.target-info{position:absolute;left:50%;top:calc(46% + 70px);transform:translateX(-50%);font:11px/1.8 var(--mono);letter-spacing:1.7px;text-align:center;color:var(--coral);text-shadow:0 2px 5px #000}.comms{position:absolute;left:4%;bottom:220px;max-width:510px;display:flex;gap:13px;align-items:center;padding:13px 17px 13px 11px;background:linear-gradient(90deg,#0a1827dc,#0a182799 75%,transparent);border-left:2px solid var(--cyan)}.comms-portrait{width:36px;min-width:36px;height:45px;display:flex;gap:3px;align-items:end;justify-content:center;padding-bottom:6px;border:1px solid #85e2de44;position:relative}.comms-portrait>span{position:absolute;left:50%;top:3px;transform:translateX(-50%);font-size:14px;color:var(--cyan)}.comms-portrait i{width:2px;height:8px;background:var(--cyan)}.comms-portrait i:nth-of-type(2),.comms-portrait i:nth-of-type(4){height:13px}.comms-portrait i:nth-of-type(3){height:18px}.comms .eyebrow{font-size:9px;letter-spacing:1.6px}.comms p{font-size:14px;line-height:1.4;margin:4px 0 0;max-width:390px;color:#d9e5d9}.cockpit-rim{position:absolute;bottom:90px;width:21%;height:55%;border-bottom:7px solid #152a37;border-left:14px solid #081320;box-shadow:-3px 3px 0 #42606b;transform-origin:bottom;opacity:.75;pointer-events:none}.cockpit-rim-left{left:-8%;transform:rotate(-26deg);border-radius:0 0 0 55%}.cockpit-rim-right{right:-8%;transform:rotate(26deg) scaleX(-1);border-radius:0 0 0 55%}.dashboard{position:absolute;left:0;right:0;bottom:0;height:184px;padding:18px 4% 15px;display:flex;gap:23px;align-items:center;background:linear-gradient(180deg,#08111eec,#0b1725 35%);border-top:2px solid #3c5a63;clip-path:polygon(0 0,23% 0,26% 9%,74% 9%,77% 0,100% 0,100% 100%,0 100%)}.instrument-panel{background:#07121b8c;border:1px solid #64858936;padding:12px 14px;position:relative}.instrument-panel:before{content:'';position:absolute;left:-1px;top:-1px;width:13px;height:2px;background:#88b1b2}.systems-panel,.weapons-panel{width:25%;min-width:235px;max-width:400px}.instrument-heading{font:8px var(--mono);letter-spacing:1.5px;color:#719497;display:flex;justify-content:space-between;align-items:center;margin:0 0 16px}.micro-square{color:var(--cyan);font-size:8px}.instrument{display:flex;align-items:center;gap:10px;margin:10px 0}.instrument-name{width:53px;font:9px var(--mono);letter-spacing:1px;color:#b5c7c1}.instrument strong{font:12px var(--mono);width:25px;text-align:right;color:var(--paper)}.meter{height:7px;border:1px solid #58777b4d;background:#20364088;flex:1;position:relative;overflow:hidden}.meter:after{content:'';position:absolute;inset:0;background:repeating-linear-gradient(90deg,transparent 0,transparent 16px,#07121b 16px,#07121b 19px)}.meter-fill{height:100%;transition:width .18s linear}.meter-fill.shield{background:var(--cyan)}.meter-fill.hull,.meter-fill.energy{background:var(--lime)}.meter-fill.heat{background:var(--coral)}.system-foot{font:7px var(--mono);letter-spacing:1.1px;color:#5d7b83;border-top:1px solid #35535a55;padding-top:9px;margin-top:12px;display:flex;justify-content:space-between}.system-foot span{color:var(--lime)}.radar-panel{height:142px;width:203px;padding:8px 9px 4px;flex-shrink:0}.radar-panel .instrument-heading{margin-bottom:2px;font-size:7px}.radar-live{color:var(--lime);font-size:6px;letter-spacing:1px}#radar{width:100%;height:99px;object-fit:contain}.radar-bottom{display:flex;justify-content:space-between;font:6px var(--mono);letter-spacing:1px;color:#597b7f}.radar-bottom span:nth-child(2){color:var(--cyan)}.flight-center{flex:1;align-self:stretch;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:180px}.speed{display:flex;flex-direction:column;align-items:center;margin:14px 0 10px}.speed strong{font:400 36px var(--mono);letter-spacing:-2px;line-height:1.1;color:var(--paper)}.speed>span{font:7px var(--mono);letter-spacing:3px;color:#69888c;margin-top:4px}.prompts{font:8px/1.7 var(--mono);letter-spacing:1px;text-align:center;color:#8ba7a7;white-space:nowrap}.prompts span{color:#475b60;margin:0 5px}.combat-stats{display:flex;justify-content:space-between;font:7px var(--mono);letter-spacing:.5px;color:#5d7b83;border-top:1px solid #35535a55;padding-top:9px;margin-top:12px}.combat-stats b{color:#c0d1be;font-size:10px;margin-right:3px}.jump-overlay{position:fixed;inset:0;z-index:6;background:#080f1b99;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:20px;pointer-events:none}.jump-overlay strong{font:700 clamp(25px,4vw,65px) var(--sans);letter-spacing:9px}.jump-overlay .eyebrow{color:var(--lime)}.jump-line{width:90px;height:3px;background:var(--lime);box-shadow:0 0 40px #d8e98c55}.jump-coordinates{font:10px var(--mono);letter-spacing:3px;color:#91adaf}.attract-banner{position:fixed;top:24px;left:50%;transform:translateX(-50%);z-index:10;display:flex;align-items:center;gap:12px;background:#0c1a29ed;border:1px solid #d8e98c55;padding:14px 24px;font:10px var(--mono);letter-spacing:1.5px;white-space:nowrap;box-shadow:0 4px 25px #0006}.attract-hint{margin-left:16px;color:var(--lime)}.damage-flash{position:fixed;inset:0;z-index:5;pointer-events:none;background:radial-gradient(ellipse,transparent 32%,#fc665555);opacity:0;transition:opacity .15s}.damage-flash.active{opacity:1}.toast{position:fixed;left:50%;bottom:205px;transform:translateX(-50%);z-index:13;background:#d8e98cf2;color:var(--ink);padding:15px 24px;font:700 14px var(--mono);letter-spacing:1px;text-align:center;box-shadow:4px 4px 0 #060d18;border:1px solid #edf6be;max-width:80%}.modal{position:fixed;inset:0;z-index:15;background:#050b15bd;backdrop-filter:blur(9px);display:flex;align-items:center;justify-content:center;padding:40px}.modal-card{width:min(580px,100%);max-height:90vh;overflow:auto;background:#0f1d2cf5;border:1px solid #87a6a660;padding:35px 40px;box-shadow:9px 9px 0 #030a13b3;position:relative;scrollbar-width:thin;scrollbar-color:#6e9697 #13232e}.modal-card:before{content:'';width:56px;height:4px;background:var(--lime);position:absolute;top:-1px;left:-1px}.modal-card.wide{width:min(1050px,100%)}.modal-card h2{font-size:38px;line-height:1.08;letter-spacing:-1.6px;margin:9px 0 24px;font-weight:700}.modal-card h3{font-size:19px;line-height:1.2;margin:23px 0 12px;color:var(--paper)}.modal-card p{font-size:16px;line-height:1.6;color:#afc2c0;margin:12px 0 20px}.modal-card .eyebrow{font-size:9px;color:var(--lime)}.modal-card .muted,.muted{color:#86a3a8;font-size:13px;line-height:1.6}.modal-card .buttons{display:flex;flex-direction:column;gap:9px;margin-top:25px}.modal-card .buttons.horizontal,.modal-card .button-row{display:flex;flex-direction:row;gap:10px;margin-top:24px;flex-wrap:wrap}.buttons .button{width:100%}.buttons.horizontal .button,.button-row .button{width:auto;flex:1;min-width:130px}.modal-card button:not(.button):not(.sector-cell){min-height:43px;padding:10px 18px;border:1px solid #75999c66;background:#1b303d;color:var(--paper)}.modal-card button:not(.button):not(.sector-cell):hover{border-color:var(--lime);color:var(--lime)}.modal-card .row{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:13px 0;border-bottom:var(--thin)}.modal-card .row>span:first-child{font-size:16px}.modal-card input:not([type=range]):not([type=checkbox]),.modal-card select{background:#071420;border:1px solid #6d91946b;color:var(--paper);padding:11px 12px;min-height:45px;max-width:100%;border-radius:0}.modal-card input[type=checkbox]{accent-color:var(--lime);width:23px;height:23px}.slider-row{display:grid;grid-template-columns:1fr 1fr 45px;gap:17px;align-items:center;padding:16px 0;border-bottom:var(--thin);font-size:15px}.slider-row label{line-height:1.4}.slider-row input[type=range]{width:100%;accent-color:var(--lime);height:24px;cursor:pointer}.slider-row output,.slider-row>span:last-child{font:12px var(--mono);color:var(--cyan);text-align:right}.map-layout{display:grid;grid-template-columns:minmax(310px,1.5fr) minmax(230px,1fr);gap:35px;align-items:start}.sector-grid{display:grid;grid-template-columns:repeat(6,1fr);gap:6px;aspect-ratio:1.2}.sector-cell{position:relative;min-height:55px;min-width:0;background:#102431;border:1px solid #55747d6b;padding:7px;color:#91aeb0;font:11px var(--mono);display:flex;align-items:center;justify-content:center;flex-direction:column;gap:4px;transition:background .12s,transform .12s}.sector-cell:hover,.sector-cell.selected,.sector-cell:focus-visible{background:#d8e98c22;border-color:var(--lime);color:var(--paper);transform:scale(1.03);z-index:1;outline:0}.sector-cell.selected:after{content:'';position:absolute;inset:-4px;border:1px solid var(--lime);pointer-events:none}.sector-cell.current{background:#85e2de18;border-color:var(--cyan);color:var(--cyan)}.sector-cell.danger{color:var(--coral)}.sector-cell.base{color:var(--lime)}.sector-cell strong{font-size:19px}.sector-cell small{font-size:8px;color:inherit;opacity:.6}.map-side{padding-left:22px;border-left:var(--thin)}.map-side h3{margin:3px 0 10px;font-size:26px}.map-side p{font-size:14px}.legend{display:flex;flex-wrap:wrap;gap:16px;font:9px var(--mono);letter-spacing:.5px;margin:20px 0 0;color:#829f9e}.legend .danger{color:var(--coral)}.legend .base{color:var(--lime)}.legend .current{color:var(--cyan)}.stat-grid,.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:20px 0}.stat-grid>div,.stats>div{padding:16px 12px;border:1px solid #688a8d44;background:#07162266;display:flex;flex-direction:column;gap:8px}.stat-grid b,.stat-grid strong,.stats b,.stats strong{font:25px var(--mono);color:var(--lime)}.stat-grid span,.stats span{font:8px var(--mono);letter-spacing:1.2px;color:#8ba6a6}.credits{font-size:13px;line-height:1.7;user-select:text}.credits h3{font-size:19px}.credits p{font-size:13px}.credits dl{display:grid;grid-template-columns:125px 1fr;gap:7px 18px;margin:15px 0 25px}.credits dt{font:10px var(--mono);color:var(--cyan);padding-top:3px}.credits dd{margin:0;color:#a8c0bc;font-size:12px;line-height:1.65}.credits ul,.credits ol{padding-left:20px;color:#abc1be;font-size:13px;line-height:1.7}.control-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.control-grid>div{padding:15px;border:var(--thin)}kbd,.glyph{font:11px var(--mono);color:var(--lime);border:1px solid #b4ce8266;padding:3px 6px;display:inline-block;min-width:24px;text-align:center;background:#d8e98c0b}a{color:var(--cyan)}.touch-menu,.touch-action{display:none}.loading-screen{position:fixed;inset:0;z-index:30;background:#08111e;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px}.loading-symbol{font-size:50px;color:var(--lime);animation:rotate-symbol 8s linear infinite}.loading-screen strong{font-size:25px;font-weight:500;margin-top:8px}.loading-screen p{font:11px var(--mono);color:#6f949b;letter-spacing:.5px}.loading-track{width:180px;height:2px;background:#21353d;overflow:hidden;margin-top:10px}.loading-track span{display:block;width:40%;height:100%;background:var(--lime);animation:loading 1.4s ease-in-out infinite}@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(350%)}}@keyframes rotate-symbol{to{transform:rotate(360deg)}}
+@media(min-width:1700px){.title-content{top:21%;left:9%}.title-kicker{font-size:12px;margin-bottom:25px}.tagline{margin-bottom:43px}.title-actions{width:410px}.launch{min-height:70px;font-size:23px}.title-secondary .button{font-size:16px;min-height:55px}.title-small-actions button{font-size:14px}.title-topline{font-size:13px}.title-footer,.title-footer #bootStatus,.title-footer-right{font-size:11px}.title-footer-right span{font-size:9px}.title-scene-label{font-size:12px}.title-scene-label b{font-size:19px}.title-scene-label small{font-size:10px}.hud-top{top:46px}.mission-block .eyebrow{font-size:12px}#objective{font-size:28px}.mission-sub{font-size:12px}.navigation-block strong{font-size:20px}.navigation-block .eyebrow,.navigation-block #threatValue{font-size:11px}.dashboard{height:220px;padding:24px 5%;gap:34px}.systems-panel,.weapons-panel{max-width:470px;padding:17px 20px}.instrument-heading{font-size:10px}.instrument-name{font-size:11px;width:64px}.instrument strong{font-size:16px;width:33px}.meter{height:9px}.instrument{margin:14px 0}.system-foot{font-size:9px;padding-top:12px}.combat-stats{font-size:9px;padding-top:12px}.combat-stats b{font-size:13px}.radar-panel{width:240px;height:165px}#radar{height:120px}.radar-panel .instrument-heading{font-size:9px}.radar-bottom{font-size:8px}.speed strong{font-size:45px}.speed>span{font-size:9px}.prompts{font-size:10px}.comms{bottom:260px;max-width:650px}.comms p{font-size:18px;max-width:520px}.comms .eyebrow{font-size:11px}.comms-portrait{width:46px;min-width:46px;height:53px}.toast{bottom:245px;font-size:16px}.modal-card{width:660px;padding:43px 48px}.modal-card.wide{width:1200px}.modal-card h2{font-size:46px}.modal-card p{font-size:19px}.modal-card .button{font-size:20px;min-height:60px}.modal-card .eyebrow{font-size:11px}.slider-row{font-size:18px;padding:20px 0}.sector-cell{min-height:67px;font-size:13px}.sector-cell strong{font-size:23px}.credits p,.credits ul,.credits ol{font-size:15px}.credits dd{font-size:14px}.credits dt{font-size:12px}}
+@media(max-height:750px) and (min-width:850px){.title-screen{padding-top:25px}.title-content{top:20%;left:7.5%}.title-kicker{margin-bottom:15px;font-size:9px}h1{font-size:clamp(63px,7.3vw,105px);margin-bottom:20px}.tagline{font-size:20px;margin-bottom:22px}.title-actions{width:325px}.launch{min-height:52px;font-size:18px}.title-secondary .button{min-height:44px;font-size:13px}.title-small-actions{margin-top:9px}.title-footer{bottom:20px;padding-top:14px}.title-scene-label{bottom:24%}.dashboard{height:160px;padding-top:14px;padding-bottom:10px;gap:18px}.instrument-panel{padding:9px 11px}.instrument-heading{margin-bottom:10px}.instrument{margin:8px 0}.radar-panel{height:127px;width:180px;padding:7px}#radar{height:88px}.comms{bottom:185px}.speed strong{font-size:30px}.prompts{font-size:7px}.hud-top{top:25px}.modal-card{padding:25px 32px}.modal-card h2{font-size:32px;margin-bottom:16px}.modal-card p{font-size:15px;margin-bottom:15px}.modal-card .buttons{margin-top:18px}.slider-row{padding:11px 0}}
+@media(max-width:1100px){.title-content{left:7%;width:48%}.title-scene-label{right:5%;font-size:8px}.title-scene-label b{font-size:13px}.dashboard{gap:14px;padding-left:3%;padding-right:3%}.systems-panel,.weapons-panel{min-width:205px}.instrument-name{font-size:8px;width:46px}.radar-panel{width:170px}.flight-center{min-width:140px}.prompts{font-size:7px;white-space:normal}.comms{max-width:420px}.comms p{font-size:13px}.map-layout{gap:23px}.modal{padding:30px}.modal-card{padding:28px 30px}.map-side{padding-left:17px}}
+@media(max-width:800px){.title-screen{padding:25px 6%;background:linear-gradient(90deg,#07101aef,#07101abf 45%,#07101a44)}.title-topline{font-size:8px;letter-spacing:1px;gap:10px}.title-topline .insignia{font-size:23px}.title-topline i{margin:0 4px}.title-content{left:8%;width:80%;top:22%;max-width:400px}.title-kicker{font-size:8px;letter-spacing:1.1px;margin-bottom:20px}h1{font-size:clamp(70px,12vw,105px)}.tagline{font-size:20px;margin-bottom:28px}.title-actions{width:310px}.launch{min-height:55px;font-size:18px}.title-secondary .button{font-size:13px}.title-scene-label{display:none}.title-footer{left:6%;right:6%;font-size:7px;letter-spacing:.8px;bottom:23px;gap:15px}.title-footer #bootStatus{font-size:7px;letter-spacing:.7px;gap:6px}.title-footer-right{display:none}.hud-top{top:25px;left:4%;right:4%}.mission-block{padding-left:11px}.mission-block .eyebrow{font-size:8px}.mission-block #missionProgress{font-size:7px;margin-left:9px}#objective{font-size:16px;margin-top:5px}.mission-sub{font-size:8px;gap:9px;letter-spacing:.6px}.navigation-block strong{font-size:11px}.navigation-block .eyebrow,.navigation-block #threatValue{font-size:7px;letter-spacing:1px}.dashboard{height:130px;padding:13px 3% 10px;gap:10px}.systems-panel,.weapons-panel{min-width:0;width:31%;padding:8px}.instrument-heading{font-size:6px;letter-spacing:.7px;margin-bottom:9px}.instrument-name{width:36px;font-size:6px;letter-spacing:.5px}.instrument{gap:6px;margin:8px 0}.instrument strong{font-size:9px;width:20px}.meter{height:6px}.system-foot{font-size:5px;letter-spacing:.3px;padding-top:8px;margin-top:8px}.combat-stats{font-size:5px;letter-spacing:0;padding-top:8px;margin-top:8px}.combat-stats b{font-size:8px}.radar-panel{width:125px;height:100px;padding:5px}#radar{height:70px}.radar-panel .instrument-heading{font-size:6px;letter-spacing:.5px}.radar-live{font-size:5px}.radar-bottom{font-size:5px}.flight-center{min-width:70px}.speed{margin:12px 0 6px}.speed strong{font-size:24px}.speed>span{font-size:5px;letter-spacing:1px}.prompts{font-size:5px;letter-spacing:.3px}.comms{bottom:155px;left:4%;max-width:380px;padding:10px 13px 10px 9px}.comms p{font-size:12px;max-width:300px}.comms .eyebrow{font-size:7px}.comms-portrait{width:30px;min-width:30px;height:38px}.comms-portrait>span{font-size:11px}.comms-portrait i{height:5px}.comms-portrait i:nth-of-type(2),.comms-portrait i:nth-of-type(4){height:8px}.comms-portrait i:nth-of-type(3){height:11px}.toast{bottom:150px;padding:12px 17px;font-size:11px}.reticle{transform:translate(-50%,-50%) scale(.8)}.target-info{font-size:9px;top:calc(46% + 58px)}.modal{padding:20px}.modal-card{padding:25px;width:min(550px,100%);max-height:94vh}.modal-card h2{font-size:31px;margin:8px 0 20px}.modal-card h3{font-size:17px}.modal-card p{font-size:14px;line-height:1.5}.modal-card .button{font-size:16px;min-height:49px}.map-layout{gap:20px;grid-template-columns:1fr}.map-side{border-left:0;border-top:var(--thin);padding:17px 0 0}.map-side h3{font-size:20px}.map-side p{font-size:13px}.sector-grid{aspect-ratio:1.5}.sector-cell{min-height:42px;font-size:10px;gap:2px;padding:5px}.sector-cell strong{font-size:16px}.sector-cell small{font-size:7px}.legend{font-size:8px;margin-top:13px}.map-side .buttons{margin-top:10px}.slider-row{grid-template-columns:1fr 1fr 35px;gap:10px;padding:13px 0;font-size:13px}.slider-row output{font-size:11px}.credits dl{grid-template-columns:90px 1fr;gap:7px 12px}.credits dt{font-size:9px}.credits dd{font-size:11px}.credits p,.credits ul,.credits ol{font-size:12px}.attract-banner{top:16px;padding:11px 15px;font-size:8px;gap:8px;letter-spacing:.8px}.attract-hint{margin-left:7px}.jump-overlay strong{font-size:25px;letter-spacing:3px}.jump-coordinates{font-size:8px;letter-spacing:1px}}
+@media(max-width:500px){.title-content{top:21%;left:9%;width:82%}.title-topline{font-size:6px}.registration{font-size:7px}h1{font-size:clamp(65px,17vw,87px)}.title-kicker{font-size:7px;letter-spacing:1px}.tagline{font-size:19px;margin-bottom:30px}.title-actions{width:100%;max-width:310px}.title-footer{font-size:6px;letter-spacing:.5px}.title-footer #bootStatus{font-size:6px}.hud-top{top:20px}.navigation-block{display:none}.mission-block .eyebrow{font-size:7px}#objective{font-size:15px}.mission-sub{font-size:7px}.dashboard{height:115px;gap:6px;padding:10px 3%}.systems-panel,.weapons-panel{width:37%}.radar-panel{width:22%;height:88px;padding:4px}#radar{height:63px}.radar-bottom{display:none}.flight-center{display:none}.instrument-name{width:31px;font-size:5px}.instrument strong{width:17px;font-size:8px}.instrument-heading{font-size:5px;letter-spacing:.4px}.instrument{gap:4px}.comms{bottom:140px;max-width:90%;gap:9px}.comms p{font-size:11px}.toast{bottom:132px;width:86%;max-width:86%;font-size:10px}.cockpit-rim{display:none}.attract-banner{font-size:6px;padding:11px 10px;gap:6px;letter-spacing:.5px}.attract-hint{margin-left:3px}.attract-banner .live-dot{width:4px;height:4px}.modal-card{padding:25px 20px}.modal-card h2{font-size:28px}.modal-card .eyebrow{font-size:8px}.modal-card .row>span:first-child{font-size:14px}.stat-grid,.stats{gap:6px}.stat-grid>div,.stats>div{padding:13px 8px}.stat-grid b,.stat-grid strong,.stats b,.stats strong{font-size:20px}.stat-grid span,.stats span{font-size:6px}.control-grid{grid-template-columns:1fr;gap:10px}.sector-grid{gap:5px}.sector-cell{min-height:38px;font-size:9px}.sector-cell strong{font-size:14px}}
+body.touch .touch-menu{position:fixed;right:17px;top:17px;z-index:14;display:block;width:47px;height:47px;background:#0d2233bb;border:1px solid #93c3bc66;color:var(--paper);font-size:20px;border-radius:50%;backdrop-filter:blur(5px)}body.touch .touch-action:not([hidden]){position:fixed;right:25px;bottom:28px;display:block;z-index:14;min-width:70px;min-height:70px;border-radius:50%;background:#d8e98ce6;color:var(--ink);font:700 10px var(--mono);border:2px solid #f0f6c8;box-shadow:0 0 25px #d8e98c22}body.touch .dashboard{display:none}body.touch .hud-top{top:23px}body.touch .navigation-block{display:none}body.touch .mission-block{border:0;padding:0}body.touch .mission-block .eyebrow{display:none}body.touch .mission-sub{opacity:.7}body.touch .comms{bottom:28px;left:22px;max-width:65%;background:transparent;border:0;padding:0}body.touch .comms-portrait{display:none}body.touch .comms p{font-size:12px;text-shadow:0 2px 7px #000}body.touch .comms .eyebrow{font-size:7px}body.touch .cockpit-rim{display:none}body.touch .toast{bottom:110px}body.touch .title-screen~.touch-menu{display:none}body.touch:has(#hud:not([hidden])) .touch-menu{display:block}body.touch:has(#menu:not([hidden])) .touch-action{display:none}body.touch .target-info{font-size:9px}body.touch .reticle{opacity:.55}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{animation-duration:.01ms!important;transition-duration:.01ms!important}}
+/* Flight-critical labels remain legible against bright planets and at TV distance. */
+.navigation-block{padding:12px 16px;background:linear-gradient(90deg,#07121b00,#07121bcb 22%,#07121be0);border-right:2px solid #85e2de66}
+@media(min-width:1100px){.instrument-heading{font-size:10px;letter-spacing:1.3px}.instrument-name{font-size:11px;width:56px;letter-spacing:.6px}.instrument strong{font-size:15px;width:30px}.system-foot{font-size:8px;letter-spacing:.6px}.combat-stats{font-size:8px;letter-spacing:.3px}.combat-stats b{font-size:11px}.prompts{font-size:11px;line-height:1.65;letter-spacing:.7px;white-space:normal;width:100%;max-width:370px}.flight-center{min-width:190px}.speed{margin-top:6px;margin-bottom:7px}}
+@media(min-width:1700px){.instrument-heading{font-size:12px}.instrument-name{font-size:13px;width:69px}.instrument strong{font-size:19px;width:36px}.system-foot{font-size:10px}.combat-stats{font-size:10px}.combat-stats b{font-size:14px}.prompts{font-size:13px;max-width:450px}.navigation-block{padding:15px 20px}}
+</style>
+</head>
+<body>
+<div class="screen-vignette" aria-hidden="true"></div>
+<div class="screen-grain" aria-hidden="true"></div>
+<section id="menu" class="panel title-screen" data-screen="title" aria-label="Stellar Raiders title screen">
+  <div class="title-topline"><span class="insignia" aria-hidden="true">✦</span><span>FRONTIER DEFENCE COMMAND <i>/</i> 1982 → 2026</span><span class="registration">SR—01</span></div>
+  <div class="title-content">
+    <div class="eyebrow title-kicker"><span class="live-dot"></span> ONE PILOT. AN ENTIRE FRONTIER.</div>
+    <h1><span>STELLAR</span><span class="title-outline">RAIDERS<span class="title-period">.</span></span></h1>
+    <p class="tagline">A small ship.<br>A very big problem.</p>
+    <nav class="title-actions" aria-label="Main menu">
+      <button class="button primary launch" data-action="start"><span class="button-mark" aria-hidden="true">↗</span><span>Launch patrol</span><span class="button-trail" aria-hidden="true">01</span></button>
+      <div class="title-secondary"><button class="button" data-action="manual">Flight manual</button><button class="button" data-action="online">Wing link <span class="link-symbol" aria-hidden="true">⌁</span></button></div>
+      <div class="title-small-actions"><button data-action="settings">Settings</button><span>/</span><button data-action="about">About & credits</button></div>
+    </nav>
+  </div>
+  <div class="title-scene-label" aria-hidden="true"><span class="label-rule"></span><span>FDC INTERCEPTOR</span><b>“LITTLE PROBLEM”</b><small>LONG RANGE / SHORT TEMPER</small></div>
+  <footer class="title-footer"><span>INKSPACE <i>/</i> FLIGHT LOG 01</span><span id="bootStatus"><span class="live-dot"></span> PREPARING FLIGHT SYSTEMS</span><span class="title-footer-right">THE FRONTIER IS CALLING<span>ANSWER WITH BOTH BARRELS.</span></span></footer>
+</section>
+<section id="hud" class="hud" hidden aria-label="Flight instruments">
+  <div class="hud-top">
+    <div class="mission-block"><div class="eyebrow"><span class="live-dot"></span> FRONTIER PATROL <span id="missionProgress">01 / 03</span></div><div id="objective">Clear the raider squadrons</div><div class="mission-sub"><span id="sectorLabel">SECTOR A1</span><span class="separator">/</span><span id="statusLabel">ALL SYSTEMS NOMINAL</span></div></div>
+    <div class="navigation-block"><span class="eyebrow">NAV COMPUTER</span><strong id="navTarget">NO JUMP PLOTTED</strong><span id="threatValue">SCAN THE FRONTIER</span></div>
+  </div>
+  <div class="reticle" aria-hidden="true"><span class="reticle-cross"></span><span class="reticle-dot"></span><span class="reticle-left"></span><span class="reticle-right"></span></div>
+  <div id="targetInfo" class="target-info"></div>
+  <div id="comms" class="comms"><div class="comms-portrait" aria-hidden="true"><span>✦</span><i></i><i></i><i></i><i></i><i></i></div><div><span id="speaker" class="eyebrow">COMMAND</span><p id="message">The frontier is yours, pilot. Make it count.</p></div></div>
+  <div class="cockpit-rim cockpit-rim-left" aria-hidden="true"></div><div class="cockpit-rim cockpit-rim-right" aria-hidden="true"></div>
+  <div class="dashboard">
+    <div class="instrument-panel systems-panel">
+      <div class="instrument-heading"><span>SHIP INTEGRITY</span><span class="micro-square">▰</span></div>
+      <div class="instrument"><span class="instrument-name">SHIELD</span><div class="meter"><div id="shieldBar" class="meter-fill shield" style="width:100%"></div></div><strong id="shieldValue">100</strong></div>
+      <div class="instrument"><span class="instrument-name">HULL</span><div class="meter"><div id="hullBar" class="meter-fill hull" style="width:100%"></div></div><strong id="hullValue">100</strong></div>
+      <div class="system-foot">FDC / INTERCEPTOR CLASS <span>✦</span></div>
+    </div>
+    <div class="instrument-panel radar-panel"><div class="instrument-heading"><span>LOCAL SCAN</span><span class="radar-live">LIVE</span></div><canvas id="radar" width="220" height="150" aria-label="Local radar"></canvas><div class="radar-bottom"><span>FRONT</span><span>▵ YOU</span><span>REAR</span></div></div>
+    <div class="flight-center"><div class="speed"><strong id="speedValue">0</strong><span>IMPULSE</span></div><div id="prompts" class="prompts">W / S THRUST <span>·</span> M GALACTIC MAP</div></div>
+    <div class="instrument-panel weapons-panel">
+      <div class="instrument-heading"><span>COMBAT SYSTEMS</span><span class="micro-square">▰</span></div>
+      <div class="instrument"><span class="instrument-name">ENERGY</span><div class="meter"><div id="energyBar" class="meter-fill energy" style="width:100%"></div></div><strong id="energyValue">100</strong></div>
+      <div class="instrument"><span class="instrument-name">HEAT</span><div class="meter"><div id="heatBar" class="meter-fill heat" style="width:0%"></div></div><strong id="heatValue">0</strong></div>
+      <div class="combat-stats"><span><b id="killsValue">0</b> KILLS</span><span><b id="basesValue">3</b> BASES</span><span><b id="ammoValue">6</b> TORPS</span></div>
+    </div>
+  </div>
+</section>
+<div id="jumpOverlay" class="jump-overlay" hidden><div class="jump-line"></div><span class="eyebrow">HYPERSPACE TRANSIT</span><strong>HOLD YOUR COURSE</strong><span class="jump-coordinates">SPACE IS MOSTLY A SUGGESTION.</span></div>
+<div id="attractBanner" class="attract-banner" hidden><span class="live-dot"></span>AUTOPILOT DEMONSTRATION <span class="attract-hint">ANY INPUT TO RETURN</span></div>
+<div id="flash" class="damage-flash" aria-hidden="true"></div>
+<div id="toast" class="toast" role="status" hidden></div>
+<div id="modal" class="modal" hidden role="dialog" aria-modal="true"></div>
+<button id="touchMenu" class="touch-menu" data-action="pause" aria-label="Pause game">Ⅱ</button>
+<button id="touchAction" class="touch-action" data-action="context" hidden>JUMP</button>
+<div id="loading" class="loading-screen"><span class="loading-symbol">✦</span><span class="eyebrow">STELLAR RAIDERS</span><strong>Waking the frontier.</strong><p>Preparing navigation, physics & flight systems</p><div class="loading-track"><span></span></div></div>
+
+<script type="application/json" id="creditsData">{"sourceInformation":{"date":"2026-11-05 22:30:41","source":"Star Raiders (1982)","plan":"none","genre":"Space combat simulation / tactical action","perspective":"First-person cockpit with a strategic sector chart","tech":"Three.js r180 (0.180.0), WebGPURenderer with WebGPU and WebGL compatibility, Rapier 0.19.3, Web Audio, Gamepad API, JavaScript, HTML/CSS; AI Hub Session Protocol v1 client 1.4.0","artDirection":"Stylized cel shading, ink outlines, low-poly ships and planets, printed frontier-command instruments","animation":"Three.js AnimationMixer and AnimationClip keyframe tracks for flight surfaces, reactors and rotating habitat; procedural flight and effects","audio":"Code-generated sequenced synthesizer music (10% default), synthesized effects and Animalese-style gibberish voices; no audio files","online":"AI Hub 1–4-player ghost score competition; standalone same-browser local practice wing via BroadcastChannel","testing":"105 automated checks: 17 real Rapier campaign checks plus 88 browser and official AI Hub harness checks. Scripted full patrol with real steering, lasers and torpedoes; mouse capture and Escape release; emulated standard gamepad and touch; synthesized-audio analyser; local ghost pilots; 2-player and 4-player Hub rounds including 150 ms latency, 50 ms jitter, 5% packet loss and host departure; file:// launch. Native WebGPU flight/input checks and WebGL compatibility multiplayer/touch checks. Visual QA at 1440×900, 1920×1080 and mobile sizes. No physical controller, real touch hardware, TV or human listening.","research":"No source or game research. Native model knowledge only. Read the supplied AI Hub integration contract and local toolchain instructions.","environment":"Codex CLI (headless); Linux","model":"OpenAI, gpt-6.1-sol, reasoning effort ultra","usage":"added on import"},"testingFeedback":["13 functional issues were found and fixed, plus two readability improvements. They covered physics initialization and cleanup, texture upload, menu focus/navigation, pointer drift, Hub countdown/debrief lifecycle, permanent starbase loss and docking state/scoring.","3 were game breaking for a supported path: physics initialization, invalid WebGPU texture upload and controller hyperspace confirmation. All were fixed.","The complete four-sector campaign using actual steering, lasers and homing torpedoes, followed by the official AI Hub conformance runs under loss, latency and host departure.","Fixed-duration browser waits were least useful: software rendering made them unreliable. The final checks wait for observed frames and game state."],"engineFeedback":["Three.js native AnimationMixer clips and toon node materials worked well for animated procedural ships, reactors and the rotating starbase.","I initially used an incorrect Rapier descriptor method and an unsupported RGB texture upload. Tests caught both. The workstation’s software WebGPU also needed an explicit ANGLE backend flag.","The flight campaign, tactical sector chart, targeting, cross-device input interface and ghost-pilot lifecycle.","Validating WebGPU headlessly: native GPU state checks and compatibility-renderer screenshots were both needed because headless WebGPU screenshots omitted the canvas.","none","Provide a stable, documented headless WebGPU capture and validation path across software adapters."],"promptFeedback":["The source, single-file deliverable, attract mode and live tuning requirements gave the game a clear, practical shape.","The intended Star Raiders edition and the preferred standalone multiplayer mode were not specified. The supplied year was retained; ghost competition was chosen.","Completing a flight campaign, strategic layer, synthesized audio, device controls and multiplayer lifecycle in one shareable document.","Specify a target mission duration and preferred multiplayer relationship, such as cooperative, competitive or ghost-based."],"aiHub":{"name":"Stellar Raiders","tagline":"A small ship. A very big problem.","description":"Defend the frontier in a cel-shaded cockpit space-combat patrol. Hunt raider squadrons, jump across a tactical sector chart, resupply at starbases and bring down the command ship.","type":"Game","genre":"Flight","source":"Star Raiders (1982)","series":"","players":"1–4","controls":"Mouse / left stick steer; W/S / right stick throttle; LMB/Space / R2 fire; R/RMB / R1 torpedo; E / L1 shields; T / Square lock; M / Triangle chart; H / Circle context; Esc / Options pause; touch assisted.","tags":["3d","sci-fi","first-person","vehicles","retro","arcade"]}}</script>
+<script type="module">
+// main.js
+import RAPIER2 from "@dimforge/rapier3d-compat";
+
+// core.js
+import RAPIER from "@dimforge/rapier3d-compat";
+var DEFAULTS = { enemyDamage: 9, enemyRate: 1, turnSpeed: 1.45, aimAssist: 0.965, energyDrain: 1, weaponDamage: 26 };
+var clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+var dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
+var Campaign = class {
+  constructor(event = () => {
+  }) {
+    this.event = event;
+    this.tuning = { ...DEFAULTS };
+    this.god = false;
+    this.reset();
+  }
+  reset() {
+    if (this.events) this.events.free();
+    if (this.world) this.world.free();
+    this.world = new RAPIER.World({ x: 0, y: 0, z: 0 });
+    this.events = new RAPIER.EventQueue(true);
+    this.world.timestep = 1 / 60;
+    this.time = 0;
+    this.score = 0;
+    this.kills = 0;
+    this.shots = 0;
+    this.hits = 0;
+    this.jumps = 0;
+    this.docks = 0;
+    this.servicedBases = /* @__PURE__ */ new Set();
+    this.missiles = 6;
+    this.energy = 100;
+    this.hull = 100;
+    this.shield = 100;
+    this.shields = true;
+    this.heat = 0;
+    this.cooldown = 0;
+    this.missileCooldown = 0;
+    this.hurt = 0;
+    this.throttle = 0.25;
+    this.yaw = 0;
+    this.pitch = 0;
+    this.roll = 0;
+    this.jump = null;
+    this.docking = 0;
+    this.docked = false;
+    this.won = false;
+    this.lost = false;
+    this.running = false;
+    this.attract = false;
+    this.autopilot = false;
+    this.bullets = [];
+    this.enemies = [];
+    this.colliderMap = /* @__PURE__ */ new Map();
+    this.effects = [];
+    this.target = null;
+    this.targetIndex = 0;
+    this.bases = [{ sector: 16, name: "KESTREL", health: 100 }, { sector: 9, name: "LANTERN", health: 100 }];
+    this.roster = { 11: ["scout", "scout", "scout"], 7: ["raider", "raider", "scout"], 3: ["bomber", "bomber", "scout", "scout"], 4: ["flagship", "raider", "raider"] };
+    this.sectors = Array.from({ length: 20 }, (_, i) => ({ id: i, name: ["CINDER", "VEIL", "SHARD", "IRON WAKE", "CROWN", "DRIFT", "EMBER", "GLASS", "HOLLOW", "LANTERN", "DUSK", "RAZOR", "ECHO", "RIFT", "QUILL", "WISP", "KESTREL", "HALO", "SABLE", "TIDE"][i], storm: [2, 8, 13, 18].includes(i), visited: false }));
+    this.player = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 0, 0).setLinearDamping(0.8).enabledRotations(false, false, false).setCcdEnabled(true));
+    const c = this.world.createCollider(RAPIER.ColliderDesc.ball(5).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), this.player);
+    this.colliderMap.set(c.handle, { type: "player" });
+    this.enterSector(11);
+  }
+  get position() {
+    return this.player.translation();
+  }
+  get remaining() {
+    return Object.values(this.roster).reduce((n, a) => n + a.length, 0);
+  }
+  get aliveBases() {
+    return this.bases.filter((b) => b.health > 0).length;
+  }
+  get base() {
+    return this.bases.find((b) => b.sector === this.sector && b.health > 0);
+  }
+  get forward() {
+    return { x: -Math.sin(this.yaw) * Math.cos(this.pitch), y: Math.sin(this.pitch), z: -Math.cos(this.yaw) * Math.cos(this.pitch) };
+  }
+  launch(attract = false) {
+    this.reset();
+    this.running = true;
+    this.attract = attract;
+    this.event("sector", { id: this.sector });
+    this.say("COMMAND", "Patrol 07. Three contacts in Razor. Keep our starbases burning bright.");
+  }
+  say(speaker, text) {
+    this.event("message", { speaker, text });
+  }
+  enterSector(id) {
+    for (const e of this.enemies) {
+      this.colliderMap.delete(e.collider.handle);
+      this.world.removeRigidBody(e.body);
+    }
+    for (const b of this.bullets) {
+      this.colliderMap.delete(b.collider.handle);
+      this.world.removeRigidBody(b.body);
+    }
+    this.bullets = [];
+    this.enemies = [];
+    this.target = null;
+    this.sector = id;
+    this.sectors[id].visited = true;
+    this.player.setTranslation({ x: 0, y: 0, z: 0 }, true);
+    this.player.setLinvel({ x: 0, y: 0, z: 0 }, true);
+    this.yaw = 0;
+    this.pitch = 0;
+    this.docked = false;
+    this.docking = 0;
+    this.roster[id]?.forEach((type, i) => this.spawnEnemy(type, i));
+    this.stationPosition = { x: 0, y: 0, z: -420 };
+    this.event("sector", { id });
+    if (this.enemies.length) this.target = this.enemies[0];
+  }
+  spawnEnemy(type, i) {
+    const flagship = type === "flagship";
+    const p = { x: (i - ((this.roster[this.sector]?.length || 1) - 1) / 2) * 100, y: i % 2 * 65 - 20, z: -360 - i * 90 };
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z));
+    const collider = this.world.createCollider(RAPIER.ColliderDesc.ball(flagship ? 42 : type === "bomber" ? 19 : 14).setSensor(true).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
+    const e = { id: `${this.sector}-${i}-${Math.random()}`, type, body, collider, hp: flagship ? 650 : type === "bomber" ? 130 : type === "raider" ? 100 : 65, maxHp: flagship ? 650 : type === "bomber" ? 130 : type === "raider" ? 100 : 65, phase: i * 2.1, cool: 2 + i * 0.8, dead: false };
+    this.colliderMap.set(collider.handle, { type: "enemy", entity: e });
+    this.enemies.push(e);
+    this.event("spawn", e);
+    return e;
+  }
+  aimTarget() {
+    const p = this.position, f = this.forward;
+    let best = null, dot = this.tuning.aimAssist;
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const q = e.body.translation(), l = dist(q, p), d = ((q.x - p.x) * f.x + (q.y - p.y) * f.y + (q.z - p.z) * f.z) / l;
+      if (d > dot) {
+        dot = d;
+        best = e;
+      }
+    }
+    return best;
+  }
+  cycleTarget() {
+    const alive = this.enemies.filter((e) => !e.dead);
+    if (!alive.length) {
+      this.target = null;
+      return;
+    }
+    this.target = alive[(alive.indexOf(this.target) + 1) % alive.length];
+    this.event("sound", "select");
+  }
+  projectile(owner, p, v, damage, missile = false) {
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(p.x, p.y, p.z).setLinvel(v.x, v.y, v.z).setCcdEnabled(true).setGravityScale(0));
+    const collider = this.world.createCollider(RAPIER.ColliderDesc.ball(missile ? 4 : owner === "player" ? 2.6 : 3.8).setSensor(true).setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS), body);
+    const b = { body, collider, owner, damage, life: missile ? 6 : 2.8, missile, target: missile ? this.target : null, dead: false };
+    this.bullets.push(b);
+    this.colliderMap.set(collider.handle, { type: "bullet", entity: b });
+    this.event("shot", b);
+  }
+  fire() {
+    if (!this.running || this.jump || this.docked || this.cooldown > 0 || this.heat > 94 || this.energy < 1) return false;
+    this.cooldown = 0.125;
+    this.heat += 6.5;
+    this.energy -= 0.32 * this.tuning.energyDrain;
+    this.shots++;
+    const p = this.position;
+    let f = this.forward;
+    const a = this.aimTarget();
+    if (a) {
+      const q = a.body.translation(), l = dist(q, p);
+      f = { x: (q.x - p.x) / l, y: (q.y - p.y) / l, z: (q.z - p.z) / l };
+    }
+    const side = this.shots % 2 ? 1 : -1;
+    this.projectile("player", { x: p.x + f.x * 12 + Math.cos(this.yaw) * side * 3, y: p.y + f.y * 12 - 1, z: p.z + f.z * 12 - Math.sin(this.yaw) * side * 3 }, { x: f.x * 900, y: f.y * 900, z: f.z * 900 }, this.tuning.weaponDamage);
+    this.event("sound", "laser");
+    return true;
+  }
+  missile() {
+    if (!this.running || this.missileCooldown > 0 || this.missiles < 1 || !this.target || this.target.dead || this.jump) return false;
+    const p = this.position, f = this.forward;
+    this.projectile("player", { x: p.x + f.x * 14, y: p.y - 3, z: p.z + f.z * 14 }, { x: f.x * 300, y: f.y * 300, z: f.z * 300 }, 180, true);
+    this.missiles--;
+    this.missileCooldown = 1.2;
+    this.event("sound", "missile");
+    return true;
+  }
+  toggleShield() {
+    this.shields = !this.shields;
+    this.event("sound", "shield");
+    this.say("SYSTEMS", this.shields ? "Deflectors online." : "Deflectors offline. Energy recharge increased.");
+  }
+  beginJump(id) {
+    if (!this.running || this.jump || id === this.sector || this.lost || this.won) return false;
+    const cost = this.jumpCost(id);
+    if (this.energy < cost) {
+      this.say("SYSTEMS", "Insufficient energy. Lower deflectors or seek a starbase.");
+      return false;
+    }
+    this.jump = { to: id, t: 0, alignment: 0 };
+    this.event("sound", "jump");
+    this.say("NAVIGATION", "Hyperspace corridor acquired. Hold the flight marker inside the ring.");
+    return true;
+  }
+  jumpCost(id) {
+    return Math.round(8 + Math.hypot(id % 5 - this.sector % 5, Math.floor(id / 5) - Math.floor(this.sector / 5)) * 2.5);
+  }
+  damage(amount) {
+    if (this.god || this.attract || this.won || this.lost) return;
+    this.hurt = 3;
+    let d = amount;
+    if (this.shields && this.energy > 0) {
+      const absorbed = Math.min(this.shield, d);
+      this.shield -= absorbed;
+      this.energy = Math.max(0, this.energy - absorbed * 0.09);
+      d -= absorbed;
+    }
+    this.hull = clamp(this.hull - d, 0, 100);
+    this.event("damage", amount);
+    this.event("sound", "hit");
+    if (this.hull <= 0) this.finish(false);
+  }
+  kill(e) {
+    if (e.dead) return;
+    e.dead = true;
+    this.kills++;
+    this.score += e.type === "flagship" ? 2400 : e.type === "bomber" ? 450 : e.type === "raider" ? 300 : 200;
+    const r = this.roster[this.sector];
+    r.splice(r.indexOf(e.type), 1);
+    this.event("explosion", { position: { ...e.body.translation() }, big: e.type === "flagship" });
+    this.event("sound", "explode");
+    if (this.target === e) this.target = this.enemies.find((x) => !x.dead) || null;
+    if (!r.length) {
+      this.score += 500;
+      this.bases.forEach((b) => {
+        if (b.health > 0) b.health = Math.min(100, b.health + 10);
+      });
+      this.say("COMMAND", this.remaining ? "Sector secure. Open the tactical chart and choose your next jump." : "All contacts eliminated. The frontier is yours.");
+      if (!this.remaining) this.finish(true);
+    } else if (e.type === "flagship") this.say("COMMAND", "Command ship destroyed! Sweep up the remaining hostiles.");
+  }
+  finish(won) {
+    if (this.won || this.lost) return;
+    this.won = won;
+    this.lost = !won;
+    this.running = false;
+    if (won) this.score += Math.round(this.hull * 10 + this.aliveBases * 500);
+    this.event("finish", { won, score: this.score });
+    this.event("sound", won ? "victory" : "alarm");
+  }
+  update(dt, input = {}) {
+    if (!this.running) return;
+    dt = Math.min(dt, 0.05);
+    this.time += dt;
+    this.cooldown = Math.max(0, this.cooldown - dt);
+    this.missileCooldown = Math.max(0, this.missileCooldown - dt);
+    this.hurt = Math.max(0, this.hurt - dt);
+    this.heat = Math.max(0, this.heat - 25 * dt);
+    if (this.god || this.attract) {
+      this.energy = 100;
+      this.hull = 100;
+      this.shield = 100;
+      this.missiles = Math.max(6, this.missiles);
+    }
+    if (this.jump) {
+      this.jump.t += dt;
+      this.jump.alignment = clamp(this.jump.alignment + dt * (Math.abs(input.yaw || 0) + Math.abs(input.pitch || 0) < 0.75 ? 1 : -0.8), 0, 3);
+      if (this.jump.t > 4) {
+        const to = this.jump.to, steady = this.jump.alignment > 2;
+        this.energy -= this.jumpCost(to);
+        this.jumps++;
+        this.jump = null;
+        this.enterSector(to);
+        this.score += steady ? 120 : 0;
+        this.say("NAVIGATION", steady ? "Clean transit. Long-range scan complete." : "Rough transit. All systems responding.");
+      }
+      return;
+    }
+    if (this.docked && !this.base) {
+      this.docked = false;
+      this.docking = 0;
+    }
+    const p = this.position;
+    this.yaw += (input.yaw || 0) * this.tuning.turnSpeed * dt;
+    this.pitch = clamp(this.pitch + (input.pitch || 0) * this.tuning.turnSpeed * dt, -1.48, 1.48);
+    this.throttle = clamp(this.throttle + (input.thrust || 0) * dt * 0.5, 0, 1);
+    const boosting = input.boost && this.energy > 5;
+    const speed = this.docked ? 0 : (12 + this.throttle * 92) * (boosting ? 2.6 : 1);
+    const f = this.forward;
+    const right = { x: Math.cos(this.yaw), y: 0, z: -Math.sin(this.yaw) };
+    this.player.setLinvel({ x: f.x * speed + right.x * (this.docked ? 0 : input.strafe || 0) * 45, y: f.y * speed, z: f.z * speed + right.z * (this.docked ? 0 : input.strafe || 0) * 45 }, true);
+    this.energy = clamp(this.energy + dt * ((this.shields ? 0.22 : 1.7) - (boosting ? 3.7 : 0) - speed * 15e-4) * this.tuning.energyDrain, 0, 100);
+    if (this.shields && this.hurt === 0 && this.energy > 5) this.shield = Math.min(100, this.shield + dt * 3);
+    if (input.fire) this.fire();
+    if (this.base && dist(p, this.stationPosition) < 115 && this.throttle < 0.32) {
+      this.docking += dt;
+      if (this.docking >= 3 && !this.docked) {
+        this.docked = true;
+        this.docks++;
+        this.hull = 100;
+        this.shield = 100;
+        this.energy = 100;
+        this.missiles = 6;
+        if (!this.servicedBases.has(this.sector)) {
+          this.score += 250;
+          this.servicedBases.add(this.sector);
+        }
+        this.event("sound", "dock");
+        this.say(this.base.name + " OPS", "Service complete. Hull sealed. Cells charged. Good hunting, patrol.");
+      }
+      if (this.docked && input.thrust > 0) {
+        this.docked = false;
+        this.docking = 0;
+        this.player.setTranslation({ x: p.x + 90, y: p.y, z: p.z }, true);
+      }
+    } else this.docking = 0;
+    for (const base of this.bases) {
+      if (base.health > 0 && this.remaining > 0) {
+        base.health = Math.max(0, base.health - dt * (this.roster[3]?.length ? 0.07 : 0.025));
+        if (base.health === 0) {
+          this.say("COMMAND", `${base.name} has gone dark. Protect the other station.`);
+          this.event("sound", "alarm");
+        }
+      }
+    }
+    if (!this.aliveBases) this.finish(false);
+    for (const e of this.enemies) {
+      if (e.dead) continue;
+      const q = e.body.translation(), d = dist(q, p);
+      e.phase += dt * (e.type === "flagship" ? 0.12 : e.type === "bomber" ? 0.24 : 0.42);
+      let desired;
+      if (e.type === "flagship") {
+        desired = { x: p.x + Math.sin(e.phase) * 280, y: p.y + 60, z: p.z - 480 };
+      } else {
+        const r = e.type === "bomber" ? 370 : 230;
+        desired = { x: p.x + Math.sin(e.phase) * r, y: p.y + Math.sin(e.phase * 0.71) * 95, z: p.z - Math.cos(e.phase) * r };
+      }
+      const lerp = dt * (e.type === "flagship" ? 0.13 : 0.28);
+      e.body.setNextKinematicTranslation({ x: q.x + (desired.x - q.x) * lerp, y: q.y + (desired.y - q.y) * lerp, z: q.z + (desired.z - q.z) * lerp });
+      e.cool -= dt * this.tuning.enemyRate;
+      if (e.cool < 0 && d < 1e3) {
+        e.cool = (e.type === "flagship" ? 1.05 : e.type === "bomber" ? 2.7 : 2.4) + Math.random();
+        const l = d || 1;
+        const spread = e.type === "flagship" ? 4 : 12;
+        const aim = { x: p.x + (Math.random() - 0.5) * spread, y: p.y + (Math.random() - 0.5) * spread, z: p.z };
+        const dir = { x: (aim.x - q.x) / l, y: (aim.y - q.y) / l, z: (aim.z - q.z) / l };
+        this.projectile("enemy", { x: q.x + dir.x * 50, y: q.y + dir.y * 50, z: q.z + dir.z * 50 }, { x: dir.x * 230, y: dir.y * 230, z: dir.z * 230 }, this.tuning.enemyDamage);
+      }
+      if (d < 22 && e.type !== "flagship") this.damage(dt * 6);
+    }
+    for (const b of this.bullets) {
+      b.life -= dt;
+      if (b.missile && b.target && !b.target.dead) {
+        const q = b.body.translation(), t = b.target.body.translation(), l = dist(q, t) || 1;
+        b.body.setLinvel({ x: (t.x - q.x) / l * 420, y: (t.y - q.y) / l * 420, z: (t.z - q.z) / l * 420 }, true);
+      }
+    }
+    this.world.timestep = dt;
+    this.world.step(this.events);
+    this.events.drainCollisionEvents((a, b, started) => {
+      if (!started) return;
+      const A = this.colliderMap.get(a), B = this.colliderMap.get(b);
+      if (!A || !B) return;
+      const shot = A.type === "bullet" ? A.entity : B.type === "bullet" ? B.entity : null;
+      const hit = A.type === "bullet" ? B : A;
+      if (!shot || shot.dead) return;
+      if (shot.owner === "player" && hit.type === "enemy" && !hit.entity.dead) {
+        shot.dead = true;
+        hit.entity.hp -= shot.damage;
+        this.hits++;
+        this.event("impact", { position: { ...shot.body.translation() } });
+        this.event("sound", "hit");
+        if (hit.entity.hp <= 0) this.kill(hit.entity);
+      }
+      if (shot.owner === "enemy" && hit.type === "player") {
+        shot.dead = true;
+        this.damage(shot.damage);
+      }
+    });
+    for (const b of this.bullets) {
+      if (b.dead) continue;
+      const q = b.body.translation();
+      if (b.owner === "player") {
+        for (const e of this.enemies) {
+          if (e.dead) continue;
+          const t = e.body.translation();
+          if (dist(q, t) < (e.type === "flagship" ? 44 : e.type === "bomber" ? 22 : 17)) {
+            b.dead = true;
+            e.hp -= b.damage;
+            this.hits++;
+            this.event("impact", { position: { ...q } });
+            if (e.hp <= 0) this.kill(e);
+            break;
+          }
+        }
+      } else if (dist(q, this.position) < 9) {
+        b.dead = true;
+        this.damage(b.damage);
+      }
+    }
+    for (let i = this.bullets.length - 1; i >= 0; i--) {
+      const b = this.bullets[i];
+      if (b.dead || b.life <= 0) {
+        this.event("removeShot", b);
+        this.colliderMap.delete(b.collider.handle);
+        this.world.removeRigidBody(b.body);
+        this.bullets.splice(i, 1);
+      }
+    }
+    for (let i = this.enemies.length - 1; i >= 0; i--) {
+      const e = this.enemies[i];
+      if (e.dead) {
+        this.event("removeEnemy", e);
+        this.colliderMap.delete(e.collider.handle);
+        this.world.removeRigidBody(e.body);
+        this.enemies.splice(i, 1);
+      }
+    }
+  }
+  snapshot() {
+    const p = this.position;
+    return { sector: this.sector, x: p.x, y: p.y, z: p.z, yaw: this.yaw, pitch: this.pitch, shooting: this.cooldown > 0.05, kills: this.kills };
+  }
+  debug() {
+    return { running: this.running, won: this.won, lost: this.lost, sector: this.sector, enemies: this.enemies.length, remaining: this.remaining, kills: this.kills, score: this.score, hull: this.hull, shield: this.shield, energy: this.energy, heat: this.heat, jumps: this.jumps, docks: this.docks, missiles: this.missiles, time: this.time, position: { ...this.position }, physics: "rapier 0.19.3", tuning: { ...this.tuning } };
+  }
+};
+
+// visuals.js
+import * as THREE from "three/webgpu";
+var V = THREE.Vector3;
+var seed = 721;
+var rnd = () => {
+  seed = seed * 1664525 + 1013904223 >>> 0;
+  return seed / 4294967296;
+};
+var Visuals = class {
+  constructor(canvas2) {
+    this.canvas = canvas2;
+    this.scene = new THREE.Scene();
+    this.scene.background = new THREE.Color("#080f20");
+    this.scene.fog = new THREE.FogExp2("#0d1529", 32e-6);
+    this.camera = new THREE.PerspectiveCamera(67, innerWidth / innerHeight, 0.05, 18e3);
+    this.scene.add(this.camera);
+    this.renderer = new THREE.WebGPURenderer({ canvas: canvas2, antialias: true, powerPreference: "high-performance" });
+    this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    this.renderer.setSize(innerWidth, innerHeight);
+    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    this.renderer.toneMappingExposure = 1.22;
+    this.mixers = [];
+    this.enemyMeshes = /* @__PURE__ */ new Map();
+    this.shotMeshes = /* @__PURE__ */ new Map();
+    this.ghosts = /* @__PURE__ */ new Map();
+    this.particles = [];
+    this.time = 0;
+    this.shake = 0;
+    this.makePalette();
+    this.scene.add(new THREE.AmbientLight("#91a8c4", 1.6));
+    const sun = new THREE.DirectionalLight("#ffe1ad", 3.3);
+    sun.position.set(-600, 500, 200);
+    this.scene.add(sun);
+    const fill = new THREE.DirectionalLight("#5d8cdb", 1.5);
+    fill.position.set(500, -100, -200);
+    this.scene.add(fill);
+    this.makeSpace();
+    this.station = this.makeStation();
+    this.scene.add(this.station);
+    this.makeCockpit();
+    this.titleShips = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const g = this.makeShip(i === 0 ? "bomber" : "scout");
+      g.position.set(50 + i * 85, 30 - i * 45, -260 - i * 75);
+      g.rotation.set(0.1, i * 0.35 + 2.9, -0.18);
+      this.titleShips.add(g);
+    }
+    this.scene.add(this.titleShips);
+    window.addEventListener("resize", () => this.resize());
+  }
+  async init() {
+    await this.renderer.init();
+    this.backend = this.renderer.backend.isWebGPUBackend ? "WebGPU" : "WebGL compatibility";
+  }
+  makePalette() {
+    const grad = new Uint8Array([55, 75, 99, 255, 130, 164, 191, 255, 225, 237, 242, 255, 255, 255, 255, 255]);
+    const tex = new THREE.DataTexture(grad, 4, 1, THREE.RGBAFormat);
+    tex.needsUpdate = true;
+    tex.magFilter = THREE.NearestFilter;
+    tex.minFilter = THREE.NearestFilter;
+    this.materials = {};
+    for (const [name, color] of Object.entries({ cream: "#e4d8b3", orange: "#e97442", red: "#be4938", navy: "#24374a", ink: "#09101c", teal: "#44baa8", gray: "#788893", gold: "#e4ad56", planet: "#c5714e" })) {
+      this.materials[name] = new THREE.MeshToonNodeMaterial({ color, gradientMap: tex });
+    }
+    this.materials.light = new THREE.MeshBasicNodeMaterial({ color: "#b6ffdb" });
+    this.materials.flame = new THREE.MeshBasicNodeMaterial({ color: "#7fece0", transparent: true, opacity: 0.8 });
+    this.materials.enemyFlame = new THREE.MeshBasicNodeMaterial({ color: "#ffb66b", transparent: true, opacity: 0.85 });
+    this.materials.line = new THREE.LineBasicMaterial({ color: "#080d19" });
+  }
+  mesh(geo, mat = "cream", edges = true) {
+    const m = new THREE.Mesh(geo, typeof mat === "string" ? this.materials[mat] : mat);
+    if (edges) {
+      const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 23), this.materials.line);
+      m.add(edge);
+    }
+    return m;
+  }
+  box(g, w, h, d, x, y, z, mat = "cream") {
+    const m = this.mesh(new THREE.BoxGeometry(w, h, d), mat);
+    m.position.set(x, y, z);
+    g.add(m);
+    return m;
+  }
+  makeShip(type = "scout", ghost = false) {
+    const g = new THREE.Group();
+    const boss = type === "flagship", bomber = type === "bomber";
+    const hull = new THREE.BufferGeometry();
+    hull.setAttribute("position", new THREE.Float32BufferAttribute([0, 3, -25, -9, -2, 14, 9, -2, 14, 0, 3, -25, 9, -2, 14, 0, 7, 12, 0, 3, -25, 0, 7, 12, -9, -2, 14, -9, -2, 14, 0, 7, 12, 9, -2, 14], 3));
+    hull.computeVertexNormals();
+    g.add(this.mesh(hull, ghost ? "teal" : boss ? "navy" : "orange"));
+    this.box(g, 8, 3, 11, 0, 5, -3, "ink");
+    this.box(g, 5, 1, 8, 0, 7, -4, "teal");
+    for (const s of [-1, 1]) {
+      const wing = new THREE.Group();
+      wing.name = s < 0 ? "port" : "starboard";
+      wing.position.set(s * 7, -1, 3);
+      const w = this.mesh(new THREE.BoxGeometry(bomber ? 25 : 22, 2, 16), ghost ? "teal" : boss ? "red" : "cream");
+      w.position.x = s * 9;
+      w.rotation.z = s * 0.17;
+      wing.add(w);
+      this.box(wing, 3, 6, 20, s * 19, -1, 6, boss ? "gold" : "red");
+      this.box(wing, 2, 2, 29, s * 17, 0, -4, "ink");
+      g.add(wing);
+      const engine = this.mesh(new THREE.ConeGeometry(3, 13, 6), ghost ? "flame" : "enemyFlame", false);
+      engine.position.set(s * 7, 0, 21);
+      engine.rotation.x = Math.PI / 2;
+      engine.name = s < 0 ? "engineL" : "engineR";
+      g.add(engine);
+    }
+    this.box(g, 2, 9, 10, 0, 10, 11, "red");
+    if (bomber) {
+      this.box(g, 13, 9, 16, 0, -5, 5, "navy");
+      for (const s of [-1, 1]) this.box(g, 5, 7, 24, s * 24, -4, 0, "orange");
+      g.scale.setScalar(1.3);
+    }
+    if (boss) {
+      g.scale.set(3.1, 2.5, 3);
+      this.box(g, 13, 7, 30, 0, -5, 5, "navy");
+      for (const s of [-1, 1]) {
+        this.box(g, 5, 5, 20, s * 22, 6, 8, "gold");
+        this.box(g, 2, 2, 18, s * 22, 6, -5, "ink");
+      }
+    }
+    const mixer = new THREE.AnimationMixer(g);
+    const clip = new THREE.AnimationClip("reactor & flight surfaces", 1.6, [new THREE.NumberKeyframeTrack("port.rotation[z]", [0, 0.8, 1.6], [-0.05, 0.04, -0.05]), new THREE.NumberKeyframeTrack("starboard.rotation[z]", [0, 0.8, 1.6], [0.05, -0.04, 0.05]), new THREE.NumberKeyframeTrack("engineL.scale[y]", [0, 0.4, 0.8, 1.2, 1.6], [0.8, 1.3, 0.9, 1.5, 0.8]), new THREE.NumberKeyframeTrack("engineR.scale[y]", [0, 0.4, 0.8, 1.2, 1.6], [1.2, 0.8, 1.4, 0.9, 1.2])]);
+    mixer.clipAction(clip).play();
+    this.mixers.push(mixer);
+    g.userData.mixer = mixer;
+    return g;
+  }
+  makeStation() {
+    const g = new THREE.Group();
+    const ring = new THREE.Group();
+    ring.name = "stationRing";
+    const torus = this.mesh(new THREE.TorusGeometry(92, 8, 5, 24), "cream");
+    ring.add(torus);
+    const inner = this.mesh(new THREE.TorusGeometry(76, 2, 4, 24), "teal");
+    ring.add(inner);
+    for (let i = 0; i < 8; i++) {
+      const a = i * Math.PI / 4;
+      const spoke = this.mesh(new THREE.BoxGeometry(8, 75, 10), "navy");
+      spoke.position.set(Math.sin(a) * 48, Math.cos(a) * 48, 0);
+      spoke.rotation.z = -a;
+      ring.add(spoke);
+      const pod = new THREE.Group();
+      this.box(pod, 24, 19, 42, 0, 0, 0, i % 2 ? "orange" : "cream");
+      this.box(pod, 25, 5, 14, 0, 0, -23, "teal");
+      pod.position.set(Math.sin(a) * 94, Math.cos(a) * 94, 0);
+      pod.rotation.z = -a;
+      ring.add(pod);
+    }
+    g.add(ring);
+    g.add(this.mesh(new THREE.IcosahedronGeometry(27, 0), "gold"));
+    this.box(g, 17, 17, 86, 0, 0, -13, "navy");
+    const gate = this.mesh(new THREE.TorusGeometry(21, 2, 4, 8), "teal");
+    gate.position.z = -60;
+    g.add(gate);
+    for (let i = 0; i < 3; i++) {
+      const panel = this.mesh(new THREE.BoxGeometry(75, 32, 2), "navy");
+      panel.position.set(0, 145 + i * 34, 0);
+      g.add(panel);
+      this.box(g, 3, 125, 4, 0, 155, 0, "cream");
+      for (let j = -3; j <= 3; j++) this.box(g, 1, 30, 3, j * 10, 145 + i * 34, 0, "teal");
+    }
+    const mix = new THREE.AnimationMixer(g);
+    mix.clipAction(new THREE.AnimationClip("habitat rotation", 80, [new THREE.NumberKeyframeTrack("stationRing.rotation[z]", [0, 80], [0, Math.PI * 2])])).play();
+    this.mixers.push(mix);
+    g.position.set(0, 0, -420);
+    return g;
+  }
+  makeSpace() {
+    const vertices = [], colors = [];
+    for (let i = 0; i < 3200; i++) {
+      const u = rnd() * Math.PI * 2, v = Math.acos(rnd() * 2 - 1), r = 7e3 + rnd() * 3e3;
+      vertices.push(Math.sin(v) * Math.cos(u) * r, Math.cos(v) * r, Math.sin(v) * Math.sin(u) * r);
+      const c = new THREE.Color().setHSL(0.52 + rnd() * 0.15, 0.1 + rnd() * 0.2, 0.4 + rnd() * 0.6);
+      colors.push(c.r, c.g, c.b);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geo.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+    this.stars = new THREE.Points(geo, new THREE.PointsMaterial({ size: 9, sizeAttenuation: true, vertexColors: true }));
+    this.scene.add(this.stars);
+    this.planet = new THREE.Group();
+    const sphere = this.mesh(new THREE.IcosahedronGeometry(1500, 4), "planet", false);
+    this.planet.add(sphere);
+    const continents = new THREE.Group();
+    for (let i = 0; i < 22; i++) {
+      const s = this.mesh(new THREE.IcosahedronGeometry(150 + rnd() * 230, 1), i % 3 ? "gold" : "red", false);
+      const a = rnd() * Math.PI * 2, b = Math.acos(rnd() * 2 - 1);
+      s.position.set(Math.sin(b) * Math.cos(a) * 1400, Math.cos(b) * 1400, Math.sin(b) * Math.sin(a) * 1400);
+      s.scale.y = 0.4 + rnd() * 0.35;
+      continents.add(s);
+    }
+    this.planet.add(continents);
+    const orbit = this.mesh(new THREE.TorusGeometry(2010, 2.5, 3, 140), "gold", false);
+    orbit.rotation.x = 1.12;
+    this.planet.add(orbit);
+    const rim = this.mesh(new THREE.TorusGeometry(1510, 11, 3, 100), "gold", false);
+    this.planet.add(rim);
+    this.planet.position.set(1900, 900, -3800);
+    this.planet.rotation.z = -0.27;
+    this.scene.add(this.planet);
+    const moon = this.mesh(new THREE.IcosahedronGeometry(290, 2), "gray");
+    moon.position.set(-2100, 1300, -4200);
+    this.scene.add(moon);
+    this.rocks = new THREE.Group();
+    for (let i = 0; i < 65; i++) {
+      const r = 7 + rnd() * 35;
+      const rock = this.mesh(new THREE.IcosahedronGeometry(r, 0), i % 3 ? "navy" : "gray");
+      rock.position.set((rnd() - 0.5) * 3500, (rnd() - 0.5) * 2200, -200 - rnd() * 4e3);
+      rock.rotation.set(rnd() * 3, rnd() * 3, rnd() * 3);
+      rock.scale.set(1, 0.6 + rnd(), 0.6 + rnd());
+      this.rocks.add(rock);
+    }
+    this.scene.add(this.rocks);
+    this.jumpLines = new THREE.Group();
+    for (let i = 0; i < 90; i++) {
+      const line = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.12, 25 + rnd() * 80), this.materials.flame);
+      const a = rnd() * Math.PI * 2, r = 8 + rnd() * 32;
+      line.position.set(Math.cos(a) * r, Math.sin(a) * r, -rnd() * 160);
+      this.jumpLines.add(line);
+    }
+    this.camera.add(this.jumpLines);
+    this.jumpLines.visible = false;
+  }
+  makeCockpit() {
+    this.cockpit = new THREE.Group();
+    const g = this.cockpit;
+    for (const s of [-1, 1]) {
+      const rail = this.box(g, 0.1, 0.1, 2.2, s * 0.83, -0.5, -0.4, "navy");
+      rail.rotation.z = s * 0.3;
+      const strut = this.box(g, 0.055, 1.6, 0.07, s * 1.05, 0.05, -1.15, "ink");
+      strut.rotation.z = s * 0.37;
+      this.box(g, 0.32, 0.12, 1, s * 0.86, -0.58, -1.4, "cream");
+      this.box(g, 0.035, 0.024, 0.75, s * 0.78, -0.51, -1.45, "teal");
+      this.box(g, 0.2, 0.1, 0.2, s * 0.83, -0.5, -1.82, "orange");
+    }
+    this.box(g, 1.9, 0.13, 0.5, 0, -0.83, -0.85, "navy");
+    this.box(g, 0.22, 0.07, 0.3, 0, -0.74, -1.07, "orange");
+    this.box(g, 0.12, 0.014, 0.12, 0, -0.7, -1.08, "teal");
+    this.camera.add(g);
+    g.visible = false;
+  }
+  addEnemy(e) {
+    const m = this.makeShip(e.type);
+    this.enemyMeshes.set(e, m);
+    this.scene.add(m);
+  }
+  removeEnemy(e) {
+    const m = this.enemyMeshes.get(e);
+    if (m) {
+      this.scene.remove(m);
+      this.stopMixer(m);
+      this.enemyMeshes.delete(e);
+    }
+  }
+  stopMixer(g) {
+    const m = g.userData.mixer;
+    if (m) {
+      m.stopAllAction();
+      m.uncacheRoot(g);
+      this.mixers = this.mixers.filter((x) => x !== m);
+    }
+  }
+  shot(b) {
+    const m = this.mesh(new THREE.BoxGeometry(b.missile ? 2.5 : 1.1, b.missile ? 2.5 : 1.1, b.missile ? 10 : 22), b.owner === "player" ? "light" : "enemyFlame", false);
+    this.scene.add(m);
+    this.shotMeshes.set(b, m);
+  }
+  removeShot(b) {
+    const m = this.shotMeshes.get(b);
+    if (m) {
+      this.scene.remove(m);
+      m.geometry.dispose();
+      this.shotMeshes.delete(b);
+    }
+  }
+  explode(position, big = false) {
+    const origin = new V(position.x, position.y, position.z);
+    for (let i = 0; i < (big ? 75 : 25); i++) {
+      const m = this.mesh(new THREE.IcosahedronGeometry(1.5 + rnd() * 4, 0), i % 3 ? "orange" : "gold", false);
+      m.position.copy(origin);
+      this.scene.add(m);
+      this.particles.push({ mesh: m, v: new V((rnd() - 0.5) * 130, (rnd() - 0.5) * 130, (rnd() - 0.5) * 130), life: 0.5 + rnd() * 1.2, max: 1.7 });
+    }
+    const ring = this.mesh(new THREE.TorusGeometry(1, 1, 4, 32), "flame", false);
+    ring.position.copy(origin);
+    this.scene.add(ring);
+    this.particles.push({ mesh: ring, ring: true, life: 0.7, max: 0.7, v: new V() });
+  }
+  impact(position) {
+    for (let i = 0; i < 4; i++) {
+      const m = this.mesh(new THREE.OctahedronGeometry(2), "light", false);
+      m.position.set(position.x, position.y, position.z);
+      this.scene.add(m);
+      this.particles.push({ mesh: m, v: new V((rnd() - 0.5) * 70, (rnd() - 0.5) * 70, (rnd() - 0.5) * 70), life: 0.25, max: 0.25 });
+    }
+  }
+  setSector(game2) {
+    for (const [e] of this.enemyMeshes) if (!game2.enemies.includes(e)) this.removeEnemy(e);
+    for (const [b] of this.shotMeshes) if (!game2.bullets.includes(b)) this.removeShot(b);
+    for (const e of game2.enemies) if (!this.enemyMeshes.has(e)) this.addEnemy(e);
+    this.station.visible = !!game2.base;
+    this.station.position.set(0, 0, -420);
+    const storm = game2.sectors[game2.sector].storm;
+    this.scene.background.set(storm ? "#1b1830" : "#080f20");
+    this.rocks.visible = !game2.base;
+  }
+  ghost(data, id) {
+    let entry = this.ghosts.get(id);
+    if (!entry) {
+      const mesh = this.makeShip("scout", true);
+      this.scene.add(mesh);
+      entry = { mesh, data, last: performance.now() };
+      this.ghosts.set(id, entry);
+    }
+    entry.data = data;
+    entry.last = performance.now();
+  }
+  removeGhost(id) {
+    const e = this.ghosts.get(id);
+    if (e) {
+      this.scene.remove(e.mesh);
+      this.stopMixer(e.mesh);
+      this.ghosts.delete(id);
+    }
+  }
+  project(position) {
+    const v = new V(position.x, position.y, position.z).project(this.camera);
+    return { x: (v.x * 0.5 + 0.5) * innerWidth, y: (-0.5 * v.y + 0.5) * innerHeight, visible: v.z < 1 && Math.abs(v.x) < 0.85 && Math.abs(v.y) < 0.85 };
+  }
+  render(dt, game2, title = false) {
+    this.time += dt;
+    for (const m of this.mixers) m.update(dt);
+    this.planet.rotation.y += dt * 8e-3;
+    this.titleShips.visible = title;
+    this.cockpit.visible = !title;
+    this.jumpLines.visible = !!game2.jump;
+    if (title) {
+      this.station.visible = true;
+      this.station.position.set(130, 25, -400);
+      this.station.rotation.y = 0.35 + Math.sin(this.time * 0.12) * 0.12;
+      this.camera.position.set(0, 10, 80);
+      this.camera.lookAt(45, 20, -450);
+      this.titleShips.rotation.y = Math.sin(this.time * 0.13) * 0.09;
+      this.titleShips.position.y = Math.sin(this.time * 0.4) * 8;
+      this.rocks.visible = true;
+    } else {
+      this.station.visible = !!game2.base;
+      this.station.rotation.y = 0;
+      const p = game2.position;
+      this.camera.position.set(p.x, p.y + 2, p.z);
+      this.camera.rotation.order = "YXZ";
+      this.camera.rotation.set(game2.pitch, game2.yaw, game2.roll || 0, "YXZ");
+      this.shake = Math.max(0, this.shake - dt * 2);
+      if (this.shake > 0) {
+        this.camera.position.x += Math.sin(this.time * 85) * this.shake;
+        this.camera.position.y += Math.cos(this.time * 97) * this.shake;
+      }
+      for (const [e, m] of this.enemyMeshes) {
+        const q = e.body.translation();
+        m.position.set(q.x, q.y, q.z);
+        const dir = new V(p.x - q.x, p.y - q.y, p.z - q.z).normalize();
+        m.quaternion.setFromUnitVectors(new V(0, 0, -1), dir);
+        m.rotateZ(Math.sin(this.time * 0.8 + e.phase) * 0.18);
+      }
+      for (const [b, m] of this.shotMeshes) {
+        const p2 = b.body.translation(), v = b.body.linvel();
+        m.position.set(p2.x, p2.y, p2.z);
+        m.quaternion.setFromUnitVectors(new V(0, 0, 1), new V(v.x, v.y, v.z).normalize());
+      }
+      for (const [id, e] of this.ghosts) {
+        e.mesh.visible = e.data.sector === game2.sector && performance.now() - e.last < 6e3;
+        e.mesh.position.lerp(new V(e.data.x, e.data.y, e.data.z), Math.min(1, dt * 12));
+        e.mesh.rotation.set(e.data.pitch, e.data.yaw, 0, "YXZ");
+      }
+      this.cockpit.rotation.z = Math.sin(game2.yaw - this.camera.rotation.y) * 0.03;
+      if (game2.jump) {
+        for (const line of this.jumpLines.children) {
+          line.position.z += dt * 220;
+          if (line.position.z > 5) line.position.z = -170;
+        }
+      }
+    }
+    this.stars.position.copy(this.camera.position);
+    for (let i = this.particles.length - 1; i >= 0; i--) {
+      const p = this.particles[i];
+      p.life -= dt;
+      if (p.life < 0) {
+        this.scene.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        this.particles.splice(i, 1);
+        continue;
+      }
+      p.mesh.position.addScaledVector(p.v, dt);
+      if (p.ring) p.mesh.scale.setScalar((1 - p.life / p.max) * 150);
+      else {
+        p.mesh.rotation.x += dt * 3;
+        p.mesh.scale.setScalar(Math.max(0.01, p.life / p.max));
+      }
+    }
+    this.renderer.render(this.scene, this.camera);
+  }
+  resize() {
+    this.camera.aspect = innerWidth / innerHeight;
+    this.camera.updateProjectionMatrix();
+    this.renderer.setSize(innerWidth, innerHeight);
+  }
+};
+
+// audio.js
+var AudioEngine = class {
+  constructor(options = {}) {
+    this.context = options.context || null;
+    this.musicVolume = 0.1;
+    this.volume = 0.8;
+    this.intensity = 0;
+    this.muted = false;
+    this.unlocked = false;
+    this._initialized = false;
+    this._timer = null;
+    this._voices = /* @__PURE__ */ new Set();
+    this._lastEffect = /* @__PURE__ */ Object.create(null);
+    this._noteCount = 0;
+    this._effectCount = 0;
+    this._voiceCount = 0;
+    this._step = 0;
+    this._nextStep = 0;
+    this._bpm = 104;
+    this._noise = null;
+    this._supported = typeof globalThis.AudioContext !== "undefined" || typeof globalThis.webkitAudioContext !== "undefined" || !!options.context;
+  }
+  _clamp(value) {
+    return Math.max(0, Math.min(1, Number(value) || 0));
+  }
+  async unlock() {
+    if (!this._supported) return false;
+    try {
+      if (!this.context) {
+        const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
+        this.context = new Context({ latencyHint: "interactive" });
+      }
+      if (!this._initialized) this._initialize();
+      this.unlocked = true;
+      if (!this.muted && this.context.state !== "running") await this.context.resume();
+      if (!this.muted) this._startClock();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+  _initialize() {
+    const c = this.context;
+    this.master = c.createGain();
+    this.master.gain.value = this.muted ? 0 : this.volume;
+    this.music = c.createGain();
+    this.music.gain.value = this.musicVolume;
+    this.effects = c.createGain();
+    this.effects.gain.value = 0.72;
+    this.compressor = c.createDynamicsCompressor();
+    this.compressor.threshold.value = -15;
+    this.compressor.knee.value = 10;
+    this.compressor.ratio.value = 4;
+    this.compressor.attack.value = 5e-3;
+    this.compressor.release.value = 0.14;
+    this.analyser = c.createAnalyser();
+    this.analyser.fftSize = 256;
+    this.music.connect(this.master);
+    this.effects.connect(this.master);
+    this.master.connect(this.compressor);
+    this.compressor.connect(this.analyser);
+    this.analyser.connect(c.destination);
+    this._noise = c.createBuffer(1, c.sampleRate * 2, c.sampleRate);
+    const data = this._noise.getChannelData(0);
+    let seed2 = 142857;
+    for (let i = 0; i < data.length; i++) {
+      seed2 = Math.imul(seed2, 1664525) + 1013904223 >>> 0;
+      data[i] = seed2 / 4294967296 * 2 - 1;
+    }
+    this._initialized = true;
+  }
+  setMusic(value) {
+    this.musicVolume = this._clamp(value);
+    if (this.music) this.music.gain.setTargetAtTime(this.musicVolume, this.context.currentTime, 0.04);
+  }
+  setVolume(value) {
+    this.volume = this._clamp(value);
+    if (this.master && !this.muted) this.master.gain.setTargetAtTime(this.volume, this.context.currentTime, 0.03);
+  }
+  setIntensity(value) {
+    this.intensity = this._clamp(value);
+  }
+  setMuted(value) {
+    this.muted = !!value;
+    if (!this._initialized) return;
+    if (this.muted) {
+      this.master.gain.cancelScheduledValues(this.context.currentTime);
+      this.master.gain.setValueAtTime(0, this.context.currentTime);
+      this._stopClock();
+      this._stopVoices();
+      if (this.context.state === "running") this.context.suspend().catch(() => {
+      });
+    } else if (this.unlocked) {
+      this.master.gain.setValueAtTime(this.volume, this.context.currentTime);
+      this.context.resume().then(() => {
+        if (!this.muted) this._startClock();
+      }).catch(() => {
+      });
+    }
+  }
+  _startClock() {
+    if (this._timer || !this._initialized || this.muted) return;
+    this._nextStep = this.context.currentTime + 0.08;
+    this._schedule();
+    this._timer = setInterval(() => this._schedule(), 70);
+  }
+  _stopClock() {
+    if (this._timer) clearInterval(this._timer);
+    this._timer = null;
+  }
+  _stopVoices() {
+    for (const voice of this._voices) {
+      try {
+        voice.source.stop();
+      } catch {
+      }
+      for (const node of voice.nodes) {
+        try {
+          node.disconnect();
+        } catch {
+        }
+      }
+    }
+    this._voices.clear();
+  }
+  _track(source, nodes, end) {
+    const voice = { source, nodes };
+    this._voices.add(voice);
+    source.onended = () => {
+      this._voices.delete(voice);
+      for (const node of nodes) {
+        try {
+          node.disconnect();
+        } catch {
+        }
+      }
+    };
+    source.stop(end);
+  }
+  _tone(frequency, time, duration, gain = 0.1, type = "sine", bus = this.effects, slide = null, cutoff = 3500) {
+    const c = this.context;
+    const oscillator = c.createOscillator();
+    oscillator.type = type;
+    oscillator.frequency.setValueAtTime(Math.max(15, frequency), time);
+    if (slide !== null) oscillator.frequency.exponentialRampToValueAtTime(Math.max(15, slide), time + duration);
+    const filter = c.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.value = cutoff;
+    filter.Q.value = 0.6;
+    const envelope = c.createGain();
+    envelope.gain.setValueAtTime(1e-5, time);
+    envelope.gain.exponentialRampToValueAtTime(Math.max(1e-4, gain), time + Math.min(0.014, duration * 0.15));
+    envelope.gain.exponentialRampToValueAtTime(1e-5, time + duration);
+    oscillator.connect(filter);
+    filter.connect(envelope);
+    envelope.connect(bus);
+    oscillator.start(time);
+    this._track(oscillator, [oscillator, filter, envelope], time + duration + 0.015);
+    this._noteCount++;
+  }
+  _hiss(time, duration, gain, low = 120, high = 2200, bus = this.effects) {
+    const c = this.context;
+    const source = c.createBufferSource();
+    source.buffer = this._noise;
+    const filter = c.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = (low + high) / 2;
+    filter.Q.value = 0.45;
+    filter.frequency.setValueAtTime(high, time);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(30, low), time + duration);
+    const envelope = c.createGain();
+    envelope.gain.setValueAtTime(1e-5, time);
+    envelope.gain.exponentialRampToValueAtTime(gain, time + 8e-3);
+    envelope.gain.exponentialRampToValueAtTime(1e-5, time + duration);
+    source.connect(filter);
+    filter.connect(envelope);
+    envelope.connect(bus);
+    source.start(time);
+    this._track(source, [source, filter, envelope], time + duration + 0.015);
+    this._noteCount++;
+  }
+  _schedule() {
+    const c = this.context;
+    if (this.muted || c.state !== "running") return;
+    const stepSeconds = 60 / this._bpm / 4;
+    if (this._nextStep < c.currentTime - 0.15) this._nextStep = c.currentTime + 0.035;
+    while (this._nextStep < c.currentTime + 0.22) {
+      const t = this._nextStep;
+      const step = this._step % 16;
+      const bar = Math.floor(this._step / 16) % 8;
+      const roots = [38, 38, 34, 34, 41, 41, 36, 33];
+      const root = roots[bar];
+      const hz = (midi) => 440 * Math.pow(2, (midi - 69) / 12);
+      const chord = [0, 7, 12, 15, 19, 24, 19, 15];
+      if (step % 4 === 0) this._tone(hz(root), t, 0.48, 0.26, "triangle", this.music, null, 650);
+      if (step % 2 === 0) {
+        const note2 = root + 24 + chord[(step / 2 + bar) % chord.length];
+        this._tone(hz(note2), t, 0.32, 0.11 + this.intensity * 0.035, "sine", this.music);
+        this._tone(hz(note2 + 12), t + 0.11, 0.25, 0.025, "sine", this.music);
+      }
+      if (step === 0) {
+        for (const n of [0, 7, 15]) this._tone(hz(root + 12 + n), t, 2.2, 0.075, "triangle", this.music, null, 1e3);
+      }
+      if (this.intensity > 0.2 && (step === 0 || step === 8)) this._tone(105, t, 0.16, 0.22 * this.intensity, "sine", this.music, 36);
+      if (this.intensity > 0.55 && step % 4 === 2) this._hiss(t, 0.065, 0.07 * this.intensity, 3e3, 5500, this.music);
+      this._step++;
+      this._nextStep += stepSeconds;
+    }
+  }
+  sfx(name) {
+    if (!this._initialized || this.muted || !this.unlocked || this.context.state !== "running") return;
+    const t = this.context.currentTime + 2e-3;
+    const cooldown = { laser: 0.045, hit: 0.07, explode: 0.08, alarm: 0.7, select: 0.035 }[name] || 0.12;
+    if (t - (this._lastEffect[name] ?? -100) < cooldown) return;
+    this._lastEffect[name] = t;
+    this._effectCount++;
+    switch (name) {
+      case "laser":
+        this._tone(1250, t, 0.13, 0.11, "sawtooth", this.effects, 160, 2200);
+        this._tone(880, t, 0.07, 0.055, "sine", this.effects, 280);
+        break;
+      case "hit":
+        this._hiss(t, 0.17, 0.32, 150, 2e3);
+        this._tone(135, t, 0.2, 0.2, "triangle", this.effects, 45);
+        break;
+      case "explode":
+        this._hiss(t, 0.85, 0.42, 65, 2100);
+        this._tone(90, t, 0.75, 0.38, "sine", this.effects, 22);
+        this._hiss(t + 0.09, 0.4, 0.13, 200, 3800);
+        break;
+      case "jump":
+        this._hiss(t, 1.6, 0.23, 5500, 80);
+        this._tone(70, t, 1.25, 0.2, "sawtooth", this.effects, 1600, 2600);
+        this._tone(1300, t + 1.25, 0.5, 0.16, "sine", this.effects, 180);
+        break;
+      case "select":
+        this._tone(740, t, 0.065, 0.1, "sine");
+        this._tone(1110, t + 0.045, 0.08, 0.06, "sine");
+        break;
+      case "shield":
+        this._tone(300, t, 0.35, 0.13, "triangle", this.effects, 900);
+        this._tone(450, t, 0.3, 0.08, "sine", this.effects, 1350);
+        break;
+      case "dock":
+        [0, 4, 7, 12].forEach((n, i) => this._tone(330 * Math.pow(2, n / 12), t + i * 0.11, 0.65, 0.13, "sine"));
+        break;
+      case "missile":
+        this._hiss(t, 0.65, 0.3, 250, 3e3);
+        this._tone(140, t, 0.55, 0.18, "sawtooth", this.effects, 70, 900);
+        break;
+      case "alarm":
+        [0, 0.23].forEach((offset, i) => this._tone(i ? 480 : 720, t + offset, 0.18, 0.1, "triangle"));
+        break;
+      case "victory":
+        [0, 7, 12, 15, 19, 24].forEach((n, i) => this._tone(220 * Math.pow(2, n / 12), t + i * 0.15, 0.9, 0.15, "triangle", this.effects, null, 2400));
+        break;
+      default:
+        break;
+    }
+  }
+  voice(seed2 = 1) {
+    if (!this._initialized || this.muted || !this.unlocked || this.context.state !== "running") return;
+    const now = this.context.currentTime;
+    if (now - (this._lastEffect.voice ?? -100) < 1.4) return;
+    this._lastEffect.voice = now;
+    this._voiceCount++;
+    let state = (Number(seed2) || 1) * 7919 >>> 0;
+    const random = () => {
+      state = Math.imul(state, 1664525) + 1013904223 >>> 0;
+      return state / 4294967296;
+    };
+    const count = 5 + Math.floor(random() * 3);
+    let t = now + 0.015;
+    for (let i = 0; i < count; i++) {
+      const pitch = 145 + random() * 130;
+      const duration = 0.07 + random() * 0.065;
+      const c = this.context;
+      const source = c.createOscillator();
+      source.type = "sawtooth";
+      source.frequency.setValueAtTime(pitch, t);
+      source.frequency.exponentialRampToValueAtTime(pitch * (0.8 + random() * 0.5), t + duration);
+      const formant = c.createBiquadFilter();
+      formant.type = "bandpass";
+      formant.frequency.value = [650, 950, 1450, 1850][Math.floor(random() * 4)];
+      formant.Q.value = 5;
+      const envelope = c.createGain();
+      envelope.gain.setValueAtTime(1e-5, t);
+      envelope.gain.exponentialRampToValueAtTime(0.12, t + 0.012);
+      envelope.gain.exponentialRampToValueAtTime(1e-5, t + duration);
+      source.connect(formant);
+      formant.connect(envelope);
+      envelope.connect(this.effects);
+      source.start(t);
+      this._track(source, [source, formant, envelope], t + duration + 0.01);
+      this._noteCount++;
+      t += duration + 0.025;
+    }
+  }
+  debug() {
+    let rms = 0;
+    if (this.analyser && this.context.state === "running") {
+      const wave = new Float32Array(this.analyser.fftSize);
+      this.analyser.getFloatTimeDomainData(wave);
+      for (const value of wave) rms += value * value;
+      rms = Math.sqrt(rms / wave.length);
+    }
+    return { supported: this._supported, active: !!(this.context && this.context.state === "running" && !this.muted), state: this.context?.state || "locked", noteCount: this._noteCount, effectCount: this._effectCount, voiceCount: this._voiceCount, activeNodes: this._voices.size, defaultMusic: 0.1, musicVolume: this.musicVolume, volume: this.volume, muted: this.muted, rms };
+  }
+  dispose() {
+    this._stopClock();
+    this._stopVoices();
+    this.muted = true;
+    if (this.context && this.context.state !== "closed") this.context.close().catch(() => {
+    });
+  }
+};
+
+// network.js
+var Network = class {
+  constructor(callbacks = {}) {
+    this.callbacks = callbacks;
+    this.hub = globalThis.AIHub || null;
+    this._active = !!this.hub?.active;
+    this._started = false;
+    this._ended = false;
+    this._finished = false;
+    this._score = 0;
+    this._stats = {};
+    this._sendElapsed = 0;
+    this._progressElapsed = 1;
+    this._room = "";
+    this._channel = null;
+    this._peers = /* @__PURE__ */ new Map();
+    this._localId = globalThis.crypto?.randomUUID?.() || `pilot-${Date.now()}-${performance.now()}`;
+    this._localTimer = null;
+    this._closedIds = /* @__PURE__ */ new Set();
+  }
+  get active() {
+    return this._active;
+  }
+  get started() {
+    return this._started;
+  }
+  get ended() {
+    return this._ended;
+  }
+  get me() {
+    return this._active ? this.hub.me : this._localId;
+  }
+  get room() {
+    return this._room;
+  }
+  get players() {
+    if (this._active) return this.hub.players || [];
+    const ids = [this._localId, ...this._peers.keys()].sort().slice(0, 4);
+    const colors = ["#e8443a", "#3b82f6", "#22c55e", "#f5b700"];
+    return ids.map((id, i) => ({ id, name: `Pilot ${i + 1}`, color: colors[i] }));
+  }
+  get status() {
+    if (this._active) return this._ended ? "Hub round complete" : this.canPlay() ? `AI Hub \xB7 ${this.players.length} pilots` : "AI Hub \xB7 awaiting launch";
+    if (!this._room) return "Solo patrol";
+    return `Local wing ${this._room} \xB7 ${this.players.length}/4 pilots`;
+  }
+  async init() {
+    if (!this._active) return null;
+    this.hub.on("start", () => {
+      if (this._ended) return;
+      this._started = true;
+      this.callbacks.start?.();
+    });
+    this.hub.on("message", (data, from) => {
+      if (this._ended || this._closedIds.has(from) || data?.t !== "pilot") return;
+      const snapshot = this._snapshot(data.p);
+      if (snapshot) this.callbacks.ghost?.(snapshot, from);
+    });
+    this.hub.on("leave", ({ id }) => {
+      this._closedIds.add(id);
+      this.callbacks.leave?.(id);
+    });
+    this.hub.on("time-up", () => {
+      if (this._ended) return;
+      const result = this.callbacks.timeup?.();
+      if (typeof result === "number") this.finish(result);
+      else this.finish(result?.score ?? this._score, result?.stats ?? this._stats);
+    });
+    this.hub.on("end", (event) => {
+      if (this._ended) return;
+      this._ended = true;
+      this.callbacks.end?.(event);
+    });
+    const info = await this.hub.connect({ mode: "ghost", seats: [1, 4] });
+    if (!info) {
+      this._active = false;
+      return null;
+    }
+    this.hub.ready();
+    return info;
+  }
+  canPlay() {
+    return !this._ended && (!this._active || this._started && this.hub.time() >= 0);
+  }
+  tick(dt, playerSnapshot, score) {
+    if (this._ended) return;
+    this._score = Number.isFinite(score) ? score : this._score;
+    if (!this.canPlay()) return;
+    this._sendElapsed += Math.max(0, dt || 0);
+    this._progressElapsed += Math.max(0, dt || 0);
+    if (this._active && !this._finished && this._progressElapsed >= 1) {
+      this._progressElapsed %= 1;
+      this.hub.progress({ score: this._score, label: `${Math.floor(this._score)} command points` });
+    }
+    if (this._sendElapsed < 0.1) return;
+    this._sendElapsed %= 0.1;
+    const snapshot = this._snapshot(playerSnapshot);
+    if (!snapshot) return;
+    if (this._active) this.hub.send({ t: "pilot", p: snapshot }, { reliable: false });
+    else if (this._channel && this.players.some((p) => p.id === this._localId)) this._post({ t: "pilot", p: snapshot, score: this._score });
+  }
+  finish(score, stats2 = {}) {
+    if (this._ended || this._finished) return;
+    this._finished = true;
+    this._score = Number.isFinite(score) ? score : this._score;
+    this._stats = stats2 && typeof stats2 === "object" ? stats2 : {};
+    if (this._active) this.hub.result({ score: this._score, stats: this._stats });
+  }
+  hostRoom(code) {
+    if (this._active) return false;
+    if (!code) {
+      const bytes = new Uint8Array(4);
+      crypto.getRandomValues(bytes);
+      code = Array.from(bytes, (b) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join("");
+    }
+    return this.joinRoom(code);
+  }
+  joinRoom(code) {
+    if (this._active || typeof BroadcastChannel !== "function") return false;
+    const cleaned = String(code || "").toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8);
+    if (!cleaned) return false;
+    this.leaveRoom();
+    this._room = cleaned;
+    this._channel = new BroadcastChannel(`stellar-raiders-wing-v1-${cleaned}`);
+    this._channel.onmessage = ({ data }) => this._receiveLocal(data);
+    this._post({ t: "hello" });
+    this._localTimer = setInterval(() => {
+      this._post({ t: "presence" });
+      const now = performance.now();
+      for (const [id, peer] of this._peers) {
+        if (now - peer.seen > 6e3) {
+          this._peers.delete(id);
+          this.callbacks.leave?.(id);
+        }
+      }
+    }, 1e3);
+    return cleaned;
+  }
+  leaveRoom() {
+    if (this._channel) {
+      this._post({ t: "bye" });
+      this._channel.close();
+      this._channel = null;
+    }
+    clearInterval(this._localTimer);
+    this._localTimer = null;
+    for (const id of this._peers.keys()) this.callbacks.leave?.(id);
+    this._peers.clear();
+    this._room = "";
+  }
+  _post(data) {
+    try {
+      this._channel?.postMessage({ ...data, id: this._localId, v: 1 });
+    } catch {
+    }
+  }
+  _receiveLocal(data) {
+    if (!data || data.v !== 1 || typeof data.id !== "string" || data.id === this._localId || data.id.length > 100) return;
+    if (data.t === "bye") {
+      this._peers.delete(data.id);
+      this.callbacks.leave?.(data.id);
+      return;
+    }
+    if (!["hello", "presence", "pilot"].includes(data.t)) return;
+    if (!this._peers.has(data.id) && this._peers.size >= 3) return;
+    this._peers.set(data.id, { seen: performance.now(), score: Number(data.score) || 0 });
+    if (data.t === "hello") this._post({ t: "presence" });
+    if (data.t === "pilot") {
+      const snapshot = this._snapshot(data.p);
+      if (snapshot) this.callbacks.ghost?.(snapshot, data.id);
+    }
+  }
+  _snapshot(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+    try {
+      const json = JSON.stringify(value);
+      return json.length <= 4e3 ? JSON.parse(json) : null;
+    } catch {
+      return null;
+    }
+  }
+};
+
+// main.js
+var $ = (id) => document.getElementById(id);
+var esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+var metadata = JSON.parse($("creditsData").textContent);
+var audio = new AudioEngine();
+var game;
+var visuals;
+var net;
+var ready = false;
+var screen = "title";
+var lastInput = "keyboard";
+var lastActivity = performance.now();
+var messageUntil = 0;
+var selected = 16;
+var simSpeed = 1;
+var attractTime = 0;
+var attractStage = 0;
+var pausedFrom = "title";
+var modalTab = "source";
+var hubEnded = false;
+var frameCount = 0;
+var settings = { music: 10, volume: 75, sensitivity: 1, glyphs: "playstation", reducedMotion: false };
+try {
+  Object.assign(settings, JSON.parse(localStorage.getItem("stellar-settings") || "{}"));
+} catch {
+}
+audio.setMusic(settings.music / 100);
+audio.setVolume(settings.volume / 100);
+var keys = /* @__PURE__ */ new Set();
+var pointer = { x: 0, y: 0, dx: 0, dy: 0, fire: false, inside: false };
+var touch = { look: null, thrust: null, x: 0, y: 0, boost: false };
+var padButtons = [];
+var padLastNav = 0;
+var lastPadAxes = [0, 0, 0, 0];
+var debugInput = null;
+var canvas = document.createElement("canvas");
+canvas.id = "space";
+canvas.setAttribute("aria-label", "Three-dimensional flight view");
+document.body.prepend(canvas);
+var extra = document.createElement("style");
+extra.textContent = `#space{position:fixed;inset:0;width:100%;height:100%;z-index:0;touch-action:none}.target-info{position:fixed!important;transform:translate(-50%,-50%);pointer-events:none;min-width:125px;text-align:center}.target-info .target-box{display:block;width:72px;height:58px;margin:0 auto 9px;border:2px solid var(--coral,#f08361);clip-path:polygon(0 0,28% 0,28% 3%,3% 3%,3% 28%,0 28%,0 0,100% 0,100% 28%,97% 28%,97% 3%,72% 3%,72% 0,100% 0,100% 100%,72% 100%,72% 97%,97% 97%,97% 72%,100% 72%,100% 100%,0 100%,0 72%,3% 72%,3% 97%,28% 97%,28% 100%,0 100%)}.target-info small{display:block;color:#ffb28b;font-size:13px;letter-spacing:.1em}.target-info.offscreen{top:35%!important;left:50%!important}.target-info.offscreen .target-box{border:0;clip-path:none;height:20px}.range-value{font-variant-numeric:tabular-nums;color:#cdf282}.sector-grid{grid-template-columns:repeat(5,minmax(0,1fr))!important}.sector-cell{min-height:80px;font-size:16px}.sector-cell b{font-size:23px;display:block}.sector-cell small{display:block;font-size:10px;letter-spacing:.08em}.sector-cell.current{box-shadow:inset 0 0 0 2px #d7ee9c}.sector-cell.danger b{color:#ef926e}.sector-cell.base b{color:#7cdbc7}.map-side h3{font-size:32px;margin:.25em 0}.map-side p{line-height:1.5;color:#bcc8cf}.brief-grid{display:grid;grid-template-columns:1fr 1fr;gap:24px}.manual-key{display:inline-block;border:1px solid #6b828d;padding:2px 8px;color:#d8eea3;font-size:18px;min-width:32px;text-align:center}.modal-card .fine{font-size:14px;color:#91a5b1;line-height:1.5}.modal-card h2{font-size:clamp(28px,4vw,48px);margin:8px 0 22px}.modal-card p{line-height:1.5}.modal-card input[type=text]{font:inherit;background:#101d2d;border:1px solid #63798b;color:#e7eddf;padding:14px;width:190px;text-transform:uppercase}.credits{max-height:55vh;overflow:auto;padding-right:20px;font-size:17px;line-height:1.6}.credits dl{display:grid;grid-template-columns:150px 1fr;gap:8px 22px}.credits dt{color:#a9c0cc}.credits dd{margin:0}.credits p{border-bottom:1px solid #354455;padding:12px 0}.row{display:flex;align-items:center;justify-content:space-between;gap:20px;margin:14px 0}.slider-row{display:grid;grid-template-columns:1fr 1.2fr 65px;gap:20px;align-items:center;margin:18px 0;font-size:18px}.slider-row input{width:100%;accent-color:#d7ee9c}.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin:24px 0}.stat-grid div{padding:18px;background:#132437;border-top:1px solid #738892}.stat-grid strong{display:block;color:#d7ee9c;font-size:38px}.stat-grid span{font-size:14px;color:#b0c3cb}.buttons{display:flex;flex-wrap:wrap;gap:12px;margin-top:24px}button:disabled{opacity:.4;cursor:default}.modal-card .button{min-height:48px}.brief-grid h3{color:#d7ee9c}.context-hint{font-size:18px;color:#d7ee9c}.dev-toggle{padding:12px;background:#1c3040}body.in-flight #space{cursor:crosshair}body.touch #targetInfo{font-size:13px}body.touch #comms{max-width:75%;bottom:65px}.reticle{top:50%!important}.jump-overlay{pointer-events:none}#touchMenu{z-index:35}#touchAction{z-index:35}.toast{z-index:90}.credits-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:18px}.credits-tabs button{font-size:15px;padding:8px 14px}.hud-top{pointer-events:none}.modal-card{max-height:90vh;overflow:auto}button:focus,input:focus{outline:2px solid #d8e98c;outline-offset:3px}.modal-card:has(.brief-grid)>.buttons{position:sticky;bottom:-25px;background:#0f1d2cf5;padding-top:8px}@media(max-width:700px){.brief-grid{grid-template-columns:1fr;gap:4px}.sector-cell{min-height:54px;padding:5px;font-size:12px}.sector-cell small{font-size:8px}.sector-cell b{font-size:17px}.credits dl{grid-template-columns:1fr;gap:3px}.credits dd{margin-bottom:12px}.slider-row{grid-template-columns:1fr 1fr 40px;font-size:14px;gap:8px}.stat-grid{gap:7px}.stat-grid div{padding:10px}.stat-grid strong{font-size:26px}}`;
+document.head.append(extra);
+function saveSettings() {
+  try {
+    localStorage.setItem("stellar-settings", JSON.stringify(settings));
+  } catch {
+  }
+}
+function note(text) {
+  $("toast").textContent = text;
+  $("toast").hidden = false;
+  setTimeout(() => $("toast").hidden = true, 2600);
+}
+function activity(type = "keyboard") {
+  lastActivity = performance.now();
+  lastInput = type;
+  if (game?.attract) {
+    returnTitle();
+    return true;
+  }
+  return false;
+}
+function promptText() {
+  if (lastInput === "gamepad") {
+    const ps = settings.glyphs === "playstation";
+    return `${ps ? "R2" : "RT"} FIRE \xB7 ${ps ? "R1" : "RB"} TORPEDO \xB7 ${ps ? "\u25B3" : "Y"} CHART \xB7 ${ps ? "\u25CB" : "B"} CONTEXT`;
+  }
+  if (lastInput === "touch") return "DRAG LEFT TO STEER \xB7 RIGHT TO THRUST \xB7 AUTO FIRE";
+  return "LMB FIRE \xB7 R TORPEDO \xB7 M CHART \xB7 E SHIELDS \xB7 ESC PAUSE";
+}
+function setModal(name, html, wide = false) {
+  screen = name;
+  $("modal").innerHTML = `<section class="modal-card ${wide ? "wide" : ""}">${html}</section>`;
+  $("modal").hidden = false;
+  if (document.pointerLockElement) document.exitPointerLock();
+  pointer.fire = false;
+  keys.clear();
+  setTimeout(() => {
+    if (name === "map") return;
+    const first = name === "manual" ? $("modal").querySelector(".modal-card") : $("modal").querySelector("button:not(:disabled),input");
+    if (first) {
+      if (name === "manual") first.tabIndex = 0;
+      first.focus({ preventScroll: true });
+    }
+  }, 20);
+}
+function closeModal() {
+  screen = game.running ? "flight" : "title";
+  $("modal").hidden = true;
+  keys.clear();
+  pointer.fire = false;
+  pointer.inside = false;
+  pointer.dx = pointer.dy = 0;
+  lastActivity = performance.now();
+}
+var backButton = (label = "Back") => `<button class="button" data-action="back">\u2190 ${label}</button>`;
+function openPause() {
+  if (!game.running || hubEnded) return;
+  pausedFrom = "flight";
+  setModal("pause", `<div class="eyebrow">PATROL ${String(game.sector + 1).padStart(2, "0")} / FLIGHT PAUSED</div><h2>Take a breath, pilot.</h2><p>One ship is still a fighting chance.</p><div class="buttons"><button class="button primary" data-action="resume">Resume flight</button><button class="button" data-action="map">Sector chart</button><button class="button" data-action="manual">Flight manual</button><button class="button" data-action="settings">Settings</button><button class="button" data-action="dev">Dev flight deck</button><button class="button" data-action="title" ${net.active ? "disabled" : ""}>End patrol</button></div><p class="fine">${net.active ? "The Hub clock keeps running while your flight is paused." : net.status}</p>`);
+}
+function openManual() {
+  if (screen === "title") pausedFrom = "title";
+  else if (screen === "flight") pausedFrom = "flight";
+  const pad = lastInput === "gamepad", ps = settings.glyphs === "playstation";
+  setModal("manual", `<div class="eyebrow">FDC / PILOT FIELD NOTES</div><h2>Hold the frontier.</h2><div class="brief-grid"><div><h3>01 / Hunt</h3><p>Destroy thirteen raiders across <b>Razor, Glass, Iron Wake and Crown</b>. The flagship at Crown carries heavy armour. Follow the target brackets; cycle your lock to find contacts behind you.</p><h3>02 / Navigate</h3><p>Open the sector chart, choose a destination, then engage hyperspace. Each transit uses energy. Keep the flight marker steady for a clean-jump bonus.</p><h3>03 / Come home</h3><p>Jump to Kestrel or Lantern. Approach the station within <b>115 units</b> and lower throttle below <b>32%</b>. Hold for three seconds to repair and reload. Throttle up to depart. Starbases suffer while the fleet survives.</p></div><div><h3>Flight controls</h3><p>${pad ? `<span class="manual-key">L</span> Steer &nbsp; <span class="manual-key">R \u2191\u2193</span> Throttle<br><span class="manual-key">${ps ? "R2" : "RT"}</span> Cannons &nbsp; <span class="manual-key">${ps ? "L2" : "LT"}</span> Boost<br><span class="manual-key">${ps ? "R1" : "RB"}</span> Homing torpedo<br><span class="manual-key">${ps ? "L1" : "LB"}</span> Deflectors<br><span class="manual-key">${ps ? "\u25A1" : "X"}</span> Cycle lock<br><span class="manual-key">${ps ? "\u25B3" : "Y"}</span> Sector chart<br><span class="manual-key">${ps ? "\u25CB" : "B"}</span> Context / dock approach<br><span class="manual-key">Options</span> Pause` : `<span class="manual-key">Mouse</span> Steer; click flight view to capture<br><span class="manual-key">W / S</span> Throttle<br><span class="manual-key">A / D</span> Strafe<br><span class="manual-key">LMB / Space</span> Cannons<br><span class="manual-key">R / RMB</span> Homing torpedo<br><span class="manual-key">Shift</span> Boost<br><span class="manual-key">E</span> Deflectors<br><span class="manual-key">T</span> Cycle lock<br><span class="manual-key">M</span> Sector chart<br><span class="manual-key">H</span> Context / dock approach<br><span class="manual-key">Esc</span> Pause`}</p><p class="fine">Touch: drag the left half to steer; drag the right half up/down for thrust. Cannons, targeting and torpedoes assist automatically. A context button appears near a station or after a sector is secure.</p><p class="fine">Cannons build heat. Deflectors regenerate after a quiet moment. Lowering them recharges energy faster. Every starbase saved improves your final rating.</p></div></div><div class="buttons">${backButton()}</div>`, true);
+}
+function openSettings() {
+  if (screen === "title") pausedFrom = "title";
+  else if (screen === "flight") pausedFrom = "flight";
+  setModal("settings", `<div class="eyebrow">FDC / PERSONAL FLIGHT PROFILE</div><h2>Make yourself at home.</h2><label class="slider-row"><span>Music</span><input type="range" min="0" max="100" step="1" value="${settings.music}" data-setting="music"><output>${settings.music}%</output></label><label class="slider-row"><span>Sound & voice</span><input type="range" min="0" max="100" value="${settings.volume}" data-setting="volume"><output>${settings.volume}%</output></label><label class="slider-row"><span>Steering sensitivity</span><input type="range" min="0.5" max="2.5" step="0.1" value="${settings.sensitivity}" data-setting="sensitivity"><output>${settings.sensitivity}\xD7</output></label><div class="row"><span>Controller glyphs</span><button class="button" data-action="glyphs">${settings.glyphs === "playstation" ? "PlayStation: \u2715 \u25CB \u25A1 \u25B3" : "Xbox: A B X Y"}</button></div><div class="row"><span>Reduced camera motion</span><button class="button" data-action="motion">${settings.reducedMotion ? "ON" : "OFF"}</button></div><div class="buttons"><button class="button" data-action="fullscreen">Fullscreen</button>${backButton()}</div>`);
+}
+function openMap() {
+  if (!game.running) return;
+  selected = game.energy < 35 ? 16 : Number(Object.keys(game.roster).find((id) => game.roster[id].length && +id !== game.sector) ?? 16);
+  screen = "map";
+  drawMap();
+}
+function drawMap() {
+  const s = game.sectors[selected], n = game.roster[selected]?.length || 0, base = game.bases.find((b) => b.sector === selected);
+  setModal("map", `<div class="eyebrow">GALACTIC CHART / ${game.aliveBases} STARBASES ONLINE</div><h2>Choose your next move.</h2><div class="map-layout"><div><div class="sector-grid">${game.sectors.map((s2) => {
+    const n2 = game.roster[s2.id]?.length || 0, b = game.bases.find((b2) => b2.sector === s2.id);
+    return `<button class="sector-cell ${s2.id === selected ? "selected" : ""} ${s2.id === game.sector ? "current" : ""} ${n2 ? "danger" : ""} ${b ? b.health > 0 ? "base" : "danger" : ""}" data-action="sector" data-sector="${s2.id}" aria-label="${s2.name}, ${n2 ? "hostiles " + n2 : b ? "starbase" : "clear space"}"><small>${String.fromCharCode(65 + s2.id % 5)}${1 + Math.floor(s2.id / 5)}</small><b>${s2.id === game.sector ? "\u25B5" : n2 ? "\u2726" : b ? b.health > 0 ? "\u25C7" : "\xD7" : s2.storm ? "\u2248" : "\xB7"}</b><small>${n2 ? `${n2} HOSTILE` : b ? b.name : s2.name}</small></button>`;
+  }).join("")}</div><p class="fine">\u25B5 YOU &nbsp; \u2726 RAIDERS &nbsp; \u25C7 STARBASE &nbsp; \u2248 ION CLOUD</p></div><div class="map-side"><div class="eyebrow">SECTOR ${String.fromCharCode(65 + selected % 5)}${1 + Math.floor(selected / 5)}</div><h3>${s.name}</h3><p>${n ? `${n} hostile ${n === 1 ? "vessel" : "vessels"} detected.${selected === 4 ? " Command signature confirmed. Bring torpedoes." : ""}` : base ? base.health > 0 ? `Starbase ${base.name}. ${Math.ceil(base.health)}% integrity. Full repair, energy and torpedo resupply.` : `Starbase ${base.name} is lost. No docking services remain.` : s.storm ? "Ion cloud. No hostile contacts. A quiet place to recharge with deflectors lowered." : "No hostile contacts. Frontier space under your protection."}</p><p class="context-hint">${selected === game.sector ? "CURRENT SECTOR" : `TRANSIT COST ${game.jumpCost(selected)} / ENERGY ${Math.floor(game.energy)}`}</p><button class="button primary" data-action="jump" ${selected === game.sector || game.energy < game.jumpCost(selected) ? "disabled" : ""}>Engage hyperspace \u2197</button></div></div><div class="buttons"><button class="button" data-action="resume">Return to flight</button></div><p class="fine">${lastInput === "gamepad" ? settings.glyphs === "playstation" ? "D-PAD SELECT \xB7 \u2715 ENGAGE \xB7 \u25CB RETURN" : "D-PAD SELECT \xB7 A ENGAGE \xB7 B RETURN" : lastInput === "touch" ? "TAP A SECTOR, THEN ENGAGE HYPERSPACE" : "ARROWS SELECT \xB7 ENTER ENGAGE \xB7 ESC RETURN"}</p>`, true);
+  const focused = $("modal").querySelector(`[data-sector="${selected}"]`);
+  focused?.focus({ preventScroll: true });
+}
+function openDev() {
+  const rows = [["enemyDamage", "Enemy damage", 0, 25, 1], ["enemyRate", "Enemy firing rate", 0.1, 3, 0.1], ["turnSpeed", "Turn speed", 0.5, 3, 0.05], ["aimAssist", "Aim assist cone", 0.9, 0.999, 1e-3], ["energyDrain", "Energy use / recharge", 0.1, 3, 0.1], ["weaponDamage", "Cannon damage", 10, 100, 1]];
+  setModal("dev", `<div class="eyebrow">DEVELOPMENT / LIVE FLIGHT DECK</div><h2>Fly. Break. Tune. Repeat.</h2>${rows.map(([key, label, min, max, step]) => `<label class="slider-row"><span>${label}</span><input data-tune="${key}" type="range" min="${min}" max="${max}" step="${step}" value="${game.tuning[key]}"><output>${game.tuning[key]}</output></label>`).join("")}<label class="slider-row"><span>Simulation speed</span><input data-speed type="range" min="0.25" max="4" step="0.25" value="${simSpeed}"><output>${simSpeed}\xD7</output></label><div class="buttons"><button class="button" data-action="god">Invulnerable: ${game.god ? "ON" : "OFF"}</button><button class="button" data-action="resupply">Repair & rearm</button><button class="button" data-action="clear">Clear sector</button><button class="button" data-action="spawn">Spawn raider</button><button class="button" data-action="resetTune">Reset defaults</button>${backButton("Pause menu")}</div><p class="fine">All changes apply immediately. Dev assistance marks this patrol as a training flight.</p>`, true);
+}
+function openOnline() {
+  pausedFrom = game.running ? "flight" : "title";
+  setModal("online", `<div class="eyebrow">WING LINK / 1\u20134 PILOTS</div><h2>Never quite alone.</h2><p>Fly rival patrols across the same frontier. Other pilots appear as cyan ghost ships when you share a sector. Compare command points in AI Hub.</p><div class="brief-grid"><div><h3>Across devices</h3><p>Launch this game together in an <b>AI Hub session</b>. The Hub handles invitations, countdowns, synchronized rounds and final standings.</p></div><div><h3>Local practice wing</h3><p>For two tabs in the same browser, open this same file or URL, then enter the same wing code.</p><div class="row"><input id="roomCode" type="text" maxlength="8" placeholder="WING CODE" aria-label="Wing code" value="${esc(net.room)}"><button class="button" data-action="joinRoom">Link</button></div><button class="button" data-action="hostRoom">Generate wing code</button></div></div><p class="context-hint" id="networkStatus">${esc(net.status)}</p><div class="buttons"><button class="button" data-action="leaveRoom" ${net.room ? "" : "disabled"}>Disconnect local wing</button>${backButton()}</div><p class="fine">Ghost pilots have independent ships, enemies and scores. They cannot damage your ship. Local practice uses BroadcastChannel and does not cross devices.</p>`, true);
+}
+function openAbout(tab = "source") {
+  modalTab = tab;
+  pausedFrom = game.running ? "flight" : "title";
+  const labels = { source: "Source information", testing: "Testing feedback", engine: "Engine feedback", prompt: "Prompt feedback" };
+  let content;
+  if (tab === "source") content = `<dl>${Object.entries(metadata.sourceInformation).map(([k, v]) => `<dt>${esc(k.replace(/([A-Z])/g, " $1"))}</dt><dd>${esc(v)}</dd>`).join("")}</dl><p>Design, code, geometric art, synthesis & flight systems: OpenAI gpt-6.1-sol. Inspired by the pioneering cockpit and strategic-map spirit of Star Raiders. This is an original, unofficial game.</p><p>Open-source components: Three.js (MIT), Rapier (Apache-2.0), AI Hub session client. No external images, voices or audio recordings.</p>`;
+  else content = metadata[`${tab}Feedback`].map((a, i) => `<p><b>${i + 1}.</b> ${esc(a)}</p>`).join("");
+  setModal("about", `<div class="eyebrow">STELLAR RAIDERS / FLIGHT RECORD</div><h2>About this little universe.</h2><div class="credits-tabs">${Object.entries(labels).map(([k, v]) => `<button class="button ${k === tab ? "primary" : ""}" data-action="creditsTab" data-tab="${k}">${v}</button>`).join("")}</div><div class="credits" tabindex="0">${content}</div><div class="buttons">${backButton()}</div>`, true);
+}
+function returnTitle() {
+  if (net?.active) return;
+  if (game) {
+    game.running = false;
+    game.attract = false;
+  }
+  screen = "title";
+  $("menu").hidden = false;
+  $("hud").hidden = true;
+  $("modal").hidden = true;
+  $("attractBanner").hidden = true;
+  $("jumpOverlay").hidden = true;
+  document.body.classList.remove("in-flight");
+  if (document.pointerLockElement) document.exitPointerLock();
+  keys.clear();
+  pointer.fire = false;
+  pointer.inside = false;
+  lastActivity = performance.now();
+}
+function startGame(attract = false) {
+  if (hubEnded) return;
+  game.launch(attract);
+  screen = "flight";
+  $("menu").hidden = true;
+  $("hud").hidden = false;
+  $("modal").hidden = true;
+  $("attractBanner").hidden = !attract;
+  document.body.classList.add("in-flight");
+  attractTime = 0;
+  attractStage = 0;
+  simSpeed = 1;
+  pointer.inside = false;
+  game.autopilot = false;
+  visuals.setSector(game);
+  if (!attract) {
+    audio.unlock();
+    audio.setMuted(false);
+  }
+  lastActivity = performance.now();
+}
+function finish(data) {
+  if (game.attract) return;
+  if (net.active) net.finish(game.score, stats());
+  let best = 0;
+  try {
+    best = +localStorage.getItem("stellar-best") || 0;
+    if (game.score > best) localStorage.setItem("stellar-best", game.score);
+  } catch {
+  }
+  setModal("debrief", `<div class="eyebrow">${game.god ? "TRAINING FLIGHT / " : ""}MISSION DEBRIEF / ${data.won ? "FRONTIER SECURE" : "SIGNAL LOST"}</div><h2>${data.won ? "A very big problem. Solved." : "The stars remember."}</h2><p>${data.won ? "The raider fleet is scattered. Starbase crews are already arguing over who buys the first round." : "Command has your flight recorder. Another patrol will carry the light."}</p><div class="stat-grid"><div><strong>${game.score.toLocaleString()}</strong><span>COMMAND POINTS</span></div><div><strong>${game.kills} / 13</strong><span>RAIDERS DESTROYED</span></div><div><strong>${game.aliveBases} / 2</strong><span>STARBASES SAVED</span></div><div><strong>${Math.floor(game.time / 60)}:${String(Math.floor(game.time % 60)).padStart(2, "0")}</strong><span>FLIGHT TIME</span></div><div><strong>${Math.round(game.hits / Math.max(1, game.shots) * 100)}%</strong><span>WEAPON ACCURACY</span></div><div><strong>${game.jumps}</strong><span>HYPERSPACE JUMPS</span></div></div><p class="context-hint">${data.won ? game.aliveBases === 2 ? "RATING: STAR COMMANDER" : "RATING: FRONTIER ACE" : "RATING: A BRAVE LITTLE SHIP"} \xB7 BEST ${Math.max(best, game.score).toLocaleString()}</p><div class="buttons">${net.active ? "<span>Awaiting the Hub\u2019s final standings.</span>" : '<button class="button primary" data-action="start">Fly another patrol</button><button class="button" data-action="title">Return to command</button>'}<button class="button" data-action="about">Flight record</button></div>`, true);
+}
+function stats() {
+  return { "Raiders destroyed": game.kills, "Bases saved": game.aliveBases, "Clean transits": game.jumps, "Hull remaining": Math.round(game.hull) };
+}
+function context() {
+  if (!game.running) return;
+  if (game.base) {
+    const p = game.position, q = game.stationPosition;
+    game.yaw = Math.atan2(-(q.x - p.x), -(q.z - p.z));
+    game.pitch = Math.atan2(q.y - p.y, Math.hypot(q.x - p.x, q.z - p.z));
+    game.throttle = dist(p, q) > 110 ? 0.7 : 0;
+    game.autopilot = true;
+    game.say("DOCK CONTROL", "Approach assist engaged. Keep clear of the habitat ring.");
+  } else openMap();
+}
+function action(name, el) {
+  if (!ready || hubEnded || net?.active && !net.canPlay()) return;
+  audio.unlock();
+  audio.sfx("select");
+  switch (name) {
+    case "start":
+      if (!net.active) startGame();
+      break;
+    case "title":
+      returnTitle();
+      break;
+    case "pause":
+      openPause();
+      break;
+    case "resume":
+      closeModal();
+      break;
+    case "back":
+      if (net.active && !game.running && (game.won || game.lost)) {
+        finish({ won: game.won, score: game.score });
+        break;
+      }
+      if (pausedFrom === "flight" && game.running) openPause();
+      else returnTitle();
+      break;
+    case "manual":
+      openManual();
+      break;
+    case "settings":
+      openSettings();
+      break;
+    case "online":
+      openOnline();
+      break;
+    case "about":
+      openAbout();
+      break;
+    case "creditsTab":
+      openAbout(el.dataset.tab);
+      break;
+    case "map":
+      openMap();
+      break;
+    case "sector":
+      selected = +el.dataset.sector;
+      drawMap();
+      break;
+    case "jump":
+      if (game.beginJump(selected)) closeModal();
+      break;
+    case "context":
+      context();
+      break;
+    case "dev":
+      openDev();
+      break;
+    case "god":
+      game.god = !game.god;
+      openDev();
+      break;
+    case "resupply":
+      game.hull = game.shield = game.energy = 100;
+      game.missiles = 6;
+      game.god = true;
+      note("Training resupply complete");
+      break;
+    case "clear":
+      game.god = true;
+      for (const e of [...game.enemies]) game.kill(e);
+      if (!game.won) openDev();
+      break;
+    case "spawn":
+      game.god = true;
+      game.roster[game.sector] ??= [];
+      game.roster[game.sector].push("raider");
+      game.spawnEnemy("raider", game.enemies.length);
+      note("Training raider spawned");
+      break;
+    case "resetTune":
+      game.tuning = { ...DEFAULTS };
+      simSpeed = 1;
+      openDev();
+      break;
+    case "glyphs":
+      settings.glyphs = settings.glyphs === "playstation" ? "xbox" : "playstation";
+      saveSettings();
+      openSettings();
+      break;
+    case "motion":
+      settings.reducedMotion = !settings.reducedMotion;
+      saveSettings();
+      openSettings();
+      break;
+    case "fullscreen":
+      if (document.fullscreenElement) document.exitFullscreen();
+      else document.documentElement.requestFullscreen().catch(() => note("Fullscreen unavailable in this browser"));
+      break;
+    case "hostRoom":
+      net.hostRoom();
+      openOnline();
+      break;
+    case "joinRoom":
+      if (!net.joinRoom($("roomCode").value)) note("Enter a wing code first");
+      else openOnline();
+      break;
+    case "leaveRoom":
+      net.leaveRoom();
+      openOnline();
+      break;
+  }
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-action]");
+  if (b) {
+    if (activity(lastInput === "touch" ? "touch" : e.detail === 0 && lastInput === "gamepad" ? "gamepad" : "keyboard")) return;
+    action(b.dataset.action, b);
+  }
+});
+document.addEventListener("pointerover", (e) => {
+  const b = e.target.closest("button,input");
+  if (b && e.pointerType === "mouse") {
+    b.focus({ preventScroll: true });
+  }
+});
+document.addEventListener("input", (e) => {
+  const el = e.target;
+  if (el.dataset.setting) {
+    const k = el.dataset.setting;
+    settings[k] = +el.value;
+    el.nextElementSibling.textContent = el.value + (k === "sensitivity" ? "\xD7" : "%");
+    audio.setMusic(settings.music / 100);
+    audio.setVolume(settings.volume / 100);
+    saveSettings();
+  }
+  if (el.dataset.tune) {
+    game.tuning[el.dataset.tune] = +el.value;
+    el.nextElementSibling.textContent = el.value;
+  }
+  if (el.hasAttribute("data-speed")) {
+    simSpeed = +el.value;
+    el.nextElementSibling.textContent = el.value + "\xD7";
+  }
+  lastActivity = performance.now();
+});
+window.addEventListener("keydown", (e) => {
+  if (activity("keyboard")) {
+    e.preventDefault();
+    return;
+  }
+  if (!ready || hubEnded || net?.active && !net.canPlay()) return;
+  audio.unlock();
+  if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Tab"].includes(e.code) && screen === "flight") e.preventDefault();
+  if (e.repeat) {
+    keys.add(e.code);
+    return;
+  }
+  keys.add(e.code);
+  if (e.code === "Escape") {
+    e.preventDefault();
+    if (screen === "flight") openPause();
+    else if (screen === "map") closeModal();
+    else if (game.running) openPause();
+    else if (net.active && (game.won || game.lost)) finish({ won: game.won, score: game.score });
+    else returnTitle();
+    return;
+  }
+  if (screen === "flight") {
+    if (e.code === "KeyM") {
+      openMap();
+      return;
+    }
+    if (e.code === "KeyT") game.cycleTarget();
+    if (e.code === "KeyR") game.missile();
+    if (e.code === "KeyE") game.toggleShield();
+    if (e.code === "KeyH") context();
+  } else if (screen === "map" && e.code === "Enter") {
+    e.preventDefault();
+    if (game.beginJump(selected)) closeModal();
+  } else if (screen === "map" && e.code.startsWith("Arrow")) {
+    e.preventDefault();
+    selected = clamp(selected + { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -5, ArrowDown: 5 }[e.code], 0, 19);
+    drawMap();
+  } else if (e.code === "Enter" && screen === "title") action("start");
+});
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => {
+  keys.clear();
+  pointer.fire = false;
+  if (screen === "flight" && !game.attract && !net.active) openPause();
+});
+window.addEventListener("mousemove", (e) => {
+  if (activity("keyboard")) return;
+  pointer.inside = true;
+  pointer.x = e.clientX / innerWidth * 2 - 1;
+  pointer.y = e.clientY / innerHeight * 2 - 1;
+  if (document.pointerLockElement) {
+    pointer.dx += e.movementX;
+    pointer.dy += e.movementY;
+  }
+});
+canvas.addEventListener("mousedown", (e) => {
+  if (activity("keyboard") || screen !== "flight" || hubEnded || net?.active && !net.canPlay()) return;
+  audio.unlock();
+  if (e.button === 0) {
+    pointer.fire = true;
+    if (!document.pointerLockElement) canvas.requestPointerLock?.()?.catch(() => {
+      pointer.inside = false;
+      note("Mouse capture unavailable. Arrow keys also steer the ship.");
+    });
+  }
+  if (e.button === 2) game.missile();
+});
+document.addEventListener("pointerlockchange", () => {
+  if (!document.pointerLockElement) {
+    pointer.inside = false;
+    pointer.fire = false;
+    pointer.dx = pointer.dy = 0;
+    if (screen === "flight" && game?.running && !game.attract && !hubEnded) openPause();
+  }
+});
+window.addEventListener("mouseup", () => pointer.fire = false);
+window.addEventListener("contextmenu", (e) => e.preventDefault());
+canvas.addEventListener("pointerdown", (e) => {
+  if (e.pointerType !== "touch") return;
+  e.preventDefault();
+  if (activity("touch")) return;
+  document.body.classList.add("touch");
+  audio.unlock();
+  if (screen !== "flight" || hubEnded || net?.active && !net.canPlay()) return;
+  canvas.setPointerCapture(e.pointerId);
+  if (e.clientX < innerWidth / 2) touch.look = { id: e.pointerId, x: e.clientX, y: e.clientY };
+  else touch.thrust = { id: e.pointerId, x: e.clientX, y: e.clientY };
+});
+canvas.addEventListener("pointermove", (e) => {
+  if (e.pointerType !== "touch") return;
+  if (touch.look?.id === e.pointerId) {
+    touch.x = clamp((e.clientX - touch.look.x) / 85, -1, 1);
+    touch.y = clamp((e.clientY - touch.look.y) / 85, -1, 1);
+  }
+  if (touch.thrust?.id === e.pointerId) {
+    touch.boost = e.clientY < touch.thrust.y - 100;
+    touch.thrust.value = clamp((touch.thrust.y - e.clientY) / 80, -1, 1);
+  }
+});
+function endTouch(e) {
+  if (touch.look?.id === e.pointerId) {
+    touch.look = null;
+    touch.x = touch.y = 0;
+  }
+  if (touch.thrust?.id === e.pointerId) {
+    touch.thrust = null;
+    touch.boost = false;
+  }
+}
+canvas.addEventListener("pointerup", endTouch);
+canvas.addEventListener("pointercancel", endTouch);
+function menuMove(x, y) {
+  if (screen === "map" && Math.abs(y) + Math.abs(x) > 0) {
+    selected = clamp(selected + (x ? Math.sign(x) : Math.sign(y) * 5), 0, 19);
+    drawMap();
+    return;
+  }
+  const current = document.activeElement;
+  if (current?.type === "range" && x) {
+    current.value = +current.value + Math.sign(x) * (+current.step || 1);
+    current.dispatchEvent(new Event("input", { bubbles: true }));
+    return;
+  }
+  const root = $("modal").hidden ? $("menu") : $("modal");
+  const items = [...root.querySelectorAll('button:not(:disabled),input,[tabindex="0"]')].filter((el) => el.getBoundingClientRect().width > 0);
+  let i = items.indexOf(current);
+  i = (i + ((y || x) > 0 ? 1 : -1) + items.length) % items.length;
+  items[i]?.focus();
+  items[i]?.scrollIntoView({ block: "nearest" });
+}
+function pollPad(now) {
+  const pad = [...navigator.getGamepads?.() || []].find((p) => p?.connected);
+  if (!pad) {
+    padButtons = [];
+    return null;
+  }
+  const axes = pad.axes.map((v) => Math.abs(v) < 0.14 ? 0 : v);
+  const buttons = pad.buttons.map((b) => b.pressed);
+  const changed = buttons.some((v, i) => v && !padButtons[i]) || axes.some((v, i) => Math.abs(v - lastPadAxes[i]) > 0.1);
+  if (changed) {
+    if (activity("gamepad")) {
+      padButtons = buttons;
+      return null;
+    }
+    audio.unlock();
+  }
+  const edge = (i) => buttons[i] && !padButtons[i];
+  if (!hubEnded && (!net?.active || net.canPlay())) {
+    if (edge(9) && !buttons[8]) {
+      if (screen === "flight") openPause();
+      else if (game.running) closeModal();
+    }
+    if (screen === "flight") {
+      if (edge(3)) openMap();
+      if (edge(2)) game.cycleTarget();
+      if (edge(5)) game.missile();
+      if (edge(4)) game.toggleShield();
+      if (edge(1)) context();
+    } else {
+      if (edge(0)) {
+        if (screen === "map") {
+          if (game.beginJump(selected)) closeModal();
+        } else document.activeElement?.click();
+      }
+      if (edge(1)) {
+        if (game.running) closeModal();
+        else if (net.active && (game.won || game.lost)) finish({ won: game.won, score: game.score });
+        else returnTitle();
+      }
+      const x = (buttons[15] ? 1 : 0) - (buttons[14] ? 1 : 0) || (Math.abs(axes[0]) > 0.55 ? Math.sign(axes[0]) : 0);
+      const y = (buttons[13] ? 1 : 0) - (buttons[12] ? 1 : 0) || (Math.abs(axes[1]) > 0.55 ? Math.sign(axes[1]) : 0);
+      if ((x || y) && now - padLastNav > 210) {
+        menuMove(x, y);
+        padLastNav = now;
+      }
+      if (Math.abs(axes[3]) > 0.2) {
+        const credits = $("modal").querySelector(".credits");
+        if (credits) credits.scrollTop += axes[3] * 16;
+      }
+    }
+  }
+  padButtons = buttons;
+  lastPadAxes = axes;
+  return { axes, buttons };
+}
+function autoPilot(dt) {
+  const target = game.target && !game.target.dead ? game.target : game.enemies.find((e) => !e.dead);
+  if (!target) return { yaw: 0, pitch: 0, thrust: -1 };
+  game.target = target;
+  const p = game.position, q = target.body.translation();
+  const yaw = Math.atan2(-(q.x - p.x), -(q.z - p.z));
+  const pitch = Math.atan2(q.y - p.y, Math.hypot(q.x - p.x, q.z - p.z));
+  let dy = yaw - game.yaw;
+  dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+  return { yaw: clamp(dy * 3, -1.8, 1.8), pitch: clamp((pitch - game.pitch) * 3, -1.8, 1.8), thrust: game.throttle > 0.32 ? -1 : 0, fire: Math.abs(dy) < 0.2 && Math.abs(pitch - game.pitch) < 0.2 };
+}
+function runAttract(dt) {
+  attractTime += dt;
+  if (attractTime > 125 || game.won || game.lost) {
+    startGame(true);
+    return;
+  }
+  if (!game.jump) {
+    if (attractStage === 0 && (game.enemies.length === 0 || attractTime > 17)) {
+      game.enterSector(16);
+      visuals.setSector(game);
+      game.player.setTranslation({ x: 0, y: 0, z: -330 }, true);
+      game.throttle = 0;
+      attractStage = 1;
+    } else if (attractStage === 1 && game.docks > 0) {
+      game.beginJump(7);
+      attractStage = 2;
+    } else if (attractStage >= 2 && game.enemies.length === 0) {
+      const next = [7, 3, 4, 11].find((id) => game.roster[id].length && game.sector !== id);
+      if (next !== void 0) game.beginJump(next);
+      else startGame(true);
+    }
+  }
+  const input = attractStage === 1 ? { thrust: -1 } : autoPilot(dt);
+  if (attractStage > 1 && Math.floor(attractTime * 2) % 7 === 0) game.missile();
+  return input;
+}
+function getInput(dt, pad) {
+  if (debugInput) return { ...debugInput };
+  if (game.attract) return runAttract(dt) || {};
+  let yaw = 0, pitch = 0;
+  if (document.pointerLockElement) {
+    yaw = -pointer.dx * 27e-4 / Math.max(dt, 1e-3);
+    pitch = -pointer.dy * 27e-4 / Math.max(dt, 1e-3);
+  } else if (pointer.inside && lastInput === "keyboard") {
+    yaw = -pointer.x * 0.8;
+    pitch = -pointer.y * 0.8;
+  }
+  pointer.dx = pointer.dy = 0;
+  yaw += (keys.has("ArrowLeft") ? 1 : 0) - (keys.has("ArrowRight") ? 1 : 0);
+  pitch += (keys.has("ArrowUp") ? 1 : 0) - (keys.has("ArrowDown") ? 1 : 0);
+  let thrust = (keys.has("KeyW") ? 1 : 0) - (keys.has("KeyS") ? 1 : 0);
+  let strafe = (keys.has("KeyD") ? 1 : 0) - (keys.has("KeyA") ? 1 : 0);
+  let fire = pointer.fire || keys.has("Space"), boost = keys.has("ShiftLeft") || keys.has("ShiftRight");
+  if (pad && lastInput === "gamepad") {
+    yaw = -pad.axes[0];
+    pitch = -pad.axes[1];
+    thrust = -pad.axes[3];
+    strafe = pad.axes[2];
+    fire = pad.buttons[7];
+    boost = pad.buttons[6];
+  }
+  if (lastInput === "touch") {
+    yaw = -touch.x;
+    pitch = -touch.y;
+    thrust = touch.thrust?.value || 0;
+    fire = !!game.aimTarget();
+    boost = touch.boost;
+    if (game.target && !game.target.dead && game.missiles > 0 && game.missileCooldown <= 0 && Math.random() < dt * 0.13) game.missile();
+  }
+  if (game.autopilot) {
+    const p = game.position, q = game.stationPosition;
+    if (dist(p, q) < 110) {
+      game.throttle = 0;
+      thrust = -1;
+    } else {
+      const desiredYaw = Math.atan2(-(q.x - p.x), -(q.z - p.z));
+      yaw = clamp(Math.atan2(Math.sin(desiredYaw - game.yaw), Math.cos(desiredYaw - game.yaw)) * 3, -1, 1);
+      pitch = clamp((Math.atan2(q.y - p.y, Math.hypot(q.x - p.x, q.z - p.z)) - game.pitch) * 3, -1, 1);
+    }
+    if (game.docked || Math.abs(touch.x) + Math.abs(touch.y) > 0 || keys.has("KeyW") || keys.has("KeyA") || keys.has("KeyD")) game.autopilot = false;
+  }
+  return { yaw: clamp(yaw * settings.sensitivity, -3, 3), pitch: clamp(pitch * settings.sensitivity, -3, 3), thrust, strafe, fire, boost };
+}
+function drawRadar() {
+  const c = $("radar"), ctx = c.getContext("2d"), w = c.width, h = c.height;
+  ctx.clearRect(0, 0, w, h);
+  ctx.strokeStyle = "#365662";
+  ctx.lineWidth = 1;
+  for (const r of [25, 48, 69]) {
+    ctx.beginPath();
+    ctx.ellipse(w / 2, h / 2, r, r * 0.82, 0, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(20, h / 2);
+  ctx.lineTo(w - 20, h / 2);
+  ctx.moveTo(w / 2, 7);
+  ctx.lineTo(w / 2, h - 7);
+  ctx.stroke();
+  const p = game.position;
+  function dot(q, color, size = 4) {
+    const dx = q.x - p.x, dz = q.z - p.z, cs = Math.cos(game.yaw), sn = Math.sin(game.yaw);
+    let x = (dx * cs - dz * sn) * 0.14, z = (dx * sn + dz * cs) * 0.14;
+    const k = Math.max(1, Math.hypot(x, z) / 65);
+    x /= k;
+    z /= k;
+    ctx.fillStyle = color;
+    ctx.fillRect(w / 2 + x - size / 2, h / 2 + z - size / 2, size, size);
+  }
+  for (const e of game.enemies) if (!e.dead) dot(e.body.translation(), e === game.target ? "#fff4c2" : "#ed805d", e.type === "flagship" ? 7 : 4);
+  if (game.base) dot(game.stationPosition, "#75d6be", 7);
+  for (const e of visuals.ghosts.values()) if (e.data.sector === game.sector) dot(e.data, "#7dcbdc", 4);
+  ctx.fillStyle = "#d3efa1";
+  ctx.beginPath();
+  ctx.moveTo(w / 2, h / 2 - 7);
+  ctx.lineTo(w / 2 - 5, h / 2 + 4);
+  ctx.lineTo(w / 2 + 5, h / 2 + 4);
+  ctx.fill();
+}
+function updateHUD(now) {
+  for (const k of ["shield", "hull", "energy", "heat"]) {
+    $(k + "Value").textContent = Math.round(game[k]);
+    $(k + "Bar").style.width = game[k] + "%";
+  }
+  $("shieldBar").style.opacity = game.shields ? 1 : 0.2;
+  $("sectorLabel").textContent = `${String.fromCharCode(65 + game.sector % 5)}${1 + Math.floor(game.sector / 5)} / ${game.sectors[game.sector].name}`;
+  $("statusLabel").textContent = game.docked ? "SERVICE COMPLETE" : game.docking > 0 ? `DOCKING ${Math.round(game.docking / 3 * 100)}%` : game.energy < 25 ? "ENERGY RESERVE LOW" : !game.shields ? "DEFLECTORS OFFLINE" : "DEFLECTORS ONLINE";
+  $("speedValue").textContent = game.docked ? "0" : Math.round(12 + game.throttle * 92);
+  $("killsValue").textContent = game.kills;
+  $("basesValue").textContent = game.aliveBases;
+  $("ammoValue").textContent = game.missiles;
+  $("missionProgress").textContent = `${game.kills} / 13`;
+  $("objective").textContent = game.base ? game.docked ? "Ship ready. Plot the next intercept." : "Approach slowly to repair & resupply" : game.enemies.length ? game.sector === 4 ? "Destroy the raider command ship" : "Clear the raider squadron" : "Sector secure. Plot your next jump.";
+  $("navTarget").textContent = game.jump ? game.sectors[game.jump.to].name : `${game.remaining} CONTACTS REMAIN`;
+  $("threatValue").textContent = game.bases.map((b) => `${b.name} ${Math.ceil(b.health)}%`).join(" / ");
+  $("prompts").textContent = promptText();
+  $("jumpOverlay").hidden = !game.jump;
+  if (game.jump) $("jumpOverlay").querySelector("strong").textContent = game.jump.alignment > 2 ? "CORRIDOR STABLE" : "HOLD YOUR COURSE";
+  $("comms").style.opacity = now < messageUntil ? "1" : "0";
+  const target = game.target;
+  if (target && !target.dead) {
+    const q = target.body.translation(), p = visuals.project(q);
+    $("targetInfo").hidden = false;
+    $("targetInfo").classList.toggle("offscreen", !p.visible);
+    $("targetInfo").style.left = p.x + "px";
+    $("targetInfo").style.top = p.y + "px";
+    const bearing = Math.atan2(-(q.x - game.position.x), -(q.z - game.position.z)) - game.yaw;
+    const turn = Math.atan2(Math.sin(bearing), Math.cos(bearing));
+    $("targetInfo").innerHTML = `<span class="target-box">${p.visible ? "" : Math.abs(turn) > 0.35 ? turn > 0 ? "\u2190 TURN LEFT" : "TURN RIGHT \u2192" : q.y > game.position.y ? "\u2191 CLIMB" : "DIVE \u2193"}</span><small>${target.type.toUpperCase()} \xB7 ${Math.round(dist(game.position, q))}u</small><small>${Math.max(0, Math.ceil(target.hp / target.maxHp * 100))}% ARMOUR</small>`;
+  } else $("targetInfo").hidden = true;
+  const touchMode = lastInput === "touch";
+  $("touchAction").hidden = !touchMode || !game.base && game.enemies.length > 0 || screen !== "flight";
+  $("touchAction").textContent = game.base ? "DOCK ASSIST" : "SECTOR CHART";
+  drawRadar();
+}
+function handleEvent(type, data) {
+  if (!visuals) return;
+  switch (type) {
+    case "sector":
+      visuals.setSector(game);
+      break;
+    case "spawn":
+      visuals.addEnemy(data);
+      break;
+    case "removeEnemy":
+      visuals.removeEnemy(data);
+      break;
+    case "shot":
+      visuals.shot(data);
+      break;
+    case "removeShot":
+      visuals.removeShot(data);
+      break;
+    case "explosion":
+      visuals.explode(data.position, data.big);
+      break;
+    case "impact":
+      visuals.impact(data.position);
+      break;
+    case "sound":
+      if (!game.attract) audio.sfx(data);
+      break;
+    case "damage":
+      if (!settings.reducedMotion) visuals.shake = 0.8;
+      $("flash").classList.add("active");
+      setTimeout(() => $("flash").classList.remove("active"), 180);
+      break;
+    case "message":
+      $("speaker").textContent = data.speaker;
+      $("message").textContent = data.text;
+      messageUntil = performance.now() + 6500;
+      if (!game.attract) audio.voice(game.kills + game.sector);
+      break;
+    case "finish":
+      finish(data);
+      break;
+  }
+}
+var last = performance.now();
+function loop(now) {
+  const dt = Math.min((now - last) / 1e3, 0.05);
+  last = now;
+  const pad = pollPad(now);
+  if (ready) {
+    if (screen === "title" && !net.active && now - lastActivity > 1e4) startGame(true);
+    if (screen === "flight" && !hubEnded && net.canPlay()) {
+      let remain = dt * simSpeed;
+      const input = getInput(dt, pad);
+      while (remain > 1e-5) {
+        const step = Math.min(remain, 1 / 60);
+        game.update(step, input);
+        remain -= step;
+      }
+    }
+    if (net.active || game.running) net.tick(dt, game.snapshot(), game.score);
+    if (!net.active || net.canPlay()) {
+      updateHUD(now);
+      audio.setIntensity(screen === "flight" && game.enemies.length ? game.sector === 4 ? 1 : 0.5 : 0);
+    } else if (!hubEnded) {
+      $("statusLabel").textContent = "AWAITING HUB LAUNCH";
+    }
+    visuals.render(dt, game, screen === "title" || pausedFrom === "title" && !game.running);
+    frameCount++;
+  }
+  requestAnimationFrame(loop);
+}
+async function boot() {
+  try {
+    await RAPIER2.init();
+    game = new Campaign(handleEvent);
+    visuals = new Visuals(canvas);
+    await visuals.init();
+    visuals.setSector(game);
+    net = new Network({ start: () => startGame(), end: () => {
+      hubEnded = true;
+      game.running = false;
+      pointer.fire = false;
+      keys.clear();
+      audio.setMuted(true);
+      $("modal").hidden = true;
+      $("attractBanner").hidden = true;
+    }, timeup: () => ({ score: game.score, stats: stats() }), ghost: (data, id) => visuals.ghost(data, id), leave: (id) => visuals.removeGhost(id) });
+    ready = true;
+    $("loading").hidden = true;
+    $("bootStatus").textContent = `${visuals.backend.toUpperCase()} / FLIGHT SYSTEMS READY`;
+    if (navigator.maxTouchPoints > 0) {
+      document.body.classList.add("touch");
+      lastInput = "touch";
+    }
+    if (net.active) {
+      $("menu").hidden = true;
+      $("hud").hidden = false;
+      screen = "waiting";
+    }
+    await net.init();
+    window.__stellar = { game, visuals, audio, network: net, action: (name) => action(name), state: () => ({ ...game.debug(), screen, input: lastInput, renderer: visuals.backend, frames: frameCount, hubEnded, audio: audio.debug() }), setInput: (v) => debugInput = v, start: () => startGame(), returnTitle, openMap, openDev };
+    last = performance.now();
+    requestAnimationFrame(loop);
+    $("menu").querySelector("[data-action=start]")?.focus({ preventScroll: true });
+  } catch (error) {
+    console.error(error);
+    $("loading").querySelector("strong").textContent = "Flight systems need attention.";
+    $("loading").querySelector("p").textContent = error.message + " \u2014 A current Chromium browser with internet access is recommended.";
+    globalThis.AIHub?.fail?.(error.message);
+    window.__bootError = error.message;
+  }
+}
+boot();
+
+</script>
+</body>
+</html>

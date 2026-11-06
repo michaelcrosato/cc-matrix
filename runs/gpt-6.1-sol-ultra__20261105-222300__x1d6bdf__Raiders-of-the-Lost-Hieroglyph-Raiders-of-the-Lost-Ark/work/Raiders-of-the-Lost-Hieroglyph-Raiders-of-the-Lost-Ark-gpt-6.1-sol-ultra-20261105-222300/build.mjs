@@ -1,0 +1,16 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {dirname,resolve} from 'node:path';
+const dir=dirname(fileURLToPath(import.meta.url));
+const read=p=>readFileSync(resolve(dir,p),'utf8');
+const name=dir.split('/').at(-1);
+const modules=[['audio.js',['createAudio','testAudioOffline']],['actors.js',['createExplorer','createEnemy','createWhip']],['world.js',['buildWorld']],['network.js',['createNetwork']]];
+const clean=s=>s.replace(/^import .*?;\s*$/gm,'').replace(/^export /gm,'');
+let js="import * as THREE from 'three';\nimport RAPIER from 'rapier';\n";
+js+='const EXIT_INTERVIEW='+read('../exit-interview.json')+';\n';
+for(const [file,names]of modules)js+=`\nconst {${names.join(',')}}=(()=>{\n${clean(read(file))}\nreturn {${names.join(',')}};\n})();\n`;
+js+=clean(read('main.js'));
+const html=read('shell.html').replace('<!--HUB_SESSION-->','<script>\n'+read('vendor/session.js').replaceAll('</script','<\/script')+'\n</script>').replace('/*STYLE*/',read('style.css')).replace('/*GAME*/',()=>js.replaceAll('</script','<\/script'));
+writeFileSync(resolve(dir,'../'+name+'.html'),html);
+writeFileSync(resolve(dir,'dev.html'),read('shell.html').replace('<!--HUB_SESSION-->','<script src="./vendor/session.js"></script>').replace('/*STYLE*/',read('style.css')).replace('<script type="module">/*GAME*/</script>','<script>const EXIT_INTERVIEW='+read('../exit-interview.json')+';</script><script type="module" src="main.js"></script>'));
+console.log('Built '+name+'.html');

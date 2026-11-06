@@ -1,0 +1,51 @@
+{
+	"sourceInformation": {
+		"date": "2026-11-05 19:13:39",
+		"source": "Dodge ’Em (Atari, 1980), designed and programmed by Carla Meninsky.",
+		"plan": "none",
+		"genre": "Arcade maze racing and score attack",
+		"perspective": "Elevated orthographic, single-screen 3D arena",
+		"tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGPU and automatic WebGL2 fallback; Rapier 0.19.3; Gamepad API; Web Audio API; Pointer Events; PeerJS 1.5.5; AI Hub Session Protocol v1 client 1.4.0.",
+		"artDirection": "Procedural cel-shaded miniature night circuit, three-band toon lighting, ink outlines, warm printed-poster typography and cream/gold/teal colors.",
+		"animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for suspension, rolling wheels, gate hops, crash spins, gold tumbling, flags and marquee; procedural vehicle paths and particles.",
+		"audio": "Code-only Web Audio: engine synthesis, gold ticks, crash noise, close-call glides, ink-slip effects, original sequenced garage groove at 10% music volume by default, formant-filtered gibberish pit-crew voices. No audio files.",
+		"online": "AI Hub ghost races for 1–4 players, progress and results; standalone room-code WebRTC ghost races through PeerJS with same-browser BroadcastChannel fallback; two-player local role-swapping couch duel.",
+		"testing": "Headless Chromium with software WebGPU; scripted full campaign and state assertions; standard Gamepad API stubs; phone multitouch emulation; Web Audio analyser; official AI Hub harness with 2 and 4 players, 150 ms latency, 50 ms jitter, 5% packet loss and host leaving; file:// startup; WebGL2 visual captures. Physical controller/listening/real phone/remote human tests: unknown. Desktop visual review at 1920×1080 and portrait phone captures; controller and touch scrolling verified.",
+		"research": "Atari’s original instructions and original manual: four lanes, automatic counterclockwise player, clockwise opponents, gap-only shifts, acceleration, three turns, escalating enemies and role-swapping multiplayer; Atari Archive historical/screenshots context; written source-sound descriptions. Exact original audio waveform: unknown.",
+		"environment": "Codex CLI (headless); Linux, Ubuntu on WSL2",
+		"model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+		"usage": "added on import"
+	},
+	"testingFeedback": [
+		"10 issues fixed: six game/UI issues (title alignment, HUD overlap, portrait framing, controller focus, spawn visibility and title warmup timing) and four test-fixture issues (hidden selectors, timing races, touch targeting and gamepad sampling). Full regression: 73/73 passed. Final UI and input recheck: 22/22 passed.",
+		"1: the initial portrait framing could hide outer lanes on phones. Fixed by rotating and reframing the complete arena. No game-breaking failures remain in the tested paths.",
+		"The scripted full campaign: autopilot physically collected all 400 gold dots through Rapier sensors, cleared all five circuits and reached victory. The official two- and four-player AI Hub harness also passed latency, loss and host-leave cases.",
+		"Headless WebGPU screenshots were blank despite valid renderer and gameplay state. State assertions verified WebGPU; screenshots used the native WebGL2 backend for visual review."
+	],
+	"engineFeedback": [
+		"Three.js provided native toon node materials, orthographic composition and an animation mixer while allowing all art to be made directly in code.",
+		"Headless WebGPU capture was unreliable, so visual review used WebGL2 while the gameplay and protocol tests kept WebGPU. Input tests also needed to wait for actual frame sampling.",
+		"The arc-length lane network, buffered gap changes, rival behavior and the full arcade flow were custom game systems.",
+		"Coordinating fixed-step Rapier sensors with smooth lane transitions and the rendering/animation loop.",
+		"none",
+		"A smaller ready-made WebGPU toon/outline example with physics and headless validation would reduce integration work."
+	],
+	"promptFeedback": [
+		"The source research, controller-first design, attract mode and required live tuning tools gave the demo a clear arcade identity.",
+		"The relationship between standalone multiplayer and AI Hub multiplayer was open to interpretation; both are implemented.",
+		"Building and validating the full single-file package, multiple input methods and both multiplayer paths together.",
+		"Specify whether standalone internet multiplayer must use a hosted relay, manual signaling or an existing service, and provide an explicit browser support baseline."
+	],
+	"aiHub": {
+		"name": "Dodge on Arrival",
+		"tagline": "Four lanes. Three lives. No brakes.",
+		"description": "Sweep gold from four looping lanes while rivals charge the other way. Queue last-second changes, squeeze through close calls and ink-slip out of trouble across five midnight circuits, or trade paint in local Bumper Tag and online ghost races.",
+		"type": "Game",
+		"genre": "Racing",
+		"source": "Dodge ’Em (1980)",
+		"series": "",
+		"players": "1–4",
+		"controls": "Stick or A/D: inward/outward at gaps; R2/Cross or Space: gas; Square or Shift: ink slip; Options or Esc: pause. Driver 2: J/L, I, K. Touch: left swipe, right hold, contextual slip.",
+		"tags": ["3d", "arcade", "racing", "top-down", "retro", "versus"]
+	}
+}

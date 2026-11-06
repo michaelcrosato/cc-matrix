@@ -1,0 +1,1379 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>
+/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#101d32"><meta name="hub:session" content="1"><meta name="hub:session-players" content="2-2"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-minutes" content="4"><meta name="hub:session-goal" content="Score more goals over three quick periods. A tie goes to sudden death."><meta name="hub:session-howto" content="Left stick skate. Cross pass. Hold Square to charge, release to shoot. Circle check. L1 switch. R1 boost.">
+<title>Ice Hockey Puck Wild</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=Barlow:wght@400;500;600;700;800&display=swap');
+:root{--ink:#101d32;--paper:#fff8e9;--gold:#ffc251;--cyan:#64dfdf;--muted:#aab9c6;--red:#ec694b;--scale:1;font-family:Barlow,Arial,sans-serif;color:var(--paper);font-synthesis:none}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#101d32}button,input,textarea{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:4px solid var(--gold);outline-offset:4px}button{touch-action:manipulation}#arena,#arena canvas{position:absolute;inset:0;width:100%;height:100%;display:block;touch-action:none}#vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 50%,transparent 45%,#07152970 100%)}#grain{position:absolute;inset:0;opacity:.05;pointer-events:none;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.9' filter='url(%23n)'/%3E%3C/svg%3E")}#loading{position:absolute;inset:0;background:var(--ink);z-index:50;display:flex;align-items:center;justify-content:center;flex-direction:column;gap:18px}#loading strong{font:900 58px 'Barlow Condensed',Impact,sans-serif;font-style:italic}.loader{height:5px;width:200px;background:#ffffff20;overflow:hidden}.loader:after{content:'';display:block;width:40%;height:100%;background:var(--gold);animation:load 1s ease-in-out infinite alternate}@keyframes load{to{transform:translateX(150%)}}#loadNote{color:var(--muted);max-width:580px;text-align:center;padding:20px;line-height:1.6}.hidden{display:none!important}#titleScreen{position:absolute;inset:0;display:flex;align-items:center;background:linear-gradient(90deg,#0b192df5 0%,#0b192ddc 34%,#0b192d30 65%,transparent 100%)}.titleContent{margin:0 0 0 6vw;width:min(520px,44vw);position:relative}.eyebrow{font:800 15px Barlow,Arial,sans-serif;letter-spacing:4px;color:var(--cyan);text-transform:uppercase}.titleContent h1{font-family:'Barlow Condensed',Impact,sans-serif;font-weight:900;font-style:italic;text-transform:uppercase;font-size:clamp(66px,7.9vw,142px);line-height:.82;letter-spacing:-2px;margin:27px 0 22px;filter:drop-shadow(5px 6px 0 #081321)}h1 span{display:block}.titleContent h1 .smallTitle{font-size:.42em;color:var(--paper);letter-spacing:2px;margin-bottom:9px}.titleContent h1 .wild{color:var(--gold)}.tagline{font-size:17px;letter-spacing:2.3px;font-weight:800;margin:24px 0 30px}.menuStack{display:flex;flex-direction:column;gap:9px;max-width:380px}.menuStack button,.panelButton{border:2px solid #ffffff26;background:#152a40e6;color:var(--paper);padding:13px 20px;font-weight:700;font-size:19px;text-align:left;position:relative;transition:transform .12s,background .12s}.menuStack button:hover,.panelButton:hover,.focused{background:#28445b!important;border-color:var(--paper)!important;transform:translateX(5px)}.menuStack button.primary{background:var(--gold);color:var(--ink);border:2px solid var(--gold);font-size:23px;font-weight:900;box-shadow:4px 5px 0 #050e20}.menuStack button.primary:hover{background:#ffdc92!important}.menuStack button small{font-size:12px;letter-spacing:2px;opacity:.7;float:right;margin-top:7px}.titleFoot{margin-top:24px;font-size:12px;letter-spacing:2px;color:#abb9c5}.edition{position:absolute;right:4vw;bottom:5vh;text-align:right;border-right:4px solid var(--gold);padding-right:18px;font:800 18px 'Barlow Condensed',sans-serif;letter-spacing:2px}.edition b{font-size:45px;display:block;color:var(--gold);font-style:italic}.cornerBrand{position:absolute;top:25px;left:35px;font-size:12px;font-weight:800;letter-spacing:3px;color:var(--paper);opacity:.8}#hud{position:absolute;inset:0;pointer-events:none}.scoreboard{position:absolute;top:25px;left:50%;transform:translateX(-50%);display:flex;align-items:stretch;background:var(--ink);border:3px solid var(--ink);box-shadow:0 6px 0 #07102055;min-width:530px}.teamBlock{display:flex;align-items:center;gap:20px;padding:8px 20px;min-width:175px}.teamBlock.fox{background:var(--gold);color:var(--ink)}.teamBlock.freeze{background:var(--cyan);color:var(--ink)}.teamName{font-size:16px;font-weight:900;letter-spacing:2px}.score{font:900 49px/.95 'Barlow Condensed',Impact,sans-serif}.clock{width:145px;text-align:center;padding:5px 14px}.clock strong{font:800 34px/1.1 'Barlow Condensed',sans-serif;display:block;letter-spacing:1px}.clock span{font-size:11px;letter-spacing:2px;color:var(--muted);font-weight:700}.teamHeat{height:4px;width:100%;background:#101d3230;position:absolute;bottom:0;left:0}.teamHeat i{display:block;background:var(--paper);height:100%;transition:width .2s}.teamBlock{position:relative}.scoreboard .attack{position:absolute;top:72px;left:0;width:100%;display:flex;justify-content:space-between;color:var(--paper);font-size:11px;letter-spacing:2px;text-shadow:0 1px 4px var(--ink)}#pauseButton{pointer-events:auto;position:absolute;top:26px;right:25px;border:2px solid #ffffff40;color:var(--paper);background:#101d32c0;width:48px;height:46px;font-weight:900;font-size:21px}.lowerHud{position:absolute;bottom:24px;left:30px;right:30px;display:flex;justify-content:space-between;align-items:flex-end}.statusPlate{background:#101d32eb;border-left:4px solid var(--gold);padding:12px 18px;min-width:195px}.statusPlate strong{font:800 20px 'Barlow Condensed',sans-serif;letter-spacing:1.5px}.statusPlate small{display:block;font-size:11px;letter-spacing:2px;color:var(--muted);margin-top:4px}.stamina{height:4px;background:#ffffff20;margin-top:10px}.stamina i{display:block;width:100%;height:100%;background:var(--gold)}.controls{display:flex;gap:20px;background:#101d32e0;padding:14px 20px;border-bottom:2px solid #ffffff20;font-weight:600;font-size:14px}.glyph{display:inline-flex;align-items:center;justify-content:center;min-width:25px;height:25px;margin-right:6px;border:1px solid #ffffff80;border-radius:5px;padding:0 5px;color:var(--gold);font-weight:800}.sticker{background:var(--gold);color:var(--ink);font:900 20px 'Barlow Condensed',sans-serif;padding:6px 12px;letter-spacing:2px;transform:rotate(-3deg);box-shadow:3px 3px var(--ink)}#attract{position:absolute;top:125px;left:50%;transform:translateX(-50%);text-align:center;pointer-events:none}#attract small{display:block;font-size:12px;letter-spacing:2px;margin-top:13px;text-shadow:0 2px var(--ink)}#banner{position:absolute;left:50%;top:42%;transform:translate(-50%,-50%) rotate(-3deg);pointer-events:none;background:var(--gold);border:4px solid var(--ink);padding:16px 40px;color:var(--ink);font:900 clamp(32px,4.5vw,74px)/1 'Barlow Condensed',Impact,sans-serif;font-style:italic;white-space:nowrap;box-shadow:8px 9px 0 #101d3280}#drill{position:absolute;left:30px;top:120px;width:310px;background:#101d32e8;border-left:4px solid var(--cyan);padding:16px 20px}#drill small{letter-spacing:2px;color:var(--cyan);font-weight:700;font-size:11px}#drill strong{display:block;font:800 25px 'Barlow Condensed',sans-serif;margin-top:7px}#drill p{font-size:14px;line-height:1.5;color:#c6d4de;margin:7px 0 0}.overlay{position:absolute;inset:0;z-index:20;display:flex;align-items:center;justify-content:center;background:#071325bd;backdrop-filter:blur(8px)}.panel{width:min(660px,90vw);max-height:88vh;background:#101f32;border:2px solid #6f8b9b55;box-shadow:12px 13px 0 #06101f80;padding:33px 38px;overflow:auto;scrollbar-color:#587182 #101f32}.panel.wide{width:min(980px,92vw)}.panel h2{font:900 46px/.95 'Barlow Condensed',Impact,sans-serif;font-style:italic;letter-spacing:1px;margin:7px 0 21px}.panel h3{font:800 25px 'Barlow Condensed',sans-serif;color:var(--gold);letter-spacing:1px;margin:22px 0 12px}.panel p{font-size:17px;line-height:1.6;color:#c2d1dc}.panel .menuStack{max-width:none}.panel .panelButton{display:block;width:100%;margin-top:10px}.back{float:right;border:none;background:transparent;color:var(--muted);font-size:17px;padding:0 3px 10px;cursor:pointer}.sectionLabel{font-size:12px;color:var(--cyan);font-weight:800;letter-spacing:3px;text-transform:uppercase}.row{display:flex;gap:15px;margin:15px 0;align-items:center;justify-content:space-between}.row label{font-size:18px;font-weight:600}.row input[type=range]{width:44%;accent-color:var(--gold);height:28px}.row output{width:50px;text-align:right;color:var(--gold);font-weight:700}.toggle{background:#284257;border:1px solid #8b9ba4;color:var(--paper);padding:9px 16px;font-weight:700}.note{font-size:13px!important;color:var(--muted)!important}.networkStatus{border-left:3px solid var(--cyan);background:#1a3345;padding:12px 16px;font-size:16px;margin:18px 0}.codeInput{width:100%;border:2px solid #587385;background:#0a1729;color:var(--paper);padding:13px;font-size:18px;margin:8px 0}.signal{font:13px monospace;resize:vertical;height:95px}.split{display:grid;grid-template-columns:1fr 1fr;gap:24px}.cards{display:grid;grid-template-columns:1fr 1fr;gap:14px}.controlCard{padding:18px;background:#1a3044;border-top:3px solid var(--gold)}.controlCard strong{display:block;color:var(--gold);font-size:20px;margin-bottom:9px}.controlCard p{font-size:15px;margin:0}.tabs{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:20px}.tabs button{border:1px solid #567081;background:#193044;color:var(--paper);padding:9px 12px;font-weight:700;font-size:14px}.tabs button.active{background:var(--gold);color:var(--ink)}dl{margin:0}dt{color:var(--cyan);font-size:12px;letter-spacing:1.5px;text-transform:uppercase;font-weight:700;margin-top:15px}dd{margin:5px 0 0;color:#d1dbe2;font-size:15px;line-height:1.45}.feedbackItem{margin-bottom:18px}.feedbackItem strong{display:block;color:var(--cyan);font-size:15px;margin-bottom:6px}.feedbackItem p{font-size:15px;line-height:1.5;margin:0}.resultScore{font:900 100px/1 'Barlow Condensed',Impact,sans-serif;color:var(--gold);letter-spacing:15px;margin:12px 0}.statsTable{width:100%;border-collapse:collapse;margin:20px 0;color:#cbd6df;font-size:17px}.statsTable td{padding:10px;border-bottom:1px solid #ffffff20;text-align:center}.statsTable td:first-child{text-align:left}#toast{position:absolute;bottom:95px;left:50%;transform:translateX(-50%);background:var(--paper);border:3px solid var(--ink);color:var(--ink);padding:12px 22px;font-size:17px;font-weight:700;z-index:45;max-width:80vw;text-align:center}#touchHint{position:absolute;pointer-events:none;padding:9px 15px;border:2px solid var(--paper);border-radius:100px;background:#101d32b0;color:var(--gold);font-size:14px;font-weight:800;transform:translate(-50%,-50%)}#touchStick{position:absolute;width:95px;height:95px;border:2px solid #ffffff60;background:#101d3230;border-radius:50%;pointer-events:none;transform:translate(-50%,-50%)}#touchStick i{display:block;position:absolute;width:30px;height:30px;border-radius:50%;background:#ffc25190;left:30px;top:30px}#netBadge{position:absolute;left:25px;top:28px;font-size:12px;font-weight:700;letter-spacing:1px;color:var(--cyan);max-width:160px}.touchMode .controls,.touchMode .statusPlate{display:none}.touchMode #drill{width:245px;padding:10px 14px;top:96px}.touchMode #drill p{font-size:12px}.touchMode .scoreboard{top:17px}.touchMode .lowerHud{bottom:12px}.touchMode #pauseButton{top:18px;right:14px}
+@media(min-width:1800px){.titleContent{width:600px}.menuStack{max-width:470px}.menuStack button{padding:17px 23px;font-size:23px}.menuStack button.primary{font-size:28px}.titleFoot{font-size:15px}.tagline{font-size:22px}.scoreboard{transform:translateX(-50%) scale(1.2);transform-origin:top center}.controls{font-size:18px}.lowerHud{bottom:35px}.panel{transform:scale(1.12);max-height:78vh}}@media(max-height:740px){.titleContent h1{font-size:clamp(60px,6.4vw,100px);margin:18px 0}.tagline{margin:16px 0;font-size:14px}.menuStack{gap:6px}.menuStack button{padding:9px 16px;font-size:16px}.menuStack button.primary{font-size:20px}.titleFoot{margin-top:15px;font-size:10px}.panel{padding:25px 30px}.panel h2{font-size:37px}}@media(max-width:760px){.titleContent{width:84vw;margin-left:8vw}.titleContent h1{font-size:90px}.titleContent .eyebrow{font-size:12px}.titleContent .menuStack{max-width:340px}#titleScreen{background:linear-gradient(90deg,#0b192df0,#0b192d90)}.edition{display:none}.cornerBrand{left:20px;top:18px;font-size:10px}.titleContent{margin-top:25px}.scoreboard{min-width:0;top:15px}.teamBlock{min-width:100px;padding:7px 10px;gap:12px}.teamName{font-size:11px;letter-spacing:1px}.score{font-size:34px}.clock{width:90px;padding:4px 7px}.clock strong{font-size:26px}.clock span{font-size:9px}.scoreboard .attack{top:57px;font-size:9px}.controls{gap:8px;font-size:10px;padding:10px}.glyph{min-width:20px;height:20px;margin-right:3px}.lowerHud{left:15px;right:15px;bottom:15px}.statusPlate{min-width:125px;padding:8px 10px}.statusPlate strong{font-size:15px}.statusPlate small{font-size:9px}#pauseButton{width:36px;height:36px;right:12px;top:15px}#netBadge{display:none}.panel{padding:24px;width:92vw}.panel h2{font-size:34px}.split,.cards{grid-template-columns:1fr;gap:10px}.panel p{font-size:15px}.row label{font-size:15px}#banner{white-space:normal;text-align:center;min-width:260px;padding:15px 20px}#drill{top:96px;left:15px;width:250px}.titleFoot{font-size:10px}.eyebrow{letter-spacing:2px}}@media(max-height:520px){.titleContent h1{font-size:65px;margin:10px 0}.titleContent .tagline{display:none}.titleContent .menuStack{gap:4px}.titleContent .menuStack button{padding:6px 13px;font-size:13px}.titleContent .menuStack button.primary{font-size:17px}.titleFoot{margin:10px 0}.titleContent{margin-top:26px}.eyebrow{font-size:10px}.controls{font-size:11px;padding:9px}#drill{top:88px}#drill p{font-size:12px}.panel{max-height:92vh}.panel h2{font-size:30px}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}</script>
+</head><body>
+<div id="arena"></div><div id="vignette"></div><div id="grain"></div>
+<div id="loading"><span class="eyebrow">THE FROZEN FOURTH LINE PRESENTS</span><strong>FRESHENING THE ICE</strong><div class="loader"></div><div id="loadNote">Lacing up skates. Tuning the rink organ.</div></div>
+<div id="titleScreen"><div class="cornerBrand">PUCK WILD • EST. 1981</div><main class="titleContent"><div class="eyebrow">A LITTLE ICE. A LOT OF TROUBLE.</div><h1><span class="smallTitle">Ice Hockey</span><span>Puck</span><span class="wild">Wild.</span></h1><div class="tagline">GOOD ICE. BAD MANNERS.</div><nav class="menuStack"><button class="primary" data-action="solo">PLAY THE NIGHT GAME <small>1 PLAYER →</small></button><button data-action="practice">Skills club <small>LEARN THE ROPES</small></button><button data-action="local">Couch face-off <small>2 PLAYERS</small></button><button data-action="online">Play with a friend <small>ONLINE / HUB</small></button><button data-action="settings">Settings & controls <small>⌘</small></button><button data-action="about">About this game <small>’81</small></button></nav><div class="titleFoot">2 ON 2 + KEEPERS &nbsp; / &nbsp; THREE QUICK PERIODS</div></main><div class="edition">ARCADE HOCKEY. FRESHLY ZAMBONIED.<b>THE NIGHT GAME</b>FOXES vs. FREEZE &nbsp; • &nbsp; NORTH END RINK</div></div>
+<div id="hud" class="hidden"><div class="scoreboard"><div class="teamBlock fox"><span class="teamName">FOXES</span><b class="score" id="score0">0</b><div class="teamHeat"><i id="heat0"></i></div></div><div class="clock"><strong id="clock">0:45</strong><span id="period">PERIOD 1 / 3</span></div><div class="teamBlock freeze"><b class="score" id="score1">0</b><span class="teamName">FREEZE</span><div class="teamHeat"><i id="heat1"></i></div></div><div class="attack"><span>ATTACK →</span><span>← ATTACK</span></div></div><div id="netBadge"></div><button id="pauseButton" aria-label="Pause">Ⅱ</button><div class="lowerHud"><div class="statusPlate"><strong id="playerName">01 / FOXES</strong><small id="puckStatus">FIND THE PUCK</small><div class="stamina"><i id="stamina"></i></div></div><div class="controls" id="controlHints"></div></div><div id="drill" class="hidden"></div></div>
+<div id="banner" class="hidden"></div><div id="attract" class="hidden"><div class="sticker">AFTER HOURS • LIVE DEMO</div><small>PRESS ANYTHING TO TAKE THE ICE</small></div><div id="modal" class="overlay hidden"><div id="panel" class="panel"></div></div><div id="toast" class="hidden"></div><div id="touchStick" class="hidden"><i></i></div><div id="touchHint" class="hidden"></div>
+<script type="module">
+import * as THREE from 'three/webgpu';
+import { color, normalWorld, vec3 } from 'three/tsl';
+
+const INK=0x152634, GOLD=0xffbc48, AQUA=0x56dfdd;
+const mats=new Map();
+function cel(hex){if(mats.has(hex))return mats.get(hex);const m=new THREE.MeshBasicNodeMaterial();m.colorNode=color(hex).mul(normalWorld.dot(vec3(.28,.89,.36)).max(0).mul(3).floor().div(3).mul(.34).add(.66));mats.set(hex,m);return m;}
+const ink=new THREE.MeshBasicMaterial({color:INK,side:THREE.BackSide});
+function outlined(geo,mat,scale=1.055){const g=new THREE.Group();const a=new THREE.Mesh(geo,mat);const b=new THREE.Mesh(geo,ink);b.scale.setScalar(scale);g.add(b,a);return g;}
+function box(w,h,d,c,parent,x=0,y=0,z=0,edge=true){const o=edge?outlined(new THREE.BoxGeometry(w,h,d),cel(c)):new THREE.Mesh(new THREE.BoxGeometry(w,h,d),cel(c));o.position.set(x,y,z);parent.add(o);return o;}
+function sphere(r,c,parent,x=0,y=0,z=0,sx=1,sy=1,sz=1){const o=outlined(new THREE.SphereGeometry(r,12,8),cel(c),1.06);o.position.set(x,y,z);o.scale.set(sx,sy,sz);parent.add(o);return o;}
+function cylinder(r,h,c,parent,x=0,y=0,z=0){const o=outlined(new THREE.CylinderGeometry(r,r,h,12),cel(c));o.position.set(x,y,z);parent.add(o);return o;}
+function line(points,c=0x789aa8,width=1,parent){const m=new THREE.Line(new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(...p))),new THREE.LineBasicMaterial({color:c,transparent:true,opacity:width}));parent.add(m);return m;}
+function roundShape(hx,hz,r){const s=new THREE.Shape();s.moveTo(-hx+r,-hz);s.lineTo(hx-r,-hz);s.quadraticCurveTo(hx,-hz,hx,-hz+r);s.lineTo(hx,hz-r);s.quadraticCurveTo(hx,hz,hx-r,hz);s.lineTo(-hx+r,hz);s.quadraticCurveTo(-hx,hz,-hx,hz-r);s.lineTo(-hx,-hz+r);s.quadraticCurveTo(-hx,-hz,-hx+r,-hz);return s;}
+function flatShape(shape,mat,y,parent,depth=0){const geo=depth?new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:false,curveSegments:12}):new THREE.ShapeGeometry(shape,16);const mesh=new THREE.Mesh(geo,mat);mesh.rotation.x=-Math.PI/2;mesh.position.y=y;parent.add(mesh);return mesh;}
+function ring(hx,hz,r,t,height,y,mat,parent){const s=roundShape(hx,hz,r);const h=roundShape(hx-t,hz-t,Math.max(.1,r-t));s.holes.push(new THREE.Path(h.getPoints(32).reverse()));return flatShape(s,mat,y,parent,height);}
+function textTexture(text,fg='#1b3443',bg=null,w=1024,h=192,font='900 90px sans-serif'){const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');ctx.clearRect(0,0,w,h);if(bg){ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);}ctx.fillStyle=fg;ctx.font=font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,w/2,h/2,w*.94);const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;return t;}
+function placard(text,w,h,x,y,z,parent,fg='#183541',bg='#e7f4ed',rot=0){const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:textTexture(text,fg,bg),transparent:!bg}));m.position.set(x,y,z);m.rotation.y=rot;parent.add(m);return m;}
+function iceText(text,w,h,x,z,parent,fg='#739ca8'){const m=placard(text,w,h,x,.038,z,parent,fg,null);m.rotation.x=-Math.PI/2;return m;}
+function disc(r,c,x,z,parent,opacity=1,y=.025){const m=new THREE.Mesh(new THREE.CircleGeometry(r,48),new THREE.MeshBasicMaterial({color:c,transparent:opacity<1,opacity,depthWrite:opacity===1}));m.rotation.x=-Math.PI/2;m.position.set(x,y,z);parent.add(m);return m;}
+function circle(r,c,x,z,parent,thickness=.055,y=.03){const m=new THREE.Mesh(new THREE.RingGeometry(r-thickness,r,64),new THREE.MeshBasicMaterial({color:c,side:THREE.DoubleSide}));m.rotation.x=-Math.PI/2;m.position.set(x,y,z);parent.add(m);return m;}
+
+function makePlayer(p){const root=new THREE.Group(), body=new THREE.Group();root.add(body);const team=p.team===0?GOLD:AQUA, trim=p.team===0?0xad5526:0x19757c;const shadow=disc(.95,0x123745,0,0,root,.15,.01);shadow.scale.y=.6;
+const torso=box(1.13,1.05,.8,team,body,0,1.7,0);box(1.15,.19,.83,0xf6f1dc,body,0,1.55,0);box(1.15,.13,.84,trim,body,0,1.32,0);box(.97,.42,.75,0x233b4e,body,0,1,0);
+sphere(.47,0xf2b58d,body,0,2.4,.02,.85,1,.9);sphere(.57,team,body,0,2.7,-.03,1,.72,1);box(.69,.08,.07,0xeafcf7,body,0,2.54,.47);box(.67,.2,.055,0x102838,body,0,2.39,.44);box(.13,.26,.1,0xe2eee2,body,-.33,2.36,.43);box(.13,.26,.1,0xe2eee2,body,.33,2.36,.43);
+const legs=[];for(const side of [-1,1]){const limb=new THREE.Group();limb.name=side<0?'leftLeg':'rightLeg';limb.position.set(side*.34,1.04,0);body.add(limb);box(.4,.65,.42,0x293e51,limb,0,-.26,0);box(.42,.23,.44,0xf5eddb,limb,0,-.52,0);box(.4,.14,.44,team,limb,0,-.63,0);box(.46,.21,.77,0x10242f,limb,0,-.78,.12);box(.08,.12,.67,0xb5d0d6,limb,0,-.93,.12);legs.push(limb);}
+const arm=new THREE.Group();arm.name='stickArm';arm.position.set(-.65,1.97,0);body.add(arm);box(.39,.72,.43,team,arm,0,-.23,.1);box(.41,.31,.45,trim,arm,0,-.63,.16);sphere(.25,0x142c38,arm,0,-.81,.28);const arm2=box(.39,.7,.43,team,body,.65,1.67,.05);arm2.rotation.z=.2;sphere(.25,0x152c3a,body,.68,1.21,.31);
+const stick=new THREE.Group();stick.name='stick';stick.position.set(-.58,1.24,.37);body.add(stick);const shaft=box(.09,1.57,.1,0xd7a463,stick,0,-.36,.32);shaft.rotation.x=-.37;box(.11,.13,.82,0x283b43,stick,0,-1.08,1.05);box(.115,.14,.27,0xf5e8ca,stick,0,-1.08,1.36);
+const label=new THREE.Sprite(new THREE.SpriteMaterial({map:textTexture(p.goalie?'G':String(p.id%3+7),'#fff',null,128,128,'900 94px sans-serif'),depthTest:false,transparent:true}));label.scale.set(.63,.63,1);label.position.set(0,1.93,.44);body.add(label);
+const marker=circle(1.15,team,0,0,root,.11,.045);const arrow=new THREE.Mesh(new THREE.ConeGeometry(.28,.5,3),new THREE.MeshBasicMaterial({color:team}));arrow.position.set(0,3.65,0);arrow.rotation.z=Math.PI;root.add(arrow);
+if(p.goalie){box(.48,.85,.3,0xf4ecdc,body,-.35,.58,.46);box(.48,.85,.3,0xf4ecdc,body,.35,.58,.46);sphere(.37,0xf4ecdc,body,.9,1.35,.36,1.1,1.2,.55);body.scale.set(1.1,.94,1.08);}
+// Both skating and the stick swing are native Three.js animation clips.
+const mixer=new THREE.AnimationMixer(body);const times=[0,.19,.38,.57,.76];const skate=new THREE.AnimationClip('skate',.76,[new THREE.NumberKeyframeTrack('leftLeg.rotation[x]',times,[.5,0,-.5,0,.5]),new THREE.NumberKeyframeTrack('rightLeg.rotation[x]',times,[-.5,0,.5,0,-.5]),new THREE.NumberKeyframeTrack('.position[y]',times,[0,.07,0,.07,0])]);const sk=mixer.clipAction(skate);sk.play();const swing=new THREE.AnimationClip('swing',.32,[new THREE.NumberKeyframeTrack('stick.rotation[y]',[0,.1,.2,.32],[-.7,-1.3,.65,0]),new THREE.NumberKeyframeTrack('stickArm.rotation[z]',[0,.12,.32],[0,-.65,0])]);const sw=mixer.clipAction(swing);sw.setLoop(THREE.LoopOnce);sw.clampWhenFinished=false;return {root,body,mixer,sk,sw,marker,arrow,lastAnim:null};}
+
+async function createView(container){const v=new HockeyView(container);await v.renderer.init();v.backend=v.renderer.backend?.isWebGPUBackend?'WebGPU':'WebGL compatibility';return v;}
+class HockeyView{
+constructor(container){this.container=container;this.scene=new THREE.Scene();this.scene.background=new THREE.Color(0x0e202f);this.scene.fog=new THREE.Fog(0x102535,80,145);this.camera=new THREE.PerspectiveCamera(42,1,.1,180);this.renderer=new THREE.WebGPURenderer({antialias:true,alpha:false,forceWebGL:new URLSearchParams(location.search).has('webgl')});this.renderer.setPixelRatio(Math.min(devicePixelRatio,2));this.renderer.outputColorSpace=THREE.SRGBColorSpace;this.renderer.setClearColor(0x112636);this.renderer.domElement.style.cssText='width:100%;height:100%;display:block;';container.appendChild(this.renderer.domElement);this.players=new Map();this.ray=new THREE.Raycaster();this.plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);this.hit=new THREE.Vector3();this.t=0;this.puckHistory=[];this.particlePool=[];this.makeArena();this.resize();window.addEventListener('resize',()=>this.resize());}
+makeArena(){const scene=this.scene;const ambient=new THREE.HemisphereLight(0xebfff6,0x17324a,3);scene.add(ambient);const sun=new THREE.DirectionalLight(0xffffff,3);sun.position.set(-15,35,25);scene.add(sun);
+// Thick inked rink, warm ivory ice, blue shadows: a little illustrated arena.
+flatShape(roundShape(29,17,5),cel(0x112936),-.62,scene,.5);flatShape(roundShape(27.4,15.4,4.7),cel(0x456774),-.17,scene,.12);flatShape(roundShape(26,14,4),new THREE.MeshBasicMaterial({color:0xdcefe9}),0,scene);
+// Very subtle skate etching, all generated geometrically.
+for(let i=0;i<100;i++){const x=Math.sin(i*12.44)*23,z=Math.cos(i*9.21)*11;line([[x,.012,z],[x+.4+Math.sin(i)*.7,.012,z+.13]],i%2?0xc8e0dd:0xf4f7e8,.45,scene);}
+ring(26.8,14.8,4.8,.6,.9,.03,cel(0xf1ead6),scene);ring(26.85,14.85,4.85,.65,.17,.05,cel(0xffc452),scene);ring(26.9,14.9,4.9,.75,.12,1.02,cel(0x173344),scene);
+// Near boards lower for visibility, far safety glass lightly catches the light.
+const glassMat=new THREE.MeshBasicMaterial({color:0x97d8db,transparent:true,opacity:.1,side:THREE.DoubleSide,depthWrite:false});const glass= new THREE.Mesh(new THREE.PlaneGeometry(45,1.7),glassMat);glass.position.set(0,1.95,-14.4);scene.add(glass);
+for(let x=-22;x<=22;x+=4){box(.06,1.9,.07,0x476778,scene,x,1.9,-14.48,false);}
+for(const x of [-10,10]){box(.23,.025,27.4,0x5a9bc5,scene,x,.025,0,false);}box(.17,.025,27.4,0xd76b6a,scene,0,.025,0,false);for(const x of [-23.9,23.9])box(.1,.025,21,0xd76b6a,scene,x,.025,0,false);
+disc(3.7,0xc1dfdc,0,0,scene,.7);circle(3.8,0x4b8a9f,0,0,scene,.09);circle(2.96,0x9ebec2,0,0,scene,.035);disc(.18,0xd57469,0,0,scene);iceText('PW',4.1,2.3,0,-.1,scene,'#74a8b0');iceText('PUCK WILD ARENA',10,1,0,9.8,scene,'#7ea7ac');iceText('EST. 1981',4.8,.55,0,-6.4,scene,'#82a9ae');
+for(const x of [-17,17])for(const z of [-7.2,7.2]){circle(3.15,0xce7e74,x,z,scene,.065);disc(.14,0xce7e74,x,z,scene);for(const a of [-1,1]){box(.08,.02,1.0,0xce7e74,scene,x+a*1.1,.03,z,false);box(.6,.02,.08,0xce7e74,scene,x+a*1.35,.03,z+.5,false);}}for(const x of [-22,22]){const c=disc(3.1,0xa7d9dd,x,0,scene,.63);c.scale.x=.61;circle(2.2,0xd4897f,x,0,scene,.04);}
+for(const side of [-1,1])this.goal(side);
+// Board advertisements are playful hockey-world brands, not web UI.
+const ads=[['COLD COMFORT',8,'#22526a'],['PUCK WILD',7,'#ad562d'],['STICK WITH IT',8,'#32675f'],['HOT ICE • 81',7,'#22526a'],['NICE SHOT!',8,'#ad562d']];ads.forEach((a,i)=>placard(a[0],a[1],.64,-18+i*9,.58,-14.14,scene,a[2],'#f7f1df'));
+// Tiers of irregular spectators, scarf stripes and arms give the arena a human rhythm.
+box(63,1.5,10,0x152e40,scene,0,-.15,-22,false);for(let row=0;row<4;row++){box(64,.45,2.4,0x274456,scene,0,row*.73+.5,-17.3-row*2.1,false);for(let j=0;j<45;j++){const x=-30+j*1.38,z=-17.2-row*2.1;const pal=[GOLD,AQUA,0xe06e55,0x7292a0,0xf0d7b3];const tone=pal[(j*7+row*3)%pal.length];const crowd=new THREE.Group();crowd.position.set(x,row*.73+1,z);box(.6,.66,.48,tone,crowd,0,.15,0,false);sphere(.23,[0xd9aa84,0xa97759,0xf0c8a2][(j+row)%3],crowd,0,.67,0);if(j%6===0){const arm=box(.13,.66,.14,tone,crowd,.43,.51,0,false);arm.rotation.z=-.3;}scene.add(crowd);}}
+for(const side of [-1,1]){for(let row=0;row<3;row++){box(3,.55,28,0x244154,scene,side*(29.2+row*2.1),row*.8-.1,0,false);for(let j=0;j<17;j++){sphere(.25,(j+row)%2?0xd9aa84:0xf0c8a2,scene,side*(29.2+row*2.1),row*.8+1.02,-12+j*1.5);box(.6,.68,.48,(j+row)%3?0x3f6979:GOLD,scene,side*(29.2+row*2.1),row*.8+.52,-12+j*1.5,false);}}}
+box(71,1,1,0x152b3a,scene,0,4.2,-26,false);placard('THE LITTLE RINK. THE BIG GAME.',29,1.25,0,4.1,-25.3,scene,'#b4d2d0','#152c3c');
+for(const x of [-24,-15,15,24]){box(.07,5,.07,0x7292a0,scene,x,7,-25,false);const flag=new THREE.Mesh(new THREE.PlaneGeometry(2.6,3.5),new THREE.MeshBasicMaterial({color:x<0?GOLD:AQUA,side:THREE.DoubleSide}));flag.position.set(x,6.7,-24.9);scene.add(flag);placard(x<0?'81':'PW',1.8,1.1,x,7.15,-24.8,scene,'#173344',null);}
+// Corners carry illustrated light pylons; faux pools provide lighting without noisy shadows.
+for(const x of [-31,31])for(const z of [-20,17]){box(.4,8,.4,0x2a4658,scene,x,3,z,false);box(3,.4,.8,0xfaf4d4,scene,x,7,z);}
+this.puck=outlined(new THREE.CylinderGeometry(.32,.32,.17,20),cel(0x182832),1.08);this.puck.position.y=.17;scene.add(this.puck);this.puckRing=circle(.49,0xffab35,0,0,scene,.08,.04);this.puckShadow=disc(.5,0x274b58,0,0,scene,.18,.012);
+this.trailGeo=new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]);this.trail=new THREE.Line(this.trailGeo,new THREE.LineBasicMaterial({color:0xffb847,transparent:true,opacity:.75}));scene.add(this.trail);
+this.effectGroup=new THREE.Group();scene.add(this.effectGroup);this.effectMat=new THREE.MeshBasicMaterial({color:0xffd475});this.snowMat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:.85});
+}
+goal(side){const scene=this.scene,x=side*24;const group=new THREE.Group();scene.add(group);const netmat=new THREE.LineBasicMaterial({color:0x7798a1,transparent:true,opacity:.55});const red=0xcb574b;for(const z of [-3.2,3.2]){cylinder(.105,1.8,red,group,x,.9,z);const bar=box(1.9,.14,.14,red,group,x+side*.9,1.77,z);box(.12,.12,6.4,red,group,x+side*1.8,.1,0);}const cross=cylinder(.105,6.4,red,group,x,1.8,0);cross.rotation.x=Math.PI/2;for(let i=0;i<=16;i++){const z=-3.2+i*.4;line([[x,.07,z],[x+side*1.8,.07,z],[x+side*1.8,1.78,z],[x,1.78,z]],0x65888f,.55,group);}for(let y=.2;y<1.8;y+=.35){line([[x,y,-3.2],[x+side*1.8,y,-3.2],[x+side*1.8,y,3.2],[x,y,3.2]],0x65888f,.55,group);}disc(.6,0xff9163,x+side*2.15,0,scene,.5);}
+resize(){const w=this.container.clientWidth||innerWidth,h=this.container.clientHeight||innerHeight;this.renderer.setSize(w,h,false);this.camera.aspect=w/h;const distance=Math.max(66,31/(Math.tan(21*Math.PI/180)*(w/h))); this.camera.position.set(0,distance*.72,distance*.65);this.camera.fov=42;this.camera.far=distance+150;this.scene.fog.near=distance+25;this.scene.fog.far=distance+110;this.camera.lookAt(0,0,-1.3);this.camera.updateProjectionMatrix();}
+aimAt(clientX,clientY){const r=this.renderer.domElement.getBoundingClientRect();this.ray.setFromCamera(new THREE.Vector2((clientX-r.left)/r.width*2-1,-(clientY-r.top)/r.height*2+1),this.camera);this.ray.ray.intersectPlane(this.plane,this.hit);return{x:THREE.MathUtils.clamp(this.hit.x,-26,26),z:THREE.MathUtils.clamp(this.hit.z,-14,14)};}
+render(state,dt){this.t+=dt;for(const p of state.players||[]){let obj=this.players.get(p.id);if(!obj){obj=makePlayer(p);this.players.set(p.id,obj);this.scene.add(obj.root);}obj.root.position.set(p.x,0,p.z);obj.root.rotation.y=Math.PI/2-(p.angle||0);const speed=Math.hypot(p.vx||0,p.vz||0);obj.sk.setEffectiveWeight(Math.min(1,speed/4));obj.sk.setEffectiveTimeScale(.45+speed*.12);obj.mixer.update(dt);obj.body.rotation.z=p.stun?Math.sin(this.t*25)*.25:0;obj.body.rotation.x=p.stun?-.9:Math.min(.12,speed*.008);obj.marker.visible=!!p.controlled;obj.arrow.visible=!!p.controlled;obj.arrow.position.y=3.55+Math.sin(this.t*5)*.15;obj.marker.rotation.z=-obj.root.rotation.y;const anim=p.anim;if((anim==='shoot'||anim==='check'||anim==='pass')&&anim!==obj.lastAnim){obj.sw.reset().play();}obj.lastAnim=anim;}
+if(state.puck){const {x,z}=state.puck;this.puck.position.set(x,.17,z);this.puck.rotation.y+=dt*7;this.puckRing.position.set(x,.04,z);this.puckRing.scale.setScalar(1+Math.sin(this.t*8)*.1);this.puckShadow.position.set(x,.012,z);this.puckHistory.unshift(new THREE.Vector3(x,.12,z));this.puckHistory.length=Math.min(this.puckHistory.length,11);this.trailGeo.setFromPoints(this.puckHistory);}
+// Reuse a fixed set of effect meshes; ages originate from authoritative simulation.
+let n=0;for(const effect of state.effects||[]){if(effect.age>1.2)continue;const count=effect.type==='goal'?24:7;for(let i=0;i<count;i++){let mesh=this.particlePool[n];if(!mesh){mesh=new THREE.Mesh(new THREE.BoxGeometry(.14,.14,.14),this.snowMat);this.effectGroup.add(mesh);this.particlePool[n]=mesh;}mesh.visible=true;const a=i*2.39996,age=effect.age||0,r=age*(effect.type==='goal'?8:4);mesh.position.set(effect.x+Math.cos(a)*r,.2+Math.sin(age*Math.PI)*((i%4)+1),effect.z+Math.sin(a)*r);mesh.rotation.set(age*6,age*8,i);mesh.scale.setScalar(Math.max(.1,1-age));n++;}}for(let i=n;i<this.particlePool.length;i++)this.particlePool[i].visible=false;
+const shake=state.screenShake||0;if(shake){this.camera.position.x=Math.sin(this.t*101)*shake*.15;this.camera.lookAt(0,0,-1.3);}else this.camera.position.x=0;
+this.renderer.render(this.scene,this.camera);}
+}
+
+
+// Every sound is synthesized. No audio assets or speech services are used.
+class HockeyAudio {
+  constructor(options = {}) {
+    this.ctx = null;
+    this.musicVolume = 0.10;
+    this.sfxVolume = 0.65;
+    this.enabled = false;
+    this.step = 0;
+    this.nextBeat = 0;
+    this.lastVoice = -10;
+    this.lastSkate = -10;
+    this.state = 'title';
+    this.stats = { tones: 0, noises: 0, voices: 0, musicNotes: 0, effects: 0 };
+    if (options.context) this._init(options.context);
+  }
+  _init(ctx) {
+    this.ctx = ctx;
+    this.offline = typeof ctx.startRendering === 'function';
+    this.master = ctx.createGain();
+    this.master.gain.value = 0.82;
+    this.musicBus = ctx.createGain();
+    this.musicBus.gain.value = this.musicVolume;
+    this.sfxBus = ctx.createGain();
+    this.sfxBus.gain.value = this.sfxVolume;
+    this.musicBus.connect(this.master);
+    this.sfxBus.connect(this.master);
+    this.compressor = ctx.createDynamicsCompressor();
+    this.compressor.threshold.value = -12;
+    this.compressor.knee.value = 18;
+    this.compressor.ratio.value = 5;
+    this.compressor.attack.value = 0.004;
+    this.compressor.release.value = 0.18;
+    this.analyser = ctx.createAnalyser();
+    this.analyser.fftSize = 512;
+    this.master.connect(this.compressor);
+    this.compressor.connect(this.analyser);
+    this.analyser.connect(ctx.destination);
+    const length = Math.ceil(ctx.sampleRate * 1.5);
+    this.noise = ctx.createBuffer(1, length, ctx.sampleRate);
+    const data = this.noise.getChannelData(0);
+    let seed = 8137;
+    for (let i = 0; i < length; i++) {
+      seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+      data[i] = seed / 2147483648 - 1;
+    }
+    this.enabled = true;
+    this.nextBeat = ctx.currentTime + 0.03;
+  }
+  async unlock() {
+    try {
+      if (!this.ctx) {
+        const AudioContext = globalThis.AudioContext || globalThis.webkitAudioContext;
+        if (!AudioContext) return false;
+        this._init(new AudioContext());
+      }
+      if (this.ctx.state === 'suspended') await this.ctx.resume();
+      if (this.nextBeat < this.ctx.currentTime) this.nextBeat = this.ctx.currentTime + 0.02;
+      return true;
+    } catch { return false; }
+  }
+  setMusic(value) {
+    this.musicVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    if (this.ctx) this.musicBus.gain.setTargetAtTime(this.musicVolume * (this.paused ? 0.38 : 1), this.ctx.currentTime, 0.035);
+  }
+  setSfx(value) {
+    this.sfxVolume = Math.max(0, Math.min(1, Number(value) || 0));
+    if (this.ctx) this.sfxBus.gain.setTargetAtTime(this.sfxVolume, this.ctx.currentTime, 0.035);
+  }
+  _tone(frequency, time, duration, gain = 0.15, type = 'triangle', bus = this.sfxBus, endFrequency) {
+    if (!this.ctx || gain <= 0) return;
+    const osc = this.ctx.createOscillator();
+    const envelope = this.ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(Math.max(10, frequency), time);
+    if (endFrequency) osc.frequency.exponentialRampToValueAtTime(Math.max(10, endFrequency), time + duration);
+    envelope.gain.setValueAtTime(0.0001, time);
+    envelope.gain.exponentialRampToValueAtTime(gain, time + Math.min(0.009, duration * 0.2));
+    envelope.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+    osc.connect(envelope); envelope.connect(bus);
+    osc.start(time); osc.stop(time + duration + 0.008);
+    osc.onended = () => { osc.disconnect(); envelope.disconnect(); };
+    this.stats.tones++;
+  }
+  _noise(time, duration, gain, cutoff = 1800, filterType = 'lowpass') {
+    const source = this.ctx.createBufferSource();
+    const filter = this.ctx.createBiquadFilter();
+    const envelope = this.ctx.createGain();
+    source.buffer = this.noise;
+    source.loop = true;
+    filter.type = filterType;
+    filter.frequency.value = cutoff;
+    filter.Q.value = filterType === 'bandpass' ? 1.5 : 0.7;
+    envelope.gain.setValueAtTime(0.0001, time);
+    envelope.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), time + Math.min(0.025, duration * 0.2));
+    envelope.gain.exponentialRampToValueAtTime(0.0001, time + duration);
+    source.connect(filter); filter.connect(envelope); envelope.connect(this.sfxBus);
+    source.start(time); source.stop(time + duration + 0.01);
+    source.onended = () => { source.disconnect(); filter.disconnect(); envelope.disconnect(); };
+    this.stats.noises++;
+  }
+  update(dt, state = 'play') {
+    if (!this.ctx || (this.ctx.state === 'suspended' && !this.offline) || !this.enabled) return;
+    const name = typeof state === 'string' ? state : (state.phase || state.mode || 'play');
+    const paused = name === 'pause' || name === 'paused' || !!state.paused;
+    if (paused !== this.paused) { this.paused = paused; this.setMusic(this.musicVolume); }
+    this.state = name;
+    const now = this.ctx.currentTime;
+    if (this.nextBeat < now - 0.1) this.nextBeat = now + 0.015;
+    let budget = 8;
+    while (this.nextBeat < now + 0.16 && budget-- > 0) {
+      this._musicStep(this.step++, this.nextBeat);
+      this.nextBeat += 60 / 134 / 2;
+    }
+  }
+  _musicStep(step, time) {
+    const i = step % 32;
+    const chords = [[50, 54, 57], [55, 59, 62], [57, 61, 64], [47, 50, 54]];
+    const chord = chords[Math.floor(step / 16) % 4];
+    const melody = [74, null, 78, 81, 78, null, 76, 74, 69, null, 71, 73, 74, null, null, null,
+                    78, null, 81, 83, 81, 78, 76, null, 74, 73, 71, 69, 74, null, 81, null];
+    const hz = midi => 440 * Math.pow(2, (midi - 69) / 12);
+    if (i % 4 === 0) {
+      this._tone(hz(chord[0] - 12), time, 0.21, 0.24, 'triangle', this.musicBus);
+      this._tone(hz(chord[0]), time, 0.16, 0.07, 'sine', this.musicBus);
+      this.stats.musicNotes += 2;
+    }
+    if (i % 4 === 2) {
+      for (const note of chord) {
+        this._tone(hz(note + 12), time, 0.15, 0.055, 'triangle', this.musicBus);
+        this.stats.musicNotes++;
+      }
+    }
+    if (melody[i] !== null) {
+      this._tone(hz(melody[i]), time, 0.17, 0.11, 'triangle', this.musicBus);
+      this._tone(hz(melody[i] + 12), time, 0.1, 0.018, 'sine', this.musicBus);
+      this.stats.musicNotes += 2;
+    }
+    if (i % 2 === 0) this._tone(i % 4 === 0 ? 90 : 240, time, 0.045, 0.055, 'square', this.musicBus, 30);
+  }
+  sfx(name, intensity = 1) {
+    if (!this.ctx || !this.enabled || (this.ctx.state === 'suspended' && !this.offline)) return;
+    const t = this.ctx.currentTime + 0.003;
+    const a = Math.max(0.05, Math.min(1.5, Number(intensity) || 1));
+    this.stats.effects++;
+    switch (name) {
+      case 'shoot': case 'shot': case 'slap':
+        this._noise(t, 0.13, 0.28 * a, 3400);
+        this._tone(210, t, 0.12, 0.29 * a, 'triangle', this.sfxBus, 48);
+        this._tone(780, t + 0.015, 0.07, 0.1 * a, 'sine', this.sfxBus, 220);
+        break;
+      case 'pass':
+        this._tone(520, t, 0.075, 0.17 * a, 'triangle', this.sfxBus, 170);
+        this._noise(t, 0.045, 0.1 * a, 2600);
+        break;
+      case 'check': case 'hit': case 'board':
+        this._noise(t, 0.23, 0.35 * a, 1200);
+        this._tone(130, t, 0.2, 0.33 * a, 'sine', this.sfxBus, 32);
+        this._tone(340, t + 0.015, 0.055, 0.08 * a, 'square', this.sfxBus, 80);
+        break;
+      case 'goal':
+        this._noise(t, 1.4, 0.12 * a, 2100, 'bandpass');
+        [293.66, 369.99, 440, 587.33].forEach((n, i) => {
+          this._tone(n, t + i * 0.12, 0.52, 0.18 * a, 'sawtooth');
+          this._tone(n / 2, t + i * 0.12, 0.65, 0.16 * a, 'triangle');
+        });
+        this.voice('goal');
+        break;
+      case 'whistle': case 'faceoff':
+        this._tone(2350, t, 0.14, 0.09 * a, 'sine', this.sfxBus, 2550);
+        this._tone(2850, t, 0.14, 0.045 * a, 'sine', this.sfxBus, 3020);
+        this._tone(2400, t + 0.19, 0.21, 0.08 * a, 'sine', this.sfxBus, 2200);
+        break;
+      case 'skate':
+        if (t - this.lastSkate < 0.12) return;
+        this.lastSkate = t;
+        this._noise(t, 0.11, 0.09 * a, 4300, 'highpass');
+        break;
+      case 'boost': case 'dash':
+        this._noise(t, 0.28, 0.17 * a, 2200, 'bandpass');
+        this._tone(170, t, 0.22, 0.13 * a, 'triangle', this.sfxBus, 790);
+        break;
+      case 'save': case 'post':
+        this._tone(880, t, 0.24, 0.16 * a, 'sine');
+        this._tone(1430, t, 0.17, 0.08 * a, 'sine');
+        this._noise(t, 0.04, 0.1 * a, 3100);
+        break;
+      case 'power': case 'ready':
+        [440, 554.37, 659.25, 880].forEach((n, i) => this._tone(n, t + i * 0.06, 0.19, 0.12 * a, 'triangle'));
+        break;
+      case 'win': case 'victory':
+        [62, 66, 69, 74, 69, 74, 78].forEach((n, i) => this._tone(440 * 2 ** ((n - 69) / 12), t + i * 0.15, 0.34, 0.2 * a, 'triangle'));
+        this.voice('win');
+        break;
+      case 'buzzer': case 'end':
+        this._tone(123.47, t, 0.7, 0.2 * a, 'sawtooth');
+        this._tone(130.81, t, 0.7, 0.13 * a, 'square');
+        break;
+      case 'switch':
+        this._tone(560, t, 0.045, 0.12 * a, 'sine');
+        this._tone(840, t + 0.04, 0.06, 0.1 * a, 'sine');
+        break;
+      case 'ui': case 'select': case 'click':
+        this._tone(740, t, 0.065, 0.12 * a, 'triangle', this.sfxBus, 980);
+        break;
+      case 'back':
+        this._tone(620, t, 0.08, 0.1 * a, 'triangle', this.sfxBus, 370);
+        break;
+      case 'charge':
+        this._tone(230, t, 0.19, 0.08 * a, 'triangle', this.sfxBus, 450);
+        break;
+      default:
+        this._tone(600, t, 0.065, 0.09 * a, 'triangle');
+    }
+  }
+  voice(mood = 'play') {
+    if (!this.ctx || !this.enabled || (this.ctx.state === 'suspended' && !this.offline)) return;
+    const now = this.ctx.currentTime + 0.025;
+    if (now - this.lastVoice < 0.85) return;
+    this.lastVoice = now;
+    this.stats.voices++;
+    // Short vowel-like syllables: filtered saw waves, not intelligible speech.
+    const excited = mood === 'goal' || mood === 'win';
+    const syllables = excited ? [0, 5, 9, 7, 12, 4, 7] : [0, 3, -2, 5];
+    const vowels = [[700, 1220], [300, 2300], [450, 800], [550, 1700], [350, 1000]];
+    syllables.forEach((pitch, i) => {
+      const t = now + i * (excited ? 0.105 : 0.12);
+      const osc = this.ctx.createOscillator();
+      const envelope = this.ctx.createGain();
+      const formants = vowels[(i + (excited ? 2 : 0)) % vowels.length];
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime((excited ? 190 : 135) * 2 ** (pitch / 12), t);
+      osc.frequency.exponentialRampToValueAtTime((excited ? 185 : 125) * 2 ** (pitch / 12), t + 0.09);
+      envelope.gain.setValueAtTime(0.0001, t);
+      envelope.gain.exponentialRampToValueAtTime(excited ? 0.09 : 0.07, t + 0.015);
+      envelope.gain.exponentialRampToValueAtTime(0.0001, t + 0.095);
+      const filters = formants.map((frequency, j) => {
+        const filter = this.ctx.createBiquadFilter();
+        filter.type = 'bandpass'; filter.frequency.value = frequency; filter.Q.value = j ? 6 : 4;
+        osc.connect(filter); filter.connect(envelope); return filter;
+      });
+      envelope.connect(this.sfxBus);
+      osc.start(t); osc.stop(t + 0.1);
+      osc.onended = () => { osc.disconnect(); envelope.disconnect(); filters.forEach(f => f.disconnect()); };
+      this.stats.tones++;
+    });
+  }
+  levels() {
+    if (!this.analyser) return { rms: 0, peak: 0 };
+    const data = new Float32Array(this.analyser.fftSize);
+    this.analyser.getFloatTimeDomainData(data);
+    let sum = 0, peak = 0;
+    for (const x of data) { sum += x * x; peak = Math.max(peak, Math.abs(x)); }
+    return { rms: Math.sqrt(sum / data.length), peak };
+  }
+  static async audit() {
+    const Context = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
+    if (!Context) return { supported: false };
+    const ctx = new Context(1, 44100 * 3, 44100);
+    const audio = new HockeyAudio({ context: ctx });
+    for (let i = 0; i < 12; i++) audio._musicStep(i, 0.03 + i * 0.2);
+    audio.sfx('shoot'); audio.sfx('pass'); audio.sfx('check'); audio.sfx('goal');
+    const buffer = await ctx.startRendering();
+    const data = buffer.getChannelData(0);
+    let sum = 0, peak = 0, finite = true;
+    for (const x of data) { sum += x * x; peak = Math.max(peak, Math.abs(x)); finite &&= Number.isFinite(x); }
+    return { supported: true, finite, rms: Math.sqrt(sum / data.length), peak, samples: data.length, stats: audio.stats, musicDefault: audio.musicVolume };
+  }
+  async dispose() {
+    if (this.ctx && this.ctx.close) await this.ctx.close();
+    this.ctx = null; this.enabled = false;
+  }
+}
+
+
+// AI Hub transport and independent direct-link multiplayer. No game simulation lives here.
+class HockeyNetwork {
+  constructor() {
+    this.onEvent = () => {};
+    this.hubActive = !!globalThis.AIHub?.active;
+    this.info = null;
+    this.isHost = true;
+    this.connected = false;
+    this.mode = 'none';
+    this.roomCode = '';
+    this.lastState = -Infinity;
+    this.lastInput = -Infinity;
+    this.ended = false;
+    this._generation = 0;
+    this._ready = false;
+    this._finished = false;
+    this._unsub = [];
+    this._heartbeat = null;
+    this._outSeq = 0;
+    this._inSeq = new Map();
+    globalThis.addEventListener?.('pagehide', () => this.disconnect());
+  }
+
+  get localTeam() {
+    if (this.hubActive) return this.info?.server ? null : Number(this.info?.me ?? 0) % 2;
+    return this.isHost ? 0 : 1;
+  }
+
+  get status() {
+    if (this.ended) return 'Round ended';
+    if (this.hubActive) return this.connected ? 'AI Hub session' : 'Connecting to AI Hub';
+    if (this.connected) return this.mode === 'rtc' ? 'Direct link connected' : `Room ${this.roomCode} connected`;
+    return this.mode === 'none' ? 'Offline' : 'Waiting for opponent';
+  }
+
+  _emit(type, data = {}) {
+    try { this.onEvent(type, data); } catch (error) { console.error('Network event handler:', error); }
+  }
+
+  async init() {
+    if (!this.hubActive) return null;
+    const hub = globalThis.AIHub;
+    this._unsub.push(hub.on('message', (data, from) => {
+      if (this.ended || !data || data.game !== 'puck-wild' || !this._fresh(data, from)) return;
+      if (data.kind === 'input' && this.isHost && from !== this.info?.host) this._emit('input', { from, input: data.payload });
+      else if (data.kind === 'state' && !this.isHost && from === this.info?.host) this._emit('state', data.payload);
+    }));
+    this._unsub.push(hub.on('start', data => this._emit('start', data)));
+    this._unsub.push(hub.on('time-up', data => this._emit('time-up', data)));
+    this._unsub.push(hub.on('leave', data => this._emit('peer-left', data)));
+    this._unsub.push(hub.on('end', data => {
+      this.ended = true;
+      this.connected = false;
+      this._emit('end', data);
+    }));
+    this.info = await hub.connect({ mode: 'shared-world', seats: [2, 2] });
+    if (!this.info) {
+      this.hubActive = false;
+      this._unsub.forEach(fn => fn());
+      this._unsub = [];
+      return null;
+    }
+    this.isHost = !!this.info.isHost;
+    this.connected = true;
+    this.mode = 'hub';
+    this._emit('hub-ready', this.info);
+    return this.info;
+  }
+
+  ready() {
+    if (this.hubActive && !this._ready) {
+      this._ready = true;
+      globalThis.AIHub.ready();
+    }
+  }
+
+  finish(teamScores, stats = {}) {
+    if (!this.hubActive || !this.isHost || this._finished || this.ended) return;
+    this._finished = true;
+    const players = this.info.players;
+    const scores = Object.fromEntries(players.map(p => [p.id, Number(teamScores[p.id % 2]) || 0]));
+    const values = [...new Set(Object.values(scores))].sort((a, b) => b - a);
+    const standings = values.map(value => players.filter(p => scores[p.id] === value).map(p => p.id));
+    const perPlayerStats = Object.fromEntries(players.map(p => [p.id, stats[p.id % 2] || {}]));
+    globalThis.AIHub.finish({ standings, scores, stats: perPlayerStats });
+  }
+
+  sendState(state) {
+    if (!this.connected || !this.isHost || this.ended) return false;
+    const now = performance.now();
+    if (now - this.lastState < 55) return false;
+    this.lastState = now;
+    return this._send({ game: 'puck-wild', kind: 'state', seq: this._outSeq++, payload: state });
+  }
+
+  sendInput(input) {
+    if (!this.connected || this.isHost || this.ended) return false;
+    const now = performance.now();
+    if (now - this.lastInput < 55) return false;
+    this.lastInput = now;
+    return this._send({ game: 'puck-wild', kind: 'input', seq: this._outSeq++, payload: input });
+  }
+
+  _send(data) {
+    try {
+      if (this.hubActive) return globalThis.AIHub.send(data, this.isHost ? { reliable: false } : { to: this.info.host, reliable: true });
+      if (this.mode === 'broadcast' && this.channel) {
+        this.channel.postMessage({ ...data, sender: this._id });
+        return true;
+      }
+      if (this.mode === 'rtc' && this.dataChannel?.readyState === 'open') {
+        if (this.dataChannel.bufferedAmount > 64000) return false;
+        this.dataChannel.send(JSON.stringify(data));
+        return true;
+      }
+    } catch (error) { this._emit('error', { message: error.message }); }
+    return false;
+  }
+
+  _fresh(data, from = 'peer') {
+    if (!Number.isFinite(data.seq)) return true;
+    const key = from + ':' + data.kind;
+    if (data.seq <= (this._inSeq.get(key) ?? -1)) return false;
+    this._inSeq.set(key, data.seq);
+    return true;
+  }
+
+  _receive(data) {
+    if (!data || data.game !== 'puck-wild' || this.ended || !this._fresh(data)) return;
+    if (data.kind === 'input' && this.isHost) this._emit('input', { from: 1, input: data.payload });
+    if (data.kind === 'state' && !this.isHost) this._emit('state', data.payload);
+  }
+
+  _randomCode() {
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    return [...bytes].map(x => 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[x % 32]).join('');
+  }
+
+  hostRoom() {
+    if (this.hubActive) throw new Error('AI Hub manages this connection.');
+    this.disconnect();
+    this.mode = 'broadcast';
+    this.isHost = true;
+    this.roomCode = this._randomCode();
+    this._openRoom(this.roomCode);
+    return this.roomCode;
+  }
+
+  joinRoom(code) {
+    if (this.hubActive) throw new Error('AI Hub manages this connection.');
+    const clean = String(code).toUpperCase().replace(/[^A-Z2-9]/g, '');
+    if (clean.length !== 6) throw new Error('Enter the six-character room code.');
+    this.disconnect();
+    this.mode = 'broadcast';
+    this.isHost = false;
+    this.roomCode = clean;
+    this._openRoom(clean);
+    const hello = () => this.channel?.postMessage({ game: 'puck-wild-room', kind: 'hello', sender: this._id });
+    hello();
+    this._heartbeat = setInterval(hello, 500);
+    return clean;
+  }
+
+  _openRoom(code) {
+    if (!globalThis.BroadcastChannel) throw new Error('This browser cannot open local rooms. Use Direct link instead.');
+    this._id = crypto.randomUUID();
+    this.channel = new BroadcastChannel('puck-wild-room-' + code);
+    this.channel.onmessage = ({ data }) => {
+      if (!data || data.sender === this._id) return;
+      if (data.game === 'puck-wild-room') {
+        if (data.kind === 'hello' && this.isHost && (!this.peerId || this.peerId === data.sender)) {
+          const first = !this.connected;
+          this.peerId = data.sender;
+          this.connected = true;
+          this.channel.postMessage({ game: 'puck-wild-room', kind: 'welcome', sender: this._id, to: data.sender });
+          if (first) this._emit('peer-connected', { transport: 'broadcast' });
+        } else if (data.kind === 'welcome' && !this.isHost && data.to === this._id) {
+          const first = !this.connected;
+          this.peerId = data.sender;
+          this.connected = true;
+          clearInterval(this._heartbeat);
+          this._heartbeat = null;
+          if (first) this._emit('peer-connected', { transport: 'broadcast' });
+        } else if (data.kind === 'bye' && data.sender === this.peerId) {
+          this.connected = false;
+          this.peerId = null;
+          this._emit('peer-left', { reason: 'disconnected' });
+        }
+        return;
+      }
+      if (this.connected && data.sender === this.peerId) this._receive(data);
+    };
+  }
+
+  _makePeer(isHost) {
+    if (this.hubActive) throw new Error('AI Hub manages this connection.');
+    if (!globalThis.RTCPeerConnection) throw new Error('Direct link is unavailable in this browser.');
+    this.disconnect();
+    this.mode = 'rtc';
+    this.isHost = isHost;
+    const generation = this._generation;
+    this.pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+    this.pc.onconnectionstatechange = () => {
+      if (generation !== this._generation) return;
+      const state = this.pc?.connectionState;
+      if (state === 'failed' || state === 'disconnected' || state === 'closed') {
+        this.connected = false;
+        this._emit('peer-left', { reason: state, message: 'Direct connection interrupted. A restrictive network may block WebRTC.' });
+      }
+    };
+    this.pc.ondatachannel = event => this._attachDataChannel(event.channel, generation);
+    if (isHost) this._attachDataChannel(this.pc.createDataChannel('puck-wild', { ordered: true }), generation);
+    return this.pc;
+  }
+
+  _attachDataChannel(channel, generation) {
+    this.dataChannel = channel;
+    channel.onopen = () => {
+      if (generation !== this._generation) return;
+      this.connected = true;
+      this._emit('peer-connected', { transport: 'rtc' });
+    };
+    channel.onmessage = event => {
+      if (generation !== this._generation) return;
+      try { this._receive(JSON.parse(event.data)); } catch { /* Ignore packets that are not game JSON. */ }
+    };
+    channel.onclose = () => {
+      if (generation !== this._generation) return;
+      this.connected = false;
+      this._emit('peer-left', { reason: 'closed' });
+    };
+    channel.onerror = () => this._emit('error', { message: 'The direct link could not send data.' });
+  }
+
+  async _gather(pc) {
+    if (pc.iceGatheringState === 'complete') return;
+    await new Promise(resolve => {
+      let timer;
+      const done = () => {
+        clearTimeout(timer);
+        pc.removeEventListener('icegatheringstatechange', changed);
+        resolve();
+      };
+      const changed = () => { if (pc.iceGatheringState === 'complete') done(); };
+      pc.addEventListener('icegatheringstatechange', changed);
+      timer = setTimeout(done, 6500);
+    });
+  }
+
+  _encode(description) {
+    return 'PW1.' + btoa(JSON.stringify({ type: description.type, sdp: description.sdp }));
+  }
+
+  _decode(value, requiredType) {
+    try {
+      const text = String(value).trim();
+      if (!text.startsWith('PW1.') || text.length > 40000) throw new Error();
+      const result = JSON.parse(atob(text.slice(4)));
+      if (result.type !== requiredType || typeof result.sdp !== 'string' || !result.sdp.startsWith('v=0')) throw new Error();
+      return result;
+    } catch { throw new Error(`Paste the complete Puck Wild ${requiredType === 'offer' ? 'invite' : 'answer'} code.`); }
+  }
+
+  async createOffer() {
+    const pc = this._makePeer(true);
+    await pc.setLocalDescription(await pc.createOffer());
+    await this._gather(pc);
+    if (this.pc !== pc) throw new Error('Connection cancelled.');
+    return this._encode(pc.localDescription);
+  }
+
+  async acceptOffer(text) {
+    const offer = this._decode(text, 'offer');
+    const pc = this._makePeer(false);
+    await pc.setRemoteDescription(offer);
+    await pc.setLocalDescription(await pc.createAnswer());
+    await this._gather(pc);
+    if (this.pc !== pc) throw new Error('Connection cancelled.');
+    return this._encode(pc.localDescription);
+  }
+
+  async acceptAnswer(text) {
+    if (this.mode !== 'rtc' || !this.pc || !this.isHost) throw new Error('Create an invite first.');
+    await this.pc.setRemoteDescription(this._decode(text, 'answer'));
+  }
+
+  disconnect() {
+    if (this.hubActive) return;
+    this._generation++;
+    clearInterval(this._heartbeat);
+    this._heartbeat = null;
+    if (this.channel) {
+      this.channel.postMessage({ game: 'puck-wild-room', kind: 'bye', sender: this._id });
+      this.channel.close();
+      this.channel = null;
+    }
+    this.dataChannel?.close();
+    this.pc?.close();
+    this.dataChannel = null;
+    this.pc = null;
+    this.peerId = null;
+    this.connected = false;
+    this.isHost = true;
+    this.mode = 'none';
+    this.roomCode = '';
+    this.lastState = -Infinity;
+    this.lastInput = -Infinity;
+    this.ended = false;
+    this._finished = false;
+    this._outSeq = 0;
+    this._inSeq.clear();
+  }
+}
+
+
+import RAPIER from 'https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/rapier.mjs';
+const DEFAULTS={speed:9.5,shot:33,ai:0.78,friction:2.4,period:45,check:5.4};
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const length=(x,z)=>Math.hypot(x,z);
+class HockeyGame{
+ static async create(audio){await RAPIER.init();return new HockeyGame(audio)}
+ constructor(audio){this.audio=audio;this.config={...DEFAULTS};this.world=new RAPIER.World({x:0,y:0,z:0});this.world.timestep=1/60;this.players=[];this.effects=[];this.events=[];this.acc=0;this.realTime=0;this.control=[0,2];this.scores=[0,0];this.heat=[0,0];this.inputs=[{},{}];this.remote=false;this.mode='menu';this.phase='menu';this.period=1;this.time=45;this.total=0;this.stats={shots:[0,0],passes:[0,0],checks:[0,0],saves:[0,0]};
+  const wall=(x,z,hx,hz)=>this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx,2,hz).setTranslation(x,1,z).setRestitution(.88).setFriction(0));
+  wall(0,14.5,27,.3);wall(0,-14.5,27,.3);wall(27,0,.3,14.5);wall(-27,0,.3,14.5);
+  for(const side of [-1,1]){wall(side*26.1,0,.18,3.25);wall(side*25.1,3.35,1.15,.14);wall(side*25.1,-3.35,1.15,.14)}
+  for(let i=0;i<6;i++){const team=i<2?0:i<4?1:i-4;const goalie=i>=4;const body=this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0,.9,0).setLinearDamping(0).lockRotations().enabledTranslations(true,false,true));this.world.createCollider(RAPIER.ColliderDesc.ball(goalie?.95:.8).setRestitution(.1).setFriction(0).setDensity(8),body);this.players.push({id:i,team,goalie,body,x:0,z:0,vx:0,vz:0,angle:team?Math.PI:0,stamina:1,stun:0,cd:0,aiTimer:0,charge:0,anim:'idle',hasPuck:false,controlled:false})}
+  this.puckBody=this.world.createRigidBody(RAPIER.RigidBodyDesc.dynamic().setTranslation(0,.24,0).setLinearDamping(.28).lockRotations().enabledTranslations(true,false,true).setCcdEnabled(true));this.world.createCollider(RAPIER.ColliderDesc.cylinder(.16,.34).setRestitution(.9).setFriction(0).setDensity(1),this.puckBody);this.puck={x:0,z:0};this.owner=null;this.pickupLock=0;this.lastTeam=0;this.banner='';this.bannerTime=0;this.faceoff();
+ }
+ emit(type,data={}){this.events.push({type,...data});if(this.events.length>60)this.events.shift();this.audio?.sfx(type);}
+ fx(type,x,z,team=0){this.effects.push({type,x,z,team,age:0})}
+ start(mode='solo'){this.mode=mode;this.phase='faceoff';this.phaseTime=2.2;this.period=1;this.time=this.config.period;this.total=0;this.scores=[0,0];this.heat=mode==='attract'?[1,1]:[0,0];this.winner=null;this.stats={shots:[0,0],passes:[0,0],checks:[0,0],saves:[0,0]};this.drill={step:0,travel:0,done:false};this.faceoff();this.banner=mode==='practice'?'SKILLS CLUB':'CENTER ICE';this.bannerTime=2;this.emit('whistle');}
+ faceoff(){this.owner=null;this.pickupLock=.2;const pos=[[-3,-1],[-8,6],[3,1],[8,-6],[-22,0],[22,0]];for(const p of this.players){p.x=pos[p.id][0];p.z=pos[p.id][1];p.vx=0;p.vz=0;p.stun=0;p.charge=0;p.stamina=1;p.body.setTranslation({x:p.x,y:.9,z:p.z},true);p.body.setLinvel({x:0,y:0,z:0},true)}this.setPuck(0,0,0,0);this.control=[0,2];}
+ setPuck(x,z,vx=0,vz=0){this.puckBody.setTranslation({x,y:.24,z},true);this.puckBody.setLinvel({x:vx,y:0,z:vz},true);this.puck={x,z}}
+ givePuck(id){this.owner=id;const p=this.players[id];this.lastTeam=p.team;p.hasPuck=true;this.setPuck(p.x+Math.cos(p.angle)*1.1,p.z+Math.sin(p.angle)*1.1);}
+ get active(){return this.phase==='play'||this.phase==='overtime'}
+ switchPlayer(team){const list=this.players.filter(p=>p.team===team&&!p.goalie);const other=list.find(p=>p.id!==this.control[team]);this.control[team]=other.id;this.emit('switch');}
+ action(team,type,aim){if(!this.active)return;const p=this.players[this.control[team]];if(!p||p.stun>0)return;
+  if(type==='switch'){this.switchPlayer(team);return}
+  if(type==='pass'&&this.owner===p.id){const mate=this.players.find(m=>m.team===team&&!m.goalie&&m.id!==p.id);const dx=mate.x-p.x,dz=mate.z-p.z,d=length(dx,dz)||1;this.release(p,dx/d,dz/d,22,'pass');this.passTarget=mate.id;this.control[team]=mate.id;this.stats.passes[team]++;this.heat[team]=clamp(this.heat[team]+.34,0,1);if(team===0)this.progress('pass');}
+  if(type==='shoot'&&this.owner===p.id){let dx=aim?.x??Math.cos(p.angle),dz=aim?.z??Math.sin(p.angle);const d=length(dx,dz)||1;const charge=clamp(p.charge,0,1),superShot=this.heat[team]>=.99;this.release(p,dx/d,dz/d,this.config.shot*(.62+charge*.55)*(superShot?1.35:1),'shoot');this.stats.shots[team]++;this.shotTeam=team;this.shotPower=superShot?2:charge;this.shotAge=0;if(superShot){this.heat[team]=0;this.banner='WILD SHOT!';this.bannerTime=1.3;this.fx('super',p.x,p.z,team)}if(charge>.4&&team===0)this.progress('charge');p.charge=0;}
+  if(type==='check'&&p.cd<=0){p.cd=.8;p.anim='check';this.fx('check',p.x,p.z,team);this.emit('check');for(const rival of this.players){if(rival.team===team||rival.goalie||length(rival.x-p.x,rival.z-p.z)>this.config.check*.58)continue;rival.stun=.8;const dx=rival.x-p.x,dz=rival.z-p.z,d=length(dx,dz)||1;rival.body.setLinvel({x:dx/d*13,y:0,z:dz/d*13},true);if(this.owner===rival.id){this.owner=null;this.pickupLock=.2;this.setPuck(rival.x,rival.z,Math.cos(p.angle)*8,Math.sin(p.angle)*8)}this.stats.checks[team]++;if(team===0)this.progress('check');this.fx('hit',rival.x,rival.z,team)}}
+ }
+ release(p,dx,dz,speed,type){this.owner=null;this.pickupLock=type==='pass'?.11:.28;this.setPuck(p.x+dx*1.35,p.z+dz*1.35,dx*speed,dz*speed);p.anim='shoot';p.swing=.3;this.fx(type,p.x,p.z,p.team);this.emit(type);}
+ progress(type){if(this.mode!=='practice'||this.drill.done)return;const tasks=['skate','pass','charge','check','goal'];if(type===tasks[this.drill.step]){this.drill.step++;this.emit('success');this.banner='NICE WORK!';this.bannerTime=1.1;if(this.drill.step===tasks.length){this.drill.done=true;this.phase='result';this.winner=0;this.banner='SKILLS COMPLETE';this.emit('goal')}}}
+ goal(team){if(!this.active)return;this.scores[team]++;this.phase='goal';this.phaseTime=3;this.banner=team===0?'FOXES GOAL!':'FREEZE GOAL!';this.bannerTime=3;this.fx('goal',team===0?24:-24,0,team);this.emit('goal',{team});this.audio?.voice('goal');this.screenShake=1;if(team===0)this.progress('goal');if(this.mode==='practice'&&this.phase!=='result'){this.phaseTime=2}}
+ finish(){this.phase='result';this.winner=this.scores[0]===this.scores[1]?null:this.scores[0]>this.scores[1]?0:1;this.banner=this.winner===0?'FOXES TAKE THE CUP!':'FREEZE TAKE THE CUP!';this.emit('finish',{scores:[...this.scores]});this.audio?.voice('win');this.fx('goal',0,0,this.winner||0);}
+ advancePeriod(){if(this.period<3){this.period++;this.time=this.config.period;this.phase='intermission';this.phaseTime=3;this.banner=`PERIOD ${this.period}`;this.bannerTime=3;this.emit('whistle')}else if(this.scores[0]===this.scores[1]){this.period=4;this.time=0;this.phase='intermission';this.phaseTime=3;this.banner='SUDDEN DEATH';this.bannerTime=3;this.emit('whistle')}else this.finish()}
+ update(dt,inputs=[{},{}]){this.inputs=inputs;this.acc+=Math.min(dt,.1);let count=0;while(this.acc>=1/60&&count++<7){this.step(1/60);this.acc-=1/60}}
+ step(dt){this.realTime+=dt;for(const e of this.effects)e.age+=dt;this.effects=this.effects.filter(e=>e.age<2.5);this.bannerTime=Math.max(0,this.bannerTime-dt);this.screenShake=Math.max(0,(this.screenShake||0)-dt*3);if(this.phase==='menu'||this.phase==='result')return;
+  if(this.phase==='faceoff'||this.phase==='intermission'||this.phase==='goal'){this.phaseTime-=dt;if(this.phaseTime<=0){if(this.phase==='goal'&&this.period===4){this.finish();return}this.faceoff();this.phase=this.period===4?'overtime':'play';this.emit('whistle');if(this.mode==='practice')this.givePuck(this.control[0]);}return}
+  if(!this.active)return;this.total+=dt;if(this.mode!=='practice'){if(this.period<4){this.time=Math.max(0,this.time-dt);if(this.time<=0){this.advancePeriod();return}}else this.time+=dt;}
+  this.pickupLock=Math.max(0,this.pickupLock-dt);this.shotAge=(this.shotAge||0)+dt;
+  for(const p of this.players){p.hasPuck=this.owner===p.id;p.controlled=!p.goalie&&this.control[p.team]===p.id;p.cd=Math.max(0,p.cd-dt);p.stun=Math.max(0,p.stun-dt);p.swing=Math.max(0,(p.swing||0)-dt);p.anim=p.swing>0?'shoot':'skate';let input=null;const isHuman=p.controlled&&(p.team===0||this.mode==='local'||this.remote)&&this.mode!=='attract';if(isHuman)input=this.inputs[p.team]||{};
+   if(p.goalie){const home=p.team===0?-22.5:22.5;const targetZ=clamp(this.puck.z*.63,-2.65,2.65);input={x:clamp((home-p.x)*2,-1,1),z:clamp((targetZ-p.z)*2,-1,1)};p.angle=p.team?Math.PI:0;
+   }else if(!input)input=this.ai(p,dt);
+   let ix=input.x||0,iz=input.z||0;const mag=length(ix,iz);if(mag>1){ix/=mag;iz/=mag}const boosting=input.boost&&p.stamina>.05&&mag>.2;p.stamina=clamp(p.stamina+dt*(boosting?-.4:.24),0,1);const speed=(p.goalie?7:this.config.speed)*(boosting?1.48:1)*(p.hasPuck?.95:1);const v=p.body.linvel();let vx=v.x,vz=v.z;if(p.stun<=0){const accel=dt*(mag>.1?7:this.config.friction);vx+=(ix*speed-vx)*Math.min(1,accel);vz+=(iz*speed-vz)*Math.min(1,accel);if(input.aim&&length(input.aim.x,input.aim.z)>.1)p.angle=Math.atan2(input.aim.z,input.aim.x);else if(mag>.15)p.angle=Math.atan2(iz,ix);if(input.shoot&&p.hasPuck)p.charge=clamp(p.charge+dt*1.1,0,1);else if(!input.shoot&&p.charge>0&&p.hasPuck){if(isHuman)this.action(p.team,'shoot',input.aim);p.charge=0}p.body.setLinvel({x:vx,y:0,z:vz},true)}p.vx=vx;p.vz=vz;
+  }
+  if(this.owner!==null){const p=this.players[this.owner];const dx=Math.cos(p.angle)*1.2,dz=Math.sin(p.angle)*1.2;this.setPuck(p.x+dx,p.z+dz,p.vx,p.vz)}
+  this.world.step();for(const p of this.players){const t=p.body.translation();p.x=t.x;p.z=t.z;}
+  const pp=this.puckBody.translation();this.puck={x:pp.x,z:pp.z};
+  if(this.owner===null&&this.pickupLock<=0){const pv=this.puckBody.linvel();let nearest=null;let min=1.6;for(const p of this.players){if(p.stun>0)continue;const d=length(p.x-this.puck.x,p.z-this.puck.z);if(p.goalie&&d<1.65&&length(pv.x,pv.z)>10){if(this.shotPower>1&&Math.random()<.43)continue;this.stats.saves[p.team]++;this.emit('save');this.fx('save',p.x,p.z,p.team);this.lastTeam=p.team;this.setPuck(p.x+(p.team===0?1.8:-1.8),p.z,p.team===0?14:-14,(Math.random()-.5)*13);this.pickupLock=.35;nearest=null;break}if(!p.goalie&&d<min){min=d;nearest=p}}if(nearest){this.owner=nearest.id;this.lastTeam=nearest.team;if(this.control[nearest.team]!==nearest.id)this.control[nearest.team]=nearest.id;if(this.passTarget===nearest.id){this.fx('catch',nearest.x,nearest.z,nearest.team);this.passTarget=null;this.emit('catch')}this.shotTeam=null;}}
+  if(this.puck.x>24.25&&Math.abs(this.puck.z)<3.05)this.goal(0);else if(this.puck.x< -24.25&&Math.abs(this.puck.z)<3.05)this.goal(1);
+  if(this.mode==='practice'){const p=this.players[this.control[0]];this.drill.travel+=length(p.vx,p.vz)*dt;if(this.drill.travel>20)this.progress('skate');if(this.drill.step===3){const rival=this.players[2];if(length(rival.x-p.x,rival.z-p.z)>7){rival.body.setTranslation({x:p.x+3,y:.9,z:p.z},true)}}}
+ }
+ ai(p,dt){p.aiTimer-=dt;const dir=p.team===0?1:-1;const owner=this.owner!==null?this.players[this.owner]:null;let tx=this.puck.x,tz=this.puck.z;const difficulty=this.mode==='attract'?1:this.config.ai;
+  if(owner?.id===p.id){tx=dir*19;tz=Math.sin(this.realTime*.7+p.id)*2.3;if(p.aiTimer<=0){if(dir*p.x>5){const a={x:dir*24-p.x,z:(Math.sin(this.realTime*3)*2.6)-p.z};const superShot=this.heat[p.team]>=.99;this.release(p,a.x/(length(a.x,a.z)||1),a.z/(length(a.x,a.z)||1),this.config.shot*.88*(superShot?1.35:1),'shoot');this.stats.shots[p.team]++;this.shotTeam=p.team;this.shotPower=superShot?2:.65;this.shotAge=0;p.charge=0;if(superShot){this.heat[p.team]=0;this.banner='WILD SHOT!';this.bannerTime=1.3;this.fx('super',p.x,p.z,p.team)}p.aiTimer=.6+Math.random()*.8}else if(Math.random()<.16){const mate=this.players.find(q=>q.team===p.team&&!q.goalie&&q.id!==p.id);const dx=mate.x-p.x,dz=mate.z-p.z,d=length(dx,dz)||1;this.release(p,dx/d,dz/d,22,'pass');this.stats.passes[p.team]++;this.heat[p.team]=clamp(this.heat[p.team]+.34,0,1);p.aiTimer=1.2}else p.aiTimer=.4}}
+  else if(owner?.team===p.team){tx=clamp(owner.x+dir*8,-20,20);tz=owner.z>0?-5.5:5.5;}
+  else {const mates=this.players.filter(q=>q.team===p.team&&!q.goalie);const near=mates.reduce((a,b)=>length(a.x-tx,a.z-tz)<length(b.x-tx,b.z-tz)?a:b);if(near.id!==p.id){tx=dir*-9+this.puck.x*.4;tz=this.puck.z*.55}if(owner&&owner.team!==p.team&&length(p.x-owner.x,p.z-owner.z)<2.3&&p.cd<=0&&p.aiTimer<=0){const old=this.control[p.team];this.control[p.team]=p.id;this.action(p.team,'check');this.control[p.team]=old;p.aiTimer=1.5;}}
+  const dx=tx-p.x,dz=tz-p.z,d=length(dx,dz)||1;return{x:dx/d*difficulty,z:dz/d*difficulty,boost:this.mode==='attract'&&d>8,aim:owner?.id===p.id?{x:dir*24-p.x,z:-p.z}:null};
+ }
+ snapshot(){return{players:this.players.map(({body,...p})=>({...p})),puck:{...this.puck},owner:this.owner,phase:this.phase,phaseTime:this.phaseTime,mode:this.mode,period:this.period,time:this.time,total:this.total,scores:[...this.scores],heat:[...this.heat],stats:structuredClone(this.stats),control:[...this.control],banner:this.banner,bannerTime:this.bannerTime,effects:this.effects.map(e=>({...e})),winner:this.winner,drill:this.drill,screenShake:this.screenShake||0}}
+ applySnapshot(s){for(const key of ['puck','owner','phase','phaseTime','mode','period','time','total','scores','heat','stats','control','banner','bannerTime','effects','winner','drill','screenShake'])if(s[key]!==undefined)this[key]=s[key];s.players?.forEach((p,i)=>{const body=this.players[i].body;Object.assign(this.players[i],p,{body});body.setTranslation({x:p.x,y:.9,z:p.z},true)});}
+}
+
+
+const INTERVIEW = {
+  "sourceInformation": {
+    "date": "2026-11-05 21:52:07",
+    "source": "Ice Hockey (1981)",
+    "plan": "none",
+    "genre": "Arcade sports / hockey",
+    "perspective": "Elevated broadcast view, 3D rink",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL compatibility, Three.js TSL, Rapier 3D 0.19.3, Web Audio API, Gamepad API, WebRTC, BroadcastChannel, AI Hub session client",
+    "artDirection": "Procedural cel-shaded / ink illustration; ivory ice, navy ink, golden Foxes and cyan Freeze",
+    "animation": "Three.js AnimationMixer, AnimationClip and native keyframe tracks; skating and stick swings, procedural stun and goal particles",
+    "audio": "Code-written rink-organ / chiptune music, synthesized effects and Animalese / Simlish-style gibberish announcer; music defaults to 10%",
+    "online": "Two-player AI Hub shared-world host authority; standalone WebRTC invite / answer; same-origin browser-tab rooms via BroadcastChannel. Direct WebRTC has STUN but no TURN relay.",
+    "testing": "Headless Chromium WebGPU and WebGL compatibility, scripted physics and match / skills playthroughs, two-page multiplayer, emulated standard gamepad and touch, offline synthesized audio analysis. Physical controller, real touchscreen, real iOS and cross-NAT network behavior: unknown.",
+    "research": "No internet research. Native model knowledge for source and design. Retrieved the user-specified AI Hub integration code and exact runtime dependencies.",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and implementation review caught 12 distinct issues: a Rapier API mismatch, six multiplayer/lifecycle bugs, three input edge cases, opponent skills progression, and AI Wild Shot behavior. All were fixed and the final suite passed.",
+    "2 critical issues: a Rapier descriptor method mismatch prevented startup; multiplayer throttling could discard guest action commands. Both were fixed.",
+    "The real Rapier scripted match and skills playthroughs, which exercised scoring, period transitions, sudden death and all five skills steps.",
+    "The initial headless WebGPU screenshot was blank; runtime state assertions and WebGL compatibility screenshots were more useful. The initial title screenshot test also outlasted the attract timer, so the test now freezes idle only during capture."
+  ],
+  "engineFeedback": [
+    "Three.js TSL made banded cel lighting and ink-shell characters straightforward, and native AnimationMixer clips fit procedural players.",
+    "Guessed one Rapier descriptor method name incorrectly; runtime testing exposed it. Browser input and multiplayer throttling also required explicit integration checks.",
+    "The full hockey simulation: puck possession, skater AI, keepers, passes, charged shots, checking, periods and host-authoritative replication.",
+    "Coordinating fixed-step Rapier physics, puck possession and network snapshots with browser rendering and input.",
+    "none",
+    "A more direct built-in path for headless WebGPU image readback and screenshot testing."
+  ],
+  "promptFeedback": [
+    "The clear single-file deliverable, controller-first direction and required attract mode made the intended experience concrete.",
+    "No plan file was supplied. The no-research instruction and required online integration URL were interpreted as allowing retrieval of integration code without source research.",
+    "Finishing gameplay, three input families, real multiplayer, procedural art/audio and verification together as one polished vertical slice.",
+    "Provide a pinned downloadable AI Hub integration package and clarify whether standalone online play should include a hosted relay."
+  ],
+  "aiHub": {
+    "name": "Ice Hockey Puck Wild",
+    "tagline": "Good ice. Bad manners.",
+    "description": "A cel-shaded arcade hockey night with slippery skating, sharp passes, big checks, and wild slapshots. Play three quick periods against the Freeze, learn in Skills Club, or face a friend locally or online.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Ice Hockey (1981)",
+    "series": "",
+    "players": "1–2",
+    "controls": "WASD / left stick skate; mouse / right stick aim; hold Space / Square shoot; E / Cross pass; F / Circle check; Q / L1 switch; Shift / R1 boost; Esc / Options pause.",
+    "tags": [
+      "3d",
+      "arcade",
+      "sports",
+      "versus",
+      "retro",
+      "cel-shaded"
+    ]
+  }
+};
+
+
+
+const $=id=>document.getElementById(id),show=(id,on=true)=>$(id).classList.toggle('hidden',!on);
+const audio=new HockeyAudio(),network=new HockeyNetwork();
+let game,view,screen='title',panelName='',panelOrigin='title',paused=false,lastInput='keyboard',idle=performance.now(),attract=false,previous=performance.now(),modalBack='title',timeScale=1,lastPhase='',toastTimer=0,remoteInput={},remoteSeen=0,hubStarted=false,hubEnded=false,hubWaiting=false,resultShown=false,remotePaused=false,remoteAudioSeq=0,networkAudioSeq=0;
+const remoteSeenByTeam=[0,0],audioEventIds=new WeakMap();
+let settings={music:.1,sfx:.65,glyphs:'ps',assist:true};try{settings={...settings,...JSON.parse(localStorage.getItem('puck-wild-settings')||'{}')}}catch{}
+audio.setMusic(settings.music);audio.setSfx(settings.sfx);
+const keys=new Set(),pointer={x:0,y:0,active:false,shoot:false},touches=new Map();let touchMove=null,touchAim=null;const pending=[[],[]],padPrev=new Map();let menuAxisAt=0,focusIndex=0,oldHint='';
+const escapeHTML=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function saveSettings(){try{localStorage.setItem('puck-wild-settings',JSON.stringify(settings))}catch{}}
+function toast(text){$('toast').textContent=text;show('toast');clearTimeout(toastTimer);toastTimer=setTimeout(()=>show('toast',false),3800)}
+function interact(type='keyboard'){if(hubEnded)return true;lastInput=type;document.body.classList.toggle('touchMode',type==='touch');idle=performance.now();audio.unlock();if(attract){attract=false;goTitle();return true}return false}
+function focusables(){return [...document.querySelectorAll((panelName?'#panel':'#titleScreen')+' button, '+(panelName?'#panel':'#titleScreen')+' input[type=range], #panel textarea, #panel input[type=text]')].filter(el=>el.offsetParent!==null&&!el.disabled)}
+function setFocus(index){const els=focusables();if(!els.length)return;focusIndex=(index+els.length)%els.length;els.forEach(el=>el.classList.remove('focused'));const el=els[focusIndex];if(el.tagName==='BUTTON')el.classList.add('focused');el.focus({preventScroll:true});if(panelName)el.scrollIntoView({block:'nearest'});}
+function menuNav(dx,dy,activate=false){const els=focusables();if(!els.length)return;if(dy)setFocus(focusIndex+dy);const el=els[focusIndex];if(dx&&el?.type==='range'){el.value=Math.max(+el.min,Math.min(+el.max,+el.value+dx*(+el.step||1)));el.dispatchEvent(new Event('input',{bubbles:true}))}else if(dx)setFocus(focusIndex+dx);if(activate)els[focusIndex]?.click()}
+function goTitle(){if(network.hubActive)return;show('modal',false);panelName='';paused=false;screen='title';show('titleScreen');show('hud',false);show('banner',false);show('attract',false);show('drill',false);game.phase='menu';game.mode='menu';game.faceoff();game.players.forEach(p=>p.controlled=false);idle=performance.now();resultShown=false;clearControls();}
+function clearControls(){keys.clear();pointer.shoot=false;touchMove=null;touchAim=null;touches.clear();pending[0]=[];pending[1]=[];for(const id of ['touchStick','touchHint'])show(id,false);}
+function start(mode){if(!network.hubActive&&mode!=='online'&&network.mode!=='none')network.disconnect();game.remote=mode==='online';game.start(mode);paused=false;panelName='';screen='game';resultShown=false;lastPhase=game.phase;show('titleScreen',false);show('hud');show('modal',false);show('attract',mode==='attract');show('drill',mode==='practice');clearControls();if(mode==='local')toast('Foxes: WASD + Space / E / F. Freeze: arrows + J / K / L. Two controllers also work.');}
+function openPanel(name,back){if(back)modalBack=back;else modalBack=panelName||((screen==='title')?'title':'pause');panelName=name;paused=screen==='game';show('modal');$('panel').classList.toggle('wide',['controls','online','about'].includes(name));renderPanel(name);setFocus(0);}
+function closePanel(){const back=modalBack;if(back==='title'){show('modal',false);panelName='';paused=false;idle=performance.now()}else if(back==='game'){resume()}else openPanel(back,back==='pause'?'game':'title');}
+function resume(){show('modal',false);panelName='';paused=false;clearControls();}
+function pause(){if(attract){interact(lastInput);return}if(network.hubActive&&hubEnded)return;if(screen==='game'){if(panelName)resume();else openPanel('pause','game')}}
+const btn=(a,t,primary=false)=>`<button ${primary?'class="primary"':''} data-action="${a}">${t}</button>`;
+const header=(label,title,back=true)=>`${back?'<button class="back" data-action="back">← Back</button>':''}<div class="sectionLabel">${label}</div><h2>${title}</h2>`;
+const slider=(key,label,val,min,max,step,dev=false)=>`<div class="row"><label for="${dev?'dev-':''}${key}">${label}</label><input id="${dev?'dev-':''}${key}" type="range" data-${dev?'dev':'setting'}="${key}" value="${val}" min="${min}" max="${max}" step="${step}"><output>${key==='music'||key==='sfx'?Math.round(val*100)+'%':Number(val).toFixed(step<1?2:0)}</output></div>`;
+function renderPanel(name){const p=$('panel');if(name==='pause')p.innerHTML=header('TIME OUT','CATCH YOUR BREATH',false)+`<div class="menuStack">${btn('resume','BACK TO THE ICE',true)}${btn('controls','How to play')}${btn('settings','Settings')}${btn('dev','Developer rink')}${btn('about','About & credits')}${btn('quit','Return to title')}</div>`;
+ if(name==='settings')p.innerHTML=header('MAKE YOURSELF AT HOME','RINK SETTINGS')+slider('music','Rink organ',settings.music,0,1,.01)+slider('sfx','Effects & voices',settings.sfx,0,1,.01)+`<div class="row"><label>Controller prompts</label><button class="toggle" data-action="glyphs">${settings.glyphs==='ps'?'PlayStation ○ × □ △':'Xbox A B X Y'}</button></div><div class="row"><label>Shot aim assist</label><button class="toggle" data-action="assist">${settings.assist?'ON':'OFF'}</button></div><button class="panelButton" data-action="controls">Controls & rink rules →</button><p class="note">Music starts at 10%. Settings stay on this browser. The rink uses WebGPU where available, with WebGL compatibility.</p>`;
+ if(name==='controls')p.innerHTML=header('LACE UP. KEEP IT SIMPLE.','HOW TO GET PUCK WILD')+`<div class="cards"><div class="controlCard"><strong>SKATE & AIM</strong><p>Left stick / WASD to skate. Right stick or mouse aims. R1 / Shift boosts; ease off to recover your legs.</p></div><div class="controlCard"><strong>PASS & FINISH</strong><p>× / E passes to your partner and switches control. Hold □ / Space or left mouse to charge. Release to shoot. Three passes light your WILD shot.</p></div><div class="controlCard"><strong>CHECK & SWITCH</strong><p>○ / F checks nearby rivals and knocks the puck loose. L1 / Q switches skater. Goalies defend automatically. Find an angle around them.</p></div><div class="controlCard"><strong>THE NIGHT GAME</strong><p>Three 45-second periods. Most goals wins. A tie goes to sudden death. No offside. No icing. Bank passes off the boards. Be a menace.</p></div></div><h3>EVERYONE GETS ICE TIME</h3><p><b>Couch:</b> Player 2 uses arrows, J to charge, K to pass, L to check, U to switch, O to boost. Or use two standard controllers.</p><p><b>Touch:</b> Drag anywhere on the left to skate. Drag on the right to aim; release to shoot or check. Tap the right to pass. Full stick boosts. A shot without aim goes toward the net.</p><p class="note">Options / Esc pauses. Menus: D-pad / arrows to focus, × / Enter to select, ○ / Esc to go back. Mouse hover also moves focus.</p>`;
+ if(name==='dev')p.innerHTML=header('LIVE TUNING • PAUSED','DEVELOPER RINK')+`<div class="sectionLabel">${view.backend} • Three.js r180 • Rapier 0.19.3</div>`+slider('speed','Skating speed',game.config.speed,4,18,.5,true)+slider('shot','Shot speed',game.config.shot,15,60,1,true)+slider('ai','AI strength',game.config.ai,0,1.4,.05,true)+slider('friction','Skater drag',game.config.friction,.5,7,.1,true)+slider('period','Seconds / period',game.config.period,10,180,5,true)+slider('check','Check reach',game.config.check,2,9,.2,true)+slider('timeScale','Simulation speed',timeScale,.25,2,.25,true)+`<div class="cards"><button class="panelButton" data-action="dev-puck">Give me the puck</button><button class="panelButton" data-action="dev-refill">Refill both teams</button><button class="panelButton" data-action="dev-goal0">Foxes goal +1</button><button class="panelButton" data-action="dev-goal1">Freeze goal +1</button><button class="panelButton" data-action="dev-period">Next period</button><button class="panelButton" data-action="dev-faceoff">Reset face-off</button><button class="panelButton" data-action="dev-end">Finish match</button><button class="panelButton" data-action="dev-reset">Reset defaults</button></div><p class="note">Changes apply live. Period length applies to the next period. Developer tools affect the host simulation. Resume from the pause menu.</p>`;
+ if(name==='online')p.innerHTML=header('BRING A WORTHY RIVAL','FRIENDLY FIRE ON ICE')+`<div class="networkStatus" id="connectionStatus">${escapeHTML(network.status)}</div><div class="tabs"><button data-action="online-tab-direct" class="active">Direct link · two devices</button><button data-action="online-tab-room">Local browser room</button></div><div id="onlineBody"></div><p class="note">AI Hub manages friends and rooms when launched inside a Hub session. A standalone direct link uses WebRTC and invite / answer codes. Restrictive networks may prevent a direct connection.</p>`;
+ if(name==='online')renderOnline('direct');
+ if(name==='about')p.innerHTML=header('MADE OF ICE & JAVASCRIPT','THE SMALL PRINT')+`<div class="tabs">${['Source Information','Testing Feedback','Engine Feedback','Prompt Feedback'].map((t,i)=>`<button data-action="about-${i}" class="${i===0?'active':''}">${t}</button>`).join('')}</div><div id="aboutBody"></div>`;
+ if(name==='about')renderAbout(0);
+ if(name==='result'){const practice=game.mode==='practice';p.innerHTML=header(practice?'SKILLS CLUB GRADUATE':'FINAL • NORTH END RINK',practice?'YOU’RE READY FOR THE NIGHT GAME':game.winner===0?'FOXES TAKE THE CUP!':'FREEZE TAKE THE CUP!',false)+`<div class="resultScore">${practice?'★ ★ ★':`${game.scores[0]} : ${game.scores[1]}`}</div><p>${practice?'You can skate, combine, charge, check, and finish. Go make a little trouble.':game.winner===0?'Sharp skates. Shaky manners. A very shiny cup.':'The ice was cold. The Freeze were colder. There’s always the rematch.'}</p>${practice?'':`<table class="statsTable"><tr><td></td><td>FOXES</td><td>FREEZE</td></tr>${[['Shots','shots'],['Passes','passes'],['Checks','checks'],['Saves','saves']].map(([t,k])=>`<tr><td>${t}</td><td>${game.stats[k][0]}</td><td>${game.stats[k][1]}</td></tr>`).join('')}</table>`}<div class="menuStack">${network.hubActive?btn('hub-done','ROUND COMPLETE',true):btn('rematch',practice?'PLAY THE NIGHT GAME':'ONE MORE GAME',true)+btn('quit','Return to title')}</div>`;}
+}
+function renderAbout(tab){const body=$('aboutBody');[...$('panel').querySelectorAll('[data-action^="about-"]')].forEach((b,i)=>b.classList.toggle('active',i===tab));if(tab===0){body.innerHTML='<dl>'+Object.entries(INTERVIEW.sourceInformation).map(([k,v])=>`<dt>${escapeHTML(k.replace(/([A-Z])/g,' $1'))}</dt><dd>${escapeHTML(v)}</dd>`).join('')+'</dl><p class="note">An original arcade hockey tribute. Ice Hockey (1981) belongs to its respective rights holders. All game artwork, music, effects, and voices are procedural.</p>';}else{const keys=['','testingFeedback','engineFeedback','promptFeedback'];const qs=[[],['How many issues did testing catch?','How many were critical or game breaking?','Most helpful test?','Least helpful test?'],['What did you like most about the engine?','Did you get stuck or guess wrong?','Most important thing built yourself?','Hardest part of the engine?','Engine changes and why?','One engine improvement?'],['What did you like most about this prompt?','What was confusing?','What was hardest?','What would you change?']];body.innerHTML=INTERVIEW[keys[tab]].map((v,i)=>`<div class="feedbackItem"><strong>${qs[tab][i]}</strong><p>${escapeHTML(v)}</p></div>`).join('')}}
+function renderOnline(tab){$('onlineBody').innerHTML=tab==='room'?`<p>Open this same game in another tab of the same browser. One player hosts; the other enters the code.</p><div class="cards"><button class="panelButton" data-action="host-room">Host a browser room</button><button class="panelButton" data-action="join-room">Join this room</button></div><input class="codeInput" id="roomCode" type="text" maxlength="6" aria-label="Six character room code" placeholder="ROOM CODE"><p id="roomHint" class="note">Rooms work between tabs on the same origin.</p>`:`<p>Host makes an invite. Your friend pastes it and makes an answer. Host pastes that answer. Then: drop the puck.</p><div class="cards"><button class="panelButton" data-action="create-offer">1. Make an invite</button><button class="panelButton" data-action="accept-offer">2. Accept an invite</button></div><textarea id="signalInput" class="codeInput signal" aria-label="Paste invite or answer" placeholder="Paste your friend’s invite or answer here"></textarea><button class="panelButton" data-action="accept-answer">3. Host: accept the answer</button><textarea id="signalOutput" class="codeInput signal" readonly aria-label="Your code to share" placeholder="Your shareable code appears here"></textarea><button class="panelButton" data-action="copy-signal">Copy my code</button>`;[...$('panel').querySelectorAll('[data-action^="online-tab"]')].forEach(b=>b.classList.toggle('active',b.dataset.action.endsWith(tab)));}
+async function action(a){if(hubEnded)return;audio.sfx('ui');if(['solo','practice','local'].includes(a)){start(a);return}if(a==='resume'){resume();return}if(a==='back'){closePanel();return}if(a==='quit'){if(network.hubActive){toast('AI Hub is running this round. The match will finish with the round.');return}network.disconnect();goTitle();return}if(['settings','controls','about','dev','online'].includes(a)){openPanel(a);return}if(a==='glyphs'){settings.glyphs=settings.glyphs==='ps'?'xbox':'ps';saveSettings();renderPanel('settings');return}if(a==='assist'){settings.assist=!settings.assist;saveSettings();renderPanel('settings');return}if(a.startsWith('about-')){renderAbout(+a.split('-')[1]);return}if(a.startsWith('online-tab-')){renderOnline(a.split('-')[2]);return}if(a==='rematch'){start(game.mode==='practice'?'solo':game.mode);return}if(a==='hub-done'){return}
+ if(a.startsWith('dev-')){if(network.connected&&!network.isHost){toast('Live tuning belongs to the host.');return}const tool=a.slice(4);if(tool==='reset'){game.config={...DEFAULTS};timeScale=1;renderPanel('dev')}if(tool==='puck'){game.givePuck(game.control[network.localTeam||0]);toast('Puck delivered.')}if(tool==='refill'){game.players.forEach(p=>{p.stamina=1;p.stun=0});game.heat=[1,1];toast('Fresh legs. Wild shots armed.')}if(tool==='goal0'||tool==='goal1'){game.scores[tool==='goal0'?0:1]++;toast('Score updated.')}if(tool==='period'){game.advancePeriod();toast('Next period queued.')}if(tool==='faceoff'){game.faceoff();game.phase='faceoff';game.phaseTime=2;toast('Face-off reset.')}if(tool==='end'){game.finish();resume()}return}
+ try{if(a==='host-room'){const code=network.hostRoom();$('roomCode').value=code;$('roomHint').textContent='Share '+code+' with the other tab. Waiting for your rival…';updateNetStatus()}if(a==='join-room'){network.joinRoom($('roomCode').value);updateNetStatus();toast('Looking for that browser room…')}if(a==='create-offer'){toast('Making invite. Gathering the connection addresses…');const code=await network.createOffer();if($('signalOutput'))$('signalOutput').value=code;toast('Invite ready. Copy it and send it to your friend.');updateNetStatus()}if(a==='accept-offer'){const code=$('signalInput').value;toast('Making your answer…');const answer=await network.acceptOffer(code);if($('signalOutput'))$('signalOutput').value=answer;toast('Answer ready. Send it back to the host.');updateNetStatus()}if(a==='accept-answer'){await network.acceptAnswer($('signalInput').value);toast('Answer accepted. Connecting…')}if(a==='copy-signal'){const text=$('signalOutput').value;if(!text){toast('Make an invite or answer first.');return}try{await navigator.clipboard.writeText(text);toast('Code copied.')}catch{$('signalOutput').focus();$('signalOutput').select();toast('Select and copy this code.')}}}catch(e){toast(e.message)}
+}
+function updateNetStatus(){if($('connectionStatus'))$('connectionStatus').textContent=network.status;$('netBadge').textContent=network.connected?`${network.hubActive?'AI HUB':network.mode==='rtc'?'DIRECT LINK':'BROWSER ROOM'} • ${network.localTeam===0?'FOXES':network.localTeam===1?'FREEZE':'SERVER'}`:'';}
+document.addEventListener('click',e=>{const el=e.target.closest('[data-action]');if(el){interact(e.pointerType==='touch'?'touch':e.detail===0?lastInput:'mouse');action(el.dataset.action)}});
+document.addEventListener('pointermove',e=>{if(e.pointerType!=='touch'&&(Math.abs(e.movementX)+Math.abs(e.movementY)>0)){if(attract)interact('mouse');else if(screen==='title')idle=performance.now();}});
+document.addEventListener('pointerover',e=>{const el=e.target.closest('button');if(el&&(panelName||screen==='title')){document.querySelectorAll('.focused').forEach(b=>b.classList.remove('focused'));el.classList.add('focused');const n=focusables().indexOf(el);if(n>=0)focusIndex=n;}});
+document.addEventListener('input',e=>{if(e.target.dataset.setting){const k=e.target.dataset.setting;settings[k]=+e.target.value;audio[k==='music'?'setMusic':'setSfx'](settings[k]);e.target.nextElementSibling.textContent=Math.round(settings[k]*100)+'%';saveSettings()}if(e.target.dataset.dev){const k=e.target.dataset.dev;if(k==='timeScale')timeScale=+e.target.value;else game.config[k]=+e.target.value;e.target.nextElementSibling.textContent=(+e.target.value).toFixed(+e.target.step<1?2:0)}});
+$('pauseButton').onclick=()=>{interact(lastInput);pause()};
+function enqueue(team,type){pending[team].push(type)}
+window.addEventListener('keydown',e=>{const typing=/^(INPUT|TEXTAREA)$/.test(e.target.tagName)&&e.target.type!=='range';if(typing&&e.code!=='Escape')return;const exited=interact('keyboard');if(exited){e.preventDefault();return}if(['Space','ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Tab'].includes(e.code))e.preventDefault();if(e.repeat)return;if(e.code==='Escape'){e.preventDefault();if(panelName){if(panelName==='pause')resume();else closePanel()}else pause();return}if(panelName||screen==='title'){if(e.code==='Enter'||e.code==='Space'){e.preventDefault();menuNav(0,0,true)}else if(['ArrowDown','KeyS'].includes(e.code))menuNav(0,1);else if(['ArrowUp','KeyW'].includes(e.code))menuNav(0,-1);else if(e.code==='ArrowLeft')menuNav(-1,0);else if(e.code==='ArrowRight')menuNav(1,0);return}keys.add(e.code);const map={KeyE:[0,'pass'],KeyF:[0,'check'],KeyQ:[0,'switch'],Tab:[0,'switch'],KeyK:[1,'pass'],KeyL:[1,'check'],KeyU:[1,'switch']};if(map[e.code])enqueue(...map[e.code]);});
+window.addEventListener('keyup',e=>{keys.delete(e.code)});window.addEventListener('blur',()=>{clearControls();if(screen==='game'&&!network.connected&&!attract&&!panelName)pause()});
+$('arena').addEventListener('contextmenu',e=>e.preventDefault());
+$('arena').addEventListener('pointermove',e=>{if(e.pointerType==='touch'){const t=touches.get(e.pointerId);if(!t)return;t.x=e.clientX;t.y=e.clientY;if(t.side==='left'){touchMove=t;const dx=t.x-t.sx,dy=t.y-t.sy,d=Math.hypot(dx,dy)||1;const scale=Math.min(d,38)/d;$('touchStick').firstElementChild.style.transform=`translate(${dx*scale}px,${dy*scale}px)`}else{touchAim=t;$('touchHint').style.left=e.clientX+'px';$('touchHint').style.top=(e.clientY-50)+'px'}return}pointer.x=e.clientX;pointer.y=e.clientY;pointer.active=true;if(Math.abs(e.movementX)+Math.abs(e.movementY)>0){lastInput='mouse';if(screen==='title')idle=performance.now()}});
+$('arena').addEventListener('pointerdown',e=>{if(interact(e.pointerType==='touch'?'touch':'mouse'))return;if(screen!=='game'||panelName)return;e.preventDefault();$('arena').setPointerCapture(e.pointerId);if(e.pointerType==='touch'){const t={side:e.clientX<innerWidth*.46?'left':'right',sx:e.clientX,sy:e.clientY,x:e.clientX,y:e.clientY,at:performance.now()};touches.set(e.pointerId,t);if(t.side==='left'){touchMove=t;$('touchStick').style.left=t.sx+'px';$('touchStick').style.top=t.sy+'px';show('touchStick')}else{touchAim=t;$('touchHint').textContent=game.owner===game.control[network.localTeam||0]?'DRAG • RELEASE TO SHOOT':'RELEASE TO CHECK';$('touchHint').style.left=t.x+'px';$('touchHint').style.top=(t.y-50)+'px';show('touchHint')}}else{pointer.x=e.clientX;pointer.y=e.clientY;pointer.active=true;if(e.button===0)pointer.shoot=true;if(e.button===2)enqueue(0,'pass');if(e.button===1)enqueue(0,'check')}});
+function touchEnd(e){const t=touches.get(e.pointerId);if(t){if(t.side==='left'){touchMove=null;show('touchStick',false)}else{const team=network.localTeam||0;const p=game.players[game.control[team]];const moved=Math.hypot(t.x-t.sx,t.y-t.sy);const tap=performance.now()-t.at<230&&moved<14;if(game.owner===p.id){if(tap)enqueue(0,'pass');else{p.charge=Math.max(p.charge,.6);pending[0].push('touch-shoot')}}else enqueue(0,'check');touchAim=null;show('touchHint',false)}touches.delete(e.pointerId)}else if(e.button===0)pointer.shoot=false;}
+$('arena').addEventListener('pointerup',touchEnd);$('arena').addEventListener('pointercancel',touchEnd);
+function playerAim(team){const p=game.players[game.control[team]];if(pointer.active&&lastInput==='mouse'){const pos=view.aimAt(pointer.x,pointer.y);return{x:pos.x-p.x,z:pos.z-p.z}}if(touchAim){const dx=touchAim.x-touchAim.sx,dz=touchAim.y-touchAim.sy;if(Math.hypot(dx,dz)>16)return{x:dx,z:dz}}const keeper=game.players[team===0?5:4];const corner=keeper.z>0?-2.65:2.65;return{x:(team===0?24:-24)-p.x,z:corner-p.z}}
+function assistAim(aim,team){if(!settings.assist||!aim)return aim;const p=game.players[game.control[team]],dir=team===0?1:-1,d=Math.hypot(aim.x,aim.z)||1;const goal={x:dir*24-p.x,z:-p.z},g=Math.hypot(goal.x,goal.z)||1;const dot=(aim.x*goal.x+aim.z*goal.z)/(d*g);if(dot>.96)return{x:aim.x*.65+goal.x/g*d*.35,z:aim.z*.65+goal.z/g*d*.35};return aim}
+function readInput(team,localIndex=team){let x=0,z=0,boost=false,shoot=false,aim=null;if(localIndex===0){x=+keys.has('KeyD')-+keys.has('KeyA');z=+keys.has('KeyS')-+keys.has('KeyW');boost=keys.has('ShiftLeft')||keys.has('ShiftRight');shoot=keys.has('Space')||pointer.shoot;aim=playerAim(team);if(touchMove){x=(touchMove.x-touchMove.sx)/45;z=(touchMove.y-touchMove.sy)/45;boost=Math.hypot(x,z)>.9;shoot=!!touchAim}if(lastInput==='touch'&&!touchAim)aim=playerAim(team)}else{x=+keys.has('ArrowRight')-+keys.has('ArrowLeft');z=+keys.has('ArrowDown')-+keys.has('ArrowUp');boost=keys.has('KeyO');shoot=keys.has('KeyJ');}
+ const pads=[...navigator.getGamepads?.()||[]].filter(Boolean),pad=pads[localIndex];if(pad){const ax=pad.axes||[];if(Math.hypot(ax[0]||0,ax[1]||0)>.16){x=ax[0];z=ax[1]}if(Math.hypot(ax[2]||0,ax[3]||0)>.24)aim={x:ax[2],z:ax[3]};boost=boost||pad.buttons[5]?.pressed;shoot=shoot||pad.buttons[2]?.pressed||pad.buttons[7]?.pressed;}
+ if(!aim){const p=game.players[game.control[team]];aim={x:Math.cos(p.angle),z:Math.sin(p.angle)}}return{x,z,boost,shoot,aim:assistAim(aim,team)};}
+function pollPads(){const pads=[...navigator.getGamepads?.()||[]].filter(Boolean);pads.forEach((pad,i)=>{if(!pad)return;const prev=padPrev.get(pad.index)||[];const now=pad.buttons.map(b=>!!b.pressed);const changed=now.some((v,j)=>v&&!prev[j])||(pad.axes||[]).some(a=>Math.abs(a)>.24);if(changed){if(interact('gamepad')){padPrev.set(pad.index,now);return}}const edge=j=>now[j]&&!prev[j];if(panelName||screen==='title'){let dx=0,dy=0;if(edge(12))dy=-1;if(edge(13))dy=1;if(edge(14))dx=-1;if(edge(15))dx=1;const n=performance.now();if(n-menuAxisAt>210){if(Math.abs(pad.axes[1]||0)>.55)dy=Math.sign(pad.axes[1]);if(Math.abs(pad.axes[0]||0)>.55)dx=Math.sign(pad.axes[0]);if(dx||dy)menuAxisAt=n;}if(dx||dy)menuNav(dx,dy);if(edge(0))menuNav(0,0,true);if(edge(1)||(edge(9)&&!(network.hubActive&&now[8]))){if(panelName==='pause')resume();else if(panelName)closePanel();}}else{if(edge(9)&&!(network.hubActive&&now[8]))pause();if(edge(0))enqueue(i,'pass');if(edge(1))enqueue(i,'check');if(edge(4))enqueue(i,'switch')}padPrev.set(pad.index,now);});}
+function dispatchActions(team,index,input){for(const a of pending[index].splice(0)){if(a==='touch-shoot')game.action(team,'shoot',input.aim);else game.action(team,a,input.aim)}}
+network.onEvent=(type,data)=>{if(type==='hub-ready'){hubWaiting=true;screen='game';show('titleScreen',false);show('hud');toast('AI Hub connected. Waiting for the face-off.');updateNetStatus()}if(type==='start'){hubStarted=true;hubWaiting=true;game.start('online');game.remote=true;screen='game';panelName='';show('modal',false);show('titleScreen',false);show('hud')}if(type==='peer-connected'){start('online');toast(`Opponent connected. You skate for the ${network.localTeam===0?'Foxes':'Freeze'}.`);updateNetStatus()}if(type==='input'&&network.isHost&&!hubEnded){remoteInput=data.input||{};remoteSeen=performance.now();remoteSeenByTeam[data.from%2]=remoteSeen;if(!paused&&!hubWaiting&&game.active&&Array.isArray(remoteInput.actions))remoteInput.actions.forEach(a=>{const team=data.from%2,type=typeof a==='string'?a:a.type;if(type==='shoot'&&typeof a==='object'){const p=game.players[game.control[team]];p.charge=Math.max(p.charge,Math.min(1,a.charge||0));}game.action(team,type,remoteInput.aim);});}if(type==='state'&&!network.isHost&&!hubEnded){remotePaused=!!data.paused;game.applySnapshot(data);if(screen!=='game'){screen='game';show('titleScreen',false);show('hud')}if(data.sfx)for(const e of data.sfx){if(typeof e==='string')audio.sfx(e);else if(e.id>remoteAudioSeq){remoteAudioSeq=e.id;audio.sfx(e.type);if(e.type==='goal')audio.voice('goal');if(e.type==='finish')audio.voice('win');}}}
+ if(type==='time-up'){if(network.isHost){game.finish();network.finish(game.scores,game.stats)}}if(type==='end'){hubEnded=true;hubWaiting=false;paused=true;audio.setMusic(0);audio.setSfx(0);audio.enabled=false;if(audio.ctx){audio.master.gain.cancelScheduledValues(audio.ctx.currentTime);audio.master.gain.setValueAtTime(0,audio.ctx.currentTime);}clearControls();if(game.phase!=='result')game.finish();openPanel('result','game');updateNetStatus()}if(type==='peer-left'){updateNetStatus();if(network.hubActive){if(network.isHost){game.finish();network.finish(game.scores)}}else{paused=true;openPanel('pause','game');toast('Your rival left the rink. Return to title to reconnect.')}}if(type==='error')toast(data.message);};
+function hints(){let mode=lastInput==='gamepad'?settings.glyphs:lastInput==='touch'?'touch':'keys';if(oldHint===mode)return;oldHint=mode;const map=mode==='ps'?[['×','PASS'],['□','HOLD / SHOOT'],['○','CHECK'],['R1','BOOST']]:mode==='xbox'?[['A','PASS'],['X','HOLD / SHOOT'],['B','CHECK'],['RB','BOOST']]:[['E','PASS'],['SPACE','HOLD / SHOOT'],['F','CHECK'],['SHIFT','BOOST']];$('controlHints').innerHTML=map.map(([k,t])=>`<span><b class="glyph">${k}</b>${t}</span>`).join('')}
+function updateHUD(){for(let t=0;t<2;t++){$('score'+t).textContent=game.scores[t];$('heat'+t).style.width=game.heat[t]*100+'%'}const sec=Math.ceil(game.time);$('clock').textContent=game.mode==='practice'?'SKILLS':`${Math.floor(sec/60)}:${String(sec%60).padStart(2,'0')}`;$('period').textContent=game.period===4?'SUDDEN DEATH':`PERIOD ${game.period} / 3`;const team=network.connected?network.localTeam||0:0,p=game.players[game.control[team]];$('playerName').textContent=`${String(p.id+1).padStart(2,'0')} / ${team===0?'FOXES':'FREEZE'}`;$('stamina').style.width=(p.stamina*100)+'%';$('puckStatus').textContent=game.owner===p.id?(p.charge>.1?`SHOT CHARGING ${Math.round(p.charge*100)}%`:game.heat[team]>=.99?'WILD SHOT READY':'YOU HAVE THE PUCK'):'FIND A LITTLE SPACE';hints();const banner=remotePaused?'HOST TIME OUT':hubWaiting?'WAITING FOR THE FACE-OFF':game.phase==='faceoff'?`FACE-OFF IN ${Math.max(1,Math.ceil(game.phaseTime))}`:game.bannerTime>0?game.banner:'';$('banner').textContent=banner;show('banner',!!banner&&!panelName&&screen==='game');if(game.mode==='practice'){const drills=[['GET YOUR LEGS','Skate around the rink. Use WASD or the left stick.'],['MAKE A FRIEND','Pass to your partner: E / ×. Control follows the puck.'],['LOAD IT UP','Hold Space / □ to charge past halfway, then release.'],['A FRIENDLY NUDGE','Get close to the cyan rival. F / ○ checks.'],['LIGHT THE LAMP','Shoot past the keeper into the right-hand net.']];const d=drills[game.drill?.step||0];if(d)$('drill').innerHTML=`<small>SKILLS CLUB • ${(game.drill?.step||0)+1} / 5</small><strong>${d[0]}</strong><p>${d[1]}</p>`;}}
+let eventCursor=0;
+function loop(now){requestAnimationFrame(loop);if(!game||!view)return;const dt=Math.min(.06,(now-previous)/1000);previous=now;pollPads();if(screen==='title'&&!panelName&&now-idle>10000&&!network.hubActive){attract=true;start('attract')}
+ if(network.hubActive&&hubStarted&&hubWaiting&&globalThis.AIHub.time()>=0)hubWaiting=false;
+ if(screen==='game'&&!hubEnded){if(!network.connected||network.isHost){if(!paused&&!hubWaiting){const localTeam=network.connected?network.localTeam:0;const ins=[{},{}];if(localTeam!==null){const main=readInput(localTeam,0);ins[localTeam]=main;dispatchActions(localTeam,0,main)}if(network.connected){const other=network.localTeam===null?null:1-network.localTeam;if(other!==null)ins[other]=now-remoteSeen<500?remoteInput:{};else{ins[0]=now-remoteSeenByTeam[0]<500?remoteInputs[0]||{}:{};ins[1]=now-remoteSeenByTeam[1]<500?remoteInputs[1]||{}:{}}}else if(game.mode==='local'){ins[1]=readInput(1,1);dispatchActions(1,1,ins[1])}game.update(dt*timeScale,ins);}if(network.connected){const s=game.snapshot();s.paused=paused;s.sfx=game.events.slice(-8).map(e=>{if(!audioEventIds.has(e))audioEventIds.set(e,++networkAudioSeq);return{id:audioEventIds.get(e),type:e.type}});network.sendState(s)}}else if(!paused){const team=network.localTeam||0,inp=remotePaused?{}:readInput(team,0);const count=pending[0].length;inp.actions=remotePaused?[]:pending[0].slice(0,count).map(a=>a==='touch-shoot'?{type:'shoot',charge:.6}:a);if(network.sendInput(inp))pending[0].splice(0,count);game.effects.forEach(e=>e.age+=dt);}
+  if(game.phase==='result'&&!resultShown&&!attract){resultShown=true;if(network.hubActive){if(network.isHost)network.finish(game.scores,[{shots:game.stats.shots[0],checks:game.stats.checks[0]},{shots:game.stats.shots[1],checks:game.stats.checks[1]}])}else openPanel('result','game');}
+  if(attract&&game.phase==='result'){game.phaseTime=(game.phaseTime||0)-dt;if(game.phaseTime< -2)game.start('attract');}
+  updateHUD();
+ }
+ // Menus keep the tiny rink alive, with no hidden match running.
+ if(screen==='title'){game.players.forEach((p,i)=>{p.x=[-9,-3,8,14,-22,22][i];p.z=[-2,5,1,-6,0,0][i];p.angle=i<2?0:Math.PI;p.controlled=false;p.vx=.7;p.vz=0;});game.puck={x:-7.8,z:-2};}
+ view.render(game.snapshot(),dt);audio.update(dt,{phase:paused?'paused':game.phase,mode:game.mode,players:game.players,paused:paused||screen==='title'||hubWaiting||hubEnded});if(game.phase!==lastPhase){lastPhase=game.phase;}
+}
+const remoteInputs=[{},{}];const baseNetworkEvent=network.onEvent;network.onEvent=(t,d)=>{if(t==='input'&&network.info?.server){remoteInputs[d.from%2]=d.input||{};}baseNetworkEvent(t,d)};
+async function boot(){try{[game,view]=await Promise.all([HockeyGame.create(audio),createView($('arena'))]);window.addEventListener('resize',()=>view.resize());await network.init();if(network.hubActive)network.ready();else goTitle();show('loading',false);previous=performance.now();requestAnimationFrame(loop);globalThis.__game={game,view,audio,network,start,action,get screen(){return screen},get panel(){return panelName},get paused(){return paused},get input(){return lastInput},step:(n=1,inputs=[{},{}])=>{for(let i=0;i<n;i++)game.step(1/60)},setIdle:seconds=>{idle=performance.now()-seconds*1000},interview:INTERVIEW,audioAudit:()=>HockeyAudio.audit()};globalThis.__gameReady=true;}catch(e){console.error(e);$('loadNote').innerHTML=`The rink could not open: ${escapeHTML(e.message)}<br><button class="panelButton" onclick="location.reload()">Try the ice again</button>`;}}
+boot();
+
+</script>
+
+<script type="application/json" id="cc-matrix-run">{"schema":2,"tool":"cc-matrix","stampedAt":"2026-11-06T05:11:19.683Z","id":"gpt-6.1-sol-ultra__20261105-215207__xc770e4__Ice-Hockey-Puck-Wild","lab":"OpenAI","cli":"Codex CLI","aiHub":{"name":"Ice Hockey Puck Wild","tagline":"Good ice. Bad manners.","description":"A cel-shaded arcade hockey night with slippery skating, sharp passes, big checks, and wild slapshots. Play three quick periods against the Freeze, learn in Skills Club, or face a friend locally or online.","type":"Game","genre":"Sports","source":"Ice Hockey (1981)","players":"1–2","controls":"WASD / left stick skate; mouse / right stick aim; hold Space / Square shoot; E / Cross pass; F / Circle check; Q / L1 switch; Shift / R1 boost; Esc / Options pause.","tags":["3d","arcade","sports","versus","retro","cel-shaded"],"model":"GPT-6.1 Sol","effort":"ultra","harness":"Codex","sourceDate":"2026-11-06T04:52:07.774Z","themeColor":"#101d32","session":"1","sessionPlayers":"2-2","sessionMode":"shared-world","sessionMinutes":"4","sessionGoal":"Score more goals over three quick periods. A tie goes to sudden death.","sessionHowto":"Left stick skate. Cross pass. Hold Square to charge, release to shoot. Circle check. L1 switch. R1 boost.","provenance":{"sourceKind":"cc-matrix-run","artifactId":"gpt-6.1-sol-ultra__20261105-215207__xc770e4__Ice-Hockey-Puck-Wild","sourceDate":"2026-11-06T04:52:07.774Z"}},"result":{"id":"gpt-6.1-sol-ultra__20261105-215207__xc770e4__Ice-Hockey-Puck-Wild","agent":"gpt-6.1-sol","provider":"codex","effort":"ultra","ultracode":false,"source":"IceHockey1981","genre":"genre-v3","perspective":"pov-engine-v4","gameTitle":"ttl-riff","research":"res-none","package":"pkg-html-v3","techStack":"tech-v6","artDirection":"art-cel-v2","animation":"ani-engine-v2","audio":"aud-code-v3","online":"multi-ai-hub","workspace":"ws-sub-v3","performance":"perf-max-v2","testing":"test-tools-v3","spend":"spend-free","premise":"prem-inspired","scope":"scope-inspired","attractMode":"attr-10s","multiplayer":"mp-hub","tone":"tone-src-v2","uiux":"ui-10ft-v4","done":"done-full","sourceInfo":"info-exit-v3","testingFeedback":"tf-4q","engineFeedback":"ef-6q-v2","promptFeedback":"pf-4q-v2","goal":"on-exit-v2","model":"gpt-6.1-sol","cliVersion":"0.166.0","promptVersion":"2e12c7a2","variantHashes":{"source":"a3bcd002","genre":"5917dd6a","perspective":"69673a49","gameTitle":"504804f8","research":"8fa33e31","package":"dd8f52ae","techStack":"84a623aa","artDirection":"59b07781","animation":"25672c4c","audio":"0abe1411","online":"7601bd74","workspace":"2dd7c02e","performance":"b911bf18","testing":"42631416","spend":"9511cae8","premise":"cc0f429b","scope":"46b0fba2","attractMode":"0d642414","multiplayer":"b62eb499","tone":"3bfc327e","uiux":"f4edc796","done":"cb3a46b6","sourceInfo":"8fe63a44","testingFeedback":"95f71baf","engineFeedback":"25041b09","promptFeedback":"7ce5dc6e","goal":"7559d614"},"goalSkipped":true,"status":"ok","exitCode":0,"wallMinutes":19.198366666666665,"costUsd":null,"costSource":"none","inputTokens":11912021,"cachedTokens":11668480,"cacheWriteTokens":0,"outputTokens":97311,"reasoningTokens":28777,"turns":1,"toolCalls":79,"tools":{"command_execution":75,"image_view":4},"toolErrors":6,"models":{"gpt-6.1-sol":{"uncachedInputTokens":243541,"cacheReadTokens":11668480,"cacheWriteTokens":0,"outputTokens":97311,"reasoningTokens":28777}},"isError":false,"sessionLog":"read","apiCalls":164,"subagents":3,"compactions":0,"firstTokenMs":2680,"contextWindow":828400,"helpers":{"agents":3,"inputTokens":7865483,"cachedTokens":7683328,"cacheWriteTokens":0,"outputTokens":53724,"reasoningTokens":15920,"apiCalls":109},"uncachedInputTokens":243541,"totalTokens":12009332,"apiCostUsd":2.62704,"replyChars":2663,"delivered":true,"kb":122,"loc":1378,"files":42,"todos":0,"gameSha256":"fb78bb2b21739268e06bdb9fb6bd277c3f2bc3c3264badbbac34881d9713b310","entry":"gpt-6.1-sol-ultra__20261105-215207__xc770e4__Ice-Hockey-Puck-Wild/work/Ice-Hockey-Puck-Wild-Ice-Hockey-1981-gpt-6.1-sol-ultra-20261105-215207.html","exitInterview":"ok","startedAt":"2026-11-06T04:52:07.774Z","finishedAt":"2026-11-06T05:11:19.676Z","timeZone":"America/Vancouver","isolated":true},"prompt":{"version":"2e12c7a2","number":7,"savedAt":"2026-11-06T02:02:45.318Z","firstRanAt":"2026-11-05T04:18:53.957Z","template":"SOURCE: {{source}}\n\nGenre: {{genre}}\n\nPerspective: {{perspective}}\n\nGame Title: {{gameTitle}}\n\nResearch: {{research}}\n\nPackage: {{package}}\n\nTech Stack: {{techStack}}\n\nArt Direction: {{artDirection}}\n\nAnimation: {{animation}}\n\nAudio: {{audio}}\n\nOnline: {{online}}\n\nWorking Environment and deliverable:\n{{workspace}}\n\nPerformance: {{performance}}\n\nTesting: {{testing}}\n\nEffort: {{spend}}\n\n## This computer\n{{machine}}\n\n## Goal\n\n{{premise}}\n\nScope\n\n{{scope}}\n\nAttract Mode: {{attractMode}}\n\nMultiplayer: {{multiplayer}}\n\nNarrative tone: {{tone}}\n\n## UI & UX: {{uiux}}\n\n## Done\n{{done}}\n\n## Source Information\n{{sourceInfo}}\n\nTesting Feedback\n\n{{testingFeedback}}\n\nEngine Feedback\n\n{{engineFeedback}}\n\nPrompt Feedback\n\n{{promptFeedback}}","text":"SOURCE: Ice Hockey - 1981\n\nGenre: Pick the game genre(s) that best fit the source and would make the best game.\n\nPerspective: Pick the camera perspective(s) that best fit the genre and source and would make the best game.\n\nGame Title: A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).\n\nResearch: Do not search the internet, use only native model knowledge.\n\nPackage: For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-215207].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.\n\nTech Stack: Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.\n\nArt Direction: Use a stylized cel-shaded / ink look for the game.\n\nAnimation: Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.\n\nAudio: All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.\n\nOnline: https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub\n\nWorking Environment and deliverable:\nCreate a subfolder called [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-215207] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-215207].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.\n\nPerformance: Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.\n\nTesting: Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.\n\nEffort: Spend effort however you see fit.\n\n## This computer\nChecked 2026-11-05 19:08 (America/Vancouver) by node check-environment.mjs.\n\n- **Computer:** IVY-DESK-1747k: Intel(R) Core(TM) i7-14700F, 20 cores, 16 GB RAM, 8 GB swap. Ubuntu 26.04.1 LTS on WSL2 (Linux 6.18.33.2-microsoft-standard-WSL2).\n- **Space:** 757 GB free in the home folder. /tmp: 7.8 GB, in memory (tmpfs), 7.7 GB free when checked.\n- **Display:** none for runs (they run with DISPLAY unset), so a headed browser needs xvfb-run.\n- **Browsers:** Playwright 1.63.0 for Python (from playwright.sync_api import sync_playwright), with Chromium 153.0 (WebGL 2, software-rendered; WebGPU, software-rendered, when started with --enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader), Firefox 155.0 (no WebGL), WebKit 26.6 (WebGL 2) already downloaded. Phone and tablet device profiles are built in.\n  Python's Playwright is in its own environment, not the system Python (python3 can't import it): run scripts that drive a browser with `~/.local/share/pipx/venvs/playwright/bin/python script.py`, or `uv run --with playwright==1.63.0 python script.py`.\n  WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game's state instead.\n  For Node, `npm install playwright@1.63.0` in your folder uses the browsers already downloaded; another version downloads its own.\n- **Tools:** node 24.21.0, npm 12.1.0, python3 3.14.4, pip3 25.1.1, git 2.53.0, gh 2.101.0, curl 8.18.0, wget 1.25.0, jq 1.8.1, ffmpeg 9.0.2, ffprobe 9.0.2, sqlite3 3.46.1, zip 3.0, unzip 6.00, rustc 1.98.1, cargo 1.98.1, go 1.27.1, java 21.0.12, xvfb-run, magick 7.1.2, sox 14.4.2, bun 1.3.14, deno 2.9.7, uv 0.12.18, tsc 5.9.3, wasm-bindgen 0.2.129.\n- **Rust:** rustup's toolchains 1.98.1, stable; the wasm32-unknown-unknown target on 1.98.1, stable.\n- **Not installed:** lighthouse, shot-scraper, esbuild.\n- **Network:** internet works (github.com, registry.npmjs.org).\n\n### What this computer doesn't have\n\nNo script can check these, so they're written by hand. Test with the stand-ins; anything that needs the real thing is checked as far as it can be here, never required.\n\n- **No physical controller.** Emulate one: replace navigator.getGamepads with a stub that returns a pad in the standard mapping (Playwright's add_init_script / addInitScript).\n- **No touch device.** Use Playwright's phone and tablet profiles, which have touch, and tap with page.touchscreen.\n- **Nobody to listen.** Check sound by what Web Audio produces: render it with an OfflineAudioContext, or read levels from an AnalyserNode.\n- **No second player.** Play multiplayer with two browser pages (or contexts) on this computer.\n- **No real iPhone or iPad.** WebKit with an iPhone profile is the closest; it isn't iOS Safari.\n- **No TV.** Judge the 10-foot view from screenshots at 1920×1080.\n\n### Sharing this computer\n\n- Other agents run here at the same time. Keep one or two browsers open at once, and close them when you're done.\n- Keep every file you make inside your own folder, not /tmp or a parent folder: /tmp is shared.\n- The browsers are already downloaded: don't run `playwright install` or `playwright install-deps`.\n- The system Python has no packages. For one (Pillow, numpy …), use uv: `uv run --with pillow python script.py`, adding `--with playwright==1.63.0` when the script drives a browser too (a newer Playwright can't find the browsers here).\n\n## Goal\n\nBuild an original game inspired by the source.\n\nScope\n\nCreate a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.\n\nAttract Mode: After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.\n\nMultiplayer: Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.\n\nNarrative tone: Use a writing style similar to the source’s.\n\n## UI & UX: 10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible\n\n## Done\nNo TODOs, placeholders, or stubbed features. The demo is complete.\n\n## Source Information\nCRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: 2026-11-05 21:52:07\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: Codex CLI (headless); Linux\n- Model: OpenAI, gpt-6.1-sol, reasoning effort ultra\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.\n\nTesting Feedback\n\n- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?\n\nEngine Feedback\n\n- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?\n\nPrompt Feedback\n\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?\n","goal":null,"sections":{"source":{"id":"IceHockey1981","text":"Ice Hockey - 1981","hash":"a3bcd002"},"genre":{"id":"genre-v3","text":"Pick the game genre(s) that best fit the source and would make the best game.","hash":"5917dd6a"},"perspective":{"id":"pov-engine-v4","text":"Pick the camera perspective(s) that best fit the genre and source and would make the best game.","hash":"69673a49"},"gameTitle":{"id":"ttl-riff","text":"A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).","hash":"504804f8"},"research":{"id":"res-none","text":"Do not search the internet, use only native model knowledge.","hash":"8fa33e31"},"package":{"id":"pkg-html-v3","text":"For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.","hash":"dd8f52ae"},"techStack":{"id":"tech-v6","text":"Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.","hash":"84a623aa"},"artDirection":{"id":"art-cel-v2","text":"Use a stylized cel-shaded / ink look for the game.","hash":"59b07781"},"animation":{"id":"ani-engine-v2","text":"Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.","hash":"25672c4c"},"audio":{"id":"aud-code-v3","text":"All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.","hash":"0abe1411"},"online":{"id":"multi-ai-hub","text":"https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub","hash":"7601bd74"},"workspace":{"id":"ws-sub-v3","text":"Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.","hash":"2dd7c02e"},"performance":{"id":"perf-max-v2","text":"Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.","hash":"b911bf18"},"testing":{"id":"test-tools-v3","text":"Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.","hash":"42631416"},"spend":{"id":"spend-free","text":"Spend effort however you see fit.","hash":"9511cae8"},"premise":{"id":"prem-inspired","text":"Build an original game inspired by the source.","hash":"cc0f429b"},"scope":{"id":"scope-inspired","text":"Create a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.","hash":"46b0fba2"},"attractMode":{"id":"attr-10s","text":"After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.","hash":"0d642414"},"multiplayer":{"id":"mp-hub","text":"Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.","hash":"b62eb499"},"tone":{"id":"tone-src-v2","text":"Use a writing style similar to the source’s.","hash":"3bfc327e"},"uiux":{"id":"ui-10ft-v4","text":"10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible","hash":"f4edc796"},"done":{"id":"done-full","text":"No TODOs, placeholders, or stubbed features. The demo is complete.","hash":"cb3a46b6"},"sourceInfo":{"id":"info-exit-v3","text":"CRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: {{date}}\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: {{environment}}\n- Model: {{lab}}, {{model}}, reasoning effort {{effort}}\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.","hash":"8fe63a44"},"testingFeedback":{"id":"tf-4q","text":"- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?","hash":"95f71baf"},"engineFeedback":{"id":"ef-6q-v2","text":"- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?","hash":"25041b09"},"promptFeedback":{"id":"pf-4q-v2","text":"- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?","hash":"7ce5dc6e"},"goal":{"id":"on-exit-v2","text":"the bundled single .html file exists in this folder's root, every feature in TASK.md that can be done on this computer is implemented with no TODOs, placeholders or stubs, exit-interview.json in this folder's root parses as JSON and answers every field, and your final reply contains the Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections.","hash":"7559d614"}}},"interview":{"file":"exit-interview.json","answers":{"sourceInformation":{"date":"2026-11-05 21:52:07","source":"Ice Hockey (1981)","plan":"none","genre":"Arcade sports / hockey","perspective":"Elevated broadcast view, 3D rink","tech":"Three.js r180 (0.180.0), WebGPURenderer with WebGL compatibility, Three.js TSL, Rapier 3D 0.19.3, Web Audio API, Gamepad API, WebRTC, BroadcastChannel, AI Hub session client","artDirection":"Procedural cel-shaded / ink illustration; ivory ice, navy ink, golden Foxes and cyan Freeze","animation":"Three.js AnimationMixer, AnimationClip and native keyframe tracks; skating and stick swings, procedural stun and goal particles","audio":"Code-written rink-organ / chiptune music, synthesized effects and Animalese / Simlish-style gibberish announcer; music defaults to 10%","online":"Two-player AI Hub shared-world host authority; standalone WebRTC invite / answer; same-origin browser-tab rooms via BroadcastChannel. Direct WebRTC has STUN but no TURN relay.","testing":"Headless Chromium WebGPU and WebGL compatibility, scripted physics and match / skills playthroughs, two-page multiplayer, emulated standard gamepad and touch, offline synthesized audio analysis. Physical controller, real touchscreen, real iOS and cross-NAT network behavior: unknown.","research":"No internet research. Native model knowledge for source and design. Retrieved the user-specified AI Hub integration code and exact runtime dependencies.","environment":"Codex CLI (headless); Linux","model":"OpenAI, gpt-6.1-sol, reasoning effort ultra","usage":"added on import"},"testingFeedback":[{"question":"How many issues did testing catch?","answer":"Testing and implementation review caught 12 distinct issues: a Rapier API mismatch, six multiplayer/lifecycle bugs, three input edge cases, opponent skills progression, and AI Wild Shot behavior. All were fixed and the final suite passed."},{"question":"How many would be considered critical issues / game breaking?","answer":"2 critical issues: a Rapier descriptor method mismatch prevented startup; multiplayer throttling could discard guest action commands. Both were fixed."},{"question":"What was the most helpful test you ran?","answer":"The real Rapier scripted match and skills playthroughs, which exercised scoring, period transitions, sudden death and all five skills steps."},{"question":"What was the least helpful test you ran?","answer":"The initial headless WebGPU screenshot was blank; runtime state assertions and WebGL compatibility screenshots were more useful. The initial title screenshot test also outlasted the attract timer, so the test now freezes idle only during capture."}],"engineFeedback":[{"question":"What did you like most about the engine?","answer":"Three.js TSL made banded cel lighting and ink-shell characters straightforward, and native AnimationMixer clips fit procedural players."},{"question":"Did you get stuck or guess wrong?","answer":"Guessed one Rapier descriptor method name incorrectly; runtime testing exposed it. Browser input and multiplayer throttling also required explicit integration checks."},{"question":"What was the most important thing you had to build yourself?","answer":"The full hockey simulation: puck possession, skater AI, keepers, passes, charged shots, checking, periods and host-authoritative replication."},{"question":"What was the hardest part about using the engine?","answer":"Coordinating fixed-step Rapier physics, puck possession and network snapshots with browser rendering and input."},{"question":"What did you change in the engine, and why? (none if nothing)","answer":"none"},{"question":"If you could change one thing about the engine, what would it be?","answer":"A more direct built-in path for headless WebGPU image readback and screenshot testing."}],"promptFeedback":[{"question":"What did you like most about this prompt?","answer":"The clear single-file deliverable, controller-first direction and required attract mode made the intended experience concrete."},{"question":"What was confusing?","answer":"No plan file was supplied. The no-research instruction and required online integration URL were interpreted as allowing retrieval of integration code without source research."},{"question":"What was the hardest thing to do?","answer":"Finishing gameplay, three input families, real multiplayer, procedural art/audio and verification together as one polished vertical slice."},{"question":"What would you change in this prompt?","answer":"Provide a pinned downloadable AI Hub integration package and clarify whether standalone online play should include a hosted relay."}],"aiHub":{"name":"Ice Hockey Puck Wild","tagline":"Good ice. Bad manners.","description":"A cel-shaded arcade hockey night with slippery skating, sharp passes, big checks, and wild slapshots. Play three quick periods against the Freeze, learn in Skills Club, or face a friend locally or online.","type":"Game","genre":"Sports","source":"Ice Hockey (1981)","series":"","players":"1–2","controls":"WASD / left stick skate; mouse / right stick aim; hold Space / Square shoot; E / Cross pass; F / Circle check; Q / L1 switch; Shift / R1 boost; Esc / Options pause.","tags":["3d","arcade","sports","versus","retro","cel-shaded"]}},"reply":"[**Play Ice Hockey Puck Wild**](\u003c~/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-215207__xc770e4/work/Ice-Hockey-Puck-Wild-Ice-Hockey-1981-gpt-6.1-sol-ultra-20261105-215207.html>)\n\nComplete single-file game. **128 checks passed; zero failures.** Includes skills training, couch and online multiplayer, attract mode, and live developer tools.\n\n**Source Information**\n\n- **Date:** 2026-11-05 21:52:07. **Source:** Ice Hockey (1981). **Plan:** none.\n- **Genre:** arcade hockey. **Perspective:** elevated 3D broadcast view.\n- **Tech:** Three.js r180, WebGPU with WebGL compatibility, TSL, Rapier 0.19.3, Gamepad API, Web Audio, WebRTC, BroadcastChannel, AI Hub.\n- **Art Direction:** procedural cel shading and ink outlines. **Animation:** native Three.js AnimationMixer clips and procedural effects.\n- **Audio:** synthesized music, effects, and gibberish voices; music defaults to 10%.\n- **Online:** two-player AI Hub, direct WebRTC, and browser-tab rooms. Direct connections have no TURN relay.\n- **Testing:** scripted match and skills playthroughs, controller/touch emulation, audio analysis, multiplayer, and official Hub conformance. Real hardware and cross-NAT behavior: unknown.\n- **Research:** none; retrieved integration code and dependencies only.\n- **Environment:** Codex CLI (headless); Linux. **Model:** OpenAI, gpt-6.1-sol, reasoning effort ultra. **Usage:** added on import.\n\n**Testing Feedback**\n\n1. Testing and review found 12 issues; all fixed.\n2. Two were critical: startup failure and dropped guest actions.\n3. Most helpful: the actual-physics match and skills playthroughs.\n4. Least helpful: headless WebGPU screenshots, which appeared blank; compatibility-renderer screenshots enabled visual inspection.\n\n**Engine Feedback**\n\n1. TSL cel shading and native animation clips worked well.\n2. I initially used an incorrect Rapier descriptor method.\n3. The main custom system was the hockey simulation and multiplayer replication.\n4. Coordinating possession, physics, input, and network snapshots was hardest.\n5. Engine changes: none.\n6. Better headless WebGPU image capture would help.\n\n**Prompt Feedback**\n\n1. The controller-first direction and concrete deliverable were useful.\n2. The no-research rule alongside the required integration URL needed interpretation.\n3. Completing gameplay, input, networking, art, audio, and verification together was hardest.\n4. I would specify a pinned Hub package and whether standalone multiplayer requires a hosted relay.\n\nThese details are also in the game’s About screen and [exit-interview.json](\u003c~/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-215207__xc770e4/work/exit-interview.json>)."}}</script>
+</body></html>

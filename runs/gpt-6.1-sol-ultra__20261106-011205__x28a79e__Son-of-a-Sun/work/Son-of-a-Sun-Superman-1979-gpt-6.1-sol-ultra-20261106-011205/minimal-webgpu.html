@@ -1,0 +1,16 @@
+<!doctype html><meta charset="utf-8"><title>WebGPU cube fixture</title><style>body{margin:0}canvas{display:block}</style>
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js';
+window.probe={ready:false,frames:0,lost:null,error:null};
+try {
+ const scene=new THREE.Scene();scene.background=new THREE.Color(0x83bfc5);
+ const camera=new THREE.PerspectiveCamera(60,innerWidth/innerHeight,.1,100);camera.position.set(2,2,4);camera.lookAt(0,0,0);
+ const cube=new THREE.Mesh(new THREE.BoxGeometry(),new THREE.MeshStandardMaterial({color:0xffbf4c}));scene.add(cube);
+ scene.add(new THREE.HemisphereLight(0xffffff,0x163548,3));
+ const renderer=new THREE.WebGPURenderer({antialias:true});renderer.setSize(innerWidth,innerHeight);document.body.append(renderer.domElement);await renderer.init();
+ window.probe.backend=renderer.backend.isWebGPUBackend?'WebGPU':'WebGL2';
+ renderer.backend.device?.lost.then(v=>window.probe.lost={message:v.message,reason:v.reason});
+ await renderer.compileAsync(scene,camera);window.probe.ready=true;
+ renderer.setAnimationLoop(()=>{cube.rotation.y+=.01;renderer.render(scene,camera);window.probe.frames++;window.probe.render={...renderer.info.render};});
+} catch(e) {window.probe.error=String(e.stack||e);console.error(e);}
+</script>

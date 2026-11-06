@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 19:13:27",
+    "source": "Cosmic Ark (Imagic, 1982), designed by Rob Fulop",
+    "plan": "none",
+    "genre": "Arcade shooter and rescue flight action",
+    "perspective": "Fixed orthographic 2.5D; orbital arena and side-view planetary rescue",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL 2 fallback, TSL cel shading; Rapier 3D 0.19.3; Gamepad API; Web Audio; PeerJS 1.5.5; AI Hub Session Protocol v1, client 1.4.0. All dependencies bundled in one HTML.",
+    "artDirection": "Procedural cel-shaded 3D with ink outlines, paper cream, seafoam, coral, and illustrated floating worlds",
+    "animation": "Three.js AnimationMixer, AnimationClip, and keyframe tracks for ship hover, creature hops and ears, and shuttle thrusters; physics-driven movement and procedural effects",
+    "audio": "Code-generated Web Audio music (10% by default), synthesized effects, and Animalese-style gibberish creature voices; no audio files",
+    "online": "Host-authoritative shared-world co-op for 1–4 via AI Hub; 1–2 standalone WebRTC room co-op via PeerJS with BroadcastChannel same-browser fallback; 1–2 local alternating-role co-op",
+    "testing": "37 grouped headless acceptance checks passed: offline file startup, Chromium WebGPU and WebGL 2, scripted full campaign and hazards, emulated standard gamepad, phone-profile multitouch, Web Audio analyser, standalone WebRTC and relay-free two-page co-op, and four official AI Hub scenarios (including 150 ms latency, jitter, 5% loss, host departure, and a dedicated host). Visual review at 1920×1080 and portrait mobile. Physical controller feel, human audio listening, real TV/iOS hardware, and external NAT combinations: unknown.",
+    "research": "Imagic original instruction manual via AtariAge; original Cosmic Ark gameplay footage via Silver Blue’s Retrocade for visuals and audio context; AI Hub README, client and official harness; official Three.js WebGPU documentation",
+    "environment": "Codex CLI (headless); Linux (Ubuntu on WSL2)",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and review found 11 implementation defects, all corrected. The final run passed 37 grouped acceptance checks, including four official AI Hub harness scenarios. Additional failed assertions about frame timing and test setup were corrected separately.",
+    "3 were game breaking in the affected paths: planetary laser collision, the relay-free room handshake, and restarting solo after a remote pause.",
+    "The explicit Rapier laser/shuttle collision test exposed a nonfunctional hazard that a successful campaign run alone did not reveal. The official Hub harness also verified network lifecycle behavior.",
+    "Headless WSL WebGPU screenshots were blank. Live renderer state and WebGL 2 visual captures supplied usable evidence instead."
+  ],
+  "engineFeedback": [
+    "Three.js makes procedural scenes and native keyframe animation easy to combine, while TSL shares the cel shader across WebGPU and WebGL 2.",
+    "I initially assumed Rapier would report fixed/kinematic sensor collisions by default. Its active collision types had to be enabled explicitly. Headless WSL WebGPU captures also required WebGL 2 for visual inspection.",
+    "The two-phase rescue campaign, controller-first interface, synthesized sound, and authoritative multiplayer replication.",
+    "Keeping physics, native animations, replicated state, and input changes coherent across two distinct play modes.",
+    "none",
+    "A built-in cross-backend toon material and clearer WebGPU startup diagnostics would simplify this kind of game."
+  ],
+  "promptFeedback": [
+    "The distinctive source, controller-first requirements, and complete-demo scope encouraged a cohesive game instead of an isolated mechanic.",
+    "The expected standalone network transport was unspecified; I chose WebRTC room codes plus a same-browser fallback.",
+    "Delivering the full campaign, multiple input methods, procedural art and audio, and verified shared-world multiplayer in one portable file.",
+    "Specify the desired standalone networking service and whether its public relay availability should be part of acceptance."
+  ],
+  "aiHub": {
+    "name": "Cosmic Arkipelago",
+    "tagline": "Small ship. Big rescue.",
+    "description": "Defend your Ark from four-way meteor storms, then swoop down to three doomed worlds and beam six little beasties to safety. Fly solo or crew up for one last escape from a dying star.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Cosmic Ark (1982)",
+    "series": "",
+    "players": "1–4",
+    "controls": "WASD/arrows or stick: fire/fly; Space/Cross or mouse: beam; Shift/Circle: boost; E/R1: pulse; Esc/Options: pause; touch: drag to fly with assisted aim and beam.",
+    "tags": [
+      "3d",
+      "arcade",
+      "co-op",
+      "sci-fi",
+      "retro",
+      "vehicles"
+    ]
+  }
+}

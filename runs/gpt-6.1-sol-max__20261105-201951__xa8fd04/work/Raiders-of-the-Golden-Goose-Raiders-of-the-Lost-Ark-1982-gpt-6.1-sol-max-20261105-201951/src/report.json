@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:19:51",
+    "source": "Raiders of the Lost Ark (1982, as supplied)",
+    "plan": "none",
+    "genre": "Action-adventure with traversal, combat and environmental puzzles",
+    "perspective": "3D cinematic overhead / three-quarter camera",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL2 compatibility fallback; Rapier 3D 0.19.3; Gamepad API; Web Audio; HTML/CSS/JavaScript; AI Hub session client 1.4.0",
+    "artDirection": "Original procedural low-poly geometry, cel-shaded materials, ink silhouettes and edges, warm sandstone, jungle teal and pulp-paper UI",
+    "animation": "Three.js AnimationMixer, AnimationClip and NumberKeyframeTrack; original idle, run, whip, shoot, jump, roll, grapple, downed and vault-door clips; procedural secondary effects",
+    "audio": "Code-written adaptive procedural adventure music at 10% default music volume, synthesized effects and Animalese-style gibberish voices; no audio files",
+    "online": "1–4 player AI Hub shared-world co-op with host authority, snapshots, input replication and dedicated-server support; standalone 1–4 player couch co-op",
+    "testing": "112 passing automated checks: complete default-balance solo and online playthroughs, all curios, clean exchange, failure/retry, saves, live tuning, two/four couch seats, emulated standard gamepad and multitouch, assisted gap jump, offline music/effects/voice renders, unmodified AI Hub harness with 2 and 4 seats, 150 ms latency, 50 ms jitter, 5% loss, host departure and dedicated server; visual checks at 1920×1080, 844×390 and 390×844. Physical controller, physical touch devices and real iPhone/iPad: unknown.",
+    "research": "none for the source; native model knowledge. Only the supplied AI Hub integration documentation and pinned dependency code were read.",
+    "environment": "Codex CLI (headless); Linux / Ubuntu on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing caught and fixed 6 game/UI/integration defects: accessible button names, a blocked escape doorway, touch attack input, attract-mode interaction range, four-seat readiness timing, and initial snapshot reliability. Additional test-driver setup issues were corrected. The final complete suite passed 112/112 checks.",
+    "2 blocking defects: the escape route collider prevented completion, and cold shader warm-up caused four-seat sessions to miss the readiness deadline. Both were fixed.",
+    "The ordinary-action, default-balance whole-expedition script: it found the blocked escape and verified the lens chain, combat, all three curios, clean idol swap and victory; the same run also completed through a real shared-world session.",
+    "A single live byte-based audio-level read was least helpful: quiet 10% music rounded to silence. Separate offline renders of music, effects and voices provided measurable nonzero RMS and peak levels instead."
+  ],
+  "engineFeedback": [
+    "Three.js combined cel materials, procedural geometry, instancing and AnimationMixer clips cleanly; Rapier supplied stable collision, jumping and movable debris.",
+    "Yes. Headless WebGPU presentation and Chromium socket-path limits needed test-driver corrections. I also initially awaited shader warm-up before Hub readiness, which missed the four-seat deadline; initialization now separates networking readiness from GPU warm-up.",
+    "The adventure state machine, traversal and combat actions, checkpoint saves, controller focus and adaptive prompts, touch assistance, and host-authoritative co-op replication.",
+    "Coordinating fixed-step Rapier simulation, native animation, cold WebGPU pipeline compilation and Hub session timing across multiple copies.",
+    "none",
+    "A first-class controller-focused game UI and character-controller integration would reduce the amount of custom infrastructure."
+  ],
+  "promptFeedback": [
+    "The concrete stack, controller-first goals, procedural audio and required developer tools gave the vertical slice a clear identity; the supplied multiplayer harness made integration verifiable.",
+    "The source is labelled 1982; whether the film or a particular game adaptation was intended is unknown. I retained the supplied label and used native knowledge of the pulp-adventure premise.",
+    "Polishing one continuous adventure across keyboard/mouse, standard gamepads, touch, couch co-op and network co-op while retaining a single-file export.",
+    "Clarify the source edition and the expected standalone multiplayer mode. Retain the developer-tool and integration-harness requirements."
+  ],
+  "aiHub": {
+    "name": "Raiders of the Golden Goose",
+    "tagline": "Fortune favours the slightly reckless.",
+    "description": "Whip across a ruined river temple, redirect ancient sunlight and liberate a very valuable goose from rival treasure hunters. Make the swap, then outrun the temple's enormous objection in a complete solo or co-op pulp adventure.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Raiders of the Lost Ark (1982)",
+    "series": "Indiana Jones",
+    "players": "1–4",
+    "controls": "Left stick / WASD move; Square / LMB whip; R2 / RMB shoot; Cross / Space jump; Circle / Ctrl roll; Triangle / E interact; L2 / Shift sprint; Options / Esc pause.",
+    "tags": ["3d", "co-op", "puzzle", "low-poly", "adventure", "third-person"]
+  }
+}

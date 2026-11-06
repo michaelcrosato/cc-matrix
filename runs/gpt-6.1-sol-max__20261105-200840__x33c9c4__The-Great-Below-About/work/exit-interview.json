@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:08:40",
+    "source": "Pitfall II: Lost Caverns (1984), David Crane / Activision",
+    "plan": "none",
+    "genre": "Exploration platformer / adventure",
+    "perspective": "2.5D side view with an orthographic camera",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGL 2 recovery; Rapier 2D 0.19.3; Gamepad API; Web Audio API; PeerJS 1.5.5; AI Hub Session Protocol v1 client 1.4.0; native HTML/CSS/JavaScript; Bun bundler. A local r180 async-pipeline rejection patch enables renderer recovery.",
+    "artDirection": "Original procedural 3D cel shading, inverted-hull ink outlines, cut-rock caverns, warm expedition illustration, botanical details, and restrained paper grain",
+    "animation": "Three.js AnimationMixer, AnimationClip and native keyframe tracks for idle, run, jump, climb, swim, balloon flight, waving, fox tail and creature wingbeats; procedural secondary effects",
+    "audio": "Original code-synthesized adaptive marimba/flute/bass adventure music at 10% default volume, procedural effects and ambient percussion; formant-filtered Animalese-style rescue gibberish; no audio files",
+    "online": "1–4-player ghost expedition races through AI Hub; standalone room races with WebRTC/PeerJS public signaling and a BroadcastChannel local transport",
+    "testing": "One-command headless Chromium suite: software WebGPU and WebGL 2; 2,895-step complete physics playthrough; every enemy and balloon pop; score/rewind persistence; native animation; developer tools; offline file launch with network blocked; emulated standard controller; actual synthetic multitouch; offline and live audio signal; WebRTC on isolated browser contexts using a loopback signaling server; BroadcastChannel rooms; official AI Hub harness with 2 and 4 seats, 150 ms latency, 50 ms jitter, 5% packet loss, time-up and host departure; composition screenshots. Physical controller, real mobile hardware, subjective listening and public signaling service availability: unknown.",
+    "research": "Activision's 1984 Atari 2600 manual (AtariAge transcription), AtariAge screenshots and game profile, original manual/advertising excerpts: connected cavern layout, ladders, swimming, balloon rides, rear-approach rat, rescue objectives, healing checkpoints, score penalties, creature movement, contextual music and diary tone. AI Hub protocol and client; Three.js r180 source; Rapier documentation and pinned API definitions",
+    "environment": "Codex CLI (headless); Linux / Ubuntu 26.04 on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Four issues: bundle replacement syntax, a stalled graphics startup on GPU pipeline rejection, oversized visual effects, and transient gameplay text showing through the title. All corrected. Additional code-review findings for free flight, mouse activity and fall scoring are covered by verification.",
+    "Two: the initial bundle could not start, and a rejected graphics pipeline could block four-player Hub readiness.",
+    "The scripted complete expedition through actual Rapier physics, combined with the official four-player Hub harness under packet loss and host departure.",
+    "The first WebGPU screenshot was captured before a trustworthy visible frame. State assertions and WebGL 2 composition captures provided useful evidence instead."
+  ],
+  "engineFeedback": [
+    "Native AnimationMixer clips, procedural geometry and toon materials make a cohesive illustrated expedition possible in one file.",
+    "Yes. r180 compileAsync could remain unresolved after a native GPU pipeline rejection during multi-copy headless testing. Reading the pinned engine source identified the missing rejection path.",
+    "The traversal state machine, expedition/score systems, controller-first menus, procedural audio, touch assistance and ghost-race networking.",
+    "Recovering from software WebGPU device/pipeline failures while meeting the Hub readiness deadline, and validating visual composition when WebGPU screenshots were unreliable.",
+    "Patched r180 WebGPUPipelineUtils to forward createRenderPipelineAsync rejection into its awaited promise. This lets the application catch the error and recover to WebGL 2 instead of hanging startup. No other engine changes.",
+    "Make renderer initialization and asynchronous pipeline failures reject reliably, with a standard backend-recovery path."
+  ],
+  "promptFeedback": [
+    "The specific source, procedural audio requirement and 10-foot controller-first direction give the expedition a coherent identity.",
+    "Standalone multiplayer transport and the exact scope of the feedback fields were open to interpretation.",
+    "Integrating every traversal mechanic, polished procedural art, standalone networking and the complete hub lifecycle into a single offline-capable file.",
+    "Specify whether standalone multiplayer should use a public signaling service, manual signaling or a supplied server."
+  ],
+  "aiHub": {
+    "name": "The Great Below-About",
+    "tagline": "A little lost. A long way down.",
+    "description": "An ink-and-cel expedition through fern caves, eel-filled rivers and a balloon belfry. Find two missing friends and the Sunseed Prism, or race up to three ghost explorers for the best haul.",
+    "type": "Game",
+    "genre": "Platformer",
+    "source": "Pitfall II: Lost Caverns (1984)",
+    "series": "Pitfall!",
+    "players": "1–4",
+    "controls": "WASD / arrows or left stick: move, climb, swim and steer; Space / Cross: jump; E / Square: release balloon; M / Triangle: map; Esc / Options: pause; touch: drag left half and tap right half.",
+    "tags": [
+      "2.5d",
+      "side-scrolling",
+      "exploration",
+      "retro",
+      "adventure",
+      "multiplayer"
+    ]
+  }
+}

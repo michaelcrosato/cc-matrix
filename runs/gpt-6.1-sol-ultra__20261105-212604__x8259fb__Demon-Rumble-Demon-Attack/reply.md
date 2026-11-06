@@ -1,0 +1,13 @@
+[**Play Demon Rumble**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-212604__x8259fb/work/Demon-Rumble-Demon-Attack-gpt-6.1-sol-ultra-20261105-212604.html)
+
+Self-contained HTML with six encounters, a three-phase boss, co-op, attract mode, controller/touch support, and developer tools. **163 checks passed; 0 failures.**
+
+[Exit interview JSON](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-212604__x8259fb/work/exit-interview.json) · [Development files and testing command](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-212604__x8259fb/work/Demon-Rumble-Demon-Attack-gpt-6.1-sol-ultra-20261105-212604/README.md)
+
+**Source Information:** Date: 2026-11-05 21:26:04. Source: Demon Attack (1982). Plan: none. Genre: arcade shooter. Perspective: front-facing orthographic 2.5D. Tech: Three.js r180/WebGPU with WebGL 2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, WebRTC, AI Hub client 1.4.0. Art: procedural cel shading and ink outlines. Animation: AnimationMixer clips and procedural movement. Audio: synthesized music at 10%, effects and gibberish voices. Online: AI Hub 1–4 players, direct WebRTC two-player, local two-player. Testing: headless campaigns, emulated controller/touch, audio rendering and multiplayer harness. Research: none beyond supplied integration files. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort ultra. Usage: added on import.
+
+**Testing Feedback:** Found and corrected 14 issues, including three classified as critical online issues. Most helpful: repeated campaign playthroughs and actual multiplayer testing. Least helpful: blank software-WebGPU screenshots; fallback rendering enabled visual review. Physical hardware, listening quality and restrictive-NAT connectivity remain unknown.
+
+**Engine Feedback:** Liked procedural geometry and native animation. Initial autoplay aiming assumptions were wrong and corrected. Built combat, input, menus, synthesis and networking. Hardest: coordinating physics, rendering and replicated state. Engine changes: none. Desired improvement: consistent built-in toon shading and outlines across rendering backends.
+
+**Prompt Feedback:** Liked the concrete controller-first and attract-mode requirements. Multiplayer topology and campaign duration were unclear. Hardest: completing and verifying every input method and multiplayer flow. Suggested change: specify campaign duration and whether relay-backed connectivity is required.

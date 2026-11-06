@@ -1,0 +1,91 @@
+B023 Function definition does not bind loop variable `page_errors`
+  --> tests/hub-test.py:35:44
+   |
+33 |         page = context.new_page()
+34 |         page_errors = []
+35 |         page.on('pageerror', lambda error: page_errors.append(str(error)))
+   |                                            ^^^^^^^^^^^
+36 |         parameters = {
+37 |             'game': '../' + game_filename.lstrip('/'),
+   |
+
+BLE001 Do not catch blind exception: `Exception`
+  --> tests/hub-test.py:63:16
+   |
+61 |             if page_errors:
+62 |                 failures.append(f'Hub {name}: browser errors — ' + '; '.join(page_errors[:5]))
+63 |         except Exception as error:
+   |                ^^^^^^^^^
+64 |             test_count += 1
+65 |             detail = str(error).split('\n')[0]
+   |
+
+S110 `try`-`except`-`pass` detected, consider logging the exception
+  --> tests/hub-test.py:74:13
+   |
+72 |                           detail += '; ' + '; '.join(r['name'] + ': ' + r.get('detail', '') for r in failed)
+73 |                       detail += '; ' + '; '.join(report.get('log', [])[-4:])
+74 | /             except Exception:
+75 | |                 pass
+   | |____________________^
+76 |               failures.append(f'Hub {name}: {detail}')
+77 |           finally:
+   |
+
+BLE001 Do not catch blind exception: `Exception`
+  --> tests/hub-test.py:74:20
+   |
+72 |                         detail += '; ' + '; '.join(r['name'] + ': ' + r.get('detail', '') for r in failed)
+73 |                     detail += '; ' + '; '.join(report.get('log', [])[-4:])
+74 |             except Exception:
+   |                    ^^^^^^^^^
+75 |                 pass
+76 |             failures.append(f'Hub {name}: {detail}')
+   |
+
+PLW1510 `subprocess.run` without explicit `check` argument
+  --> tests/test_game.py:24:12
+   |
+22 | def command(args, label, env=None):
+23 |     global count
+24 |     result=subprocess.run(args,cwd=PROJECT,env=env,text=True,capture_output=True)
+   |            ^^^^^^^^^^^^^^
+25 |     output=result.stdout+'\n'+result.stderr
+26 |     matches=re.findall(r'(\d+)/(\d+) .*checks passed',output)
+   |
+help: Add explicit `check=False`
+
+BLE001 Do not catch blind exception: `Exception`
+  --> tests/test_game.py:64:12
+   |
+62 |         assert '<script src=' not in html and 'type="importmap"' not in html
+63 |         count+=1
+64 |     except Exception as error:
+   |            ^^^^^^^^^
+65 |         count+=1;failures.append('FAIL deliverable metadata: '+str(error))
+66 |     server=ThreadingHTTPServer(('127.0.0.1',0),functools.partial(QuietHandler,directory=str(ROOT)))
+   |
+
+BLE001 Do not catch blind exception: `Exception`
+  --> tests/test_game.py:77:20
+   |
+75 |                 f,n=module('jungle_browser_checks','browser-checks.py').run_browser_checks(browser,origin,STEM+'.html')
+76 |                 failures.extend('FAIL '+x for x in f);count+=n
+77 |             except Exception as error:
+   |                    ^^^^^^^^^
+78 |                 count+=1;failures.append('FAIL browser suite: '+str(error).split('\n')[0])
+79 |             finally:
+   |
+
+BLE001 Do not catch blind exception: `Exception`
+  --> tests/test_game.py:83:12
+   |
+81 |             f,n=module('jungle_hub_checks','hub-test.py').test_hub(lambda:p.chromium.launch(headless=True,args=FLAGS),origin,STEM+'.ht…
+82 |             failures.extend('FAIL '+x for x in f);count+=n
+83 |     except Exception as error:
+   |            ^^^^^^^^^
+84 |         count+=1;failures.append('FAIL test runner: '+str(error).split('\n')[0])
+85 |     finally:
+   |
+
+Found 9 errors (1 fixed, 8 remaining).

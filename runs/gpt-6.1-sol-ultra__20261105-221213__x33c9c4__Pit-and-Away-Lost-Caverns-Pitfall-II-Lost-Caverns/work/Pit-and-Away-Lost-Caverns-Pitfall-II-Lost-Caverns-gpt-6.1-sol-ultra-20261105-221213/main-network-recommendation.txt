@@ -1,0 +1,85 @@
+REVIEW OF main.js / PROTOCOL REPAIR NOTES
+
+1. Use one ordinary player state and one KCC per ACTUAL seat, regardless of whether that seat belongs to this browser.
+   A playerless host is another process, not another adventurer: its info.me is absent from network.players.
+   network.players are id0 and id1; server me is2. Both seats need ordinary independent physics and both inputs arrive remotely.
+
+   Suggested structures (pseudocode, no changes made to main.js):
+   const actors = new Map();             // seat id -> player state
+   const avatarPhysics = new WeakMap();  // player state -> {body,collider,controller}
+   const remoteInputs = new Map();       // seat id -> {input,at}
+   const localId = network.isServer ? null : network.playerId;
+   for (const seat of network.players) actors.set(seat.id, {...newPlayer(3+seat.id*.8,.04),id:seat.id});
+   // Solo: id0. Standalone host/join: id0,id1. Hub: ONLY network.players.
+   // newPlayer does not contain Rapier objects; snapshots remain JSON-safe.
+   // makePhysics(p) creates a fresh kinematic body/capsule/KCC at p's spawn.
+
+2. updatePlayer should use the same KCC path for every actor.
+   At the first line: const {body,collider,controller}=avatarPhysics.get(p).
+   Delete the if(isRemote){manual integration...} branch and always run the KCC code.
+   Synchronize the corresponding body in climb/float/dev paths for every actor.
+   damage(p) must select avatarPhysics.get(p), respawn that actor, penalize the shared score once, clear vy/mode, and give normal invulnerability.
+   Current remote damage does not clear float mode/vy and teleports the local body's collider when damage(p) is used.
+   Filter ALL avatar colliders from each KCC collision query so they can share ladders:
+     controller.computeColliderMovement(collider,delta,undefined,undefined,c=>!avatarColliderHandles.has(c.handle));
+
+3. Assign inputs by seat ID, never by a catch-all remotePlayer reference.
+   onInput(data,id): remoteInputs.set(id,{input:{x:data.x,y:data.y,jump:data.jump,interact:data.action},at:performance.now()}).
+   Each authoritative tick:
+     for (const [id,p] of actors) {
+       const remote=remoteInputs.get(id);
+       const input=id===localId ? (modalPage?ZERO_INPUT:inp)
+         : remote && performance.now()-remote.at<650 ? remote.input : ZERO_INPUT;
+       updatePlayer(dt,input,p,id!==localId);
+     }
+     world.timestep=dt; world.step(); stats.time+=dt;
+   Guests ONLY send input and apply snapshots. They must not world.step(), update balloon.cooldown, collect items, or damage anything.
+   sendInput expects action, while current main uses interact: sendInput({...inp,action:inp.interact}).
+
+4. Balloon ownership must belong to a seat rather than the local process.
+   Add balloon.ownerId=null. Remove !isRemote from the catch condition, and add !balloon.attached.
+   When caught: ownerId=p.id; attached=true. Only that float actor updates balloon x/y.
+   When released/popped/damaged: detach/reset cooldown ONLY IF balloon.ownerId===p.id.
+   One shared balloon is enough: the next explorer can catch its respawn after3seconds.
+   This lets either remote seat finish the complete source route, including on playerless hosts.
+
+5. Snapshot explicit IDs and both physical avatars:
+   {players:[...actors.values()].map(p=>({...p})),stats,collected,balloon,worldTime,mode}.
+   Guest picks own state by network.playerId; all other seat IDs become other visuals.
+   Server rendering may be skipped entirely; no camera/input belongs to server id2.
+   Host player must not be moved by guest input. Guest must not swap identities when joining before first input.
+
+6. Gate authoritative gameplay before touching worldTime/enemies/physics:
+   const sessionBlocked=network.hub && !network.running;
+   if(sessionBlocked) { audio.update(dt,{active:false}); if(network.ended)audio.stop(); return; }
+   In hub, build/reset once, set playing=true without prompting, hide title, then call ready().
+   No attract mode, title, restart/quit actions, or user gesture before ready.
+   On a connected shared host, local pause/map overlays neutralize local input but keep the shared simulation running for companions.
+   All copies stop gameplay/input/transmission and audio on end. Network .running already checks .ended.
+
+7. Report current score on every authoritative frame:
+   network.setScore(stats.score,stats.finished);
+   Otherwise time-up returns the constructor's score0 rather than current team score.
+
+8. Final replication precedes the hub result:
+   stats.finished=true; add the final bonus; network.setScore(stats.score,true);
+   network.sendSnapshot(makeSnapshot(),true); // optional force argument now implemented in hub.js
+   network.finish(stats.score,true); showResults();
+   This forced, reliable snapshot prevents losing the final state to the normal80ms throttle.
+
+9. In readPad, Options is ignored while Create is held:
+   if(edge(9) && !b[8]) pauseGame();
+   The same guard applies to resume from pause. The combination belongs to the Hub.
+   Hub restart/title/quit callbacks must return immediately, including keyboard shortcuts.
+
+METADATA TO USE
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-2">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Rescue two friends, recover the Sunstone, and find the way out.">
+<meta name="hub:session-howto" content="Stick/WASD: move, climb, swim. Cross/Space: jump, catch/release balloon.">
+<meta name="hub:session-minutes" content="8">
+Only add <meta name="hub:webgpu" content="required"> if there is no WebGL fallback.
+The protocol mandates unmodified session.js as FIRST head script after charset; inline it before imports/other scripts.
+The generic official harness's four-seat stress recipe should use2 for this declared two-seat game.
+Required scenarios here:2-player standard,2-player latency150/jitter50/loss5,host-leave,and2-player server.

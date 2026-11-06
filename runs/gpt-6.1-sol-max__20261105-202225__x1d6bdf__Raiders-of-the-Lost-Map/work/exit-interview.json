@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 20:22:25",
+    "source": "Raiders of the Lost Ark (Atari 2600, 1982), designed by Howard Scott Warshaw",
+    "plan": "none",
+    "genre": "Action-adventure; environmental puzzles; cooperative exploration",
+    "perspective": "Third-person isometric 3D, with a tracking escape camera",
+    "tech": "Three.js 0.180.0 (r180), WebGPURenderer with WebGL 2 fallback, Rapier 3D 0.19.3, Gamepad API, Web Audio API, AI Hub Session Protocol v1 client 1.4.0, PeerJS 1.5.5, BroadcastChannel. Interface fonts: Barlow Condensed and DM Sans.",
+    "artDirection": "Stylized cel shading, ink outlines, hand-built low-poly sandstone dioramas, warm paper and teal shadows",
+    "animation": "Native Three.js AnimationMixer and AnimationClip keyframes for walk, idle, whip, evade, flute, digging, parachuting and biplane propeller; procedural snake motion and effects",
+    "audio": "Original code-synthesized adventure music (10% by default), procedural sound effects, Animalese-style gibberish voices; no audio files",
+    "online": "1–4 player host-authoritative cooperative AI Hub sessions; standalone WebRTC rooms via PeerJS and same-browser BroadcastChannel rooms",
+    "testing": "Headless Chromium 153 with Playwright 1.63.0: 33/33 full-suite checks, including the complete seven-chapter playthrough, WebGPU state, WebGL 2 visual review, emulated standard gamepad, touch, offline audio, two-page co-op, direct file launch, and four official AI Hub harness scenarios. A stricter replay regression passed 8/8, showing every chapter and nine whip crossings. Visuals reviewed at 1600x900 and 1920x1080; touch profile 844x390. No FPS targets. Physical controller, real mobile hardware, subjective audio quality and cross-device WebRTC: unknown.",
+    "research": "Original Atari instruction manual and reverse-engineered game analysis: inventory, trading, snakes and flute, map room, ankh, mesas, parachute, room silhouettes, enemies and TIA sound / title music. AI Hub Session Protocol v1, Three.js r180 toon material source, and Rapier character-controller documentation. Original audio recordings were not auditioned.",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "10 findings were addressed: 8 game or UX issues and 2 test-tool issues. These included co-op roster synchronization, title loading and attract timing, replay routing, shared Sprite geometry cleanup, canyon visibility, controller scrolling, material colors and an automated evade timing error.",
+    "1 critical issue: a newly joined co-op player could lack a visible actor when the roster changed without a room change. It was fixed and two-page state convergence passed.",
+    "The two-page authoritative co-op state comparison caught the missing remote actor. The complete seven-chapter scripted playthrough also verified trading, both puzzles, traversal, boss combat, defeat recovery and the escape ending.",
+    "The WebGPU screenshot was blank in this headless environment. WebGPU state assertions and WebGL 2 captures provided the useful evidence instead."
+  ],
+  "engineFeedback": [
+    "Native toon materials, reusable geometry and AnimationMixer clips made a coherent ink-and-sand world possible without external art or animation files.",
+    "Yes. Cloning a toon node material lost the intended cloth colors, and disposing shared Sprite geometry hid later inscriptions. A WebGPU queue-completion diagnostic also failed on the headless adapter. Each was corrected or replaced with an appropriate check.",
+    "The adventure state machine, contextual interactions, procedural art and audio, input abstraction, checkpoints, and host-authoritative cooperative networking.",
+    "Keeping Rapier movement, animated whip traversal, room transitions and replicated actors synchronized across input methods and network copies.",
+    "none",
+    "An integrated character controller and a small gameplay / resource-lifetime inspector would make this kind of single-file game easier to build."
+  ],
+  "promptFeedback": [
+    "The specific source, controller-first requirements, complete vertical-slice scope and explicit testing stand-ins gave the game a clear direction.",
+    "Standalone networking transport, signaling-service expectations and the target length of the demo were unspecified. There was no blocking ambiguity.",
+    "Combining seven distinct adventure sequences, procedural presentation, controller and touch support, and verified standalone / AI Hub co-op in one HTML file.",
+    "Specify the standalone networking transport, whether public signaling services are acceptable, and a target demo duration."
+  ],
+  "aiHub": {
+    "name": "Raiders of the Lost Map",
+    "tagline": "One missing map. Far too many snakes.",
+    "description": "Trade in a bustling bazaar, charm snakes, solve a sunlit atlas, and swing across desert mesas in a cel-shaded pulp adventure. Recover a buried reliquary and outrun the inevitable boulder, solo or with up to three partners.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Raiders of the Lost Ark (1982)",
+    "series": "Indiana Jones",
+    "players": "1–4",
+    "controls": "Left stick / WASD move; Square / LMB whip; Triangle / E interact; Cross / Space evade; Circle / F flute or parachute; L1 / Q notes; Options / Esc pause.",
+    "tags": [
+      "3d",
+      "adventure",
+      "co-op",
+      "isometric",
+      "exploration",
+      "boss fights"
+    ]
+  }
+}

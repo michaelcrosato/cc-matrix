@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!--HUB_CLIENT-->
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#172b2a">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23172b2a'/%3E%3Ctext x='32' y='47' text-anchor='middle' font-size='48' fill='%23ffd05b'%3E✣%3C/text%3E%3C/svg%3E">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="ghost">
+<meta name="hub:session-goal" content="Keep the convoy alive. Clear three desert sectors, rescue crew, and destroy the Dustmaker. Highest score wins.">
+<meta name="hub:session-howto" content="Left stick / WASD: fly. Right stick / mouse: aim. R2 / Space / LMB: fire. Square / E: rocket. Circle / Q: flares. Hover low to rescue. L3 / Shift: boost.">
+<meta name="hub:session-minutes" content="5">
+<title>Chopper Caboodle · A desert-sky arcade</title>
+<style>/*GAME_STYLE*/</style>
+</head>
+<body data-input="keyboard" data-screen="boot">
+<div id="sky"></div><canvas id="game" aria-label="Chopper Caboodle game world"></canvas><div class="grain"></div><div class="vignette"></div>
+<div id="boot"><div class="boot-mark">✣</div><strong>CHOPPER CABOODLE</strong><span id="boot-message">WARMING THE ROTORS…</span><div class="load-track"><i></i></div></div>
+<div id="error" hidden><h1>HOLD THAT FLIGHT.</h1><p id="error-text"></p><button onclick="location.reload()">TRY AGAIN</button></div>
+
+<section class="screen title-screen" id="title" hidden>
+  <header class="title-mast"><span class="wingmark">✣</span><span>DESERT PATROL DIVISION<span class="mast-line">FLIGHT NO. 07 / EST. 1982</span></span></header>
+  <div class="title-copy"><div class="eyebrow"><i></i> A DESERT-SKY ARCADE</div><h1>CHOPPER<br><em>CABOODLE</em></h1><p class="tagline">A little chopper.<br>A whole lot of trouble.</p>
+    <nav class="title-menu" aria-label="Main menu"><button class="primary" data-action="solo"><span>SCRAMBLE</span><span class="button-glyph">↗</span></button><button data-action="coop"><span>TWO-PILOT PATROL</span><span class="menu-meta">CO-OP</span></button><div class="menu-pair"><button data-action="school">FLIGHT SCHOOL</button><button data-action="options">OPTIONS</button></div><button class="quiet" data-action="credits">ABOUT & CREDITS <span>↗</span></button></nav>
+  </div>
+  <div class="patrol-stamp"><span>KEEP THE</span><b>WHEELS</b><span>TURNING</span><i>★ ★ ★</i></div>
+  <div class="title-scene-caption"><span class="caption-line"></span><b>01 / DUST PATROL</b><span>THREE TRUCKS. ONE VERY BUSY SKY.</span></div>
+  <footer class="title-footer"><span id="title-best">PERSONAL BEST · 000000</span><span data-prompt="accept"></span><span class="idle-hint">STAND BY FOR AUTOPILOT</span></footer>
+</section>
+
+<div id="hud" hidden>
+  <div class="hud-top"><div class="score-block"><span class="tiny">PATROL SCORE</span><strong id="score">000000</strong><span class="tiny" id="reserve-count">RESERVES 2</span></div><div class="mission-block"><span class="tiny">DESERT PATROL / LIVE</span><strong id="sector-name">01 / DUST PATROL</strong><span id="objective">CLEAR THE SKY</span></div><div class="armor-block"><div><span class="tiny">P1 / HULL</span><b><span id="armor-value">100</span><small>%</small></b></div><div class="health-track"><i id="armor-fill"></i></div><div class="supply-row"><span><i class="rocket-icon">↗</i> <b id="rocket-count">05</b></span><span>✣ <b id="flare-count">03</b></span><span class="boost-track"><i id="boost-fill"></i></span></div><span id="p2-status" hidden></span></div></div>
+  <div id="boss-meter" hidden><span id="boss-phase">DUSTMAKER / ARMORED</span><div><i id="boss-fill"></i></div></div>
+  <div class="convoy-status"><span class="tiny">CONVOY</span><b id="convoy-count">3 / 3</b><div id="convoy-bars"></div></div>
+  <div id="world-labels"></div><div id="hover-status" hidden></div>
+  <div id="radio"><span class="radio-icon">▂▅▃▇</span><div><span class="tiny">GROUNDSKEEPER / RADIO</span><b id="radio-message">CONVOY FREQUENCY / 88.2</b></div></div>
+  <div class="radar-shell"><div class="radar-title"><span>THE WHOLE CABOODLE</span><span><i class="radar-dot"></i> YOU <i class="radar-dot enemy-dot"></i> RAIDERS</span></div><canvas id="radar" width="680" height="74" aria-label="Tactical radar: gold pilots, red raiders, white convoy, green rescue and field pad"></canvas></div>
+  <div class="combat-prompts"><span data-prompt="rocket"></span><span data-prompt="flare"></span><span data-prompt="boost"></span></div>
+</div>
+<div id="attract-label" hidden><b>AUTOPILOT</b><span>DEMONSTRATION FLIGHT · ANY INPUT RETURNS TO MENU</span></div>
+<div id="hubwait-label" hidden><b>WINGS AT THE READY.</b><span>THE HUB WILL CALL THE SCRAMBLE.</span></div>
+<button id="touch-menu" data-action="pause" aria-label="Pause menu" hidden>Ⅱ</button><button id="touch-rocket" data-action="touchRocket" aria-label="Fire a homing rocket" hidden>↗<span>ROCKET</span></button><div id="touch-stick" hidden><i></i></div>
+
+<section class="screen panel-screen" id="pause" hidden><div class="panel pause-panel"><div class="eyebrow" id="pause-sub">ROTOR BRAKE ENGAGED</div><h2>ON HOLD.</h2><nav><button class="primary" data-action="resume">BACK TO THE SKY <span>↗</span></button><button data-action="school">FLIGHT MANUAL</button><button data-action="options">OPTIONS</button><button data-action="dev" data-solo-only>DEVELOPER MODE</button><button data-action="retry" data-solo-only>RESTART PATROL</button><button class="quiet" data-action="title" data-solo-only>RETURN TO HANGAR</button></nav><div class="panel-footer" data-prompt="back"></div></div></section>
+
+<section class="screen panel-screen" id="options" hidden><div class="panel wide-panel"><div class="eyebrow">MAKE YOURSELF AT HOME</div><h2>FLIGHT OPTIONS.</h2><div id="settings-controls"></div><button class="primary back-button" data-action="back">ALL SET <span data-prompt="back"></span></button><p class="option-note">Music starts at 10%. Options and your best score stay on this device.</p></div></section>
+
+<section class="screen panel-screen" id="coop" hidden><div class="panel wide-panel"><div class="eyebrow">TWO PILOTS / ONE CONVOY</div><h2>BRING A WING.</h2><p class="large-copy">Share the sky. Split the trouble.<br>Both pilots protect the same three trucks.</p><div class="coop-seats"><div><b class="gold">PILOT 01</b><p>Controller 1<br>or WASD + mouse</p></div><div><b class="mint">PILOT 02</b><p>Controller 2<br>or I J K L</p><small>O fire · U rocket · H flares · N boost</small></div></div><p class="option-note">Online score races for up to four pilots are available when launched in an AI Hub session. Other pilots appear as ghost aircraft.</p><button class="primary" data-action="startCoop">SCRAMBLE TOGETHER <span>↗</span></button><button class="quiet" data-action="back">BACK</button></div></section>
+
+<section class="screen panel-screen" id="school" hidden><div class="panel manual-panel"><div class="eyebrow">FIVE THINGS BETWEEN YOU AND GLORY</div><h2>KNOW YOUR BIRD.</h2><div class="manual-grid"><article><span class="manual-number">01</span><div><h3>FLY & FIRE</h3><p>Free flight. Fast reversals. Keep red aircraft out of your convoy’s sky.</p><b><span data-prompt="fly"></span> · <span data-prompt="aim"></span><br><span data-prompt="fire"></span></b></div></article><article><span class="manual-number">02</span><div><h3>PACK A PUNCH</h3><p>Homing rockets crack armor. Flares break incoming missiles. Boost gets you there.</p><b><span data-prompt="rocket"></span> · <span data-prompt="flare"></span><br><span data-prompt="boost"></span></b></div></article><article><span class="manual-number">03</span><div><h3>HOVER TO HELP</h3><p>Slow down low over green crew beacons to winch up a survivor. Hover over the H pad to repair and rearm.</p></div></article><article><span class="manual-number">04</span><div><h3>KEEP THEM ROLLING</h3><p>Save at least one truck. Clear three sectors. Bring down the Dustmaker. Rescues and surviving trucks mean big points.</p></div></article></div><div class="manual-bottom"><button class="primary" data-action="training" data-solo-only>TAKE FLIGHT SCHOOL <span>↗</span></button><button data-action="back">ROGER THAT</button></div></div></section>
+
+<section class="screen panel-screen" id="dev" hidden><div class="panel dev-panel"><div class="eyebrow">FIELD WORKSHOP / LIVE BALANCE</div><h2>TUNE THE TROUBLE.</h2><div class="dev-scroll"><div id="dev-controls" class="dev-grid"></div><div class="dev-tools"><button id="dev-god" data-action="god">INVULNERABLE · OFF</button><button id="dev-auto" data-action="auto">AUTOPILOT · OFF</button><button data-action="refill">REPAIR & REARM ALL</button><button data-action="nextSector">NEXT SECTOR</button><button data-action="spawnBoss">SPAWN DUSTMAKER</button><button data-action="clearSector">CLEAR CURRENT SKY</button><button data-action="resetDev">RESET BALANCE DEFAULTS</button><button data-action="resetTools">RESET TEST TOOLS</button></div></div><button class="primary back-button" data-action="back">BACK TO PAUSE <span data-prompt="back"></span></button><p class="option-note">Sliders apply immediately. Raider density affects the next sector. Test tools are disabled in Hub rounds.</p></div></section>
+
+<section class="screen panel-screen" id="credits" hidden><div class="panel credits-panel"><div class="eyebrow">THE CREW BEHIND THE CABOODLE</div><h2>FLIGHT RECORD.</h2><div id="credits-body" tabindex="-1"></div><div class="credits-bottom"><span>SCROLL / ↑ ↓ TO READ</span><button class="primary" data-action="back">BACK TO HANGAR <span data-prompt="back"></span></button></div></div></section>
+
+<section class="screen panel-screen" id="result" hidden><div class="panel result-panel"><div class="eyebrow" id="result-kicker">ALL THREE SECTORS SECURE</div><h2 id="result-title">ROAD CLEAR.</h2><div class="result-main"><div><span class="tiny">PATROL SCORE</span><b id="result-score">000000</b><span class="tiny" id="result-best">PERSONAL BEST</span></div><div class="rank-seal"><small>FLIGHT RANK</small><b id="result-rank">A</b></div></div><div id="result-stats"></div><button class="primary" id="result-next" data-action="retry">FLY AGAIN <span>↗</span></button><button class="quiet" data-action="title">RETURN TO HANGAR</button></div></section>
+
+<section class="screen panel-screen" id="ended" hidden><div class="panel"><div class="eyebrow">AI HUB / PATROL REPORT</div><h2>FLIGHT LOGGED.</h2><p class="large-copy">Rotors down.<br>The Hub has your score.</p><div class="ended-score" id="ended-score">000000</div></div></section>
+<div id="toast" role="status" hidden></div>
+<script>/*GAME_SCRIPT*/</script>
+</body></html>

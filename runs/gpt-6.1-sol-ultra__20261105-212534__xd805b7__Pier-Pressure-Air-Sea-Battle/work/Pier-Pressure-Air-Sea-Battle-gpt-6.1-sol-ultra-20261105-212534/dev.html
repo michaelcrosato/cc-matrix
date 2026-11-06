@@ -1,0 +1,3927 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#102f3e">
+<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-2"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-goal" content="Defend the pier and sink the Admiral. Both gunners share a score."><meta name="hub:session-howto" content="Left stick aims, R2 fires, Square fires a broadside. Mouse aims, hold click fires, E broadside."><meta name="hub:session-minutes" content="3">
+<title>Pier Pressure · Coastal Artillery Club</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%23102c3b'/%3E%3Cpath d='M15 48L29 14H40L27 48Z' fill='%23ffcf5d'/%3E%3Cpath d='M11 48H53V55H11Z' fill='%23ed7750'/%3E%3C/svg%3E">
+<style>
+@font-face{font-family:PierDisplay;src:url(data:font/woff2;base64,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) format("woff2");font-weight:900;font-display:swap;}
+:root{--ink:#102f3e;--paper:#f4e8c9;--yellow:#ffce5d;--coral:#e96949;--teal:#459e98;--muted:#637371;font-family:Arial,Helvetica,sans-serif;color:var(--ink);font-synthesis:none;color-scheme:light}*{box-sizing:border-box}html,body{width:100%;height:100%;margin:0;overflow:hidden}body{background:#f0dfbb;user-select:none;-webkit-user-select:none;touch-action:none}button,input,select,textarea{font:inherit}button{cursor:pointer;border:0}button,input,select,textarea{outline-offset:5px}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:4px solid var(--coral)}button:disabled{opacity:.5;cursor:wait}button{transition:background .15s,transform .15s,box-shadow .15s}button:hover,button:focus-visible{transform:translateY(-2px)}[hidden]{display:none!important}#game{display:block;width:100%;height:100%;position:absolute;inset:0}body:after{content:'';pointer-events:none;position:fixed;inset:0;opacity:.045;z-index:30;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.7' filter='url(%23n)'/%3E%3C/svg%3E")}#screen{position:fixed;inset:0;pointer-events:none;z-index:3}.panel{pointer-events:auto;position:absolute}.eyebrow{font-size:clamp(12px,1.2vw,19px);font-weight:800;letter-spacing:.2em;text-transform:uppercase}.tiny{font-size:13px;letter-spacing:.12em;text-transform:uppercase;font-weight:bold}.muted{color:var(--muted)}.titlePanel{inset:0;padding:5.5vh 5vw;background:linear-gradient(90deg,#f4e8c9 0%,#f4e8c9f7 29%,#f4e8c9b8 45%,#f4e8c900 66%);display:flex;flex-direction:column;align-items:flex-start}.club{display:flex;align-items:center;gap:15px}.club .mark{width:42px;height:42px;background:var(--ink);color:var(--paper);display:grid;place-items:center;font-size:28px;transform:rotate(-7deg)}h1{font-family:PierDisplay,Impact,'Arial Black',Arial,sans-serif;font-weight:900;font-size:clamp(75px,10vw,164px);line-height:.84;letter-spacing:-.025em;margin:6vh 0 1.6vh;position:relative}h1 span{display:block}h1 .outline{color:var(--coral);-webkit-text-stroke:1px var(--ink);text-shadow:5px 5px 0 var(--ink)}.titleSub{font-size:clamp(17px,1.6vw,26px);line-height:1.5;max-width:460px;margin:1.5vh 0 3vh}.titleSub strong{font-weight:800}.titleActions{display:flex;flex-wrap:wrap;gap:12px;max-width:600px}.primary,.secondary,.navBtn{padding:17px 24px;font-weight:900;letter-spacing:.05em;font-size:clamp(16px,1.35vw,22px);text-transform:uppercase;border:2px solid var(--ink);background:var(--yellow);color:var(--ink);box-shadow:4px 4px 0 var(--ink);min-height:56px}.primary:hover,.primary:focus-visible{background:#ffe195;box-shadow:5px 7px 0 var(--ink)}.secondary{background:var(--paper);box-shadow:3px 3px 0 var(--ink)}.secondary:hover,.secondary:focus-visible{background:#fff5d9}.titleLinks{display:flex;gap:24px;margin-top:23px}.textBtn{background:transparent;color:var(--ink);font-size:clamp(14px,1.1vw,18px);font-weight:800;padding:10px 0;border-bottom:2px solid transparent}.textBtn:hover,.textBtn:focus-visible{border-bottom-color:var(--ink)}.key{display:inline-flex;align-items:center;justify-content:center;min-width:25px;min-height:25px;padding:2px 6px;border:1.5px solid currentColor;border-radius:4px;font-size:.8em;margin-right:8px;vertical-align:2px}.titleFooter{margin-top:auto;font-size:clamp(11px,.95vw,15px);font-weight:bold;letter-spacing:.14em;line-height:1.9}.seal{position:absolute;right:5vw;top:6vh;width:145px;height:145px;border:2px solid var(--ink);border-radius:50%;display:flex;align-items:center;justify-content:center;flex-direction:column;transform:rotate(12deg);background:#f4e8c950;letter-spacing:.12em;gap:8px;font-weight:900;font-size:12px}.seal b{font-family:PierDisplay,Impact,Arial,sans-serif;font-size:45px;letter-spacing:.04em}.titleCaption{position:absolute;right:4.5vw;bottom:7vh;font-weight:800;letter-spacing:.14em;font-size:12px;display:flex;align-items:center;gap:12px}.titleCaption:before{content:'';width:40px;height:2px;background:var(--ink)}
+.menuPanel{inset:0;background:#f2e6c8f2;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:5vh 6vw}.menuInner{width:min(900px,90vw);max-height:91vh;overflow:auto;padding:8px 10px 18px;scrollbar-color:var(--ink) transparent;touch-action:pan-y}.menuInner.wide{width:min(1180px,93vw)}h2{font-family:PierDisplay,Impact,'Arial Black',Arial,sans-serif;font-size:clamp(42px,6vw,83px);line-height:1;letter-spacing:.01em;margin:14px 0 24px}h3{font-size:clamp(19px,1.65vw,27px);font-weight:900;margin:0 0 12px}.menuStack{display:grid;gap:14px;max-width:510px}.menuStack button{text-align:left}.menuButtons{display:flex;gap:16px;flex-wrap:wrap;margin-top:26px}.panel p{line-height:1.6;font-size:clamp(16px,1.45vw,22px)}.back{margin-top:28px}.settingsRows{border-top:2px solid var(--ink)}.sliderRow{display:flex;align-items:center;gap:26px;padding:18px 0;border-bottom:1px solid #102f3e33;font-size:clamp(17px,1.55vw,25px);font-weight:bold}.sliderRow span{flex:1;min-width:150px}.sliderRow input[type=range]{width:40%;accent-color:var(--coral);height:30px}.sliderRow output{width:70px;text-align:right;font-variant-numeric:tabular-nums}.sliderRow select{background:var(--paper);padding:12px;border:2px solid var(--ink);font-weight:bold}.sliderRow input[type=checkbox]{width:29px;height:29px;accent-color:var(--coral)}.devPanel .menuInner{max-height:92vh}.devPanel h2{font-size:54px;margin-bottom:10px}.devPanel .sliderRow{padding:10px 0;font-size:18px}.devPanel p{margin:0 0 14px;font-size:16px}.devPanel .secondary{font-size:15px;padding:13px}.instructions{display:grid;grid-template-columns:repeat(3,1fr);gap:20px}.instruction{border-top:5px solid var(--ink);padding-top:20px}.instruction .n{font-size:46px;font-family:PierDisplay,Impact,Arial,sans-serif;color:var(--coral);margin-bottom:12px}.instruction p{font-size:18px}.instructions b{background:var(--yellow);padding:2px 5px}.infoNote{border-left:5px solid var(--coral);padding-left:20px;margin-top:25px}.resultPanel{text-align:center}.resultPanel .eyebrow{color:#b34931}.resultPanel h2{font-size:clamp(40px,5.8vw,86px)}.resultPanel .menuButtons{justify-content:center}.finalScore{font-family:PierDisplay,Impact,Arial,sans-serif;font-size:clamp(70px,10vw,140px);line-height:1;color:var(--ink)}#medal{display:inline-block;font-weight:900;letter-spacing:.13em;padding:13px 20px;background:var(--yellow);border:2px solid var(--ink);margin:15px 0 22px;transform:rotate(-2deg)}#resultStats{display:flex;justify-content:center;gap:40px;font-size:13px;letter-spacing:.1em;font-weight:bold;margin:15px 0 25px}#resultStats b{display:block;font-size:32px;margin-bottom:8px}.onlineGrid{display:grid;grid-template-columns:1fr 1fr;gap:35px}.onlineGrid section{border-top:3px solid var(--ink);padding-top:18px}.onlineGrid p{font-size:16px;min-height:50px}.onlineGrid .secondary{padding:12px;font-size:15px;min-height:46px}.onlineGrid .menuButtons{gap:10px;margin:12px 0}.onlineGrid input,.onlineGrid textarea{border:2px solid var(--ink);background:#fff4d8;color:var(--ink);padding:14px;font-size:16px;width:100%;user-select:text;touch-action:pan-y}.onlineGrid input{letter-spacing:.15em;text-transform:uppercase;font-weight:800}.onlineGrid textarea{height:80px;resize:vertical}.onlineGrid label{display:block;font-weight:bold;font-size:13px;letter-spacing:.1em;margin:15px 0 7px}#networkStatus{background:var(--ink);color:var(--paper);padding:16px 22px;font-size:16px;line-height:1.5;margin:20px 0}.creditsGrid{display:grid;grid-template-columns:1fr 1fr;gap:28px}.creditsGrid h3{border-top:3px solid var(--ink);padding-top:18px;font-size:23px}.creditsGrid p,.creditsGrid dl{font-size:15px;line-height:1.6}.creditsGrid dt{font-weight:900;float:left;clear:left;margin-right:7px}.creditsGrid dd{margin:0 0 7px}.creditsGrid .qa{margin-bottom:19px}.creditsGrid .qa strong{display:block}.creditsIntro{font-size:18px!important;max-width:850px}.creditsGrid a{color:var(--ink)}
+#hud{position:fixed;inset:0;pointer-events:none;z-index:4;color:var(--ink)}.hudTop{position:absolute;top:3.2vh;left:3.6vw;right:3.6vw;display:grid;grid-template-columns:1fr 1.3fr 1fr;gap:25px;align-items:start}.hudBrand{font-family:PierDisplay,Impact,Arial,sans-serif;font-size:clamp(20px,2.7vw,43px);letter-spacing:.02em}.hudHealth{font-size:clamp(22px,2.2vw,35px);letter-spacing:3px;color:var(--coral);line-height:1.3}.hudMission{text-align:center;background:var(--ink);color:var(--paper);padding:12px 25px;border-bottom:5px solid var(--yellow);box-shadow:4px 4px 0 #102f3e38}.hudMission .tiny{font-size:11px;letter-spacing:.18em;color:var(--yellow)}#mission{font-family:PierDisplay,Impact,Arial,sans-serif;font-size:clamp(23px,2.6vw,38px);letter-spacing:.04em;margin:5px 0}#objective{font-size:12px;font-weight:bold;letter-spacing:.1em}.hudScore{text-align:right;padding-right:56px}.scoreNum{font-size:clamp(27px,3.6vw,53px);font-weight:900;font-variant-numeric:tabular-nums;letter-spacing:-.03em;line-height:1.1}.hudScore .tiny{font-size:11px}#combo{font-weight:900;font-size:14px;margin-top:7px;color:#c35c3f}.hudBottom{position:absolute;bottom:3.4vh;left:3.6vw;right:3.6vw;display:flex;align-items:flex-end;justify-content:space-between;gap:20px}.salvoHUD{background:var(--ink);color:var(--paper);padding:15px 19px;min-width:250px;border-left:5px solid var(--coral)}.salvoTitle{font-weight:900;font-size:14px;letter-spacing:.06em}.energyTrack{height:5px;background:#4d686e;margin-top:10px}.energyTrack span{height:100%;display:block;background:var(--yellow);transition:width .12s}.controls{color:var(--paper);background:#102f3ee6;padding:15px 20px;font-size:13px;display:flex;gap:15px;align-items:center}.controls b{color:var(--yellow);margin-right:5px}.windHUD{background:var(--paper);border:2px solid var(--ink);padding:10px 15px;font-size:11px;letter-spacing:.1em;font-weight:bold}#wind{font-size:21px;margin-left:10px}.pauseBtn{position:fixed;right:3.4vw;top:3.3vh;z-index:7;pointer-events:auto;background:var(--paper);color:var(--ink);border:2px solid var(--ink);font-size:22px;width:45px;height:45px;display:grid;place-items:center}.bossTrack{height:9px;background:#476068;margin:11px -8px 0}.bossTrack span{height:100%;display:block;background:var(--coral);transition:width .2s}#banner{position:fixed;left:50%;top:34%;transform:translate(-50%,-20%);text-align:center;pointer-events:none;z-index:5;opacity:0;transition:opacity .25s,transform .3s;width:min(850px,90vw);color:var(--ink)}#banner.show{opacity:1;transform:translate(-50%,0)}#bannerKicker{font-size:12px;font-weight:900;letter-spacing:.25em;margin-bottom:10px}#bannerTitle{font-family:PierDisplay,Impact,Arial,sans-serif;font-size:clamp(36px,5vw,74px);letter-spacing:.03em;text-shadow:2px 2px 0 var(--paper),-2px -2px 0 var(--paper)}#bannerSub{display:inline-block;font-size:17px;font-weight:bold;background:var(--paper);padding:10px 19px;border-bottom:3px solid var(--coral);margin-top:14px}#toast{position:fixed;left:50%;bottom:17vh;transform:translate(-50%,15px);opacity:0;transition:.2s;z-index:8;background:var(--yellow);color:var(--ink);border:2px solid var(--ink);padding:12px 24px;font-weight:900;font-size:16px;pointer-events:none;white-space:nowrap}#toast.show{opacity:1;transform:translate(-50%,0)}#attract{position:fixed;z-index:6;left:50%;bottom:15vh;transform:translateX(-50%);text-align:center;pointer-events:none;background:var(--paper);border:2px solid var(--ink);box-shadow:4px 4px 0 var(--ink);padding:16px 28px;min-width:350px}#attract strong{display:block;font-size:20px;font-weight:900;letter-spacing:.12em;margin-bottom:7px}#attract span{font-size:14px}#sync{position:fixed;left:50%;top:25%;transform:translateX(-50%);background:var(--ink);color:var(--yellow);padding:18px;font-size:22px;font-weight:900}#damageFlash{position:fixed;inset:0;pointer-events:none;z-index:2}#damageFlash.flash{animation:damage .4s ease-out}@keyframes damage{0%{box-shadow:inset 0 0 130px #dd533baa}100%{box-shadow:inset 0 0 0 #dd533b00}}#salvoTouch{position:fixed;right:5vw;bottom:7vh;border-radius:50%;width:90px;height:90px;background:#102f3e90;color:var(--paper);border:3px solid var(--paper);z-index:8;font-weight:900;font-size:12px;pointer-events:auto}#salvoTouch.ready{background:var(--yellow);color:var(--ink);border-color:var(--ink);box-shadow:0 0 0 6px #ffce5d33}.touch .controls,.touch .salvoHUD,.touch .windHUD{display:none}.touch .hudTop{grid-template-columns:1fr 1fr}.touch .hudMission{order:3;grid-column:1/3;justify-self:center;min-width:200px;padding:7px 15px}.touch .hudBrand{font-size:20px}.touch .hudHealth{font-size:18px}.touch #mission{font-size:20px}.touch .hudScore{padding-right:50px}.touch .scoreNum{font-size:27px}.touch #objective{font-size:10px}.touch #coopTag{display:none}#loading{position:fixed;inset:0;background:var(--paper);display:flex;align-items:center;justify-content:center;flex-direction:column;z-index:50;padding:30px;text-align:center}.loadingMark{font-size:70px;color:var(--coral);margin-bottom:25px;animation:bob 1s ease-in-out infinite alternate}#loadText{font-weight:900;letter-spacing:.1em;font-size:22px}#loadDetail{font-size:15px;max-width:650px;line-height:1.6;margin-top:18px}@keyframes bob{to{transform:translateY(-8px) rotate(5deg)}}
+@media(min-width:1700px){.titleActions{max-width:700px}.titleLinks{gap:35px}.primary,.secondary{padding:20px 30px}.controls{font-size:17px}.salvoHUD{min-width:320px}.salvoTitle{font-size:18px}.windHUD{font-size:14px}.tiny{font-size:16px}}
+@media(max-height:700px) and (min-width:800px){.titlePanel{padding-top:4vh}h1{font-size:15.6vh;margin-top:4vh}.titleSub{font-size:17px;margin:2vh 0}.primary,.secondary{min-height:47px;padding:12px 18px;font-size:16px}.titleLinks{margin-top:10px}.titleFooter{font-size:10px}.menuPanel{padding:2vh 5vw}.menuInner{max-height:95vh}h2{font-size:48px;margin:12px 0 17px}.sliderRow{padding:10px 0;font-size:18px}.back{margin-top:15px}.menuStack{gap:10px}.seal{width:105px;height:105px;font-size:9px}.seal b{font-size:33px}.hudTop{top:3vh}.controls{font-size:11px;padding:12px}.salvoHUD{padding:10px 14px;min-width:210px}}
+@media(max-width:700px){.titlePanel{padding:5vh 7vw;background:linear-gradient(90deg,#f4e8c9ed,#f4e8c9a6 80%,#f4e8c92b)}h1{font-size:20vw;margin-top:7vh}.eyebrow{font-size:11px}.club .mark{width:32px;height:32px;font-size:22px}.titleSub{font-size:16px;margin:3vh 0 3vh;max-width:300px}.titleActions{gap:12px}.primary,.secondary{font-size:14px;min-height:48px;padding:13px 15px}.titleLinks{gap:22px;margin-top:18px}.textBtn{font-size:13px}.titleFooter{font-size:10px;max-width:260px;margin-top:auto}.seal{right:5vw;top:5vh;width:83px;height:83px;font-size:7px;gap:4px}.seal b{font-size:28px}.titleCaption{display:none}.menuPanel{padding:3vh 4vw}.menuInner{width:93vw;max-height:94vh}h2{font-size:45px;margin:12px 0 23px}.menuInner p{font-size:16px}.sliderRow{font-size:16px;gap:12px;padding:15px 0}.sliderRow span{min-width:100px}.sliderRow input[type=range]{width:36%}.sliderRow output{width:40px}.sliderRow select{padding:8px;font-size:14px}.instructions{grid-template-columns:1fr;gap:14px}.instruction{padding-top:10px;display:grid;grid-template-columns:45px 1fr;gap:5px 15px}.instruction .n{font-size:33px;grid-row:1/3}.instruction h3{font-size:18px;margin-bottom:0}.instruction p{font-size:14px;margin:0}.infoNote{margin-top:20px;padding-left:13px}.onlineGrid,.creditsGrid{grid-template-columns:1fr;gap:20px}.onlineGrid p{min-height:auto}.creditsGrid h3{font-size:21px}.creditsGrid p,.creditsGrid dl{font-size:14px}.devPanel h2{font-size:35px}.devPanel .sliderRow{font-size:15px;gap:10px;padding:10px 0}.devPanel .secondary{font-size:12px;padding:10px}.devPanel .menuButtons{gap:10px;margin-top:15px}.resultPanel h2{font-size:43px}.finalScore{font-size:90px}#resultStats{gap:20px;font-size:10px}#resultStats b{font-size:27px}#medal{font-size:12px}.hudTop{left:4vw;right:4vw;gap:10px}.hudBrand{font-size:20px}.hudHealth{font-size:17px;letter-spacing:1px}.hudMission{padding:8px 10px}#mission{font-size:19px}.hudMission .tiny{font-size:8px}#objective{font-size:9px}.scoreNum{font-size:24px}.hudScore{padding-right:0}.hudScore .tiny{font-size:8px}#combo{font-size:10px}#coopTag{font-size:8px}.pauseBtn{top:auto;bottom:3vh;right:4vw}.hudBottom{bottom:3vh;left:4vw;right:calc(4vw + 60px)}.controls{display:none}.salvoHUD{min-width:150px;padding:10px 12px}.salvoTitle{font-size:10px}.windHUD{font-size:8px;padding:8px}#wind{font-size:16px;margin-left:5px}#banner{top:33%}#bannerTitle{font-size:40px}#bannerSub{font-size:13px;max-width:90vw}#bannerKicker{font-size:10px}#toast{font-size:12px;max-width:90vw;white-space:normal;text-align:center;padding:10px 16px}#attract{bottom:16vh;min-width:0;width:84vw;padding:14px}#attract strong{font-size:15px}#attract span{font-size:12px}.touch .hudScore{padding-right:0}.touch .pauseBtn{top:auto;bottom:3vh}.touch #salvoTouch{bottom:10vh;width:76px;height:76px;font-size:10px}.touch .hudTop{grid-template-columns:1fr 1fr}.touch .hudMission{margin-top:0}.touch .hudMission .tiny{display:none}}
+</style>
+<script type="importmap">{"imports": {"three": "./vendor/three.webgpu.js", "three/webgpu": "./vendor/three.webgpu.js", "three/tsl": "./vendor/three.tsl.js", "rapier": "./vendor/rapier.js"}}</script>
+<!-- Embedded Pier Display subset based on Liberation Sans Narrow.
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: Liberation Fonts
+Source: https://github.com/liberationfonts
+
+Files: *
+Copyright:
+ Digitized data copyright (c) 2010 Google Corporation with Reserved Font Arimo, Tinos and Cousine.
+ Copyright (c) 2012 Red Hat, Inc. with Reserved Font Name Liberation.
+License: SIL-OFL-1.1
+ This Font Software is licensed under the SIL Open Font License,
+ Version 1.1.
+ .
+ This license is copied below, and is also available with a FAQ at:
+ http://scripts.sil.org/OFL
+ .
+ SIL OPEN FONT LICENSE Version 1.1 - 26 February 2007
+ .
+ PREAMBLE The goals of the Open Font License (OFL) are to stimulate
+ worldwide development of collaborative font projects, to support the font
+ creation efforts of academic and linguistic communities, and to provide
+ a free and open framework in which fonts may be shared and improved in
+ partnership with others.
+ .
+ The OFL allows the licensed fonts to be used, studied, modified and
+ redistributed freely as long as they are not sold by themselves.
+ The fonts, including any derivative works, can be bundled, embedded,
+ redistributed and/or sold with any software provided that any reserved
+ names are not used by derivative works.  The fonts and derivatives,
+ however, cannot be released under any other type of license.  The
+ requirement for fonts to remain under this license does not apply to
+ any document created using the fonts or their derivatives.
+ .
+ .
+ .
+ DEFINITIONS
+ "Font Software" refers to the set of files released by the Copyright
+ Holder(s) under this license and clearly marked as such.
+ This may include source files, build scripts and documentation.
+ .
+ "Reserved Font Name" refers to any names specified as such after the
+ copyright statement(s).
+ .
+ "Original Version" refers to the collection of Font Software components
+ as distributed by the Copyright Holder(s).
+ .
+ "Modified Version" refers to any derivative made by adding to, deleting,
+ or substituting ? in part or in whole ?
+ any of the components of the Original Version, by changing formats or
+ by porting the Font Software to a new environment.
+ .
+ "Author" refers to any designer, engineer, programmer, technical writer
+ or other person who contributed to the Font Software.
+ .
+ .
+ PERMISSION & CONDITIONS
+ .
+ Permission is hereby granted, free of charge, to any person obtaining a
+ copy of the Font Software, to use, study, copy, merge, embed, modify,
+ redistribute, and sell modified and unmodified copies of the Font
+ Software, subject to the following conditions:
+ .
+ 1) Neither the Font Software nor any of its individual components,in
+    Original or Modified Versions, may be sold by itself.
+ .
+ 2) Original or Modified Versions of the Font Software may be bundled,
+    redistributed and/or sold with any software, provided that each copy
+    contains the above copyright notice and this license. These can be
+    included either as stand-alone text files, human-readable headers or
+    in the appropriate machine-readable metadata fields within text or
+    binary files as long as those fields can be easily viewed by the user.
+ .
+ 3) No Modified Version of the Font Software may use the Reserved Font
+    Name(s) unless explicit written permission is granted by the
+    corresponding Copyright Holder. This restriction only applies to the
+    primary font name as presented to the users.
+ .
+ 4) The name(s) of the Copyright Holder(s) or the Author(s) of the Font
+    Software shall not be used to promote, endorse or advertise any
+    Modified Version, except to acknowledge the contribution(s) of the
+    Copyright Holder(s) and the Author(s) or with their explicit written
+    permission.
+ .
+ 5) The Font Software, modified or unmodified, in part or in whole, must
+    be distributed entirely under this license, and must not be distributed
+    under any other license. The requirement for fonts to remain under
+    this license does not apply to any document created using the Font
+    Software.
+ .
+ .
+ .
+ TERMINATION
+ This license becomes null and void if any of the above conditions are not met.
+ .
+ .
+ .
+ DISCLAIMER
+ THE FONT SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO ANY WARRANTIES OF
+ MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT
+ OF COPYRIGHT, PATENT, TRADEMARK, OR OTHER RIGHT.  IN NO EVENT SHALL THE
+ COPYRIGHT HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
+ DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM OTHER
+ DEALINGS IN THE FONT SOFTWARE.
+ .
+
+-->
+</head><body data-screen="loading">
+<canvas id="game" aria-label="Pier Pressure coastal artillery game"></canvas><div id="damageFlash"></div>
+<div id="screen" data-screen="loading">
+ <section class="panel titlePanel" data-panel="title" hidden>
+  <div class="club"><span class="mark">⚓</span><div class="eyebrow">The Coastal<br>Artillery Club</div></div>
+  <h1>PIER<span class="outline">PRESSURE</span></h1>
+  <p class="titleSub">A little flak. A lot of splash.<br><strong>Hold the coast. Make every shot count.</strong></p>
+  <div class="titleActions"><button class="primary" id="start"><span class="key" data-prompt="confirm">ENTER</span>Take command</button><button class="secondary" id="coop">Two gunners</button></div>
+  <div class="titleLinks"><button class="textBtn" id="online">Play online ↗</button><button class="textBtn" id="howto">Field manual</button><button class="textBtn" id="settings">Settings</button><button class="textBtn" id="about">About</button></div>
+  <div class="titleFooter">01—03 / A COMPLETE COASTAL CAMPAIGN<br>1–2 GUNNERS · NO QUARTERS REQUIRED</div>
+  <div class="seal"><span>INSPIRED BY</span><b>1977</b><span>AIR · SEA · BATTLE</span></div>
+  <div class="titleCaption">CALM SEAS. QUESTIONABLE COMPANY.</div>
+ </section>
+ <section class="panel menuPanel" data-panel="pause" hidden><div class="menuInner"><div class="eyebrow">A moment of shore leave</div><h2>HOLD FIRE.</h2><div class="menuStack"><button class="primary" id="resume"><span class="key" data-prompt="confirm">ENTER</span>Back to the battery</button><button class="secondary" id="pauseSettings">Settings</button><button class="secondary" id="dev">Developer tools</button><button class="secondary" id="pauseAbout">About / Credits</button><button class="secondary" id="quit">Return to title</button></div><p class="muted">The battery is paused. Return when you’re ready.</p></div></section>
+ <section class="panel menuPanel" data-panel="settings" hidden><div class="menuInner"><div class="eyebrow">Set your bearings</div><h2>SETTINGS</h2><div class="settingsRows"><label class="sliderRow"><span>Music</span><input type="range" id="music" min="0" max="100" step="5" value="10"><output id="musicOut">10%</output></label><label class="sliderRow"><span>Sound effects & voices</span><input type="range" id="sfx" min="0" max="100" step="5" value="65"><output id="sfxOut">65%</output></label><label class="sliderRow"><span>Controller glyphs</span><select id="glyph"><option value="ps">PlayStation · ✕ ○ □ △</option><option value="xbox">Xbox · A B X Y</option></select></label><label class="sliderRow"><span>Camera shake</span><input type="checkbox" id="shake" checked></label><label class="sliderRow"><span>Touch aiming assist</span><input type="checkbox" id="assist" checked></label></div><button class="secondary back" data-back><span class="key" data-prompt="back">ESC</span>Back</button></div></section>
+ <section class="panel menuPanel" data-panel="howto" hidden><div class="menuInner wide"><div class="eyebrow">Field manual / edition 01</div><h2>THE SHORE THING.</h2><div class="instructions"><div class="instruction"><div class="n">01</div><h3>LEAD YOUR SHOT</h3><p>Aim with <b>left stick</b> or <b>mouse</b>. Hold <b>R2 / click / Space</b> to fire. Shells arc; moving targets won't wait.</p></div><div class="instruction"><div class="n">02</div><h3>MIND THE PIER</h3><p>Red bombs cost hull. Shoot them out of the sky. Green supply crates restore hull and charge your broadside.</p></div><div class="instruction"><div class="n">03</div><h3>MAKE A SPLASH</h3><p><b>□ / E / right click</b> fires seven shells and clears bombs. Charge returns with time and hits. Chain kills for up to 5× score.</p></div></div><p class="infoNote">Clear 8 aircraft, stop 10 convoy targets, then sink <strong>the Admiral</strong>. The battery gets two repairs between operations. Seven hull points. One coast.</p><p class="muted">Two gunners: two controllers, or player 1 uses mouse / A D / Space / E while player 2 uses J L / Enter / U. Touch: hold the sea or sky to aim and fire automatically; tap SALVO when ready.</p><button class="secondary back" data-back><span class="key" data-prompt="back">ESC</span>Back</button></div></section>
+ <section class="panel menuPanel devPanel" data-panel="dev" hidden><div class="menuInner"><div class="eyebrow">Coastal proving ground</div><h2>DEVELOPER TOOLS</h2><p>Changes apply live. Autopilot leads shots and protects the pier.</p><div id="sliders"></div><div class="menuButtons"><button class="secondary" id="resetTuning">Reset defaults</button><button class="secondary" id="devHeal">Repair & recharge</button><button class="secondary" id="devWave">Next operation</button><button class="secondary" id="devAI">Autopilot off</button></div><button class="secondary back" data-back>Back to pause</button></div></section>
+ <section class="panel menuPanel resultPanel" data-panel="results" hidden><div class="menuInner"><div class="eyebrow" id="resultKicker">MISSION COMPLETE</div><h2 id="resultTitle">HARBOR SECURED</h2><div id="medal">GOLD ANCHOR</div><div class="tiny">TOTAL SCORE</div><div class="finalScore" id="finalScore">000000</div><div id="resultStats"></div><div class="tiny">PERSONAL BEST <span id="best">000000</span></div><div class="menuButtons"><button class="primary" id="retry">Another watch</button><button class="secondary" id="resultMenu">Return to title</button></div></div></section>
+ <section class="panel menuPanel" data-panel="online" hidden><div class="menuInner wide"><div class="eyebrow">Two guns. One coast.</div><h2>RADIO ROOM</h2><div id="networkStatus">Choose a connection. Co-op shares hull, operations and score.</div><div class="onlineGrid"><section><h3>ON THIS COMPUTER</h3><p>Open the game in two windows on the same site. Create a room, then enter its code in the other window.</p><label for="roomCode">ROOM CODE</label><input id="roomCode" placeholder="6-letter code" maxlength="24" autocomplete="off"><div class="menuButtons"><button class="secondary" id="hostLocal">Create room</button><button class="secondary" id="joinLocal">Join room</button></div><p class="muted">For side-by-side play on one screen, use Two Gunners from the title.</p></section><section><h3>DIRECT CONNECTION</h3><p>Host sends an invitation. Guest pastes it and sends a reply. Host pastes the reply and connects.</p><label for="signalIn">PASTE INVITATION OR REPLY</label><textarea id="signalIn" placeholder="Paste the other gunner’s radio code"></textarea><div class="menuButtons"><button class="secondary" id="createOffer">1 · Host</button><button class="secondary" id="joinOffer">2 · Join</button><button class="secondary" id="acceptAnswer">3 · Connect</button></div><label for="signalOut">YOUR OUTGOING CODE</label><textarea id="signalOut" readonly placeholder="Your outgoing radio code appears here"></textarea><button class="textBtn" id="copySignal">Copy outgoing code</button></section></div><p class="muted">AI Hub connects gunners automatically. Direct play uses WebRTC; networks that require a relay may prevent a connection.</p><button class="secondary back" data-back><span class="key" data-prompt="back">ESC</span>Back</button></div></section>
+ <section class="panel menuPanel" data-panel="about" hidden><div class="menuInner wide"><div class="eyebrow">The Coastal Artillery Club presents</div><h2>PIER PRESSURE</h2><p class="creditsIntro">A small salute to the angle-and-timing arcade battles of 1977. All geometry, animation, music, sound effects and nonsense radio chatter are generated in code.</p><p class="tiny muted">RIGHT STICK / MOUSE WHEEL TO SCROLL</p><div class="creditsGrid" id="credits"><section><h3>Source Information</h3><dl><dt>Date:</dt><dd>2026-11-05 21:25:34</dd><dt>Source:</dt><dd>Air-Sea Battle (1977)</dd><dt>Plan:</dt><dd>none</dd><dt>Genre:</dt><dd>Arcade artillery / score-attack shooter</dd><dt>Perspective:</dt><dd>Fixed side-on 2.5D orthographic</dd><dt>Tech:</dt><dd>Three.js 0.180.0 (R180), WebGPURenderer with WebGPU and WebGL 2 fallback, Rapier 3D 0.19.3, JavaScript, HTML/CSS, Web Audio API, Gamepad API, WebRTC, BroadcastChannel and AI Hub session protocol v1 (client 1.4.0)</dd><dt>ArtDirection:</dt><dd>Procedural low-poly coastal diorama with cel-shaded color bands, dark ink outlines and a warm screen-printed palette</dd><dt>Animation:</dt><dd>Three.js AnimationMixer and AnimationClip with procedural keyframe tracks for cannon recoil, propellers, rotors, bobbing hulls and parachutes; procedural particle and sea motion</dd><dt>Audio:</dt><dd>Original procedural Web Audio maritime synth march, synthesized cannon/explosion/splash/damage effects and fanfare, and formant-filtered Animalese/Simlish-style gibberish voices; no audio files; music defaults to 10%</dd><dt>Online:</dt><dd>Two-player cooperative play through AI Hub host-authoritative sessions; standalone same-browser window rooms through BroadcastChannel and direct peer connections through WebRTC with manual signaling</dd><dt>Testing:</dt><dd>Headless scripted state checks, complete scripted playthrough, emulated standard-mapping gamepad, touch emulation, two-page multiplayer, OfflineAudioContext sample checks and screenshots for visual inspection; no physical controller, touch device, listener or second human player available</dd><dt>Research:</dt><dd>none; native model knowledge for the source. Supplied AI Hub integration contract and dependency source code were read for implementation; no internet source research or searches</dd><dt>Environment:</dt><dd>Codex CLI (headless); Linux</dd><dt>Model:</dt><dd>OpenAI, gpt-6.1-sol, reasoning effort ultra</dd><dt>Usage:</dt><dd>added on import</dd></dl></section><section><h3>Testing Feedback</h3><p class="qa"><strong>Issues caught:</strong>12 tracked issue groups were caught and fixed: AI Hub metadata, multitouch ownership, rotor timing, initial controller focus, guest disconnect recovery, mobile title clipping, dedicated-server seat routing, guest broadside routing, guest pause/menu state, touch-button visibility, horizontal-left controller aim and frame-rate-dependent physics stepping.</p><p class="qa"><strong>Critical issues:</strong>3 critical issues: two multiplayer session-edge blockers (disconnect recovery and dedicated-server seat-zero input) and frame-rate-dependent physics stepping. All were fixed before delivery.</p><p class="qa"><strong>Most helpful test:</strong>The complete AI-driven circuit used actual Rapier collisions to clear every operation. Cadence tests verified fixed simulation timing, and the upstream AI Hub harness plus real gun-input regressions covered standard, host-leave and dedicated-server sessions.</p><p class="qa"><strong>Least helpful test:</strong>Exact document-title equality was least helpful; it rejected a valid title containing the game tagline. It was replaced with an identity-prefix check.</p><h3>Engine Feedback</h3><p class="qa"><strong>What worked well:</strong>Three.js WebGPURenderer, TSL materials and AnimationMixer made a coherent ink-and-cel coastal scene possible with procedural assets and native keyframe clips.</p><p class="qa"><strong>Where we got stuck:</strong>Headless WebGPU screenshots were blank despite a live simulation. Visual review used the same renderer’s WebGL 2 backend; state and protocol tests verified WebGPU. Physical-device behavior is unknown.</p><p class="qa"><strong>Built for this game:</strong>The artillery rules, wave director, ballistic aiming, controller-first menus, touch assistance, procedural sound and host-authoritative multiplayer synchronization were built for this game.</p><p class="qa"><strong>Hardest engine work:</strong>The hardest engine work was keeping animated visual targets, Rapier sensors, predictive shell aiming and replicated guest state consistent across the fixed-step simulation.</p><p class="qa"><strong>Engine changes:</strong>none; engine and physics library source were not modified.</p><p class="qa"><strong>One engine improvement:</strong>A reliable headless WebGPU capture path with clearer device-loss diagnostics would make visual verification easier.</p><h3>Prompt Feedback</h3><p class="qa"><strong>What worked well:</strong>The specific source, single-file deliverable, controller-first direction, code-only sound and required attract mode gave the demo a clear identity and useful completion criteria.</p><p class="qa"><strong>What was confusing:</strong>The no-internet-research rule and requirement to follow an online integration repository needed interpretation: the supplied repository was read only as an implementation contract. No source research was done.</p><p class="qa"><strong>Hardest requirement:</strong>The hardest requirement was completing and verifying solo play, local co-op, direct peer play, AI Hub lifecycle, native input switching and touch assistance in the same portable file.</p><p class="qa"><strong>Suggested change:</strong>Provide the AI Hub contract files alongside the prompt and define whether interrupted multiplayer sessions count as critical issues in the exit interview.</p></section></div><p class="tiny" id="backend">THREE.JS r180 · RAPIER 0.19.3</p><button class="secondary back" data-back><span class="key" data-prompt="back">ESC</span>Back</button></div></section>
+</div>
+<div id="hud" hidden><div class="hudTop"><div><div class="hudBrand">PIER PRESSURE</div><div class="hudHealth" id="health" aria-label="7 hull points">▰▰▰▰▰▰▰</div><div class="tiny" id="coopTag">PORT BATTERY</div></div><div class="hudMission"><div class="tiny">OPERATION <span id="operation">01 / 03</span></div><div id="mission">SKY PATROL</div><div id="objective">0 / 8 AIRCRAFT</div><div class="bossTrack" id="bossTrack" hidden><span id="bossFill"></span></div></div><div class="hudScore"><div class="tiny">COASTAL SCORE</div><div class="scoreNum" id="score">000000</div><div id="combo"></div></div></div><div class="hudBottom"><div class="salvoHUD"><div class="salvoTitle"><span class="key" data-prompt="salvo">E</span><span id="salvoText">BROADSIDE READY</span></div><div class="energyTrack"><span id="energyFill" style="width:100%"></span></div></div><div class="controls" id="controlLine"></div><div class="windHUD">WIND <span id="wind">→ 0.4</span></div></div><div id="sync" hidden></div></div>
+<button class="pauseBtn" id="pause" aria-label="Pause" hidden>Ⅱ</button><button id="salvoTouch" hidden>SALVO</button>
+<div id="banner"><div id="bannerKicker"></div><div id="bannerTitle"></div><div id="bannerSub"></div></div><div id="toast" role="status"></div>
+<div id="attract" hidden><strong>DEMONSTRATION</strong><span>Press any button to take command.</span></div>
+<div id="loading"><div class="loadingMark">⚓</div><div id="loadText">TUNING THE RADIO…</div><div id="loadDetail">Procedural coast. Fresh ammunition. No quarters required.</div></div>
+<script type="module">import * as THREE from 'three/webgpu';
+import {color,normalWorld,vec3} from 'three/tsl';
+import RAPIER from 'rapier';
+const Sound = (()=>{
+// All sound is synthesized. No samples, audio assets, speech services or timers.
+class Sound {
+	constructor(options = {}) {
+		this.context = options.context || null;
+		this.musicVolume = 0.1;
+		this.sfxVolume = 0.65;
+		this.muted = false;
+		this.disposed = false;
+		this.ready = false;
+		this.sources = new Set();
+		this.stats = {
+			notes: 0,
+			effects: 0,
+			voices: 0,
+			musicVolume: 0.1,
+			sfxVolume: 0.65,
+			unlocked: false,
+		};
+		this.step = 0;
+		this.nextBeat = 0;
+		this.voiceReadyAt = 0;
+		this.intensity = 0;
+	}
+
+	_build() {
+		if (this.ready || this.disposed) return;
+		const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
+		if (!this.context && !Context) return;
+		this.context ||= new Context({ latencyHint: "interactive" });
+		const ctx = this.context;
+		this.master = ctx.createGain();
+		this.master.gain.value = this.muted ? 0 : 0.8;
+		this.musicBus = ctx.createGain();
+		this.musicBus.gain.value = this.musicVolume;
+		this.sfxBus = ctx.createGain();
+		this.sfxBus.gain.value = this.sfxVolume;
+		this.compressor = ctx.createDynamicsCompressor();
+		this.compressor.threshold.value = -12;
+		this.compressor.knee.value = 16;
+		this.compressor.ratio.value = 5;
+		this.compressor.attack.value = 0.005;
+		this.compressor.release.value = 0.18;
+		this.analyser = ctx.createAnalyser();
+		this.analyser.fftSize = 1024;
+		this.musicBus.connect(this.master);
+		this.sfxBus.connect(this.master);
+		this.master.connect(this.compressor);
+		this.compressor.connect(this.analyser);
+		this.analyser.connect(ctx.destination);
+		this.noiseBuffer = ctx.createBuffer(
+			1,
+			Math.ceil(ctx.sampleRate * 2),
+			ctx.sampleRate,
+		);
+		const samples = this.noiseBuffer.getChannelData(0);
+		let seed = 0x7a1977;
+		for (let i = 0; i < samples.length; i++) {
+			seed ^= seed << 13;
+			seed ^= seed >>> 17;
+			seed ^= seed << 5;
+			samples[i] = (seed >>> 0) / 2147483648 - 1;
+		}
+		this.nextBeat = ctx.currentTime + 0.035;
+		this.ready = true;
+	}
+
+	async unlock() {
+		if (this.disposed) return false;
+		try {
+			this._build();
+			if (!this.ready) return false;
+			const offline = typeof this.context.startRendering === "function";
+			if (!offline && this.context.state === "suspended" && this.context.resume)
+				await this.context.resume();
+			this.stats.unlocked = this.context.state === "running" || offline;
+			this.nextBeat = Math.max(this.context.currentTime + 0.02, this.nextBeat);
+			return this.stats.unlocked;
+		} catch {
+			return false;
+		}
+	}
+
+	_gain(node, value) {
+		if (!node || !this.context || this.disposed) return;
+		node.gain.setTargetAtTime(value, this.context.currentTime, 0.025);
+	}
+
+	setMusic(value) {
+		this.musicVolume = Math.max(0, Math.min(1, Number(value) || 0));
+		this.stats.musicVolume = this.musicVolume;
+		this._gain(this.musicBus, this.musicVolume);
+	}
+
+	setSfx(value) {
+		this.sfxVolume = Math.max(0, Math.min(1, Number(value) || 0));
+		this.stats.sfxVolume = this.sfxVolume;
+		this._gain(this.sfxBus, this.sfxVolume);
+	}
+
+	mute(value = true) {
+		this.muted = Boolean(value);
+		this._gain(this.master, this.muted ? 0 : 0.8);
+	}
+
+	_track(source, end, nodes = []) {
+		this.sources.add(source);
+		source.onended = () => {
+			this.sources.delete(source);
+			source.disconnect();
+			nodes.forEach((n) => {
+				n.disconnect();
+			});
+		};
+		source.stop(end);
+	}
+
+	_tone(
+		freq,
+		at,
+		duration,
+		amplitude = 0.2,
+		type = "triangle",
+		bus = this.sfxBus,
+		endFreq = freq,
+	) {
+		if (!this.ready || this.disposed) return;
+		const ctx = this.context;
+		const osc = ctx.createOscillator();
+		const gain = ctx.createGain();
+		osc.type = type;
+		osc.frequency.setValueAtTime(Math.max(12, freq), at);
+		osc.frequency.exponentialRampToValueAtTime(
+			Math.max(12, endFreq),
+			at + duration,
+		);
+		gain.gain.setValueAtTime(0, at);
+		gain.gain.linearRampToValueAtTime(
+			amplitude,
+			at + Math.min(0.007, duration * 0.1),
+		);
+		gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+		osc.connect(gain);
+		gain.connect(bus);
+		osc.start(at);
+		this._track(osc, at + duration + 0.01, [gain]);
+	}
+
+	_noise(at, duration, amplitude, cutoff, highpass = false, bus = this.sfxBus) {
+		if (!this.ready || this.disposed) return;
+		const ctx = this.context;
+		const source = ctx.createBufferSource();
+		source.buffer = this.noiseBuffer;
+		const filter = ctx.createBiquadFilter();
+		filter.type = highpass ? "highpass" : "lowpass";
+		filter.frequency.setValueAtTime(cutoff, at);
+		filter.frequency.exponentialRampToValueAtTime(
+			Math.max(80, cutoff * 0.22),
+			at + duration,
+		);
+		const gain = ctx.createGain();
+		gain.gain.setValueAtTime(0, at);
+		gain.gain.linearRampToValueAtTime(amplitude, at + 0.004);
+		gain.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+		source.connect(filter);
+		filter.connect(gain);
+		gain.connect(bus);
+		source.start(at);
+		this._track(source, at + duration + 0.01, [filter, gain]);
+	}
+
+	shot() {
+		if (!this.ready || this.disposed) return;
+		this.stats.effects++;
+		const t = this.context.currentTime + 0.002;
+		this._tone(150, t, 0.15, 0.42, "triangle", this.sfxBus, 38);
+		this._tone(630, t, 0.075, 0.09, "square", this.sfxBus, 175);
+		this._noise(t, 0.14, 0.28, 4200);
+	}
+
+	hit(type = "") {
+		if (!this.ready || this.disposed) return;
+		this.stats.effects++;
+		const t = this.context.currentTime + 0.002;
+		const heavy = type === "boss" || type === "ship" || type === "heavy";
+		this._noise(t, heavy ? 0.48 : 0.25, heavy ? 0.6 : 0.37, 2600);
+		this._tone(
+			heavy ? 90 : 190,
+			t,
+			heavy ? 0.45 : 0.24,
+			0.35,
+			"triangle",
+			this.sfxBus,
+			25,
+		);
+		this._tone(880, t + 0.025, 0.11, 0.1, "sine", this.sfxBus, 1320);
+		this._tone(1320, t + 0.08, 0.15, 0.065, "triangle");
+	}
+
+	splash() {
+		if (!this.ready || this.disposed) return;
+		this.stats.effects++;
+		const t = this.context.currentTime + 0.002;
+		this._noise(t, 0.3, 0.18, 1100);
+		for (let i = 0; i < 3; i++)
+			this._tone(
+				440 - i * 70,
+				t + i * 0.045,
+				0.09,
+				0.08,
+				"sine",
+				this.sfxBus,
+				100,
+			);
+	}
+
+	hurt() {
+		if (!this.ready || this.disposed) return;
+		this.stats.effects++;
+		const t = this.context.currentTime + 0.002;
+		this._tone(330, t, 0.18, 0.2, "sawtooth", this.sfxBus, 135);
+		this._tone(220, t + 0.13, 0.26, 0.18, "triangle", this.sfxBus, 65);
+		this._noise(t, 0.3, 0.2, 650);
+	}
+
+	fanfare() {
+		if (!this.ready || this.disposed) return;
+		this.stats.effects++;
+		const t = this.context.currentTime + 0.02;
+		[72, 72, 76, 79, 84, 79, 84].forEach((m, i) => {
+			const at = t + [0, 0.12, 0.24, 0.39, 0.58, 0.78, 0.94][i];
+			this._tone(this._midi(m), at, i === 6 ? 0.65 : 0.22, 0.18, "triangle");
+			this._tone(this._midi(m - 12), at, 0.24, 0.075, "square");
+		});
+		this.voice(1);
+	}
+
+	// Formant-filtered pitched syllables: an invented little radio language.
+	voice(variant = 0) {
+		if (!this.ready || this.disposed) return;
+		const ctx = this.context;
+		if (ctx.currentTime < this.voiceReadyAt) return;
+		this.stats.voices++;
+		const t = ctx.currentTime + 0.025;
+		this.voiceReadyAt = t + 0.9;
+		const syllables = variant
+			? [1.1, 1.4, 0.96, 1.65, 1.2]
+			: [1.0, 1.25, 0.88, 1.42];
+		syllables.forEach((pitch, i) => {
+			const at = t + i * 0.105;
+			const osc = ctx.createOscillator();
+			osc.type = "sawtooth";
+			osc.frequency.setValueAtTime(205 * pitch, at);
+			osc.frequency.exponentialRampToValueAtTime(240 * pitch, at + 0.075);
+			const vowel = ctx.createBiquadFilter();
+			vowel.type = "bandpass";
+			vowel.frequency.value = [850, 1400, 650, 1850, 1000][i];
+			vowel.Q.value = 4;
+			const gain = ctx.createGain();
+			gain.gain.setValueAtTime(0, at);
+			gain.gain.linearRampToValueAtTime(0.28, at + 0.012);
+			gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.085);
+			osc.connect(vowel);
+			vowel.connect(gain);
+			gain.connect(this.sfxBus);
+			osc.start(at);
+			this._track(osc, at + 0.095, [vowel, gain]);
+		});
+	}
+
+	_midi(note) {
+		return 440 * 2 ** ((note - 69) / 12);
+	}
+
+	_beat(at, active) {
+		// Original 6/8 harbor march. Eight bars, four harmonic changes.
+		const melody = [
+			72,
+			76,
+			79,
+			76,
+			74,
+			72,
+			67,
+			null,
+			67,
+			71,
+			74,
+			79,
+			77,
+			76,
+			74,
+			72,
+			74,
+			76,
+			79,
+			null,
+			76,
+			74,
+			72,
+			null,
+			72,
+			76,
+			79,
+			84,
+			83,
+			79,
+			77,
+			null,
+			77,
+			76,
+			74,
+			71,
+			72,
+			74,
+			76,
+			79,
+			76,
+			74,
+			72,
+			null,
+			67,
+			71,
+			72,
+			null,
+		];
+		const i = this.step % 48;
+		const root = [48, 43, 53, 48, 48, 53, 43, 48][Math.floor(i / 6)];
+		const gain = active ? 0.23 : 0.16;
+		if (melody[i] !== null) {
+			this._tone(
+				this._midi(melody[i]),
+				at,
+				0.19,
+				gain,
+				"triangle",
+				this.musicBus,
+			);
+			this.stats.notes++;
+		}
+		if (i % 3 === 0) {
+			this._tone(this._midi(root), at, 0.22, 0.32, "triangle", this.musicBus);
+			this._tone(
+				this._midi(root + 12),
+				at + 0.004,
+				0.15,
+				0.08,
+				"sine",
+				this.musicBus,
+			);
+			this._tone(105, at, 0.09, 0.27, "sine", this.musicBus, 36);
+		} else if (i % 3 === 1) {
+			this._tone(
+				this._midi(root + 19),
+				at,
+				0.095,
+				0.09,
+				"square",
+				this.musicBus,
+			);
+			this._tone(
+				this._midi(root + 24),
+				at,
+				0.095,
+				0.065,
+				"triangle",
+				this.musicBus,
+			);
+		}
+		if (active && i % 6 === 3)
+			this._noise(at, 0.085, 0.15, 3300, true, this.musicBus);
+		if (active && this.intensity > 0.55)
+			this._noise(at, 0.035, 0.045, 6500, true, this.musicBus);
+		this.step++;
+	}
+
+	update(_dt, active = false, intensity = 0) {
+		if (!this.ready || this.disposed || this.context.state === "closed") return;
+		this.intensity = Math.max(0, Math.min(1, Number(intensity) || 0));
+		if (
+			this.context.state !== "running" &&
+			typeof this.context.startRendering !== "function"
+		)
+			return;
+		const now = this.context.currentTime;
+		if (this.nextBeat < now - 0.25) this.nextBeat = now + 0.015;
+		const interval = active ? 60 / (108 + this.intensity * 8) / 2 : 60 / 92 / 2;
+		let scheduled = 0;
+		while (this.nextBeat < now + 0.12 && scheduled++ < 4) {
+			this._beat(this.nextBeat, active);
+			this.nextBeat += interval;
+		}
+	}
+
+	level() {
+		if (!this.analyser) return 0;
+		this._samples ||= new Float32Array(this.analyser.fftSize);
+		this.analyser.getFloatTimeDomainData(this._samples);
+		let sum = 0;
+		for (const v of this._samples) sum += v * v;
+		return Math.sqrt(sum / this._samples.length);
+	}
+
+	dispose() {
+		if (this.disposed) return;
+		this.disposed = true;
+		for (const source of this.sources) {
+			try {
+				source.stop();
+				source.disconnect();
+			} catch {
+				/* Already ended. */
+			}
+		}
+		this.sources.clear();
+		if (this.master) this.master.disconnect();
+		if (this.context?.close && this.context.state !== "closed")
+			this.context.close().catch(() => {});
+	}
+}
+
+return Sound;})();
+const Network = (()=>{
+// Pier Pressure networking: AI Hub Session Protocol v1, plus standalone peer co-op.
+// The unmodified hub-session.js must be the first script in the delivered HTML.
+const NET_VERSION = "pier-pressure-1";
+const noop = () => {};
+const emptyInput = () => ({ aim: 0, fire: false, burst: false });
+
+class Network {
+	constructor(callbacks = {}) {
+		this.callbacks = callbacks;
+		this.active = !!globalThis.AIHub?.active;
+		this.connected = false;
+		this.ended = false;
+		this.started = false;
+		this.reported = false;
+		this.role = "host";
+		this.me = 0;
+		this.server = false;
+		this.players = [{ id: 0, name: "Port gunner", color: "#f4b34e" }];
+		this._seatIds = [0];
+		this._elapsed = 0;
+		this._sendAt = 0;
+		this._sequence = 0;
+		this._lastState = -1;
+		this._lastInput = new Map();
+		this._unsub = [];
+		this._nonce = globalThis.crypto?.randomUUID?.() || String(Math.random());
+		this.stats = { sent: 0, received: 0, rejected: 0, bytes: 0 };
+		this.lastScore = 0;
+	}
+
+	get isHost() {
+		return this.role === "host";
+	}
+	get isGuest() {
+		return this.role === "guest";
+	}
+	get online() {
+		return this.active || this.connected;
+	}
+	get localSeat() {
+		return this.server ? -1 : Math.max(0, this._seatIds.indexOf(this.me));
+	}
+	get running() {
+		if (this.ended) return false;
+		return this.active ? this.started && AIHub.time() >= 0 : true;
+	}
+	get countdown() {
+		return this.active ? Math.max(0, -AIHub.time() / 1000) : 0;
+	}
+
+	_call(name, ...args) {
+		(this.callbacks[name] || noop)(...args);
+	}
+	_status(text) {
+		this._call("onStatus", text);
+	}
+
+	async init() {
+		if (!this.active) return null;
+		const info = await AIHub.connect({ mode: "shared-world", seats: [1, 2] });
+		if (!info) {
+			this.active = false;
+			return null;
+		}
+		this.role = info.isHost ? "host" : "guest";
+		this.me = info.me;
+		this.server = !!info.server;
+		this.players = info.players.slice();
+		this._seatIds = info.players.map((p) => p.id);
+		this.connected = true;
+		this._unsub.push(
+			AIHub.on("start", (info) => {
+				this.started = true;
+				this._sendAt = 0;
+				this._call("onStart", info);
+			}),
+			AIHub.on("message", (data, from) => this._receive(data, from)),
+			AIHub.on("leave", ({ id, reason }) => {
+				const seat = this._seatIds.indexOf(id);
+				this.players = this.players.filter((p) => p.id !== id);
+				if (seat >= 0 && this.isHost) this._call("onInput", emptyInput(), seat);
+				this._call("onLeave", id, reason);
+				this._status("A gunner left. The coastal watch continues.");
+			}),
+			AIHub.on("time-up", (info) => {
+				if (this.ended) return;
+				this._call("onTimeUp", info);
+				// The game normally reports immediately. This fallback also honors short rounds.
+				if (this.isHost && !this.reported) this.finish(this.lastScore, false);
+			}),
+			AIHub.on("end", (info) => {
+				this.ended = true;
+				this.connected = false;
+				this._call("onEnd", info.reason, info);
+			}),
+		);
+		this._status(
+			this.server
+				? "AI Hub · coastal command"
+				: `AI Hub · gunner ${this.localSeat + 1}`,
+		);
+		return info;
+	}
+
+	ready() {
+		if (this.active && !this.ended) AIHub.ready();
+	}
+
+	// dt is seconds. The host supplies its compact JSON snapshot, guests their current input.
+	// Ten packets/sec in each direction stays within the Hub's 20/sec allowance.
+	tick(dt, input, snapshot) {
+		this._elapsed += Math.max(0, Number(dt) || 0);
+		if (
+			this.ended ||
+			!this.online ||
+			!this.running ||
+			this._elapsed < this._sendAt
+		)
+			return;
+		this._sendAt = this._elapsed + 0.1;
+		if (this.isHost && snapshot != null) {
+			this._send({
+				protocol: NET_VERSION,
+				kind: "state",
+				seq: ++this._sequence,
+				state: snapshot,
+			});
+		} else if (this.isGuest) {
+			this._send({
+				protocol: NET_VERSION,
+				kind: "input",
+				seq: ++this._sequence,
+				input: input || emptyInput(),
+			});
+		}
+	}
+
+	_send(data) {
+		if (this.ended) return false;
+		let encoded;
+		try {
+			encoded = JSON.stringify(data);
+		} catch {
+			return false;
+		}
+		if (encoded.length > 16000) {
+			this.stats.rejected++;
+			return false;
+		}
+		let sent = false;
+		if (this.active)
+			sent = AIHub.send(
+				data,
+				this.isHost ? { reliable: true } : { to: AIHub.host, reliable: false },
+			);
+		else if (this._data?.readyState === "open") {
+			if (this._data.bufferedAmount > 65536) return false;
+			this._data.send(encoded);
+			sent = true;
+		} else if (this._broadcast && this.connected && this._remote) {
+			this._broadcast.postMessage({
+				protocol: NET_VERSION,
+				from: this._nonce,
+				to: this._remote,
+				kind: "packet",
+				data,
+			});
+			sent = true;
+		}
+		if (sent) {
+			this.stats.sent++;
+			this.stats.bytes += encoded.length;
+		}
+		return sent;
+	}
+
+	_receive(data, from) {
+		if (this.ended || !data || data.protocol !== NET_VERSION) return;
+		this.stats.received++;
+		if (data.kind === "input" && this.isHost) {
+			const seat = this.active ? this._seatIds.indexOf(from) : 1;
+			if (seat < 0 || seat > 1 || !Number.isFinite(data.seq)) return;
+			if (data.seq <= (this._lastInput.get(from) ?? -1)) return;
+			this._lastInput.set(from, data.seq);
+			const source = data.input || {};
+			// Only ordinary input crosses the boundary: no guest world state or score.
+			const clean = { ...source };
+			for (const k of ["aim", "angle", "x", "y", "power"]) {
+				if (k in clean)
+					clean[k] = Math.max(-10000, Math.min(10000, Number(clean[k]) || 0));
+			}
+			this._call("onInput", clean, seat);
+		} else if (data.kind === "state" && this.isGuest) {
+			if (this.active && from !== AIHub.host) return;
+			if (!Number.isFinite(data.seq) || data.seq <= this._lastState) return;
+			this._lastState = data.seq;
+			this._call("onState", data.state);
+		} else if (data.kind === "end" && this.isGuest) {
+			this._call("onResult", data.score, !!data.won, data.stats || {});
+		}
+	}
+
+	finish(score = 0, won = false, stats = {}) {
+		if (!this.isHost || this.reported || this.ended) return;
+		this.reported = true;
+		this.lastScore = Number.isFinite(Number(score)) ? Number(score) : 0;
+		if (this.active) {
+			const ids = this.players.map((p) => p.id);
+			const scores = Object.fromEntries(ids.map((id) => [id, this.lastScore]));
+			const playerStats = Object.fromEntries(ids.map((id) => [id, stats]));
+			AIHub.finish({
+				standings: [ids],
+				scores,
+				won: !!won,
+				stats: playerStats,
+			});
+		} else if (this.connected) {
+			this._send({
+				protocol: NET_VERSION,
+				kind: "end",
+				score: this.lastScore,
+				won: !!won,
+				stats,
+			});
+		}
+	}
+
+	fail(message) {
+		if (this.active && !this.ended) AIHub.fail(String(message));
+		this._status(String(message));
+	}
+
+	_standalone(role) {
+		if (this.active) throw new Error("AI Hub manages this session.");
+		this.leave();
+		this.role = role;
+		this.me = role === "host" ? 0 : 1;
+		this.ended = false;
+		this.reported = false;
+		this.started = true;
+		this._seatIds = [0, 1];
+		this.players = [
+			{ id: 0, name: "Port gunner", color: "#f4b34e" },
+			{ id: 1, name: "Starboard gunner", color: "#67dac6" },
+		];
+	}
+
+	_connected() {
+		this.connected = true;
+		this._status("Two gunners connected. All hands on deck!");
+		this._call("onConnect", this.role);
+	}
+
+	// A six-letter same-browser room; handy for two windows on one computer.
+	// For different devices use the offer/answer functions below.
+	hostLocal(code) {
+		this._standalone("host");
+		this._room = String(
+			code ||
+				Array.from(
+					crypto.getRandomValues(new Uint8Array(6)),
+					(x) => "ABCDEFGHJKLMNPQRSTUVWXYZ"[x % 24],
+				).join(""),
+		).toUpperCase();
+		this._openBroadcast();
+		this._status(
+			`Local window room ${this._room} · waiting for a second window`,
+		);
+		return this._room;
+	}
+
+	joinLocal(code) {
+		code = String(code || "")
+			.trim()
+			.toUpperCase();
+		if (!/^[A-Z0-9-]{3,24}$/.test(code))
+			throw new Error("Enter the room code shown by the host.");
+		this._standalone("guest");
+		this._room = code;
+		this._openBroadcast();
+		const hello = () =>
+			this._broadcast?.postMessage({
+				protocol: NET_VERSION,
+				from: this._nonce,
+				kind: "hello",
+			});
+		hello();
+		this._helloTimer = setInterval(() => {
+			if (!this.connected) hello();
+		}, 500);
+		this._status(`Calling local room ${code}…`);
+	}
+
+	_openBroadcast() {
+		if (!globalThis.BroadcastChannel)
+			throw new Error(
+				"This browser does not support local window rooms. Use direct connection.",
+			);
+		this._broadcast = new BroadcastChannel(`${NET_VERSION}:${this._room}`);
+		this._broadcast.onmessage = ({ data }) => {
+			if (
+				!data ||
+				data.protocol !== NET_VERSION ||
+				data.from === this._nonce ||
+				(data.to && data.to !== this._nonce)
+			)
+				return;
+			if (
+				data.kind === "hello" &&
+				this.isHost &&
+				(!this._remote || this._remote === data.from)
+			) {
+				this._remote = data.from;
+				this._broadcast.postMessage({
+					protocol: NET_VERSION,
+					from: this._nonce,
+					to: data.from,
+					kind: "welcome",
+				});
+				if (!this.connected) this._connected();
+			} else if (data.kind === "welcome" && this.isGuest && !this.connected) {
+				this._remote = data.from;
+				clearInterval(this._helloTimer);
+				this._connected();
+			} else if (data.kind === "packet" && data.from === this._remote) {
+				this._receive(data.data, this.isHost ? 1 : 0);
+			} else if (data.kind === "bye" && data.from === this._remote)
+				this._disconnected();
+		};
+	}
+
+	// Manual WebRTC signaling avoids accounts and a signaling server. STUN discovers
+	// addresses; some restrictive networks require a relay unavailable to this file.
+	_makePeer() {
+		if (!globalThis.RTCPeerConnection)
+			throw new Error("Direct connections require a browser with WebRTC.");
+		this._peer = new RTCPeerConnection({
+			iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
+		});
+		this._peer.ondatachannel = (e) => this._wireData(e.channel);
+		this._peer.onconnectionstatechange = () => {
+			if (
+				["failed", "disconnected", "closed"].includes(
+					this._peer?.connectionState,
+				)
+			)
+				this._disconnected();
+		};
+	}
+
+	_wireData(channel) {
+		this._data = channel;
+		channel.onopen = () => this._connected();
+		channel.onclose = () => this._disconnected();
+		channel.onmessage = ({ data }) => {
+			if (typeof data !== "string" || data.length > 16000) return;
+			try {
+				this._receive(JSON.parse(data), this.isHost ? 1 : 0);
+			} catch {
+				this.stats.rejected++;
+			}
+		};
+	}
+
+	async _gather() {
+		if (this._peer.iceGatheringState !== "complete")
+			await new Promise((resolve) => {
+				const peer = this._peer;
+				const timer = setTimeout(done, 5000);
+				function done() {
+					clearTimeout(timer);
+					peer.removeEventListener("icegatheringstatechange", changed);
+					resolve();
+				}
+				function changed() {
+					if (peer.iceGatheringState === "complete") done();
+				}
+				peer.addEventListener("icegatheringstatechange", changed);
+			});
+		return "PP1." + btoa(JSON.stringify(this._peer.localDescription));
+	}
+
+	_description(token, type) {
+		try {
+			if (!String(token).trim().startsWith("PP1.")) throw new Error();
+			const data = JSON.parse(atob(String(token).trim().slice(4)));
+			if (
+				data.type !== type ||
+				typeof data.sdp !== "string" ||
+				data.sdp.length > 30000
+			)
+				throw new Error();
+			return data;
+		} catch {
+			throw new Error(
+				`Paste the complete ${type === "offer" ? "invitation" : "reply"} code from the other gunner.`,
+			);
+		}
+	}
+
+	async hostRoom() {
+		this._standalone("host");
+		this._makePeer();
+		this._wireData(this._peer.createDataChannel(NET_VERSION));
+		await this._peer.setLocalDescription(await this._peer.createOffer());
+		const token = await this._gather();
+		this._status(
+			"Invitation ready. Send it to your gunner, then paste their reply.",
+		);
+		return token;
+	}
+
+	async joinRoom(token) {
+		const description = this._description(token, "offer");
+		this._standalone("guest");
+		this._makePeer();
+		await this._peer.setRemoteDescription(description);
+		await this._peer.setLocalDescription(await this._peer.createAnswer());
+		const answer = await this._gather();
+		this._status("Reply ready. Send it to the host to connect.");
+		return answer;
+	}
+
+	async acceptAnswer(token) {
+		if (this.active || !this._peer || !this.isHost)
+			throw new Error("Create an invitation first.");
+		await this._peer.setRemoteDescription(this._description(token, "answer"));
+		this._status("Reply accepted. Connecting the coastal batteries…");
+	}
+
+	_disconnected() {
+		if (!this.connected) return;
+		this.connected = false;
+		this._remote = null;
+		if (this.isHost) this._call("onInput", emptyInput(), 1);
+		this._call("onDisconnect");
+		this._status("The other gunner disconnected. Host may continue solo.");
+	}
+
+	leave() {
+		if (this.active) return false;
+		if (this._broadcast && this._remote)
+			this._broadcast.postMessage({
+				protocol: NET_VERSION,
+				from: this._nonce,
+				to: this._remote,
+				kind: "bye",
+			});
+		clearInterval(this._helloTimer);
+		this._broadcast?.close();
+		this._broadcast = null;
+		if (this._data) {
+			this._data.onclose = null;
+			this._data.close();
+			this._data = null;
+		}
+		if (this._peer) {
+			this._peer.onconnectionstatechange = null;
+			this._peer.close();
+			this._peer = null;
+		}
+		this.connected = false;
+		this.role = "host";
+		this.me = 0;
+		this.server = false;
+		this._remote = null;
+		this._seatIds = [0];
+		this.players = [{ id: 0, name: "Port gunner", color: "#f4b34e" }];
+		this._lastInput.clear();
+		this._lastState = -1;
+		this._sequence = 0;
+		this._sendAt = 0;
+		return true;
+	}
+
+	dispose() {
+		this.leave();
+		for (const off of this._unsub) off();
+		this._unsub.length = 0;
+	}
+}
+
+return Network;})();
+const Coast = (()=>{
+
+class Coast {
+	constructor(canvas) {
+		this.scene = new THREE.Scene();
+		this.scene.background = new THREE.Color("#f0dfbb");
+		this.camera = new THREE.OrthographicCamera(-28, 28, 28, -5, 0.1, 250);
+		this.camera.position.set(0, 17, 58);
+		this.camera.lookAt(0, 12, 0);
+		this.renderer = new THREE.WebGPURenderer({
+			canvas,
+			antialias: true,
+			alpha: false,
+			forceWebGL: new URLSearchParams(location.search).has("webgl"),
+		});
+		this.renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+		this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+		this.targetRoots = new Set();
+		this.trails = new Set();
+		this.materials = new Map();
+		this.mixers = [];
+		this.particles = [];
+		this.waves = [];
+		this.clouds = [];
+		this.time = 0;
+		this.ink = new THREE.MeshBasicNodeMaterial({
+			color: "#102c3b",
+			side: THREE.BackSide,
+		});
+		this.boxGeo = new THREE.BoxGeometry(1, 1, 1);
+		this.ballGeo = new THREE.SphereGeometry(1, 12, 8);
+		this.build();
+		this.resize();
+	}
+	async init() {
+		await this.renderer.init();
+		this.backend = this.renderer.backend.isWebGPUBackend
+			? "WebGPU"
+			: "WebGL 2 fallback";
+	}
+	mat(hex) {
+		if (!this.materials.has(hex)) {
+			const m = new THREE.MeshBasicNodeMaterial();
+			m.colorNode = color(hex).mul(
+				normalWorld
+					.dot(vec3(0.25, 0.8, 0.6))
+					.max(0)
+					.mul(3)
+					.floor()
+					.div(3)
+					.mul(0.33)
+					.add(0.67),
+			);
+			this.materials.set(hex, m);
+		}
+		return this.materials.get(hex);
+	}
+	mesh(
+		geo,
+		c,
+		parent,
+		x = 0,
+		y = 0,
+		z = 0,
+		sx = 1,
+		sy = 1,
+		sz = 1,
+		outline = true,
+	) {
+		const m = new THREE.Mesh(geo, this.mat(c));
+		m.position.set(x, y, z);
+		m.scale.set(sx, sy, sz);
+		parent.add(m);
+		if (outline) {
+			const o = new THREE.Mesh(geo, this.ink);
+			o.scale.setScalar(1.045);
+			m.add(o);
+		}
+		return m;
+	}
+	box(c, p, x, y, z, sx, sy, sz, outline = true) {
+		return this.mesh(this.boxGeo, c, p, x, y, z, sx, sy, sz, outline);
+	}
+	ball(c, p, x, y, z, sx, sy, sz, outline = true) {
+		return this.mesh(this.ballGeo, c, p, x, y, z, sx, sy, sz, outline);
+	}
+	build() {
+		const s = this.scene;
+		this.mesh(
+			new THREE.CircleGeometry(5.1, 64),
+			"#fac963",
+			s,
+			16,
+			18,
+			-38,
+			1,
+			1,
+			1,
+			false,
+		);
+		this.mesh(
+			new THREE.RingGeometry(5.5, 5.54, 64),
+			"#d9ac69",
+			s,
+			16,
+			18,
+			-37,
+			1,
+			1,
+			1,
+			false,
+		);
+		// Cut-paper distant islands and their ink contour.
+		for (let i = 0; i < 11; i++) {
+			const x = (i - 5) * 7;
+			const h = 2 + Math.sin(i * 3.7) * 1.5;
+			this.mesh(
+				new THREE.ConeGeometry(5, h, 5),
+				"#719692",
+				s,
+				x,
+				0.5 + h / 2,
+				-24,
+				1,
+				1,
+				1,
+				true,
+			);
+		}
+		this.box("#267f86", s, 0, -75, -27.8, 150, 150, 1, false);
+		this.box("#267f86", s, 0, 0, 20, 150, 1, 95, false);
+		this.box("#85bbb0", s, 0, 0.65, -24, 150, 0.06, 3, false);
+		for (let i = 0; i < 125; i++) {
+			const x = ((i * 13.713) % 78) - 39,
+				z = ((i * 7.231) % 61) - 30;
+			const m = this.box(
+				i % 3 ? "#70b8b0" : "#b8d5bc",
+				s,
+				x,
+				0.65,
+				z,
+				1 + (i % 6) * 0.7,
+				0.025,
+				0.07,
+				false,
+			);
+			this.waves.push(m);
+		}
+		for (let i = 0; i < 12; i++) {
+			const g = new THREE.Group();
+			s.add(g);
+			g.position.set(-40 + i * 7, 15 + (i % 4) * 2.3, -28 - (i % 3) * 2);
+			for (let k = 0; k < 3; k++)
+				this.ball(
+					"#f9f0d4",
+					g,
+					k * 1.5,
+					Math.sin(k * 2) * 0.25,
+					0,
+					1.8,
+					0.65 + (k % 2) * 0.3,
+					0.3,
+					false,
+				);
+			this.clouds.push(g);
+		}
+		// Lighthouse on the outer shoal.
+		const light = new THREE.Group();
+		light.position.set(23, 0.6, -16);
+		s.add(light);
+		this.mesh(
+			new THREE.CylinderGeometry(1, 1.7, 1, 7),
+			"#486d6b",
+			light,
+			0,
+			0,
+			0,
+		);
+		this.mesh(
+			new THREE.CylinderGeometry(0.45, 0.8, 4.7, 10),
+			"#f3dfb3",
+			light,
+			0,
+			2.5,
+			0,
+		);
+		this.mesh(
+			new THREE.CylinderGeometry(0.52, 0.6, 0.65, 10),
+			"#e56b49",
+			light,
+			0,
+			3.1,
+			0,
+		);
+		this.mesh(
+			new THREE.CylinderGeometry(0.7, 0.7, 0.65, 10),
+			"#ffce5e",
+			light,
+			0,
+			5.05,
+			0,
+		);
+		this.mesh(
+			new THREE.ConeGeometry(0.95, 0.9, 10),
+			"#203f48",
+			light,
+			0,
+			5.8,
+			0,
+		);
+		this.box("#e8e0ba", s, 0, -0.9, 9, 70, 0.9, 8);
+		for (let i = 0; i < 24; i++) {
+			this.box("#c5a578", s, -34 + i * 3, -0.35, 9, 2.9, 0.13, 7.8);
+		}
+		for (const x of [-12, 12]) {
+			const g = new THREE.Group();
+			g.position.set(x, 0, 0);
+			s.add(g);
+			this.mesh(
+				new THREE.CylinderGeometry(3.7, 4.2, 1.8, 8),
+				"#68766c",
+				g,
+				0,
+				0.5,
+				1,
+			);
+			this.mesh(
+				new THREE.CylinderGeometry(3.5, 3.7, 0.45, 8),
+				"#d3ba88",
+				g,
+				0,
+				1.5,
+				1,
+			);
+			for (let k = 0; k < 5; k++)
+				this.box("#e5c991", g, -2.8 + k * 1.4, 1.95, 2.9, 1.1, 0.6, 0.5);
+			this.box("#273f43", g, 0, 1.65, 1.2, 3, 0.1, 2.7);
+			this.box("#d3ba88", g, 0, 1.3, -1.7, 5, 0.3, 1.8);
+			this.box("#ffcf59", g, x < 0 ? -2.4 : 2.4, 2.9, 2.2, 0.1, 2.6, 0.1);
+			this.box(
+				x < 0 ? "#e76746" : "#5ab7ad",
+				g,
+				x < 0 ? -2 : 2,
+				3.8,
+				2.2,
+				0.9,
+				0.6,
+				0.08,
+			);
+		}
+		for (let x = -30; x <= 30; x += 3.2) {
+			this.box("#59665a", s, x, -1, 12, 0.25, 2, 0.25);
+			this.box("#d4bf8f", s, x, 0.3, 12, 0.3, 1.1, 0.3);
+		}
+		this.box("#6b6a52", s, 0, 0.7, 12, 65, 0.16, 0.16);
+		this.guns = [this.makeGun(-12, "#ed734c"), this.makeGun(12, "#69bcb0")];
+		this.preview = new THREE.Group();
+		s.add(this.preview);
+		this.previewDots = [];
+		for (let i = 0; i < 25; i++) {
+			const m = this.ball(
+				"#ffe298",
+				this.preview,
+				0,
+				0,
+				0.2,
+				0.075,
+				0.075,
+				0.075,
+				false,
+			);
+			this.previewDots.push(m);
+		}
+		this.reticle = new THREE.Group();
+		s.add(this.reticle);
+		this.mesh(
+			new THREE.TorusGeometry(0.42, 0.035, 5, 32),
+			"#fff1be",
+			this.reticle,
+			0,
+			0,
+			0,
+			1,
+			1,
+			1,
+			false,
+		);
+		this.reticle.visible = false;
+	}
+	makeGun(x, c) {
+		const root = new THREE.Group();
+		root.position.set(x, 2.1, 0);
+		this.scene.add(root);
+		this.mesh(
+			new THREE.CylinderGeometry(1.3, 1.6, 0.65, 12),
+			"#183e49",
+			root,
+			0,
+			0,
+			0,
+		);
+		this.ball(c, root, 0, 0.4, 0, 1.25, 0.9, 0.85);
+		const pivot = new THREE.Group();
+		pivot.position.y = 1.1;
+		root.add(pivot);
+		const barrel = new THREE.Group();
+		barrel.name = "barrel";
+		pivot.add(barrel);
+		this.box("#1c3943", barrel, 1.2, 0, 0, 2.7, 0.5, 0.5);
+		this.box(c, barrel, 0.55, 0, 0, 1.1, 0.7, 0.7);
+		this.box("#f3d081", barrel, 2.4, 0, 0, 0.24, 0.65, 0.65);
+		this.ball("#294953", root, 0, 0.95, 0.8, 0.4, 0.4, 0.15);
+		const mixer = new THREE.AnimationMixer(root);
+		const clip = new THREE.AnimationClip("recoil", 0.24, [
+			new THREE.NumberKeyframeTrack(
+				"barrel.position[x]",
+				[0, 0.05, 0.24],
+				[0, -0.4, 0],
+			),
+		]);
+		const action = mixer.clipAction(clip);
+		action.setLoop(THREE.LoopOnce, 1);
+		action.clampWhenFinished = true;
+		this.mixers.push(mixer);
+		pivot.rotation.z = x < 0 ? 1.1 : 2.04;
+		return { root, pivot, mixer, action, x, angle: x < 0 ? 1.1 : 2.04 };
+	}
+	animate(root, tracks, duration) {
+		const mixer = new THREE.AnimationMixer(root);
+		const clip = new THREE.AnimationClip("mechanical", duration, tracks);
+		mixer.clipAction(clip).play();
+		root.userData.mixer = mixer;
+		return mixer;
+	}
+	makeTarget(type, side = 1) {
+		const root = new THREE.Group(),
+			g = new THREE.Group();
+		root.add(g);
+		g.name = "hull";
+		this.scene.add(root);
+		root.userData.type = type;
+		this.targetRoots.add(root);
+		const c =
+			type === "supply"
+				? "#8cc7aa"
+				: type === "boat"
+					? "#e99151"
+					: type === "boss"
+						? "#c75543"
+						: "#edb54d";
+		if (type === "plane" || type === "scout") {
+			this.ball(c, g, 0, 0, 0, 1.6, 0.4, 0.45);
+			this.box(c, g, -0.15, 0, 0, 1.2, 0.13, 4.2);
+			this.box("#e9cb82", g, -0.2, 0.78, 0, 1.5, 0.13, 4.5);
+			for (const z of [-1.45, 1.45]) {
+				this.box("#314b4f", g, -0.65, 0.4, z, 0.07, 0.85, 0.07);
+				this.box("#314b4f", g, 0.35, 0.4, z, 0.07, 0.85, 0.07);
+			}
+			this.box("#c86a44", g, 0.9, -0.03, 0.4, 0.35, 0.45, 0.07);
+			for (const z of [-0.4, 0.4]) {
+				this.box("#1c3d46", g, 0.35, -0.47, z, 0.1, 0.4, 0.1);
+				this.mesh(
+					new THREE.CylinderGeometry(0.19, 0.19, 0.14, 8),
+					"#193b43",
+					g,
+					0.35,
+					-0.7,
+					z,
+					1,
+					1,
+					1,
+				).rotation.x = Math.PI / 2;
+			}
+			for (let k = 0; k < 4; k++)
+				this.ball(
+					"#374f4c",
+					g,
+					-0.8 + k * 0.4,
+					-0.12,
+					0.43,
+					0.035,
+					0.035,
+					0.035,
+					false,
+				);
+			this.box("#183f4a", g, -1.2, 0.43, 0, 0.65, 0.9, 0.13);
+			this.box(c, g, -1.25, 0.1, 0, 0.6, 0.13, 1.6);
+			this.ball("#a9d8cc", g, 0.4, 0.35, 0, 0.55, 0.33, 0.35);
+			const prop = new THREE.Group();
+			prop.name = "prop";
+			prop.position.x = 1.65;
+			g.add(prop);
+			this.box("#153a45", prop, 0, 0, 0, 0.12, 1.8, 0.12);
+			this.box("#e66846", g, -0.2, 0.88, 1.65, 0.6, 0.04, 0.55);
+			this.box("#e66846", g, -0.2, 0.88, -1.65, 0.6, 0.04, 0.55);
+			this.animate(
+				root,
+				[
+					new THREE.NumberKeyframeTrack(
+						"prop.rotation[x]",
+						[0, 2],
+						[0, Math.PI * 32],
+					),
+					new THREE.NumberKeyframeTrack(
+						"hull.rotation[z]",
+						[0, 1, 2],
+						[0, 0.045, 0],
+					),
+				],
+				2,
+			);
+			g.rotation.y = side < 0 ? Math.PI : 0;
+		} else if (type === "heli") {
+			this.ball("#db7653", g, 0, 0, 0, 1.1, 0.65, 0.65);
+			this.ball("#add9cf", g, 0.6, 0.15, 0.3, 0.65, 0.45, 0.45);
+			this.box("#193c47", g, -1.4, 0, 0, 1.9, 0.22, 0.22);
+			this.box(c, g, -2.2, 0.35, 0, 0.3, 0.8, 0.15);
+			this.box("#173b46", g, 0, 0.85, 0, 0.15, 0.6, 0.15);
+			const rotor = new THREE.Group();
+			rotor.name = "rotor";
+			rotor.position.y = 1.1;
+			g.add(rotor);
+			this.box("#173b46", rotor, 0, 0, 0, 4.1, 0.06, 0.14);
+			for (const k of [-1, 1])
+				this.box("#193c47", g, 0, -0.75, k * 0.55, 2.5, 0.13, 0.13);
+			this.animate(
+				root,
+				[
+					new THREE.NumberKeyframeTrack(
+						"rotor.rotation[y]",
+						[0, 2],
+						[0, Math.PI * 40],
+					),
+					new THREE.NumberKeyframeTrack(
+						"hull.rotation[z]",
+						[0, 1, 2],
+						[0, 0.05, 0],
+					),
+				],
+				2,
+			);
+			g.rotation.y = side < 0 ? Math.PI : 0;
+		} else if (type === "supply") {
+			this.mesh(
+				new THREE.SphereGeometry(1.2, 12, 6, 0, Math.PI * 2, 0, Math.PI / 2),
+				"#9fc5a1",
+				g,
+				0,
+				1,
+				0,
+				1,
+				0.65,
+				1,
+			);
+			for (const k of [-1, 1])
+				this.box("#eee1b5", g, k * 0.65, 0.35, 0, 0.035, 1.4, 0.035, false);
+			this.box("#f3d397", g, 0, -0.6, 0, 1, 1, 0.8);
+			this.box("#4d9186", g, 0, -0.6, 0.43, 0.15, 0.8, 0.04);
+			this.box("#4d9186", g, 0, -0.6, 0.43, 0.75, 0.15, 0.04);
+			this.animate(
+				root,
+				[
+					new THREE.NumberKeyframeTrack(
+						"hull.rotation[z]",
+						[0, 1, 2],
+						[-0.15, 0.15, -0.15],
+					),
+				],
+				2,
+			);
+		} else if (type === "bomb") {
+			this.ball("#d15c43", g, 0, 0, 0, 0.23, 0.5, 0.23);
+			this.box("#193d46", g, 0, 0.4, 0, 0.7, 0.15, 0.15);
+		} else {
+			const boss = type === "boss",
+				scale = boss ? 2.5 : 1;
+			const shape = new THREE.Shape();
+			shape.moveTo(-2.2, 0.15);
+			shape.lineTo(2.2, 0.15);
+			shape.lineTo(1.5, -0.65);
+			shape.lineTo(-1.6, -0.65);
+			shape.closePath();
+			this.mesh(
+				new THREE.ExtrudeGeometry(shape, { depth: 1.2, bevelEnabled: false }),
+				boss ? "#324b52" : "#d66a47",
+				g,
+				0,
+				0,
+				-0.6,
+				scale,
+				scale,
+				scale,
+			);
+			this.box("#f2ce83", g, 0, 0.25, 0, 4.1 * scale, 0.15, 1.3 * scale);
+			for (let k = 0; k < 5; k++) {
+				this.ball(
+					"#f2c274",
+					g,
+					(-1.4 + k * 0.65) * scale,
+					-0.25 * scale,
+					0.62 * scale,
+					0.1 * scale,
+					0.1 * scale,
+					0.05,
+					false,
+				);
+			}
+			this.box(
+				"#d5ccab",
+				g,
+				-0.3,
+				1 * scale,
+				0,
+				1.7 * scale,
+				1.3 * scale,
+				0.95 * scale,
+			);
+			this.box(
+				"#264a52",
+				g,
+				0.1,
+				1.4 * scale,
+				0.51 * scale,
+				0.7 * scale,
+				0.35 * scale,
+				0.05,
+			);
+			for (let k = 0; k < (boss ? 3 : 1); k++) {
+				this.box(
+					"#263e45",
+					g,
+					(-1.3 + k * 0.9) * scale,
+					2 * scale,
+					0,
+					0.4 * scale,
+					1 * scale,
+					0.5 * scale,
+				);
+				this.box(
+					"#c96348",
+					g,
+					(-1.3 + k * 0.9) * scale,
+					2.45 * scale,
+					0,
+					0.43 * scale,
+					0.25 * scale,
+					0.53 * scale,
+				);
+			}
+			for (const k of [-1, 1]) {
+				this.ball(
+					"#c75640",
+					g,
+					k * 1.5 * scale,
+					0.55 * scale,
+					0,
+					0.5 * scale,
+					0.4 * scale,
+					0.5 * scale,
+				);
+				this.box(
+					"#1c3841",
+					g,
+					k * 1.9 * scale,
+					0.85 * scale,
+					0,
+					1.1 * scale,
+					0.16 * scale,
+					0.2 * scale,
+				);
+			}
+			this.box(
+				"#25434a",
+				g,
+				0.8 * scale,
+				2 * scale,
+				0,
+				0.065,
+				2.8 * scale,
+				0.065,
+			);
+			this.box(
+				"#efbf59",
+				g,
+				1.15 * scale,
+				3.05 * scale,
+				0,
+				0.7 * scale,
+				0.5 * scale,
+				0.05,
+			);
+			for (const z of [-0.8, 0.8]) {
+				for (let k = -2; k <= 2; k++)
+					this.box(
+						"#cdbf95",
+						g,
+						k * 0.7 * scale,
+						0.45 * scale,
+						z * scale,
+						0.035,
+						0.5 * scale,
+						0.035,
+						false,
+					);
+				this.box(
+					"#cdbf95",
+					g,
+					0,
+					0.7 * scale,
+					z * scale,
+					3 * scale,
+					0.035,
+					0.035,
+					false,
+				);
+			}
+			if (boss) {
+				for (let k = 0; k < 5; k++)
+					this.box("#efbd58", g, -3 + k * 1.5, 0, 1.55, 0.65, 0.22, 0.05);
+			}
+			this.animate(
+				root,
+				[
+					new THREE.NumberKeyframeTrack(
+						"hull.rotation[z]",
+						[0, 1.5, 3],
+						[-0.025, 0.025, -0.025],
+					),
+					new THREE.NumberKeyframeTrack(
+						"hull.position[y]",
+						[0, 1.5, 3],
+						[0, 0.13, 0],
+					),
+				],
+				3,
+			);
+		}
+		return root;
+	}
+	remove(root) {
+		if (!root) return;
+		this.targetRoots.delete(root);
+		this.trails.delete(root);
+		if (root.userData.mixer) {
+			root.userData.mixer.stopAllAction();
+			root.userData.mixer.uncacheRoot(root);
+		}
+		const owned = new Set();
+		root.traverse((o) => {
+			if (o.isMesh && o.geometry !== this.boxGeo && o.geometry !== this.ballGeo)
+				owned.add(o.geometry);
+		});
+		for (const g of owned) g.dispose();
+		this.scene.remove(root);
+	}
+	projectile(x, y, special = false) {
+		const g = new THREE.Group();
+		this.scene.add(g);
+		this.trails.add(g);
+		g.userData.trailTime = 0;
+		g.position.set(x, y, 0);
+		this.ball(special ? "#9ee7d0" : "#ffe68d", g, 0, 0, 0, 0.17, 0.17, 0.17);
+		return g;
+	}
+	burst(x, y, c = "#ffcb60", size = 1) {
+		for (let i = 0; i < 14; i++) {
+			const a = Math.random() * Math.PI * 2,
+				v = 2 + Math.random() * 6;
+			const m = this.mesh(
+				i % 2 ? this.boxGeo : this.ballGeo,
+				i % 4 === 0 ? "#f7e9bf" : c,
+				this.scene,
+				x,
+				y,
+				0.5,
+				0.12 + Math.random() * 0.22,
+				0.12 + Math.random() * 0.22,
+				0.13,
+				false,
+			);
+			this.particles.push({
+				m,
+				vx: Math.cos(a) * v * size,
+				vy: Math.sin(a) * v * size,
+				life: 0.35 + Math.random() * 0.55,
+				max: 0.9,
+			});
+		}
+		const ring = this.mesh(
+			new THREE.TorusGeometry(0.3, 0.07, 5, 24),
+			c,
+			this.scene,
+			x,
+			y,
+			0.6,
+			1,
+			1,
+			1,
+			false,
+		);
+		this.particles.push({
+			m: ring,
+			vx: 0,
+			vy: 0,
+			life: 0.45,
+			max: 0.45,
+			ring: true,
+		});
+	}
+	drawAim(x, y, angle, speed, gravity, wind, visible) {
+		this.preview.visible = visible;
+		if (!visible) return;
+		for (let i = 0; i < this.previewDots.length; i++) {
+			const t = (i + 1) * 0.06;
+			const p = this.previewDots[i];
+			p.position.set(
+				x + Math.cos(angle) * speed * t + wind * 0.5 * t * t,
+				y + Math.sin(angle) * speed * t - gravity * 0.5 * t * t,
+				0,
+			);
+			p.visible = p.position.y > 0.8 && p.position.y < 26;
+		}
+	}
+	update(dt) {
+		this.time += dt;
+		for (const r of this.trails) {
+			r.userData.trailTime -= dt;
+			if (r.userData.trailTime <= 0 && dt > 0) {
+				r.userData.trailTime = 0.04;
+				const m = this.ball(
+					"#b78e55",
+					this.scene,
+					r.position.x,
+					r.position.y,
+					-0.05,
+					0.065,
+					0.065,
+					0.065,
+					false,
+				);
+				this.particles.push({
+					m,
+					vx: 0,
+					vy: 0,
+					life: 0.32,
+					max: 0.32,
+					trail: true,
+				});
+			}
+		}
+		for (const r of this.targetRoots) {
+			if (!["boat", "boss"].includes(r.userData.type)) continue;
+			r.userData.smoke = (r.userData.smoke || 0) - dt;
+			if (r.userData.smoke <= 0 && dt > 0) {
+				r.userData.smoke = 0.3;
+				const boss = r.userData.type === "boss",
+					m = this.ball(
+						"#66837a",
+						this.scene,
+						r.position.x - (boss ? 1 : 1.3),
+						r.position.y + (boss ? 6 : 2.7),
+						-0.1,
+						0.22,
+						0.26,
+						0.22,
+						false,
+					);
+				this.particles.push({
+					m,
+					vx: -0.5,
+					vy: 0.65,
+					life: 1.6,
+					max: 1.6,
+					smoke: true,
+				});
+			}
+		}
+		for (const m of this.mixers) m.update(dt);
+		for (let i = this.particles.length - 1; i >= 0; i--) {
+			const p = this.particles[i];
+			p.life -= dt;
+			if (p.life <= 0) {
+				this.scene.remove(p.m);
+				if (p.ring) p.m.geometry.dispose();
+				this.particles.splice(i, 1);
+				continue;
+			}
+			p.m.position.x += p.vx * dt;
+			p.m.position.y += p.vy * dt;
+			if (!p.smoke && !p.trail) p.vy -= 8 * dt;
+			p.m.rotation.z += dt * 2;
+			if (p.ring) p.m.scale.setScalar(1 + (p.max - p.life) * 12);
+			else p.m.scale.multiplyScalar((p.smoke ? 1.55 : 0.25) ** dt);
+		}
+		for (let i = 0; i < this.waves.length; i++) {
+			const w = this.waves[i];
+			w.position.x += dt * (0.2 + (i % 3) * 0.06);
+			if (w.position.x > 42) w.position.x = -42;
+			w.scale.x = 1 + Math.sin(this.time * 1.2 + i) * 0.12;
+		}
+		for (const c of this.clouds) {
+			c.position.x += dt * 0.12;
+			if (c.position.x > 48) c.position.x = -48;
+		}
+	}
+	resize() {
+		const w = innerWidth,
+			h = innerHeight;
+		this.renderer.setSize(w, h);
+		const aspect = w / h;
+		const width = Math.max(54, 33 * aspect),
+			height = width / aspect;
+		this.camera.left = -width / 2;
+		this.camera.right = width / 2;
+		this.camera.top = height / 2;
+		this.camera.bottom = -height / 2;
+		this.camera.updateProjectionMatrix();
+		this.camera.position.set(0, 22, 60);
+		this.camera.lookAt(0, 12, 0);
+	}
+	pointer(x, y) {
+		const v = new THREE.Vector3(
+			(x / innerWidth) * 2 - 1,
+			(-y / innerHeight) * 2 + 1,
+			0.5,
+		).unproject(this.camera);
+		const dir = new THREE.Vector3(0, 0, -1).applyQuaternion(
+			this.camera.quaternion,
+		);
+		const t = -v.z / dir.z;
+		return v.addScaledVector(dir, t);
+	}
+	render(shake = 0) {
+		this.camera.position.x = shake ? (Math.random() - 0.5) * shake : 0;
+		this.renderer.render(this.scene, this.camera);
+	}
+}
+
+return Coast;})();
+
+const $ = (id) => document.getElementById(id),
+	clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const defaults = {
+	speed: 29,
+	gravity: 13,
+	cooldown: 0.3,
+	enemySpeed: 1,
+	spawn: 1.45,
+	damage: 1,
+	wind: 1,
+	assist: 0.35,
+};
+let tuning = { ...defaults },
+	prefs = { music: 0.1, sfx: 0.65, glyph: "ps", shake: true, assist: true };
+try {
+	Object.assign(
+		prefs,
+		JSON.parse(localStorage.getItem("pier-pressure-prefs") || "{}"),
+	);
+} catch {}
+const sound = new Sound();
+sound.setMusic(prefs.music);
+sound.setSfx(prefs.sfx);
+let coast,
+	world,
+	events,
+	screen = "loading",
+	previous = "title",
+	mode = "solo",
+	inputMode = "keyboard",
+	idle = 0,
+	ready = false,
+	autoplay = false;
+let simTime = 0,
+	physicsSteps = 0,
+	stepClock = 0,
+	spawnClock = 0,
+	supplyClock = 0,
+	nextId = 1,
+	shake = 0,
+	toastTime = 0,
+	bannerTime = 0,
+	demoTime = 0;
+let entities = new Map(),
+	handles = new Map(),
+	remoteViews = new Map(),
+	inputs = [
+		{ angle: 1.1, fire: false, salvo: false },
+		{ angle: 2.04, fire: false, salvo: false },
+	],
+	remoteInputs = [{}, {}];
+let salvoLatch = [0, 0];
+function playerSeat() {
+	return mode === "online" ? Math.max(0, net.localSeat) : 0;
+}
+function requestSalvo(seat = playerSeat()) {
+	if (screen !== "playing") return;
+	if (mode === "online" && net.isGuest) salvoLatch[seat] = 0.35;
+	else salvo(seat);
+}
+let G = {},
+	keys = new Set(),
+	pointerDown = false,
+	mousePoint = null,
+	padPrevious = [],
+	navAt = 0,
+	navIndex = 0,
+	manualInput = null,
+	touchOrigin = null,
+	touchAim = null,
+	touchActive = false,
+	touchPointerId = null;
+const stageNames = ["SKY PATROL", "CONVOY CROSSING", "THE ADMIRAL"];
+const stageOrders = [
+	"Lead the aircraft. Shoot down red bombs.",
+	"Rough water. Low angles. Watch the wind.",
+	"Sink the flagship. Keep the pier standing.",
+];
+const net = new Network({
+	onInput: (input, seat) => {
+		remoteInputs[seat] = {
+			...input,
+			fire: !!input.fire,
+			salvo: !!input.salvo || !!remoteInputs[seat]?.salvo,
+		};
+	},
+	onState: (s) => applySnapshot(s),
+	onStatus: (t) => {
+		$("networkStatus").textContent = t;
+	},
+	onConnect: () => {
+		start("online");
+		toast("SECOND GUNNER ABOARD");
+	},
+	onDisconnect: () => {
+		if (["playing", "pause", "dev"].includes(screen)) {
+			if (net.isGuest) {
+				finish(false, "RADIO LINK LOST", true);
+				return;
+			}
+			mode = "solo";
+			inputs[1].fire = false;
+			remoteInputs[1] = {};
+			coast.guns[1].root.visible = false;
+			toast("SECOND GUNNER LEFT · KEEP FIRING");
+		}
+	},
+	onStart: () => start("online"),
+	onTimeUp: () => {
+		if (net.isHost) finish(G.health > 0, "WATCH COMPLETE");
+	},
+	onEnd: (reason) => {
+		if (screen !== "results")
+			finish(
+				false,
+				reason === "host-left" ? "COMMAND DISCONNECTED" : "WATCH ENDED",
+				true,
+			);
+	},
+	onResult: (score, won, stats) => {
+		G.score = score;
+		Object.assign(G, stats);
+		finish(won, won ? "HARBOR SECURED" : "WATCH ENDED", true);
+	},
+	onLeave: () => {
+		remoteInputs[1] = {};
+		toast("A GUNNER LEFT THE WATCH");
+	},
+});
+function save() {
+	try {
+		localStorage.setItem("pier-pressure-prefs", JSON.stringify(prefs));
+	} catch {}
+}
+function touchOrPad() {
+	document.body.classList.toggle("touch", inputMode === "touch");
+}
+function setInputMode(v) {
+	if (inputMode !== v) {
+		inputMode = v;
+		$("salvoTouch").hidden = v !== "touch" || screen !== "playing";
+		touchOrPad();
+		updatePrompts();
+		if (
+			v === "gamepad" &&
+			screen !== "playing" &&
+			!focusables().includes(document.activeElement)
+		)
+			focusables()[0]?.focus({ preventScroll: true });
+	}
+}
+function activity(type) {
+	idle = 0;
+	if (type) setInputMode(type);
+	if (mode === "demo") {
+		title();
+		return true;
+	}
+	return false;
+}
+function updatePrompts() {
+	const pad = inputMode === "gamepad",
+		xbox = prefs.glyph === "xbox";
+	for (const e of document.querySelectorAll("[data-prompt]")) {
+		const p = e.dataset.prompt;
+		e.textContent = pad
+			? {
+					fire: xbox ? "RT" : "R2",
+					salvo: xbox ? "X" : "□",
+					confirm: xbox ? "A" : "✕",
+					back: xbox ? "B" : "○",
+					pause: "☰",
+					aim: "L",
+				}[p]
+			: {
+					fire: "HOLD CLICK / SPACE",
+					salvo: "E",
+					confirm: "ENTER",
+					back: "ESC",
+					pause: "ESC",
+					aim: "MOUSE / A D",
+				}[p];
+	}
+	$("controlLine").innerHTML = pad
+		? `<b>L</b> aim <b>${xbox ? "RT" : "R2"} / ${xbox ? "A" : "✕"}</b> fire <b>${xbox ? "X" : "□"}</b> salvo <b>☰</b> pause`
+		: "<b>MOUSE</b> aim <b>HOLD CLICK / SPACE</b> fire <b>E</b> salvo <b>ESC</b> pause";
+}
+function setScreen(s) {
+	screen = s;
+	$("screen").dataset.screen = s;
+	document.body.dataset.screen = s;
+	for (const el of document.querySelectorAll(".panel"))
+		el.hidden = el.dataset.panel !== s;
+	$("hud").hidden = !["playing", "pause", "dev"].includes(s);
+	$("pause").hidden = s !== "playing";
+	$("attract").hidden = mode !== "demo";
+	$("salvoTouch").hidden = inputMode !== "touch" || s !== "playing";
+	navIndex = 0;
+	requestAnimationFrame(() => {
+		const b = focusables()[0];
+		if (b && inputMode === "gamepad") b.focus({ preventScroll: true });
+	});
+}
+function toast(text) {
+	$("toast").textContent = text;
+	toastTime = 2.8;
+	$("toast").classList.add("show");
+}
+function banner(kicker, title, sub) {
+	$("bannerKicker").textContent = kicker;
+	$("bannerTitle").textContent = title;
+	$("bannerSub").textContent = sub;
+	bannerTime = 3.2;
+	$("banner").classList.add("show");
+	sound.voice(G.wave || 0);
+}
+function title() {
+	clearWorld();
+	mode = "solo";
+	autoplay = false;
+	setScreen("title");
+	idle = 0;
+	pointerDown = false;
+	touchActive = false;
+	inputs.forEach((i) => {
+		i.fire = false;
+	});
+	sound.mute(false);
+	coast.guns.forEach((g) => {
+		g.root.visible = true;
+	});
+	createTableau();
+}
+function clearWorld() {
+	for (const e of [...entities.values()]) remove(e);
+	for (const r of remoteViews.values()) coast?.remove(r);
+	remoteViews.clear();
+}
+function createTableau() {
+	if (!coast) return;
+	const a = spawn("plane", 1, 24);
+	a.x = 9;
+	a.y = 16;
+	a.baseY = 16;
+	a.root.position.set(9, 16, 0);
+	a.body.setTranslation({ x: 9, y: 16, z: 0 }, true);
+	const b = spawn("boat", -1);
+	b.x = 16;
+	b.y = 3.5;
+	b.baseY = 3.5;
+	b.root.position.set(16, 3.5, 0);
+	b.body.setTranslation({ x: 16, y: 3.5, z: 0 }, true);
+	const h = spawn("heli", -1);
+	h.x = 23;
+	h.y = 10;
+	h.baseY = 10;
+	h.root.position.set(23, 10, 0);
+	h.body.setTranslation({ x: 23, y: 10, z: 0 }, true);
+}
+function resetPhysics() {
+	clearWorld();
+	if (world) world.free();
+	if (events) events.free();
+	world = new RAPIER.World({ x: 0, y: -tuning.gravity, z: 0 });
+	world.timestep = 1 / 60;
+	events = new RAPIER.EventQueue(true);
+	handles.clear();
+}
+function start(which = "solo") {
+	if (which !== "online" && !net.active && net.isGuest) net.leave();
+	mode = which;
+	salvoLatch = [0, 0];
+	autoplay = which === "demo";
+	$("devAI").textContent = "AUTOPILOT " + (autoplay ? "ON" : "OFF");
+	resetPhysics();
+	simTime = 0;
+	stepClock = 0;
+	spawnClock = 0.45;
+	supplyClock = 8;
+	demoTime = 0;
+	remoteInputs = [{}, {}];
+	manualInput = null;
+	G = {
+		wave: 0,
+		score: 0,
+		health: 7,
+		maxHealth: 7,
+		energy: [100, 100],
+		cooldowns: [0, 0],
+		kills: 0,
+		waveKills: 0,
+		shotsFired: 0,
+		hits: 0,
+		combo: 0,
+		comboTimer: 0,
+		bestCombo: 0,
+		bossHP: 24,
+		bossMax: 24,
+		won: false,
+		time: 0,
+		salvos: 0,
+		rescues: 0,
+	};
+	inputs = [
+		{ angle: 1.1, fire: false, salvo: false },
+		{ angle: 2.04, fire: false, salvo: false },
+	];
+	pointerDown = false;
+	touchActive = false;
+	keys.clear();
+	net.reported = false;
+	sound.mute(false);
+	setScreen("playing");
+	banner(
+		which === "demo" ? "AUTOMATIC DEMONSTRATION" : "OPERATION 01",
+		stageNames[0],
+		stageOrders[0],
+	);
+	updateHUD();
+	coast.guns[1].root.visible = which !== "solo" && which !== "demo";
+}
+function nextWave() {
+	G.wave++;
+	G.waveKills = 0;
+	G.health = Math.min(G.maxHealth, G.health + 2);
+	G.energy = G.energy.map((v) => Math.max(v, 65));
+	clearWorld();
+	spawnClock = 1;
+	banner("OPERATION 0" + (G.wave + 1), stageNames[G.wave], stageOrders[G.wave]);
+	if (G.wave === 2) spawn("boss", 1);
+	sound.fanfare();
+}
+function finish(
+	won,
+	reason = won ? "HARBOR SECURED" : "PIER OVERRUN",
+	fromNet = false,
+) {
+	if (screen === "results") return;
+	G.won = won;
+	inputs.forEach((i) => {
+		i.fire = false;
+	});
+	pointerDown = false;
+	touchActive = false;
+	if (mode === "demo") {
+		start("demo");
+		return;
+	}
+	$("resultKicker").textContent = won ? "MISSION COMPLETE" : "END OF WATCH";
+	$("resultTitle").textContent = reason;
+	const acc = G.shotsFired ? Math.round((G.hits / G.shotsFired) * 100) : 0;
+	const medal = won
+		? G.health >= 5
+			? "GOLD ANCHOR"
+			: G.health >= 3
+				? "SILVER ANCHOR"
+				: "BRONZE ANCHOR"
+		: "BACK TO THE BATTERY";
+	$("medal").textContent = medal;
+	$("finalScore").textContent = String(G.score || 0).padStart(6, "0");
+	$("resultStats").innerHTML =
+		`<span><b>${G.kills || 0}</b> TARGETS</span><span><b>${acc}%</b> ACCURACY</span><span><b>${G.bestCombo || 0}×</b> BEST CHAIN</span>`;
+	try {
+		const old = Number(localStorage.getItem("pier-pressure-best") || 0);
+		if (G.score > old) localStorage.setItem("pier-pressure-best", G.score);
+		$("best").textContent = String(Math.max(old, G.score || 0)).padStart(
+			6,
+			"0",
+		);
+	} catch {}
+	setScreen("results");
+	if (won) sound.fanfare();
+	else sound.hurt();
+	if (!fromNet && net.isHost && mode === "online")
+		net.finish(G.score, won, {
+			kills: G.kills,
+			shotsFired: G.shotsFired,
+			hits: G.hits,
+			bestCombo: G.bestCombo,
+			health: G.health,
+		});
+}
+function spawn(type, side = Math.random() < 0.5 ? 1 : -1, y) {
+	const id = nextId++,
+		x = side > 0 ? -29 : 29,
+		baseY =
+			y ??
+			(type === "boat"
+				? 2.8
+				: type === "boss"
+					? 3.2
+					: type === "supply"
+						? 24
+						: 11 + Math.random() * 11);
+	const root = coast.makeTarget(type, side);
+	root.position.set(x, baseY, 0);
+	const body = world.createRigidBody(
+		RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(x, baseY, 0),
+	);
+	const dims =
+		type === "boss"
+			? [5.4, 2.4, 1.7]
+			: type === "boat"
+				? [2.2, 1.4, 1.5]
+				: type === "bomb"
+					? [0.38, 0.55, 0.4]
+					: type === "supply"
+						? [1.05, 1.5, 1.1]
+						: type === "heli"
+							? [1.8, 1.05, 1.6]
+							: [1.7, 0.65, 1.8];
+	const col = world.createCollider(
+		RAPIER.ColliderDesc.cuboid(...dims)
+			.setTranslation(0, type === "boss" ? 1.5 : type === "boat" ? 0.45 : 0, 0)
+			.setSensor(true)
+			.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+		body,
+	);
+	const speed =
+		(type === "boat"
+			? 2.5
+			: type === "heli"
+				? 3.4
+				: type === "boss"
+					? 0
+					: type === "supply"
+						? 0
+						: 5.1 + Math.random() * 2) * side;
+	const e = {
+		id,
+		type,
+		x,
+		y: baseY,
+		baseY,
+		vx: speed,
+		vy: 0,
+		side,
+		root,
+		body,
+		col,
+		alive: true,
+		hp: type === "boss" ? 24 : type === "heli" || type === "boat" ? 2 : 1,
+		age: 0,
+		drop: 2.1 + Math.random() * 2,
+		flash: 0,
+	};
+	if (type === "boss") {
+		e.x = 0;
+		root.position.x = 0;
+		body.setTranslation({ x: 0, y: baseY, z: 0 }, true);
+	}
+	if (type === "supply") {
+		e.x = (Math.random() - 0.5) * 32;
+		root.position.x = e.x;
+		body.setTranslation({ x: e.x, y: baseY, z: 0 }, true);
+	}
+	entities.set(id, e);
+	handles.set(col.handle, e);
+	return e;
+}
+function remove(e) {
+	if (!e || !entities.has(e.id)) return;
+	e.alive = false;
+	handles.delete(e.col.handle);
+	if (world.getRigidBody(e.body.handle)) world.removeRigidBody(e.body);
+	coast.remove(e.root);
+	entities.delete(e.id);
+}
+function shoot(seat = 0, angle = inputs[seat].angle, special = false) {
+	if (G.cooldowns[seat] > 0 && !special) return false;
+	const gun = coast.guns[seat],
+		x = gun.x + Math.cos(angle) * 2.65,
+		y = 3.2 + Math.sin(angle) * 2.65;
+	const body = world.createRigidBody(
+		RAPIER.RigidBodyDesc.dynamic()
+			.setTranslation(x, y, 0)
+			.setLinvel(
+				Math.cos(angle) * tuning.speed,
+				Math.sin(angle) * tuning.speed,
+				0,
+			)
+			.enabledTranslations(true, true, false)
+			.enabledRotations(false, false, false)
+			.setCcdEnabled(true),
+	);
+	const col = world.createCollider(
+		RAPIER.ColliderDesc.ball(0.25 + tuning.assist * 0.23)
+			.setSensor(true)
+			.setActiveEvents(RAPIER.ActiveEvents.COLLISION_EVENTS),
+		body,
+	);
+	const e = {
+		id: nextId++,
+		type: "shot",
+		seat,
+		body,
+		col,
+		root: coast.projectile(x, y, special),
+		x,
+		y,
+		age: 0,
+		alive: true,
+		special,
+	};
+	entities.set(e.id, e);
+	handles.set(col.handle, e);
+	G.shotsFired++;
+	G.cooldowns[seat] = tuning.cooldown;
+	gun.action.reset().play();
+	coast.burst(x, y, "#ffdb79", 0.18);
+	sound.shot();
+	return true;
+}
+function salvo(seat) {
+	if (G.energy[seat] < 99.8) return;
+	G.energy[seat] = 0;
+	G.salvos++;
+	sound.voice(2);
+	shake = prefs.shake ? 0.25 : 0;
+	const a = inputs[seat].angle;
+	for (let i = -3; i <= 3; i++)
+		shoot(seat, clamp(a + i * 0.115, 0.13, Math.PI - 0.13), true);
+	for (const e of [...entities.values()]) {
+		if (e.type === "bomb") damage(e, 2);
+	}
+	toast("BROADSIDE!");
+}
+function damage(e, amount = 1) {
+	if (!e?.alive || e.type === "shot") return;
+	if (e.type === "supply") {
+		G.energy = G.energy.map((v) => Math.min(100, v + 40));
+		G.health = Math.min(G.maxHealth, G.health + 1);
+		G.rescues++;
+		G.score += 250;
+		coast.burst(e.x, e.y, "#a4e8c4", 1.4);
+		sound.hit("supply");
+		toast("SUPPLY +1 HULL · +40 SALVO");
+		remove(e);
+		return;
+	}
+	e.hp -= amount;
+	G.hits++;
+	e.flash = 0.16;
+	e.root.scale.setScalar(1.08);
+	if (e.type === "boss") G.bossHP = Math.max(0, e.hp);
+	coast.burst(
+		e.x,
+		e.y + (e.type === "boss" ? 1 : 0),
+		e.type === "bomb" ? "#f5d077" : "#ef8b50",
+		e.hp > 0 ? 0.45 : 1,
+	);
+	sound.hit(e.type);
+	if (e.hp > 0) return;
+	const values = {
+		plane: 100,
+		scout: 100,
+		heli: 175,
+		boat: 200,
+		bomb: 75,
+		boss: 2500,
+	};
+	G.combo = G.comboTimer > 0 ? G.combo + 1 : 1;
+	G.comboTimer = 3.5;
+	G.bestCombo = Math.max(G.bestCombo, G.combo);
+	const mult = Math.min(5, 1 + Math.floor(G.combo / 4));
+	G.score += (values[e.type] || 100) * mult;
+	G.energy = G.energy.map((v) => Math.min(100, v + 7));
+	if (e.type !== "bomb") {
+		G.kills++;
+		G.waveKills++;
+	}
+	if (e.type === "boss") {
+		remove(e);
+		finish(true);
+		return;
+	}
+	remove(e);
+	if (G.wave === 0 && G.waveKills >= 8) nextWave();
+	else if (G.wave === 1 && G.waveKills >= 10) nextWave();
+}
+function hurt() {
+	if (autoplay || mode === "demo" || tuning.damage === 0) return;
+	G.health -= tuning.damage;
+	G.combo = 0;
+	G.comboTimer = 0;
+	shake = prefs.shake ? 0.6 : 0;
+	sound.hurt();
+	coast.burst((Math.random() - 0.5) * 22, 2, "#ee7450", 1.8);
+	$("damageFlash").classList.remove("flash");
+	void $("damageFlash").offsetWidth;
+	$("damageFlash").classList.add("flash");
+	if (G.health <= 0) finish(false);
+}
+function wind() {
+	return (G.wave === 0 ? 0.35 : Math.sin(simTime * 0.19) * 2.3) * tuning.wind;
+}
+function aimAt(seat, x, y) {
+	const dx = x - coast.guns[seat].x,
+		dy = y - 3.2,
+		v = tuning.speed,
+		g = tuning.gravity,
+		abs = Math.abs(dx),
+		disc = v * v * v * v - g * (g * abs * abs + 2 * dy * v * v);
+	if (abs < 0.2) return Math.PI / 2;
+	if (disc < 0) return Math.atan2(Math.max(1, dy), dx);
+	const a = Math.atan((v * v - Math.sqrt(disc)) / (g * abs));
+	return clamp(dx < 0 ? Math.PI - a : a, 0.12, Math.PI - 0.12);
+}
+function autoInput(seat) {
+	const gun = coast.guns[seat];
+	let target = null,
+		best = 1e9;
+	for (const e of entities.values()) {
+		if (e.type === "shot") continue;
+		const priority =
+			(e.type === "bomb" ? -0.7 : 0) +
+			(e.type === "boss" ? -0.3 : 0) +
+			(e.type === "supply" ? 0.5 : 0);
+		const d = Math.hypot(e.x - gun.x, e.y - 3.2) / 30 + priority;
+		if (d < best) {
+			best = d;
+			target = e;
+		}
+	}
+	if (!target) return { angle: 1.1, fire: false, salvo: false };
+	let a = aimAt(
+		seat,
+		target.x,
+		target.y + (["boat", "boss"].includes(target.type) ? 1 : 0),
+	);
+	for (let k = 0; k < 4; k++) {
+		let t =
+			Math.abs(target.x - gun.x) /
+			Math.max(2, Math.abs(Math.cos(a) * tuning.speed));
+		t = clamp(t, 0.08, 2.2);
+		const xx =
+			target.type === "boss"
+				? Math.sin((simTime + t) * 0.43) * 13
+				: target.x + target.vx * t * tuning.enemySpeed;
+		const yy =
+			target.y +
+			(target.type === "bomb"
+				? target.vy * t
+				: target.type === "supply"
+					? -0.7 * t
+					: 0) +
+			(target.type === "boss" ? 1.8 : target.type === "boat" ? 0.7 : 0);
+		a = aimAt(seat, xx - wind() * 0.5 * t * t, yy);
+	}
+	return {
+		angle: a,
+		fire: true,
+		salvo: G.energy[seat] >= 100 && G.wave > 0 && G.time > 15,
+	};
+}
+function updateEntities(dt) {
+	const dead = [];
+	for (const e of entities.values()) {
+		e.age += dt;
+		if (e.type === "shot") {
+			if (Math.abs(wind()) > 0.01) {
+				const v = e.body.linvel();
+				e.body.setLinvel({ x: v.x + wind() * dt, y: v.y, z: 0 }, true);
+			}
+			const p = e.body.translation();
+			e.x = p.x;
+			e.y = p.y;
+			e.root.position.set(p.x, p.y, 0);
+			if (e.y < 0.8 || e.y > 34 || Math.abs(e.x) > 34 || e.age > 6) {
+				if (e.y < 0.8) {
+					coast.burst(e.x, 0.8, "#a0d9ca", 0.6);
+					sound.splash();
+				}
+				dead.push(e);
+			}
+			continue;
+		}
+		if (e.flash > 0) {
+			e.flash -= dt;
+			if (e.flash <= 0) e.root.scale.setScalar(1);
+		}
+		if (e.type === "boss") {
+			e.x = Math.sin(simTime * 0.43) * 13;
+			e.drop -= dt;
+			if (e.drop <= 0) {
+				e.drop = 2.1;
+				for (let k = -1; k <= 1; k++) {
+					const b = spawn("bomb", 1, e.y + 5);
+					b.x = e.x + k * 3;
+					b.vx = (coast.guns[k === 1 ? 1 : 0].x - b.x) * 0.25;
+					b.vy = 6;
+					b.baseY = b.y;
+				}
+			}
+		} else if (e.type === "bomb") {
+			e.x += e.vx * dt;
+			e.vy -= 7 * dt;
+			e.y += e.vy * dt;
+			if (e.y < 1.8) {
+				dead.push(e);
+				hurt();
+			}
+		} else if (e.type === "supply") {
+			e.y -= 0.72 * dt;
+			if (e.y < 1.8) dead.push(e);
+		} else {
+			e.x += e.vx * dt * tuning.enemySpeed;
+			e.y = e.baseY + Math.sin(e.age * (e.type === "boat" ? 1.5 : 2)) * 0.18;
+			e.drop -= dt;
+			if (e.drop <= 0 && Math.abs(e.x) < 20) {
+				e.drop = e.type === "boat" ? 4.3 : 4.8;
+				const b = spawn("bomb", 1, e.y - 0.7);
+				b.x = e.x;
+				b.vx =
+					e.type === "boat"
+						? (coast.guns[e.x > 0 ? 1 : 0].x - e.x) * 0.4
+						: e.vx * 0.3;
+				b.vy = e.type === "boat" ? 11 : -1;
+			}
+			if (Math.abs(e.x) > 34) dead.push(e);
+		}
+		e.body.setNextKinematicTranslation({ x: e.x, y: e.y, z: 0 });
+		e.root.position.set(e.x, e.y, 0);
+		e.root.userData.mixer?.update(dt);
+	}
+	for (const e of dead) remove(e);
+}
+function step(dt) {
+	if (screen !== "playing" || net.ended) return;
+	if (!net.running) return;
+	if (net.isGuest && mode === "online") {
+		const seat = playerSeat();
+		net.tick(
+			dt,
+			{ ...inputs[seat], salvo: inputs[seat].salvo || salvoLatch[seat] > 0 },
+			null,
+		);
+		salvoLatch[seat] = Math.max(0, salvoLatch[seat] - dt);
+		return;
+	}
+	simTime += dt;
+	G.time += dt;
+	physicsSteps++;
+	world.gravity.y = -tuning.gravity;
+	const seats = mode === "coop" || mode === "online" ? 2 : 1;
+	for (let i = 0; i < seats; i++) {
+		G.cooldowns[i] = Math.max(0, G.cooldowns[i] - dt);
+		G.energy[i] = Math.min(100, G.energy[i] + dt * 2.1);
+		let inp = autoplay || mode === "demo" ? autoInput(i) : inputs[i];
+		if (mode === "online" && (net.server || i !== net.localSeat))
+			inp = remoteInputs[i] || {};
+		if (inp.angle != null && Number.isFinite(inp.angle))
+			inputs[i].angle = clamp(inp.angle, 0.12, Math.PI - 0.12);
+		coast.guns[i].pivot.rotation.z = inputs[i].angle;
+		if (inp.fire) shoot(i);
+		if (inp.salvo) {
+			salvo(i);
+			if (mode === "online" && (net.server || i !== net.localSeat))
+				remoteInputs[i].salvo = false;
+		}
+	}
+	spawnClock -= dt;
+	supplyClock -= dt;
+	if (spawnClock <= 0) {
+		spawnClock = tuning.spawn * (G.wave === 2 ? 1.8 : 1);
+		const type =
+			G.wave === 0
+				? Math.random() < 0.2
+					? "heli"
+					: "plane"
+				: G.wave === 1
+					? Math.random() < 0.6
+						? "boat"
+						: "plane"
+					: Math.random() < 0.4
+						? "heli"
+						: "plane";
+		spawn(type);
+	}
+	if (supplyClock <= 0) {
+		spawn("supply");
+		supplyClock = 16;
+	}
+	updateEntities(dt);
+	world.step(events);
+	const collisions = [];
+	events.drainCollisionEvents((a, b, started) => {
+		if (started) collisions.push([handles.get(a), handles.get(b)]);
+	});
+	for (const [a, b] of collisions) {
+		if (!a?.alive || !b?.alive) continue;
+		const shot = a.type === "shot" ? a : b.type === "shot" ? b : null;
+		const target = shot === a ? b : a;
+		if (shot && target.type !== "shot") {
+			remove(shot);
+			damage(target, shot.special ? 2 : 1);
+		}
+	}
+	G.comboTimer = Math.max(0, G.comboTimer - dt);
+	if (!G.comboTimer) G.combo = 0;
+	net.lastScore = G.score;
+	net.tick(dt, inputs[net.localSeat] || {}, snapshot());
+}
+function snapshot() {
+	return {
+		g: { ...G, cooldowns: undefined },
+		a: inputs.map((i) => i.angle),
+		e: [...entities.values()].map((e) => [
+			e.id,
+			e.type,
+			+e.x.toFixed(2),
+			+e.y.toFixed(2),
+			e.hp || 0,
+			e.side || 1,
+		]),
+		screen,
+		mode: "online",
+		t: +simTime.toFixed(2),
+	};
+}
+function applySnapshot(s) {
+	if (!s?.g || !Array.isArray(s.e) || s.e.length > 170) return;
+	G = { ...G, ...s.g };
+	simTime = s.t || 0;
+	mode = "online";
+	if (s.screen === "results") {
+		finish(!!G.won, G.won ? "HARBOR SECURED" : "PIER OVERRUN", true);
+		return;
+	}
+	if (
+		!["playing", "pause", "dev", "settings", "about", "howto"].includes(screen)
+	)
+		setScreen("playing");
+	coast.guns.forEach((g, i) => {
+		g.root.visible = true;
+		g.pivot.rotation.z = s.a?.[i] ?? g.angle;
+	});
+	const seen = new Set();
+	for (const d of s.e) {
+		const [id, type, x, y, , side] = d;
+		seen.add(id);
+		let r = remoteViews.get(id);
+		if (!r) {
+			r =
+				type === "shot" ? coast.projectile(x, y) : coast.makeTarget(type, side);
+			remoteViews.set(id, r);
+			if (type === "shot") sound.shot();
+		}
+		r.position.set(x, y, 0);
+		r.userData.mixer?.update(0.1);
+	}
+	for (const [id, r] of remoteViews) {
+		if (!seen.has(id)) {
+			if (r.position.y > 1.5)
+				coast.burst(r.position.x, r.position.y, "#edb656", 0.6);
+			coast.remove(r);
+			remoteViews.delete(id);
+		}
+	}
+	updateHUD();
+}
+function updateHUD() {
+	if (!G.energy) return;
+	$("score").textContent = String(G.score || 0).padStart(6, "0");
+	$("operation").textContent = "0" + (G.wave + 1) + " / 03";
+	$("mission").textContent = stageNames[G.wave];
+	$("objective").textContent =
+		G.wave === 2
+			? "FLAGSHIP " + Math.max(0, G.bossHP) + " / " + G.bossMax
+			: (G.waveKills || 0) +
+				" / " +
+				(G.wave === 0 ? "8 AIRCRAFT" : "10 TARGETS");
+	$("health").textContent =
+		"▰".repeat(Math.max(0, Math.ceil(G.health))) +
+		"▱".repeat(Math.max(0, G.maxHealth - Math.ceil(G.health)));
+	$("health").setAttribute("aria-label", G.health + " hull points");
+	const energy = G.energy[playerSeat()] ?? 0;
+	$("energyFill").style.width = energy + "%";
+	$("salvoText").textContent =
+		energy >= 99.8
+			? "BROADSIDE READY"
+			: "BROADSIDE " + Math.floor(energy) + "%";
+	$("salvoTouch").classList.toggle("ready", energy >= 99.8);
+	$("salvoTouch").textContent = energy >= 99.8 ? "SALVO" : "CHARGING";
+	$("combo").textContent =
+		G.combo >= 2
+			? G.combo + " CHAIN · " + Math.min(5, 1 + Math.floor(G.combo / 4)) + "×"
+			: "";
+	$("wind").textContent =
+		(wind() > 0 ? "→" : "←") + " " + Math.abs(wind()).toFixed(1);
+	$("bossTrack").hidden = G.wave !== 2;
+	$("bossFill").style.width = Math.max(0, (G.bossHP / G.bossMax) * 100) + "%";
+	$("coopTag").textContent =
+		mode === "coop"
+			? "TWO GUNNERS"
+			: mode === "online"
+				? "CONNECTED CO-OP"
+				: "PORT BATTERY";
+	$("sync").hidden = !net.active || net.running;
+	if (!net.running)
+		$("sync").textContent = "GUNNERS READY · " + Math.ceil(net.countdown);
+}
+function pause() {
+	if (screen === "playing" && mode !== "demo") {
+		keys.clear();
+		salvoLatch = [0, 0];
+		if (mode === "online" && net.isGuest)
+			net.tick(
+				0.11,
+				{ ...inputs[playerSeat()], fire: false, salvo: false },
+				null,
+			);
+		pointerDown = false;
+		touchActive = false;
+		inputs.forEach((i) => {
+			i.fire = false;
+			i.salvo = false;
+		});
+		setScreen("pause");
+		sound.mute(true);
+	} else if (["pause", "dev"].includes(screen)) {
+		setScreen("playing");
+		sound.mute(false);
+	}
+}
+function focusables() {
+	return [
+		...document.querySelectorAll(
+			".panel:not([hidden]) button,.panel:not([hidden]) input,.panel:not([hidden]) select,.panel:not([hidden]) textarea",
+		),
+	].filter((e) => !e.disabled && e.offsetParent !== null);
+}
+function navigate(d) {
+	const a = focusables();
+	if (!a.length) return;
+	const current = a.indexOf(document.activeElement);
+	navIndex = (Math.max(0, current) + d + a.length) % a.length;
+	a[navIndex].focus({ preventScroll: true });
+	a[navIndex].scrollIntoView({ block: "nearest" });
+}
+function adjustFocused(d) {
+	const e = document.activeElement;
+	if (e?.type === "range") {
+		e.value = clamp(
+			Number(e.value) + d * Number(e.step || 1),
+			Number(e.min),
+			Number(e.max),
+		);
+		e.dispatchEvent(new Event("input"));
+	} else if (e?.tagName === "SELECT") {
+		e.selectedIndex =
+			(e.selectedIndex + d + e.options.length) % e.options.length;
+		e.dispatchEvent(new Event("change"));
+	} else navigate(d);
+}
+function menuBack() {
+	if (["pause", "dev"].includes(screen)) {
+		if (screen === "dev") setScreen("pause");
+		else pause();
+	} else if (screen === "settings") {
+		setScreen(previous === "pause" ? "pause" : "title");
+		sound.mute(previous === "pause");
+	} else if (screen === "about" || screen === "howto")
+		setScreen(previous === "pause" ? "pause" : "title");
+	else if (screen === "online") {
+		net.leave();
+		title();
+	} else if (screen === "results") title();
+}
+function pollInputs(dt) {
+	const pads = [...(navigator.getGamepads?.() || [])].filter(Boolean);
+	for (let n = 0; n < Math.min(2, pads.length); n++) {
+		const p = pads[n],
+			prev = padPrevious[n] || [],
+			pressed = (i) => !!p.buttons[i]?.pressed,
+			edge = (i) => pressed(i) && !prev[i];
+		const axis = p.axes || [];
+		const any =
+			p.buttons.some((b) => b.pressed) || axis.some((v) => Math.abs(v) > 0.22);
+		if (any) {
+			sound.unlock();
+			const exit = activity("gamepad");
+			if (exit) {
+				padPrevious[n] = p.buttons.map((b) => b.pressed);
+				continue;
+			}
+		}
+		if (screen !== "playing" && Math.abs(axis[3] || 0) > 0.2) {
+			const scroll = document.querySelector(".panel:not([hidden]) .menuInner");
+			if (scroll) scroll.scrollTop += (axis[3] || 0) * dt * 700;
+		}
+		if (screen === "playing") {
+			const seat = mode === "online" ? net.localSeat : n;
+			if (seat >= 0 && seat < 2) {
+				if (Math.hypot(axis[0] || 0, axis[1] || 0) > 0.25)
+					inputs[seat].angle = clamp(
+						Math.atan2(Math.max(0, -(axis[1] || 0)), axis[0] || 0),
+						0.12,
+						Math.PI - 0.12,
+					);
+				inputs[seat].fire = pressed(7) || pressed(0);
+				inputs[seat].salvo = pressed(2);
+				if (edge(2) && net.isGuest && mode === "online")
+					salvoLatch[seat] = 0.35;
+			}
+			if (edge(9)) pause();
+		} else if (any && performance.now() > navAt) {
+			if (edge(0)) {
+				document.activeElement?.click();
+				navAt = performance.now() + 180;
+			} else if (edge(1) || edge(9)) {
+				menuBack();
+				navAt = performance.now() + 180;
+			} else if (pressed(13) || (axis[1] || 0) > 0.55) {
+				navigate(1);
+				navAt = performance.now() + 220;
+			} else if (pressed(12) || (axis[1] || 0) < -0.55) {
+				navigate(-1);
+				navAt = performance.now() + 220;
+			} else if (pressed(15) || (axis[0] || 0) > 0.55) {
+				adjustFocused(1);
+				navAt = performance.now() + 180;
+			} else if (pressed(14) || (axis[0] || 0) < -0.55) {
+				adjustFocused(-1);
+				navAt = performance.now() + 180;
+			}
+		}
+		padPrevious[n] = p.buttons.map((b) => b.pressed);
+	}
+	if (screen !== "playing") return;
+	const seat = mode === "online" ? net.localSeat : 0;
+	if (seat < 0) return;
+	if (manualInput) {
+		Object.assign(inputs[seat], manualInput);
+		return;
+	}
+	if (inputMode === "keyboard") {
+		if (mousePoint) {
+			const point = coast.pointer(mousePoint.x, mousePoint.y);
+			inputs[seat].angle = aimAt(seat, point.x, Math.max(3.5, point.y));
+		}
+		if (keys.has("KeyA") || keys.has("ArrowLeft")) {
+			mousePoint = null;
+			inputs[seat].angle = clamp(
+				inputs[seat].angle + dt * 1.6,
+				0.12,
+				Math.PI - 0.12,
+			);
+		}
+		if (keys.has("KeyD") || keys.has("ArrowRight")) {
+			mousePoint = null;
+			inputs[seat].angle = clamp(
+				inputs[seat].angle - dt * 1.6,
+				0.12,
+				Math.PI - 0.12,
+			);
+		}
+		inputs[seat].fire = pointerDown || keys.has("Space");
+		inputs[seat].salvo = keys.has("KeyE");
+	}
+	if (inputMode === "touch") {
+		inputs[seat].fire = touchActive;
+		if (touchActive) {
+			if (touchAim) {
+				const v = coast.pointer(touchAim.x, touchAim.y);
+				inputs[seat].angle = aimAt(seat, v.x, Math.max(4, v.y));
+			}
+			if (prefs.assist) {
+				const ai = autoInput(seat);
+				inputs[seat].angle = ai.angle;
+			}
+		}
+	}
+	if (mode === "coop" && !pads[1]) {
+		if (keys.has("KeyJ"))
+			inputs[1].angle = clamp(inputs[1].angle + dt * 1.6, 0.12, Math.PI - 0.12);
+		if (keys.has("KeyL"))
+			inputs[1].angle = clamp(inputs[1].angle - dt * 1.6, 0.12, Math.PI - 0.12);
+		inputs[1].fire = keys.has("Enter");
+		inputs[1].salvo = keys.has("KeyU");
+	}
+}
+function frame(dt, render = true) {
+	if (!ready) return;
+	dt = Math.max(0, Math.min(dt, 0.1));
+	idle += dt;
+	if (screen === "title" && idle >= 10 && !net.active) start("demo");
+	pollInputs(dt);
+	if (screen === "playing") {
+		stepClock += dt;
+		while (stepClock + 1e-9 >= 1 / 60 && screen === "playing") {
+			stepClock = Math.max(0, stepClock - 1 / 60);
+			step(1 / 60);
+		}
+		demoTime += dt;
+		if (mode === "demo" && demoTime > 110) start("demo");
+	} else if (
+		["title", "settings", "about", "howto", "online"].includes(screen)
+	) {
+		for (const e of entities.values()) {
+			e.age += dt;
+			e.root.userData.mixer?.update(dt);
+			e.root.position.y = e.baseY + Math.sin(e.age) * 0.16;
+		}
+	}
+	if (screen === "playing" || screen === "title") coast.update(dt);
+	else coast.update(0);
+	const seat = playerSeat();
+	coast.reticle.visible =
+		screen === "playing" && inputMode === "keyboard" && !!mousePoint;
+	if (coast.reticle.visible) {
+		const p = coast.pointer(mousePoint.x, mousePoint.y);
+		coast.reticle.position.set(p.x, p.y, 0.5);
+	}
+	coast.drawAim(
+		coast.guns[seat].x,
+		3.2,
+		inputs[seat]?.angle || 1.1,
+		tuning.speed,
+		tuning.gravity,
+		wind(),
+		screen === "playing" && mode !== "demo" && inputMode !== "touch",
+	);
+	shake = Math.max(0, shake - dt * 1.8);
+	toastTime -= dt;
+	if (toastTime <= 0) $("toast").classList.remove("show");
+	bannerTime -= dt;
+	if (bannerTime <= 0) $("banner").classList.remove("show");
+	sound.update(dt, screen === "playing" && mode !== "demo", G.wave / 2 || 0);
+	if (screen === "playing") updateHUD();
+	if (render) coast.render(shake);
+}
+function bindUI() {
+	$("start").onclick = () => {
+		sound.unlock();
+		start("solo");
+	};
+	$("coop").onclick = () => {
+		sound.unlock();
+		start("coop");
+	};
+	$("online").onclick = () => {
+		previous = "title";
+		setScreen("online");
+	};
+	$("settings").onclick = () => {
+		previous = "title";
+		setScreen("settings");
+	};
+	$("about").onclick = () => {
+		previous = "title";
+		setScreen("about");
+	};
+	$("howto").onclick = () => {
+		previous = "title";
+		setScreen("howto");
+	};
+	$("pause").onclick = pause;
+	$("resume").onclick = pause;
+	$("dev").onclick = () => setScreen("dev");
+	$("pauseSettings").onclick = () => {
+		previous = "pause";
+		setScreen("settings");
+	};
+	$("pauseAbout").onclick = () => {
+		previous = "pause";
+		setScreen("about");
+	};
+	$("quit").onclick = () => {
+		net.leave();
+		title();
+	};
+	$("retry").onclick = () => start(mode === "online" ? "solo" : mode);
+	$("resultMenu").onclick = () => {
+		net.leave();
+		title();
+	};
+	for (const e of document.querySelectorAll("[data-back]"))
+		e.onclick = menuBack;
+	$("music").value = prefs.music * 100;
+	$("musicOut").textContent = Math.round(prefs.music * 100) + "%";
+	$("music").oninput = (e) => {
+		prefs.music = Number(e.target.value) / 100;
+		sound.setMusic(prefs.music);
+		$("musicOut").textContent = e.target.value + "%";
+		save();
+	};
+	$("sfx").value = prefs.sfx * 100;
+	$("sfxOut").textContent = Math.round(prefs.sfx * 100) + "%";
+	$("sfx").oninput = (e) => {
+		prefs.sfx = Number(e.target.value) / 100;
+		sound.setSfx(prefs.sfx);
+		$("sfxOut").textContent = e.target.value + "%";
+		sound.shot();
+		save();
+	};
+	$("glyph").value = prefs.glyph;
+	$("glyph").onchange = (e) => {
+		prefs.glyph = e.target.value;
+		save();
+		updatePrompts();
+	};
+	$("shake").checked = prefs.shake;
+	$("shake").onchange = (e) => {
+		prefs.shake = e.target.checked;
+		save();
+	};
+	$("assist").checked = prefs.assist;
+	$("assist").onchange = (e) => {
+		prefs.assist = e.target.checked;
+		save();
+	};
+	const names = {
+		speed: "Shell velocity",
+		gravity: "Gravity",
+		cooldown: "Shot interval",
+		enemySpeed: "Target speed",
+		spawn: "Spawn interval",
+		damage: "Incoming damage",
+		wind: "Wind strength",
+		assist: "Hit forgiveness",
+	};
+	const ranges = {
+		speed: [20, 40, 0.5],
+		gravity: [6, 20, 0.5],
+		cooldown: [0.08, 0.65, 0.01],
+		enemySpeed: [0.3, 2.5, 0.1],
+		spawn: [0.5, 3, 0.05],
+		damage: [0, 2, 1],
+		wind: [0, 3, 0.1],
+		assist: [0, 2, 0.05],
+	};
+	for (const k of Object.keys(defaults)) {
+		const label = document.createElement("label");
+		label.className = "sliderRow";
+		label.innerHTML = `<span>${names[k]}</span><input id="tune-${k}" type="range" min="${ranges[k][0]}" max="${ranges[k][1]}" step="${ranges[k][2]}" value="${defaults[k]}"><output id="out-${k}">${defaults[k]}</output>`;
+		$("sliders").append(label);
+		$("tune-" + k).oninput = (e) => {
+			tuning[k] = Number(e.target.value);
+			$("out-" + k).textContent = e.target.value;
+		};
+	}
+	$("resetTuning").onclick = () => {
+		tuning = { ...defaults };
+		for (const k in defaults) {
+			$("tune-" + k).value = defaults[k];
+			$("out-" + k).textContent = defaults[k];
+		}
+		toast("DEFAULT BALANCE RESTORED");
+	};
+	$("devHeal").onclick = () => {
+		G.health = G.maxHealth;
+		G.energy = [100, 100];
+		updateHUD();
+		toast("BATTERY REPAIRED");
+	};
+	$("devWave").onclick = () => {
+		if (G.wave < 2) nextWave();
+		else {
+			const b = [...entities.values()].find((e) => e.type === "boss");
+			if (b) damage(b, 100);
+		}
+		updateHUD();
+	};
+	$("devAI").onclick = () => {
+		autoplay = !autoplay;
+		$("devAI").textContent = "AUTOPILOT " + (autoplay ? "ON" : "OFF");
+	};
+	$("salvoTouch").onclick = (e) => {
+		e.stopPropagation();
+		requestSalvo();
+	};
+	const busy = async (fn) => {
+		try {
+			$("networkStatus").textContent = "ESTABLISHING RADIO LINK…";
+			await fn();
+		} catch (e) {
+			$("networkStatus").textContent = e.message || "CONNECTION FAILED";
+		}
+	};
+	$("hostLocal").onclick = () =>
+		busy(async () => {
+			$("roomCode").value = net.hostLocal();
+		});
+	$("joinLocal").onclick = () =>
+		busy(async () => net.joinLocal($("roomCode").value));
+	$("createOffer").onclick = () =>
+		busy(async () => {
+			$("signalOut").value = await net.hostRoom();
+			$("networkStatus").textContent =
+				"Send your invitation. Paste the other gunner’s reply below, then Connect.";
+		});
+	$("joinOffer").onclick = () =>
+		busy(async () => {
+			$("signalOut").value = await net.joinRoom($("signalIn").value);
+			$("networkStatus").textContent =
+				"Send this reply to the host. Your gun will join automatically.";
+		});
+	$("acceptAnswer").onclick = () =>
+		busy(async () => {
+			await net.acceptAnswer($("signalIn").value);
+		});
+	$("copySignal").onclick = async () => {
+		const e = $("signalOut");
+		e.select();
+		try {
+			await navigator.clipboard.writeText(e.value);
+			$("networkStatus").textContent = "RADIO CODE COPIED";
+		} catch {
+			$("networkStatus").textContent = "Code selected. Press Ctrl+C to copy.";
+		}
+	};
+	document.addEventListener("pointerover", (e) => {
+		if (e.pointerType !== "touch" && e.target.closest("button"))
+			e.target.closest("button").focus({ preventScroll: true });
+	});
+	document.addEventListener("pointermove", (e) => {
+		if (e.pointerType === "touch") return;
+		activity("keyboard");
+		if (screen === "playing") mousePoint = { x: e.clientX, y: e.clientY };
+	});
+	document.addEventListener(
+		"pointerdown",
+		(e) => {
+			if (activity(e.pointerType === "touch" ? "touch" : "keyboard")) {
+				e.preventDefault();
+				e.stopPropagation();
+				return;
+			}
+			sound.unlock();
+			if (
+				screen !== "playing" ||
+				e.target.closest("button,input,select,textarea,label")
+			)
+				return;
+			if (e.pointerType === "touch") {
+				touchActive = true;
+				touchPointerId = e.pointerId;
+				touchOrigin = { x: e.clientX, y: e.clientY };
+				touchAim = { ...touchOrigin };
+			} else if (e.button === 0) {
+				pointerDown = true;
+				mousePoint = { x: e.clientX, y: e.clientY };
+			}
+		},
+		true,
+	);
+	document.addEventListener("pointermove", (e) => {
+		if (
+			e.pointerType === "touch" &&
+			touchActive &&
+			e.pointerId === touchPointerId
+		) {
+			touchAim = { x: e.clientX, y: e.clientY };
+		}
+	});
+	document.addEventListener("pointerup", (e) => {
+		if (e.pointerType === "touch") {
+			if (e.pointerId === touchPointerId) {
+				touchActive = false;
+				touchPointerId = null;
+			}
+		} else pointerDown = false;
+	});
+	document.addEventListener("pointercancel", () => {
+		touchActive = false;
+		pointerDown = false;
+	});
+	document.addEventListener("contextmenu", (e) => {
+		e.preventDefault();
+		if (screen === "playing") requestSalvo();
+	});
+	document.addEventListener("keydown", (e) => {
+		if (
+			e.target.matches("input,textarea,select") &&
+			!["Escape"].includes(e.code)
+		)
+			return;
+		if (activity("keyboard")) {
+			e.preventDefault();
+			return;
+		}
+		sound.unlock();
+		if (
+			[
+				"Space",
+				"ArrowUp",
+				"ArrowDown",
+				"ArrowLeft",
+				"ArrowRight",
+				"Enter",
+			].includes(e.code)
+		)
+			e.preventDefault();
+		keys.add(e.code);
+		if (
+			screen === "playing" &&
+			!e.repeat &&
+			e.code === "KeyE" &&
+			net.isGuest &&
+			mode === "online"
+		)
+			salvoLatch[playerSeat()] = 0.35;
+		if (e.repeat) return;
+		if (e.code === "Escape") {
+			if (screen === "playing") pause();
+			else menuBack();
+		} else if (screen !== "playing") {
+			if (e.code === "ArrowDown") navigate(1);
+			if (e.code === "ArrowUp") navigate(-1);
+			if (e.code === "ArrowLeft") adjustFocused(-1);
+			if (e.code === "ArrowRight") adjustFocused(1);
+			if (e.code === "Enter" || e.code === "Space") {
+				const a = focusables();
+				if (!a.includes(document.activeElement)) a[0]?.focus();
+				document.activeElement?.click();
+			}
+		}
+	});
+	document.addEventListener("keyup", (e) => keys.delete(e.code));
+	window.addEventListener("blur", () => {
+		keys.clear();
+		pointerDown = false;
+		touchActive = false;
+		if (screen === "playing" && mode !== "demo" && !net.online) pause();
+	});
+	window.addEventListener("resize", () => coast.resize());
+}
+async function init() {
+	try {
+		$("loadText").textContent = "PREPARING THE COAST…";
+		await RAPIER.init();
+		coast = new Coast($("game"));
+		await coast.init();
+		resetPhysics();
+		bindUI();
+		updatePrompts();
+		$("backend").textContent =
+			coast.backend + " · THREE.JS r180 · RAPIER 0.19.3";
+		await net.init();
+		ready = true;
+		$("loading").hidden = true;
+		title();
+		if (net.active) {
+			clearWorld();
+			$("start").disabled = true;
+			$("networkStatus").textContent = "AI HUB · WAITING FOR THE WATCH";
+			setScreen("online");
+		}
+		net.ready();
+		window.__Sound = Sound;
+		window.__game = {
+			state: () => ({
+				ready,
+				screen,
+				mode,
+				wave: G.wave || 0,
+				score: G.score || 0,
+				health: G.health || 0,
+				energy: G.energy,
+				targets: [...entities.values()].filter((e) => e.type !== "shot").length,
+				shots: [...entities.values()].filter((e) => e.type === "shot").length,
+				shotsFired: G.shotsFired || 0,
+				hits: G.hits || 0,
+				kills: G.kills || 0,
+				physicsSteps,
+				time: G.time || 0,
+				musicVolume: sound.stats.musicVolume,
+				backend: coast.backend,
+				inputMode,
+				glyph: prefs.glyph,
+				tuning: { ...tuning },
+				won: G.won || false,
+				autoplay,
+				angles: inputs.map((i) => i.angle),
+				net: {
+					host: net.isHost,
+					guest: net.isGuest,
+					online: net.online,
+					stats: net.stats,
+				},
+			}),
+			start,
+			setInput: (i) => (manualInput = i),
+			setAutoplay: (v) => {
+				autoplay = v;
+			},
+			advance: (seconds, frameDelta = 1 / 60) => {
+				frameDelta = clamp(frameDelta, 1 / 240, 0.1);
+				for (let t = 0; t < seconds; t += frameDelta)
+					frame(Math.min(frameDelta, seconds - t), false);
+				coast.render(0);
+			},
+			dev: (values) => {
+				for (const [k, v] of Object.entries(values)) {
+					if (k === "health") {
+						G.health = v;
+						if (v <= 0) finish(false);
+					} else if (k === "wave") {
+						while (G.wave < v && G.wave < 2) nextWave();
+					} else if (k in tuning) tuning[k] = v;
+				}
+			},
+			goto: setScreen,
+			damage: hurt,
+			sound,
+			net,
+			snapshot,
+			entities: () =>
+				[...entities.values()].map((e) => ({
+					type: e.type,
+					x: e.x,
+					y: e.y,
+					hp: e.hp,
+				})),
+			pause,
+		};
+		let last = performance.now();
+		const loop = (now) => {
+			const dt = (now - last) / 1000;
+			last = now;
+			frame(dt);
+			requestAnimationFrame(loop);
+		};
+		requestAnimationFrame(loop);
+	} catch (e) {
+		console.error(e);
+		$("loadText").textContent = "THE RADIO LOST ITS SIGNAL";
+		$("loadDetail").textContent =
+			e.message +
+			" · Check the connection, then reload. CDN libraries require internet on first load.";
+		net.fail(e.message);
+	}
+}
+init();
+</script>
+</body></html>

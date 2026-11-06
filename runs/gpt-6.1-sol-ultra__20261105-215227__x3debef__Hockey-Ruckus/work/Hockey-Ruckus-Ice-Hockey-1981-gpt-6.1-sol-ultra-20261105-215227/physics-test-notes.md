@@ -1,0 +1,11 @@
+# Physics and complete-playthrough verification
+
+Run `node tests-physics.mjs`, or import `runPhysicsTests()` into the unified test runner. The function prints nothing and returns `{passed, failed, failures}`. Direct execution prints only failures and the final count. Known Rapier initialization deprecation noise is filtered during initialization only.
+
+19 checks passed. Each test owns and frees its Rapier world. Scripted positioning uses the same public dev data/methods as the balance tools; goals and rebounds require actual fixed-step physics, not direct score changes.
+
+Coverage: faceoff and clock pause; skating acceleration, glide and goalie/forward zone bounds; tap versus fully charged release and one shot per release; all 32 forward shot angles for both teams; physical pass reception with selection transfer; carrier knockdown/dislodging, cooldown and rearming; goalie immunity inside the crease and vulnerability outside; side-board bank rebound/statistics and end-board non-goal rebound; real goals through both mouths and next faceoff; opposing-shot goalie save; nearest-player selection and manual switch lock; all five practice lessons driven by inputs through an actual final goal; regulation loss, tied overtime and actual sudden-death winning goal; all three authored cup rounds played through full regulation clocks; autonomous AI match reaches a scored result; live drag/shot-power/clock sliders affect simulation; serializable snapshot preserves positions, animation data, scores and statistics.
+
+The first live-slider test had two test-fixture issues, both corrected: its direct shot call omitted `aimZ: 0`, and the high-power test shot legitimately scored during the subsequent clock-speed measurement. No normal game-input regression was found. A direct public `shoot(player, {aimX:1})` call produces NaN velocity when aimZ is omitted; normal input always supplies both components, but the parent was informed as a possible defensive API improvement.
+
+Scripted cup progression validates the three engine rounds and each winner. Browser tests must separately validate the menu's next-round wiring, camera/rendering, controller and touch UI, save persistence, and online transport.

@@ -1,0 +1,37 @@
+AI Hub integration, researched 2026-11-05
+Primary source: https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub
+Protocol v1, session client 1.4.0; the downloaded session.js is unmodified.
+
+Bundle session.js as the first head script, immediately after charset. Then:
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-2">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Rescue your friends and recover the cavern jewel together.">
+<meta name="hub:session-howto" content="Move: stick/WASD. Jump: Cross/Space. Climb/swim: up/down. Release: Circle/E.">
+<meta name="hub:session-minutes" content="8">
+Add hub:webgpu required only if no rendering fallback is provided.
+
+Constructor callbacks: new ExpeditionNetwork(onInput(input,id), onSnapshot(world), onStatus(status,network)).
+await network.init() before selecting title-screen behavior. null means standalone.
+In hub mode, skip title/attract, build world, network.ready() without a keypress, and gate simulation on network.running.
+For the hub's playerless-server scenario, network.isServer is true; run the world without any local input or local player.
+network.players lists the actual player IDs and names. Never use names as HTML.
+Guest sends sendInput({x,y,jump,action}) every frame; internally throttled to12.5Hz except button edges.
+Host applies onInput to the correct remote player, runs Rapier, and sends sendSnapshot(compactWorld) every frame, throttled12.5Hz.
+Guest applies onSnapshot directly and does not run authoritative physics.
+Keep snapshots below16KB. Reliable snapshots avoid large unreliable packet loss.
+Call setScore(score,won) continuously; call finish(score,true) on victory. Time-up finishes automatically with the last setScore.
+On network.ended, stop all input/simulation and call audio.stop(). Hub alone owns restart/title/quit in a session.
+Ignore controller Options while Create is also pressed.
+
+Standalone same-browser co-op: hostLocal('ROOM') / joinLocal('ROOM'). Both pages must have the same origin (including protocol/port).
+Standalone across devices: host await createOffer(); companion await answerOffer(invitation); host await acceptAnswer(reply).
+The signaling strings contain only standard SDP/ICE connection information, exchanged manually. No account or game server.
+WebRTC uses Google STUN for public address discovery only; restrictive NATs may require a relay, which is not provided.
+No WebRTC, STUN, BroadcastChannel, chat or external game server is used while AIHub.active.
+
+Audio: new CavernAudio(); await .start() from user gesture; .update(dt,{active,mode:'explore'|'balloon'|'swim'|'sad'}).
+.setMusic(0.1), .setSfx(0.65), .effect(name), .voice(seed), .stop(), .getStats().
+Effect names: jump,land,gold/collect,checkpoint,rescue,diamond,hit,pop,splash,balloon,win,pause/menu.
+All oscillators/noise/formant voices are generated in code. Original adaptive music; 10% music gain by default.
+CavernAudio.auditOffline() renders actual synthesis and returns finite/peak/rms/note/voice metrics.

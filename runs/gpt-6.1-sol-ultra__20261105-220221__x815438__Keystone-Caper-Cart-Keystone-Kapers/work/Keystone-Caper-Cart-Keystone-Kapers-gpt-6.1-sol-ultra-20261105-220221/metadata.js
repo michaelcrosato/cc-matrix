@@ -1,0 +1,23 @@
+export const SOURCE_INFO={date:'2026-11-05 22:02:21',source:'Keystone Kapers (Activision, 1983), designed by Garry Kitchen',plan:'none',genre:'Arcade action / chase platformer',perspective:'Side-on orthographic 3D cutaway',tech:'Three.js 0.180.0 (R180), WebGPURenderer; Rapier 3D 0.19.3; Gamepad API; Web Audio; PeerJS 1.5.5; AI Hub Session Protocol v1 client 1.4.0',artDirection:'Procedural cel-shaded meshes, ink outlines, Art Deco department store, cream / teal / brass palette',animation:'Three.js AnimationMixer / AnimationClip and keyframe tracks; procedural prop, lift, escalator and particle animation',audio:'Original code-generated ragtime, synthesized Foley and Animalese-style gibberish; music defaults to 10%; no audio files',online:'1–4 player host-authoritative online co-op with PeerJS; same-origin local-tab transport; AI Hub shared-world sessions; 1–2 couch co-op',testing:'Headless Chromium WebGPU, scripted whole-game playthrough, physics and game-state checks, emulated standard gamepad, touch profile, offline audio render, two-page networking and official AI Hub harness; screenshots for visual review',research:'Original Activision manual, 1983 advertising, Atari/Atarimania imagery and source sound descriptions; official Three.js, Rapier and AI Hub documentation',environment:'Codex CLI (headless); Linux',model:'OpenAI, gpt-6.1-sol, reasoning effort ultra',usage:'added on import'};
+export const FEEDBACK={
+ testingFeedback:[
+  '8 confirmed issues caught and fixed across automated tests and visual review.',
+  '2 game-breaking issues: a Rapier startup API mismatch and incorrect seat assignment for three/four-player local-tab rooms.',
+  'The complete three-case playthrough with actual Rapier physics, default tuning, active hazards and the finale lift shortcut.',
+  'Headless WebGPU screenshots were blank on this adapter; state assertions and WebGL fallback captures were more useful.'
+ ],
+ engineFeedback:[
+  'Native AnimationMixer clips and WebGPU toon materials made the procedural cast expressive and cohesive.',
+  'I initially used live-body setter names on a Rapier body descriptor. Actual-version tests caught the mismatch. Headless WebGPU image capture also required a WebGL visual fallback.',
+  'The floor-aware chase simulation, cycling lift and escalators, controller menu focus, procedural audio and authoritative co-op snapshots.',
+  'Coordinating fixed-step physics, native animation, menu focus and asynchronous multiplayer state in a single-file release.',
+  'none',
+  'Dependable headless WebGPU screenshot/readback support across software adapters.'
+ ],
+ promptFeedback:[
+  'Researching the original and designing for a TV controller gave the game a clear identity and useful constraints.',
+  'The target length of a feature-complete demo and the desired multiplayer player count were unspecified.',
+  'Completing and validating gameplay, every input method, synthesized audio, standalone networking and Hub sessions as one portable HTML.',
+  'Specify a target demo duration and player count while keeping the source-research and vertical-slice requirements.'
+ ]
+};

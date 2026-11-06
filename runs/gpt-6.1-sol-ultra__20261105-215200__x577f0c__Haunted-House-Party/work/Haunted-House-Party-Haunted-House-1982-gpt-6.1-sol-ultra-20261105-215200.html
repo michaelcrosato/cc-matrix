@@ -1,0 +1,3208 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<script>if(window.AIHub&&AIHub.active)window.__hubEarlyConnect=AIHub.connect({mode:'shared-world',seats:[1,4]});</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><meta name="theme-color" content="#0a171f"><title>Haunted House Party</title>
+<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-goal" content="Join three pieces of the family urn and escape with your party."><meta name="hub:session-howto" content="Left stick / WASD to move; Cross / E interact; Square / Space light; Circle / Shift dodge; Triangle / Q drop; L1 / Tab journal."><meta name="hub:session-minutes" content="8">
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}</script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500;1,600&family=DM+Sans:wght@400;500;600;700&display=swap');
+:root{--paper:#eee5cf;--muted:#a7b1a7;--gold:#ffc67a;--ink:#0b161d;--line:#a5c1b32c}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#091219;color:var(--paper);font-family:'DM Sans',sans-serif}button,input{font:inherit}button{cursor:pointer;color:inherit}#world{display:block;width:100%;height:100%;position:absolute;inset:0;touch-action:none}#shade{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 55% 46%,transparent 36%,#030d1480 100%)}.grain{position:absolute;inset:0;pointer-events:none;opacity:.13;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23ffffff' filter='url(%23n)' opacity='.3' d='M0 0h180v180H0z'/%3E%3C/svg%3E")}.hidden{display:none!important}#loading{position:absolute;inset:0;display:grid;place-content:center;background:#0a171f;z-index:100;text-align:center}#loading .match{font-size:54px;animation:glimmer 1.4s infinite}#loading p{letter-spacing:.22em;font-size:13px;text-transform:uppercase}.loading-note{max-width:600px;line-height:1.7;color:var(--muted);font-size:16px;letter-spacing:0!important;text-transform:none!important}#title{position:absolute;inset:0;background:linear-gradient(90deg,#08131af0 0%,#08131ade 29%,#08131a55 53%,transparent 75%);padding:7vh 5vw;display:flex;flex-direction:column;align-items:flex-start;justify-content:center;pointer-events:none}#title>*{pointer-events:auto}.eyebrow{font-size:12px;font-weight:600;letter-spacing:.25em;color:#b1c6b4;text-transform:uppercase;display:flex;align-items:center;gap:14px}.eyebrow:before{content:'';height:1px;width:36px;background:var(--gold)}h1{font-family:'Cormorant Garamond',Georgia,serif;font-size:clamp(64px,7.6vw,128px);font-weight:500;line-height:.81;letter-spacing:-.045em;margin:25px 0 23px;text-shadow:0 3px 40px #000}h1 em{display:block;color:var(--gold);font-weight:500;margin-left:40px}#tagline{font-size:17px;color:#c3c7b9;line-height:1.6;margin:0 0 28px;max-width:370px}#title nav{display:flex;flex-direction:column;gap:8px;width:320px}.menu-button{background:#10232bcc;border:1px solid var(--line);padding:15px 22px;text-align:left;display:flex;align-items:center;justify-content:space-between;min-height:54px;font-size:17px;transition:background .15s,border-color .15s,transform .15s}.menu-button.primary{background:var(--gold);border-color:var(--gold);color:#1e2525;font-weight:700}.menu-button:focus-visible,.menu-button.focused,.menu-button:hover{outline:none;border-color:var(--gold);background:#28413e;transform:translateX(5px)}.menu-button.primary:hover,.menu-button.primary:focus-visible{background:#ffdfab}.button-mark{font-family:Georgia;font-size:22px}.title-foot{position:absolute;bottom:28px;left:5vw;right:5vw;display:flex;justify-content:space-between;color:#a6b7ae;font-size:12px;letter-spacing:.1em}.title-foot button{border:0;background:none;color:#cdd3c3;font-size:13px;padding:10px}#edition{position:absolute;right:4vw;top:5vh;text-align:right;line-height:1.8;font-size:12px;letter-spacing:.18em;color:#a1bbb4}#edition b{color:var(--paper);font-weight:500}.seal{width:90px;height:90px;border:1px solid #aac3b340;border-radius:50%;display:grid;place-content:center;margin:20px 0 0 auto;font-family:Georgia;font-size:35px;color:var(--gold)}#hud{position:absolute;inset:0;pointer-events:none;padding:30px 36px}#hud-top{display:flex;align-items:flex-start;justify-content:space-between;gap:20px}.room-heading{font-family:'Cormorant Garamond',Georgia,serif;font-size:32px;line-height:1.2;text-shadow:0 2px 12px #000}.smallcaps{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#a5bfb7;margin-bottom:4px}.urn-track{display:flex;align-items:center;gap:12px;background:#08151bd9;padding:12px 20px;border:1px solid var(--line);border-radius:2px}.shard{width:18px;height:27px;background:#344348;clip-path:polygon(20% 0,85% 10%,100% 75%,40% 100%,0 50%);border:1px solid #aaa}.shard.found{background:var(--gold);filter:drop-shadow(0 0 8px #ffc67a60)}.urn-label{font-size:12px;color:#b7c9c0;margin-left:4px}.nerves{text-align:right}.nerve-dots{font-size:22px;letter-spacing:3px;color:var(--gold);line-height:1.1}.match-count{font-size:13px;color:#bdcdc3;margin-top:7px}#objective{position:absolute;top:103px;left:36px;max-width:400px;color:#c2d1c5;font-size:14px;line-height:1.5}#bottom{position:absolute;left:36px;right:36px;bottom:28px;display:flex;align-items:flex-end;justify-content:space-between;gap:22px}#hand{padding:14px 18px;border-left:2px solid var(--gold);background:linear-gradient(90deg,#08151be8,#08151b00);min-width:220px}#hand-name{font-family:'Cormorant Garamond',Georgia,serif;font-size:25px}#hand-hint{font-size:11px;color:#a9bdb3;margin-top:4px;max-width:250px}#context{font-size:16px;text-align:center;color:#fff1ce;background:#0a1a21da;border:1px solid #ffc67a50;padding:14px 22px;pointer-events:auto;cursor:pointer;border-radius:4px;box-shadow:0 3px 25px #0004}#controls{font-size:12px;color:#d2dbc9;display:flex;gap:16px;align-items:center}.key{display:inline-block;min-width:23px;text-align:center;border:1px solid #b4c2b170;border-radius:5px;padding:4px 6px;margin-right:4px;background:#0a1724;color:#f2e9d2;font-weight:600}.hud-button{background:#12252bc9;border:1px solid #bbcbbb40;border-radius:50%;width:45px;height:45px;pointer-events:auto;font-size:20px}#lightbar{width:100%;height:3px;background:#54665a4d;margin-top:10px}#lightbar span{display:block;height:100%;background:var(--gold);transition:width .08s}#toast{position:absolute;bottom:138px;left:50%;transform:translateX(-50%);background:#e8dfc8;color:#15232a;max-width:min(620px,90vw);padding:14px 26px;font-size:16px;text-align:center;box-shadow:5px 5px 0 #0005;transition:opacity .3s;pointer-events:none}#attract{position:absolute;bottom:35px;left:50%;transform:translateX(-50%);background:#091a22e8;border:1px solid var(--line);padding:14px 30px;text-align:center;white-space:nowrap}#attract b{font-size:13px;letter-spacing:.18em;color:var(--gold)}#attract p{margin:6px 0 0;font-size:12px;color:#becdc3}.overlay{position:absolute;inset:0;background:#06121ac9;backdrop-filter:blur(9px);display:flex;align-items:center;justify-content:center;z-index:20;padding:28px}.panel{background:#10252bed;border:1px solid #91a99a45;box-shadow:12px 12px 0 #02090f70;width:620px;max-width:95vw;max-height:90vh;overflow:auto;padding:36px 40px}.panel.wide{width:920px}.panel h2{font-family:'Cormorant Garamond',Georgia,serif;font-weight:500;font-size:49px;line-height:1;margin:8px 0 22px}.panel h3{font-family:'Cormorant Garamond',Georgia,serif;font-size:25px;font-weight:500;margin:22px 0 10px;color:var(--gold)}.panel p{font-size:16px;line-height:1.65;color:#bdcabc}.panel .menu-button{width:100%;margin:8px 0}.panel .close{float:right;background:none;border:1px solid var(--line);border-radius:50%;width:38px;height:38px;font-size:20px}.settings-row{display:flex;align-items:center;justify-content:space-between;gap:22px;margin:22px 0;font-size:16px}.settings-row input[type=range]{width:47%;accent-color:var(--gold)}.settings-row output{min-width:42px;color:var(--gold);text-align:right}.settings-row label{flex:1}.settings-row select,.network-code{font:inherit;color:var(--paper);background:#091a21;border:1px solid #8aa49560;padding:12px;max-width:100%}.network-code{font-size:25px;letter-spacing:.1em;width:100%;margin:10px 0}.network-status{color:var(--gold)!important;font-size:15px!important;min-height:25px}.instruction-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 35px}.instruction-grid p{font-size:14px}.instruction-icon{font-size:24px;color:var(--gold);margin-right:10px}.about-columns{display:grid;grid-template-columns:1fr 1fr;gap:25px}.about-columns p,.feedback p{font-size:13px;line-height:1.65}.about-columns b{color:var(--paper)}.feedback{border-top:1px solid var(--line);margin-top:20px;padding-top:5px}.about a{color:var(--gold)}.map-rooms{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:22px 0}.map-room{min-height:110px;background:#071820;border:1px solid var(--line);padding:15px;font-size:13px;line-height:1.6;color:#79928d}.map-room.visited{background:#26413e;color:var(--paper)}.map-room.current{border-color:var(--gold);box-shadow:inset 0 0 0 1px var(--gold)}.map-room span{display:block;font-size:11px;color:var(--gold);margin-top:6px}.floor-tabs{display:flex;gap:8px}.floor-tabs button{flex:1;background:#122f35;border:1px solid var(--line);padding:12px}.floor-tabs button.active{background:var(--gold);color:#18252b}.touch #controls,.touch #objective,.touch .urn-label,.touch #hand-hint{display:none}.touch #hud{padding:18px}.touch #bottom{bottom:18px;left:18px;right:18px}.touch #hud-top{gap:10px}.touch .room-heading{font-size:24px}.touch .nerve-dots{font-size:15px}.touch .urn-track{padding:10px}.touch #context{font-size:13px;padding:12px}.touch #hand{padding:8px 12px;min-width:0}.touch #hand-name{font-size:21px}#touch-ring{position:absolute;width:90px;height:90px;border:1px solid #ffc67a50;border-radius:50%;pointer-events:none;background:#ffc67a0c}#touch-ring:after{content:'';position:absolute;width:25px;height:25px;left:31px;top:31px;border-radius:50%;background:#ffc67a60}#vignette{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 100px 40px #b6383400;transition:box-shadow .2s}.hurt#vignette{box-shadow:inset 0 0 100px 40px #b6383480}#network-indicator{position:absolute;right:36px;top:110px;font-size:11px;color:#a9bcb0;letter-spacing:.1em}#result-stats{display:flex;justify-content:space-between;border-block:1px solid var(--line);padding:20px 0;margin:25px 0}#result-stats b{display:block;font-size:30px;font-family:Georgia;color:var(--gold)}#result-stats span{font-size:12px;color:var(--muted)}.subtle{font-size:12px!important;color:#8fa99f!important}.boot-error{max-width:700px;padding:30px;font-family:sans-serif;color:#ffd3ac}button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--gold);outline-offset:4px}@keyframes glimmer{50%{opacity:.45;transform:translateY(-4px)}}@media(max-height:760px){#title{padding-block:4vh}h1{font-size:clamp(65px,7vw,100px);margin:20px 0}#tagline{margin-bottom:20px;font-size:15px}#title nav{gap:5px}.menu-button{padding:11px 20px;min-height:45px}.title-foot{bottom:10px}.panel{padding:25px 34px}.panel h2{font-size:42px}.settings-row{margin:17px 0}}@media(max-width:700px){#title{padding:7vw;background:linear-gradient(90deg,#08131af0,#08131aaa 65%,#08131a22)}h1{font-size:76px}#title nav{width:min(320px,82vw)}#tagline{font-size:15px;max-width:280px}#edition{display:none}.title-foot{left:7vw;right:5vw;font-size:9px}.title-foot span{max-width:140px;line-height:1.6}#hud{padding:20px}#bottom{left:20px;right:20px}#controls{display:none}.urn-label{display:none}.nerve-dots{font-size:16px}.room-heading{font-size:27px}#objective{left:20px;top:100px;max-width:270px}.panel{padding:25px}.panel h2{font-size:39px}.instruction-grid,.about-columns{grid-template-columns:1fr}.map-room{font-size:11px;padding:10px;min-height:100px}#attract{padding:10px 20px;width:90%;white-space:normal}#context{font-size:13px}#hand{min-width:0}#hand-hint{max-width:130px}.settings-row{gap:10px;font-size:14px}#network-indicator{right:18px;top:90px}}
+/* TV legibility: the same focus targets and layout on every input device. */
+@media(min-width:1000px) and (min-height:800px){.menu-button{font-size:21px;min-height:58px}.eyebrow{font-size:14px}#tagline{font-size:20px;max-width:420px}#title nav{width:355px}#objective{font-size:19px;max-width:460px;top:115px}.smallcaps{font-size:13px}.room-heading{font-size:38px}.urn-label{font-size:15px}.match-count{font-size:16px}#context{font-size:21px;padding:17px 24px}#controls{font-size:16px;gap:10px}.key{font-size:15px;min-width:27px}#hand-name{font-size:31px}#hand-hint{font-size:14px;max-width:280px}#toast{font-size:20px;bottom:155px;max-width:740px}.settings-row{font-size:19px}.panel p{font-size:18px}.panel .subtle{font-size:14px!important}.about-columns p,.feedback p{font-size:14px}.instruction-grid p{font-size:17px}.title-foot{font-size:13px}.title-foot button{font-size:16px}}
+
+</style></head><body>
+<canvas id="world" aria-label="Isometric haunted mansion"></canvas><div id="shade"></div><div class="grain"></div><div id="vignette"></div>
+<div id="loading"><div class="match">♧</div><p>Striking a match…</p><p class="loading-note">The house is getting ready for company.</p></div>
+<section id="title"><div class="eyebrow">A match-lit misadventure</div><h1>Haunted<br>House <em>Party</em></h1><p id="tagline">The guests are dead.<br>The evening is very much alive.</p><nav><button class="menu-button primary" data-action="solo">Enter the house <span class="button-mark">↗</span></button><button class="menu-button" data-action="local">Bring a friend <span class="button-mark">♧</span></button><button class="menu-button" data-action="online">Play online <span class="button-mark">⌁</span></button><button class="menu-button" data-action="how">House rules <span class="button-mark">?</span></button></nav><div id="edition">A MOST UNFORTUNATE VISIT<br><b>24 ROOMS · 4 FLOORS · 1 WAY OUT</b><div class="seal">☾</div></div><footer class="title-foot"><span>INSPIRED BY ATARI'S<br>HAUNTED HOUSE · 1982</span><div><button data-action="settings">Settings</button><button data-action="about">About & credits</button></div></footer></section>
+<div id="hud" class="hidden"><div id="hud-top"><div><div class="smallcaps" id="floor-name">I · The lower house</div><div class="room-heading" id="room-name">The Foyer</div></div><div class="urn-track"><i class="shard"></i><i class="shard"></i><i class="shard"></i><span class="urn-label">THE FAMILY URN</span></div><div class="nerves"><div class="smallcaps">Nerves remaining</div><div class="nerve-dots" id="nerves">•••••••••</div><div class="match-count" id="matches">0 matches struck</div></div></div><div id="objective"></div><div id="network-indicator"></div><div id="bottom"><div id="hand"><div class="smallcaps">In your one free hand</div><div id="hand-name">Nothing. Yet.</div><div id="hand-hint">A little light goes a long way.</div><div id="lightbar"><span></span></div></div><button id="context" class="hidden" data-action="interact"></button><div id="controls"></div><button class="hud-button" aria-label="Pause" data-action="pause">Ⅱ</button></div></div>
+<div id="toast" class="hidden"></div><div id="attract" class="hidden"><b>THE HOUSE IS ENTERTAINING ITSELF</b><p>Any button returns to the invitation.</p></div><div id="touch-ring" class="hidden"></div><div id="overlay" class="overlay hidden"></div>
+
+<script type="module">
+window.GAME_CREDITS={"sourceInformation": {"date": "2026-11-05 21:52:00", "source": "Haunted House (Atari 2600, 1982)", "plan": "none", "genre": "Survival horror and puzzle adventure", "perspective": "Isometric third-person", "tech": "Three.js r180 (0.180.0) WebGPURenderer; WebGPU with WebGL 2 fallback; Rapier 0.19.3; Gamepad API; Web Audio API; PeerJS 1.5.5; AI Hub Session Protocol v1, client 1.4.0; HTML/CSS/JavaScript", "artDirection": "Procedural cel-shaded and ink-outlined 3D mansion, moonlit teal, warm amber matches and illustrated furnishings", "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for walking, breathing, ghosts, bat wings, spider legs and clocks; procedural secondary effects", "audio": "Code-generated Web Audio waltz at 10% music volume by default, 16 synthesized sound effects and Animalese-style gibberish voices; no audio files", "online": "AI Hub host-authoritative shared-world co-op for 1\u20134; standalone PeerJS/WebRTC co-op for 1\u20134 with same-origin BroadcastChannel transport; shared-screen local co-op for 1\u20132", "testing": "Headless Chromium 153 with Playwright 1.63; software WebGPU state checks; complete normal-physics and attract playthroughs; emulated standard gamepad, keyboard, mouse and touch; OfflineAudioContext; file:// launch; TV screenshots through WebGL fallback; official AI Hub harness; actual WebRTC with loopback enabled", "research": "Atari official Haunted House source page (https://atari.com/pages/hauntedhouse); original instruction manual (https://static.atariage.com/manual_html_page.php?SoftwareLabelID=233); official AI Hub documentation and harness; Three.js r180 WebGPURenderer source; Rapier character-controller documentation. Researched urn, one-hand inventory, matches, four floors/six rooms, enemies, darkness and sound cues.", "environment": "Codex CLI (headless); Linux", "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra", "usage": "added on import"}, "testingFeedback": ["Testing caught 2 game issues: furniture crowded a stair landing and delayed initialization could miss the four-player Hub handshake deadline. Both were fixed.", "1 critical integration issue: the four-player Hub startup deadline could prevent a round from starting. The stair issue blocked the scripted route but could be approached from an adjacent point.", "The complete four-floor playthrough through normal Rapier movement, pickups, locks, urn merging, stairs and escape was most helpful; it found the blocked landing.", "Initial headless WebGPU screenshots were least helpful because they could be blank. Runtime state checks and WebGL diagnostic screenshots provided useful evidence."], "engineFeedback": ["Three.js scene graphs and AnimationMixer made it straightforward to build expressive procedural characters, distinct rooms and reusable native animation clips.", "Headless WebGPU framebuffer capture was unreliable. I also initially placed the Hub handshake after expensive initialization; the final game connects in the head before loading its modules.", "The most important custom system was the shared game state: one-hand inventory, urn assembly, mansion navigation and authoritative co-op synchronization.", "The hardest part was keeping Rapier colliders and navigation synchronized with changing floor decorations while supporting every input device.", "none; no engine source was modified.", "I would improve reliable WebGPU framebuffer capture in headless software browsers."], "promptFeedback": ["The controller-first UX, attract mode, source research and concrete packaging requirements gave the project a clear and useful target.", "Haunted House (1982) can refer to the Atari 2600 game or a Gottlieb pinball table. I used the Atari 2600 game.", "The hardest requirement was completing the gameplay, four input styles, live developer tools and authoritative multiplayer together inside one shareable HTML file.", "I would specify the source platform and put the mandatory feedback fields in one compact schema at the beginning."], "aiHub": {"name": "Haunted House Party", "tagline": "The guests are dead. The evening is alive.", "description": "Explore a moonlit, ink-outlined mansion by matchlight. Carry one object at a time, outwit spiders, bats and a wall-walking host, and reunite a broken urn before you lose your last nerve; bring friends for shared-house co-op.", "type": "Game", "genre": "Horror", "source": "Haunted House (Atari 2600, 1982)", "series": "Haunted House", "players": "1\u20134", "controls": "WASD/left stick move; Space/Square light; E/Cross interact; Shift/Circle dodge; Q/Triangle drop; Tab/L1 journal; Esc/Options pause; touch drag, context tap and double-tap dodge.", "tags": ["3d", "isometric", "co-op", "horror", "exploration", "retro"]}};
+/* Procedural mansion art. All geometry, texture marks, and animation are generated here. */
+async function createScene(THREE, canvas) {
+  const renderer = new THREE.WebGPURenderer({ canvas, antialias: true, alpha: false, forceWebGL: new URLSearchParams(location.search).get('renderer') === 'webgl' });
+  renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 1.65));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.32;
+  await renderer.init();
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0c1520');
+  scene.fog = new THREE.FogExp2('#0c1520', .012);
+  const camera = new THREE.OrthographicCamera(-26, 26, 16, -16, .1, 160);
+  camera.position.set(29, 38, 37);
+  const viewTarget = new THREE.Vector3(0, 0, 0);
+  camera.lookAt(viewTarget);
+  const art = new THREE.Group(), actors = new THREE.Group(), effects = new THREE.Group();
+  scene.add(art, actors, effects);
+  const obstacles = [];
+  const mixers = [];
+  let currentFloor = -1, lastWidth = 0, lastHeight = 0, sceneTime = 0;
+  const actorsById = new Map(), itemById = new Map(), doorById = new Map();
+  const animated = [];
+  const mats = new Map();
+  const ink = new THREE.MeshBasicMaterial({ color: '#070d16', side: THREE.BackSide });
+  const edgeMaterial = new THREE.LineBasicMaterial({ color: '#0b1019', transparent: true, opacity: .86 });
+  const mat = (color, options={}) => {
+    const key = color + JSON.stringify(options);
+    if (!mats.has(key)) mats.set(key, new THREE.MeshStandardMaterial({ color, roughness: .92, metalness: 0, flatShading: true, ...options }));
+    return mats.get(key);
+  };
+  const basic = (color, options={}) => new THREE.MeshBasicMaterial({ color, ...options });
+  const colors = { gold:'#e9b55a', brass:'#a87339', bone:'#f9e4b6', wall:'#23494e', wood:'#725748', dark:'#162932', purple:'#655470', teal:'#58c7c0', red:'#743945' };
+  function mesh(geo, material, parent=art, outline=false) {
+    const m = new THREE.Mesh(geo, typeof material === 'string' ? mat(material) : material);
+    m.castShadow = true; m.receiveShadow = true; parent.add(m);
+    if(outline) {
+      const shell = new THREE.Mesh(geo, ink); shell.scale.setScalar(1.035); m.add(shell);
+    }
+    return m;
+  }
+  function box(x,y,z,w,h,d,color,parent=art,outline=true) {
+    const m=mesh(new THREE.BoxGeometry(w,h,d),color,parent,false); m.position.set(x,y,z);
+    if(outline){const edge=new THREE.LineSegments(new THREE.EdgesGeometry(m.geometry,25),edgeMaterial);m.add(edge);}
+    return m;
+  }
+  function sphere(x,y,z,r,color,parent=art,scale=[1,1,1],outline=true) {
+    const m=mesh(new THREE.SphereGeometry(r,12,8),color,parent,outline);m.position.set(x,y,z);m.scale.set(...scale);return m;
+  }
+  function cylinder(x,y,z,r1,r2,h,color,parent=art,n=10) {
+    const m=mesh(new THREE.CylinderGeometry(r1,r2,h,n),color,parent);m.position.set(x,y,z);return m;
+  }
+  function line(points,color='#d1ad6d',parent=art,opacity=1) {
+    const g=new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(...p)));
+    const m=new THREE.Line(g,new THREE.LineBasicMaterial({color,transparent:opacity<1,opacity}));parent.add(m);return m;
+  }
+  function disc(x,y,z,r,color,parent=art,opacity=1) {
+    const m=mesh(new THREE.CircleGeometry(r,48),basic(color,{transparent:opacity<1,opacity,depthWrite:false}),parent);m.rotation.x=-Math.PI/2;m.position.set(x,y,z);m.castShadow=false;return m;
+  }
+  function tag(text,x,z,size=1,color='#d4bf9b',parent=art) {
+    const cv=document.createElement('canvas');cv.width=512;cv.height=96;
+    const ctx=cv.getContext('2d');ctx.clearRect(0,0,512,96);ctx.font='600 30px Georgia';ctx.textAlign='center';ctx.fillStyle=color;ctx.fillText(text.toUpperCase(),256,57);
+    const tex=new THREE.CanvasTexture(cv);tex.colorSpace=THREE.SRGBColorSpace;
+    const m=mesh(new THREE.PlaneGeometry(size*7.2,size*1.35),new THREE.MeshBasicMaterial({map:tex,transparent:true,depthWrite:false,opacity:.65}),parent);m.rotation.x=-Math.PI/2;m.position.set(x,.17,z);m.castShadow=false;return m;
+  }
+  const ambient = new THREE.HemisphereLight('#a8cadb','#191324',1.25);scene.add(ambient);
+  const moon=new THREE.DirectionalLight('#9ec8df',2.9);moon.position.set(-15,25,-17);moon.castShadow=true;
+  moon.shadow.mapSize.set(2048,2048);Object.assign(moon.shadow.camera,{left:-25,right:25,top:23,bottom:-23,near:1,far:70});moon.shadow.bias=-.001;moon.shadow.normalBias=.03;scene.add(moon);
+  const warm=new THREE.DirectionalLight('#ffbc79',1.7);warm.position.set(14,18,18);scene.add(warm);
+  const exterior=new THREE.Group();scene.add(exterior);
+  const voidGround=mesh(new THREE.CylinderGeometry(39,42,1,64),mat('#11232c'),exterior);voidGround.position.set(0,-2,0);
+  const halo=disc(0,-1.45,0,31,'#19313c',exterior,.65);
+  // The crooked dead garden frames the floating cutaway like an illustrated diorama.
+  function tree(x,z,s=1) {
+    const g=new THREE.Group();g.position.set(x,-.8,z);g.scale.setScalar(s);exterior.add(g);
+    const trunk=cylinder(0,2,0,.12,.42,5,'#11202a',g,5);trunk.rotation.z=.13;
+    for(let i=0;i<6;i++){
+      const side=i%2?1:-1,y=1.4+i*.52;
+      line([[0,y,0],[side*.8,y+.65,0],[side*1.6,y+.95,.2]],'#243e46',g);
+      const branch=cylinder(side*.5,y+.4,0,.05,.14,1.45,'#12242c',g,5);branch.rotation.z=-side*.9;
+    }
+  }
+  [[-23,-14,1.4],[-24,3,1.2],[22,-16,1.1],[23,7,1.3],[-15,-18,.9],[13,-19,1]].forEach(t=>tree(...t));
+  // Broken iron fence and cemetery silhouettes.
+  for(let i=0;i<22;i++){
+    const x=-23+i*2.2;
+    cylinder(x,.1,-16,.045,.045,2,'#152932',exterior,5);
+    const tip=mesh(new THREE.ConeGeometry(.14,.4,4),mat('#2e4852'),exterior);tip.position.set(x,1.25,-16);
+  }
+  line([[-23,.4,-16],[23,.4,-16]],'#314955',exterior);line([[-23,-.3,-16],[23,-.3,-16]],'#314955',exterior);
+  for(let i=0;i<9;i++){
+    const x=-21+(i*7.13)%42,z=-13.6-(i%3)*1.2;
+    const grave=box(x,-.1,z,.8,1.1,.3,'#243c46',exterior);grave.rotation.z=(i%3-1)*.14;
+    line([[x-.2,.15,z+.16],[x+.2,.15,z+.16]],'#50636a',exterior);line([[x,.4,z+.16],[x,-.1,z+.16]],'#50636a',exterior);
+  }
+  // Stair landings have a shared, generous reservation on every floor.
+  // The same bounds gate art and collision so skipped furniture cannot leave an invisible blocker.
+  function furnitureClear(x,z,w,d){return [[-14,-8],[14,8]].every(([sx,sz])=>Math.hypot(Math.max(0,Math.abs(x-sx)-w/2),Math.max(0,Math.abs(z-sz)-d/2))>=2.15);}
+  function addCollider(x,z,w,d){if(furnitureClear(x,z,w,d))obstacles.push({x,z,w,d});}
+  function wall(x,z,w,d,h=1.6){
+    box(x,h/2,z,w,h,d,colors.wall);box(x,h+.05,z,w+.04,.12,d+.06,'#7c8b7d');box(x,.18,z,w+.05,.25,d+.07,'#152d33');addCollider(x,z,w,d);
+    if(w>d && w>3) for(let i=0;i<Math.floor(w/1.35);i++) box(x-w/2+.65+i*1.35,h*.6,z+d/2+.012,.045,h*.55,.035,'#436265',art,false);
+  }
+  function arch(x,z,alongX=true){
+    const g=new THREE.Group();g.position.set(x,0,z);if(!alongX)g.rotation.y=Math.PI/2;art.add(g);
+    for(const side of [-1,1]){
+      box(side*1.6,1.1,0,.25,2.2,.6,'#3d5d60',g);box(side*1.6,2.12,0,.4,.18,.75,colors.brass,g);
+    }
+    const shape=new THREE.Shape();shape.moveTo(-1.75,2.05);shape.quadraticCurveTo(0,3.5,1.75,2.05);shape.lineTo(1.75,2.45);shape.quadraticCurveTo(0,3.8,-1.75,2.45);shape.closePath();
+    const m=mesh(new THREE.ExtrudeGeometry(shape,{depth:.28,bevelEnabled:false}),mat('#29484e'),g);m.position.z=-.14;
+    const badge=mesh(new THREE.OctahedronGeometry(.22),mat(colors.gold,{emissive:'#603b12',emissiveIntensity:.25}),g);badge.position.set(0,2.85,.18);
+  }
+  function candle(x,z,parent=art,y=.2,scale=1){
+    const g=new THREE.Group();g.position.set(x,y,z);g.scale.setScalar(scale);parent.add(g);
+    cylinder(0,.1,0,.22,.32,.18,colors.brass,g);cylinder(0,.48,0,.11,.13,.7,'#d8c9a1',g);
+    const flame=sphere(0,.99,0,.17,basic('#ffc974'),g,[.6,1.7,.6],false);
+    animated.push({kind:'flame',object:flame,phase:x+z});
+    const glow=disc(0,.015,0,1.3,'#ffbb55',g,.055);return g;
+  }
+  function portrait(x,z,variant=0,parent=art){
+    if(parent===art&&!furnitureClear(x,z,1.55,.16))return null;
+    const g=new THREE.Group();g.position.set(x,1.8,z);parent.add(g);
+    box(0,0,0,1.55,1.95,.16,colors.brass,g);box(0,0,.1,1.28,1.67,.04,['#273b45','#44334c','#413b37'][variant%3],g);
+    sphere(0,.25,.15,.34,['#7c8f82','#9a7f85','#887e6e'][variant%3],g,[.8,1, .13],false);
+    const bust=mesh(new THREE.ConeGeometry(.56,.85,5),mat('#17262c'),g);bust.position.set(0,-.37,.15);bust.scale.z=.2;
+    for(const sx of [-.12,.12])sphere(sx,.28,.205,.044,basic('#ffdb85'),g,[1,1,.3],false);
+    g.rotation.z=Math.sin(x*4)*.07;return g;
+  }
+  function books(x,z,parent=art,width=3.1){
+    if(parent===art&&!furnitureClear(x,z,width,.7))return null;
+    const g=new THREE.Group();g.position.set(x,0,z);parent.add(g);
+    box(0,1.25,0,width,2.5,.7,'#493e3c',g);box(0,1.25,.37,width-.25,2.26,.05,'#192c31',g);
+    for(let j=0;j<3;j++){
+      box(0,.28+j*.77,.47,width+.15,.1,.95,'#7d6650',g);
+      for(let k=0;k<Math.floor(width/.22)-1;k++){
+        const bh=.36+((k*7+j*3)%5)*.07;
+        const b=box(-width/2+.28+k*.22,.34+j*.77+bh/2,.45,.15,bh,.4,['#a96854','#6c927e','#ba9b60','#69677d','#9c7a60'][k%5],g,false);
+        if(k%5===0)b.rotation.z=.14;
+        box(b.position.x,b.position.y+bh*.25,.663,.13,.025,.012,'#d8bb81',g,false);
+      }
+    }
+  }
+  function table(x,z,parent=art,style=0){
+    if(parent===art&&!furnitureClear(x,z,2.6,1.25))return null;
+    const g=new THREE.Group();g.position.set(x,0,z);parent.add(g);
+    box(0,.94,0,2.6,.2,1.25,'#8c6851',g);box(0,1.055,0,2.38,.03,1.04,'#684a40',g);
+    for(const sx of [-1,1])for(const sz of [-.4,.4])box(sx,.45,sz,.13,.9,.13,'#53413b',g);
+    if(style===0){candle(-.7,0,g,1.1,.6);box(.35,1.11,0,.75,.08,.55,'#7f8d7e',g);box(.35,1.16,0,.62,.03,.5,'#dfcfaa',g);}
+    else {sphere(-.55,1.27,0,.22,'#aab5a2',g);cylinder(.2,1.2,0,.27,.3,.2,'#bda581',g);candle(.8,0,g,1.1,.6);}
+  }
+  function chair(x,z,parent=art,rotation=0){
+    if(parent===art&&!furnitureClear(x,z,1,.9))return null;
+    const g=new THREE.Group();g.position.set(x,0,z);g.rotation.y=rotation;parent.add(g);
+    box(0,.64,0,.85,.18,.85,'#70444a',g);box(0,1.2,-.32,.9,1.25,.2,'#73464b',g);
+    for(const dx of [-.3,.3])for(const dz of [-.3,.3])box(dx,.29,dz,.1,.6,.1,'#594a40',g,false);
+    box(0,1.76,-.32,1,.14,.28,colors.brass,g);
+  }
+  function grandfather(x,z,parent=art){
+    if(parent===art&&!furnitureClear(x,z,1.1,.65))return null;
+    const g=new THREE.Group();g.position.set(x,0,z);parent.add(g);
+    box(0,1.5,0,1.1,3,.65,'#4c4140',g);box(0,.2,0,1.4,.25,.9,colors.brass,g);
+    box(0,1.15,.35,.7,1.6,.04,'#172f35',g);
+    const face=mesh(new THREE.CylinderGeometry(.48,.48,.12,24),mat('#ddc68f'),g);face.rotation.x=Math.PI/2;face.position.set(0,2.4,.42);
+    line([[0,2.4,.49],[.05,2.74,.49]],'#19252a',g);line([[0,2.4,.5],[.27,2.3,.5]],'#19252a',g);
+    const pend=new THREE.Group();pend.name='Pendulum';pend.position.set(0,1.9,.43);g.add(pend);box(0,-.6,0,.035,1.15,.04,colors.gold,pend);sphere(0,-1.15,0,.19,colors.gold,pend,[1,1,.22]);
+    const mixer=new THREE.AnimationMixer(g);mixer.clipAction(new THREE.AnimationClip('clock tick',2,[new THREE.NumberKeyframeTrack('Pendulum.rotation[z]',[0,.5,1,1.5,2],[-.17,0,.17,0,-.17])])).play();mixers.push(mixer);
+    const cap=mesh(new THREE.ConeGeometry(.85,.5,4),mat('#79624c'),g);cap.rotation.y=Math.PI/4;cap.position.y=3.2;
+  }
+  function windowArt(x,z,parent=art){
+    if(parent===art&&!furnitureClear(x,z,2.5,.5))return null;
+    const g=new THREE.Group();g.position.set(x,1.7,z);parent.add(g);
+    box(0,0,0,2.5,2.8,.14,'#102b36',g);box(0,0,.09,2.2,2.5,.03,basic('#447986'),g);
+    for(let i=0;i<4;i++){
+      const p=mesh(new THREE.PlaneGeometry(.58,.94),basic(['#72b8b5','#8c789f','#dbb87c','#5d8b9e'][i]),g);p.position.set((i%2-.5)*1.05,(i<2?.5:-.5)*1.08,.12);p.rotation.z=Math.PI/4;
+    }
+    box(0,0,.15,.08,2.6,.08,'#172e36',g);box(0,0,.15,2.3,.08,.08,'#172e36',g);
+    for(const side of [-1,1])box(side*1.3,-.12,.17,.32,2.7,.22,'#604752',g);
+  }
+  function plant(x,z,parent=art){
+    if(parent===art&&!furnitureClear(x,z,.7,.7))return null;
+    cylinder(x,.3,z,.35,.25,.6,'#8f6451',parent);for(let i=0;i<5;i++){
+      const a=i*2.4;const leaf=sphere(x+Math.cos(a)*.27,.9+(i%3)*.2,z+Math.sin(a)*.27,.35,'#3e6d63',parent,[.36,1.8,.5]);leaf.rotation.z=Math.sin(a)*.6;
+    }
+  }
+  function fireplace(x,z,parent=art){
+    if(parent===art&&!furnitureClear(x,z,3.1,.9))return null;
+    box(x,1.05,z,3.1,2.1,.9,'#586163',parent);box(x,.75,z+.47,2.3,1.35,.05,'#15252c',parent);box(x,2.1,z,3.6,.25,1.25,'#b5a489',parent);
+    for(let i=0;i<3;i++){const flame=sphere(x-.5+i*.5,.45,z+.6,.35,basic('#d98746'),parent,[.7,1.4,.5],false);animated.push({kind:'flame',object:flame,phase:i});}
+    candle(x-1.1,z,parent,2.25,.65);candle(x+1.1,z,parent,2.25,.65);
+  }
+  function staircase(x,z,up){
+    const g=new THREE.Group();g.position.set(x,0,z);art.add(g);
+    box(0,.08,0,3.2,.14,2.7,'#314e50',g);
+    for(let i=0;i<5;i++)box(0,.1+i*.16,-.9+i*.42,2.5,.15+i*.31,.4,'#c0a477',g);
+    for(const s of [-1,1]){cylinder(s*1.5,.85,1,.08,.1,1.7,colors.brass,g);cylinder(s*1.5,.5,-1,.08,.1,1,colors.brass,g);line([[s*1.5,1,-1],[s*1.5,1.7,1]],'#d6b474',g);}
+    const chevron=new THREE.Shape();chevron.moveTo(-.65,0);chevron.lineTo(0,.7);chevron.lineTo(.65,0);chevron.lineTo(.35,0);chevron.lineTo(0,.35);chevron.lineTo(-.35,0);chevron.closePath();
+    const arrow=mesh(new THREE.ShapeGeometry(chevron),basic(up?'#f5cc78':'#8ed2d0'),g);arrow.rotation.x=-Math.PI/2;arrow.rotation.z=up?0:Math.PI;arrow.position.set(0,.96,.35);
+    tag(up?'UP':'DOWN',x,z+1.9,.38,up?'#f7ce81':'#88bbb9');
+    disc(x,.06,z,2.05,up?'#edbd5d':'#60b7c0',art,.06);
+  }
+  const roomNames=[['The Conservatory','The Long Gallery','The Dining Room','The Cobweb Parlour','The Foyer','The Clock Room'],['The Moonlit Study','The Doll Room','The East Library','The Blue Bedroom','The Landing','The Sealed Salon'],['The Winter Garden','The Mourning Room','The Observatory','The Music Room','The Dusty Landing','The Nursery'],['The Crooked Stair','The Family Vault','The Moth Room','The Trunk Room','The Last Landing','The Rafter Room']];
+  function clear(group){while(group.children.length){const child=group.children.pop();child.parent=null;child.traverse(o=>{if(o.geometry)o.geometry.dispose();if(o.material?.map)o.material.map.dispose();});}}
+  function setFloor(floor){
+    if(currentFloor===floor)return;
+    currentFloor=floor;clear(art);obstacles.length=0;animated.length=0;mixers.length=0;
+    const palette=[['#60584b','#6c5e4d','#20474c'],['#5d4f54','#6b5959','#3b3d53'],['#4b5650','#626a58','#284753'],['#645447','#78634f','#3b4350']][floor]||['#60584b','#6c5e4d','#20474c'];
+    box(0,-.65,0,37.3,1.2,23.2,'#101e29');box(0,-.12,0,36.6,.15,22.6,colors.brass);box(0,-.02,0,36,.14,22,'#3a3f3c');
+    // Individually staggered parquet boards and their ink seams.
+    for(let row=0;row<2;row++)for(let col=0;col<3;col++){
+      const cx=(col-1)*12,cz=(row-.5)*11;
+      box(cx,.005,cz,11.7,.05,10.7,palette[0],art,false);
+      for(let j=0;j<15;j++)for(let i=0;i<5;i++){
+        const px=cx-5.6+i*2.32+(j%2)*.45;
+        const w=i===4&&j%2?1.8:2.25;
+        if(px+w/2>cx+5.85)continue;
+        box(px,.04,cz-5.05+j*.71,w,.025,.66,(i+j)%3?palette[0]:palette[1],art,false);
+        if((i+j)%4===0)line([[px-w*.34,.058,cz-5.02+j*.71],[px+w*.25,.058,cz-5.03+j*.71]],'#373e39',art,.4);
+      }
+      // Velvet rugs with a botanical geometric border, kept flush to walk over.
+      const rug=['#425953','#6d414b','#354f5c','#6c4e47','#5c5948','#3f5e5a'][(col+row*3+floor)%6];
+      box(cx,.067,cz,7.7,.025,6.65,'#182d31',art,false);box(cx,.084,cz,7.45,.025,6.4,'#b69566',art,false);box(cx,.101,cz,7.15,.025,6.08,rug,art,false);
+      box(cx,.117,cz,6.8,.018,5.74,'#b69566',art,false);box(cx,.129,cz,6.67,.018,5.61,rug,art,false);
+      for(let k=0;k<8;k++){
+        const a=k*Math.PI/4;line([[cx+Math.cos(a)*.55,.145,cz+Math.sin(a)*.55],[cx+Math.cos(a)*2.15,.145,cz+Math.sin(a)*2.15]],'#ab9067',art,.45);
+        const fl=sphere(cx+Math.cos(a)*2.15,.145,cz+Math.sin(a)*2.15,.075,'#b59a71',art,[1,.12,1],false);fl.castShadow=false;
+      }
+      const diamond=mesh(new THREE.RingGeometry(.64,.69,4),basic('#b69b6f'),art);diamond.rotation.x=-Math.PI/2;diamond.rotation.z=Math.PI/4;diamond.position.set(cx,.15,cz);
+      tag(roomNames[floor][row*3+col],cx,cz+2.4,.62);
+      // Perimeter furniture leaves all room centers and door routes clear.
+      const furnishing=(row*3+col+floor)%6;
+      if(furnishing===0){books(cx-2.1,cz-4.5,art,4);grandfather(cx+4.5,cz-4.4);table(cx-3.7,cz+3.1);addCollider(cx-2.1,cz-4.5,4,.7);addCollider(cx+4.5,cz-4.4,1.1,.65);addCollider(cx-3.7,cz+3.1,2.6,1.25);}
+      if(furnishing===1){portrait(cx-3.3,cz-5.12,0);portrait(cx,cz-5.12,1);portrait(cx+3.3,cz-5.12,2);plant(cx-4.5,cz+3.8);chair(cx+4.2,cz-3.7,art,-.4);addCollider(cx-4.5,cz+3.8,.7,.7);}
+      if(furnishing===2){fireplace(cx-2.5,cz-4.7);table(cx+3.7,cz+3.1,art,1);chair(cx+3.7,cz+4.25);addCollider(cx-2.5,cz-4.7,3.1,.9);addCollider(cx+3.7,cz+3.1,2.6,1.25);}
+      if(furnishing===3){table(cx-3.6,cz-3.6,art,1);chair(cx-3.6,cz-4.8,art,Math.PI);chair(cx-3.6,cz-2.5);windowArt(cx+2.7,cz-5.1);plant(cx+4.6,cz+4);addCollider(cx-3.6,cz-3.6,2.6,1.25);}
+      if(furnishing===4){grandfather(cx-4.8,cz-3.9);portrait(cx+3,cz-5.1,1);chair(cx+4.5,cz+3.3,art,-Math.PI/2);addCollider(cx-4.8,cz-3.9,1.1,.65);}
+      if(furnishing===5){windowArt(cx-2.5,cz-5.1);plant(cx+4.5,cz-4);plant(cx+4.8,cz+3.8);table(cx-3.6,cz+3.4);addCollider(cx+4.5,cz-4,.7,.7);addCollider(cx-3.6,cz+3.4,2.6,1.25);}
+      candle(cx+4.9,cz+4.4,art,.1,.8);
+      // Inlaid runes and scattered tiny bone-white pages.
+      for(let p=0;p<3;p++){
+        const page=box(cx-4.3+p*.46,.08,cz+1.9+p*.18,.35,.012,.46,'#a9aa92',art,false);page.rotation.y=p*.9;
+      }
+      const lamp=new THREE.PointLight(['#ffbd70','#87b9c4','#daa7ad'][(col+row)%3],9,9,2);lamp.position.set(cx-2,3.2,cz-3);art.add(lamp);
+    }
+    // Exterior cutaway walls. The front rail is low to keep the player visible.
+    wall(0,-11,36.5,.32,2.7);wall(-18,0,.32,22,1.6);wall(18,0,.32,22,1.6);
+    wall(-10,11,16,.32,.55);wall(10,11,16,.32,.55);
+    for(const x of [-6,6])for(const cz of [-5.5,5.5]){
+      wall(x,cz-3.55,.25,3.9,1.12);wall(x,cz+3.55,.25,3.9,1.12);arch(x,cz,false);
+    }
+    for(const cx of [-12,0,12]){wall(cx-3.8,0,4.4,.25,1.18);wall(cx+3.8,0,4.4,.25,1.18);arch(cx,0,true);}
+    // Finials, exterior stone tiles, and brass corner braces.
+    for(const x of [-18,18])for(const z of [-11,11]){box(x,.4,z,.55,.8,.55,'#63716b');sphere(x,.95,z,.23,colors.brass);}
+    for(let i=0;i<9;i++)box(-3.1+i*.78,-.38,12,.71,.18,1.5,'#64716b',art);
+    if(floor===0){arch(0,11,true);tag('HOME, IF YOU DARE',0,12.7,.5);disc(0,.04,10,1.5,'#d1b079',art,.08);}
+    staircase(-14,-8,true);staircase(14,8,false);
+    // Cobweb fans stretched between rafters, rendered as fine ink-white threads.
+    for(const [x,z] of [[-17.8,-10.8],[17.8,-10.8],[-5.8,.15],[6.1,-10.8]]){
+      for(let i=0;i<5;i++){const a=i*Math.PI/8;line([[x,1.5,z],[x+Math.cos(a)*2.3,1.5-i*.12,z+Math.sin(a)*2.3]],'#718080',art,.3);}
+      for(let r=1;r<4;r++){
+        const pts=[];for(let i=0;i<5;i++){const a=i*Math.PI/8;pts.push([x+Math.cos(a)*r*.58,1.5-i*.12*r/4,z+Math.sin(a)*r*.58]);}line(pts,'#718080',art,.25);
+      }
+    }
+  }
+  function eye(parent,x,y,z,size=.13,evil=false){
+    sphere(x,y,z,size,basic(evil?'#ffbc7b':'#f5efd2'),parent,[.77,1.25,.4],false);
+    sphere(x+.017,y-.015,z+size*.39,size*.4,basic('#122531'),parent,[.7,1.1,.7],false);
+  }
+  function playerModel(id,index=0){
+    const first=index%2===0;
+    const root=new THREE.Group();actors.add(root);
+    const body=new THREE.Group();body.name='Body';root.add(body);
+    const cloak=mesh(new THREE.ConeGeometry(.49,1.2,9,1,true),mat(first?'#294952':'#644e71',{side:THREE.DoubleSide}),body,true);cloak.position.y=.65;
+    cylinder(0,.13,0,.48,.52,.18,'#132731',body);
+    const face=sphere(0,1.04,.04,.4,'#142b36',body,[1,1,.9]);
+    // The source's enormous eyes remain the most readable feature.
+    eye(body,-.14,1.08,.38,.15);eye(body,.14,1.08,.38,.15);
+    const collar=mesh(new THREE.TorusGeometry(.32,.075,5,12),mat(first?'#dfb663':'#9bbad1'),body);collar.rotation.x=Math.PI/2;collar.position.y=.79;
+    const hat=mesh(new THREE.ConeGeometry(.48,.6,7),mat(first?'#577276':'#856b8e'),body,true);hat.position.set(.02,1.63,-.03);hat.rotation.z=-.18;
+    cylinder(0,1.39,0,.55,.55,.08,first?'#bd9b5b':'#9f9bbc',body);
+    const hand=new THREE.Group();hand.name='Hand';hand.position.set(.52,.84,.15);body.add(hand);
+    sphere(0,0,0,.12,'#d5c49a',hand);box(0,.25,0,.042,.5,.042,'#d3bb88',hand,false);
+    const flame=sphere(0,.57,0,.14,basic('#ffcc71'),hand,[.6,1.6,.6],false);flame.name='Flame';
+    const light=new THREE.PointLight('#ffc36e',21,10,1.7);light.position.set(.5,1.55,.25);root.add(light);
+    const pool=disc(0,.16,0,3.5,'#e9aa55',root,.075);pool.name='Pool';
+    const ring=mesh(new THREE.RingGeometry(.52,.58,36),basic(first?'#dfbd77':'#9dc0e5',{transparent:true,opacity:.8,depthWrite:false}),root);ring.rotation.x=-Math.PI/2;ring.position.y=.16;
+    const carry=new THREE.Group();carry.position.set(-.48,.8,.18);body.add(carry);
+    const ward=new THREE.Group();ward.name='Ward';root.add(ward);
+    const wardRing=mesh(new THREE.RingGeometry(.94,1.015,48),basic('#99e3e7',{transparent:true,opacity:.75,depthWrite:false}),ward);wardRing.rotation.x=-Math.PI/2;wardRing.position.y=.18;wardRing.castShadow=false;
+    const wardInner=mesh(new THREE.RingGeometry(.77,.79,48),basic('#b4e3ef',{transparent:true,opacity:.4,depthWrite:false}),ward);wardInner.rotation.x=-Math.PI/2;wardInner.position.y=.185;wardInner.castShadow=false;
+    for(let i=0;i<6;i++){
+      const a=i*Math.PI/3;const star=mesh(new THREE.OctahedronGeometry(.07),basic('#b6eced'),ward);star.position.set(Math.cos(a)*.98,.28,Math.sin(a)*.98);star.castShadow=false;
+      if(i%2===0){const trail=mesh(new THREE.TorusGeometry(.77,.012,3,32,Math.PI*.55),basic('#78c4db',{transparent:true,opacity:.6}),ward);trail.rotation.set(Math.PI/2+.4,a,.2);trail.position.y=.78;trail.castShadow=false;}
+    }
+    const wardLight=new THREE.PointLight('#71cbdc',6,5,2);wardLight.position.y=1;ward.add(wardLight);ward.visible=false;
+    const mixer=new THREE.AnimationMixer(root);
+    const idle=new THREE.AnimationClip('nervous breathing',2.2,[new THREE.NumberKeyframeTrack('Body.position[y]',[0,1.1,2.2],[0,.055,0]),new THREE.NumberKeyframeTrack('Hand.rotation[z]',[0,1.1,2.2],[-.13,.06,-.13])]);
+    const walk=new THREE.AnimationClip('tiptoe',.58,[new THREE.NumberKeyframeTrack('Body.rotation[z]',[0,.145,.29,.435,.58],[-.07,0,.07,0,-.07])]);
+    mixer.clipAction(idle).play();const walkAction=mixer.clipAction(walk);walkAction.play();
+    mixer.clipAction(new THREE.AnimationClip('moon ward',5,[new THREE.NumberKeyframeTrack('Ward.rotation[y]',[0,5],[0,Math.PI*2])])).play();
+    return {root,body,light,pool,flame,mixer,walkAction,carry,ward,ring,kind:'player',previous:new THREE.Vector2(),carryType:null};
+  }
+  function enemyModel(type,id){
+    const root=new THREE.Group(),body=new THREE.Group();body.name='Body';root.add(body);actors.add(root);
+    if(type==='ghost'){
+      const shape=new THREE.Shape();shape.moveTo(-.65,-.65);shape.bezierCurveTo(-.95,.7,-.65,1.4,0,1.4);shape.bezierCurveTo(.65,1.4,.95,.7,.65,-.65);for(let i=0;i<5;i++)shape.lineTo(.65-i*.325,-.65+(i%2)*.3);shape.closePath();
+      const ghost=mesh(new THREE.ExtrudeGeometry(shape,{depth:.6,bevelEnabled:true,bevelThickness:.12,bevelSize:.1,bevelSegments:1,steps:1}),mat('#9ac9c0',{emissive:'#244d50',emissiveIntensity:.5,transparent:true,opacity:.87}),body,true);ghost.position.set(0,1.15,-.3);
+      eye(body,-.25,1.9,.49,.19,true);eye(body,.25,1.9,.49,.19,true);
+      const mouth=sphere(0,1.4,.48,.2,basic('#25414a'),body,[.8,1.4,.25],false);
+      const hat=mesh(new THREE.CylinderGeometry(.6,.72,.35,8),mat('#293944'),body,true);hat.position.set(0,2.64,0);cylinder(0,2.44,0,.91,.91,.1,'#33464d',body);
+      const light=new THREE.PointLight('#81d6cc',7,5,2);light.position.y=1.7;root.add(light);
+      disc(0,.17,0,1.2,'#67bfb6',root,.065);
+    } else if(type==='bat'){
+      sphere(0,1.35,0,.32,'#52415d',body,[1,1.25,.9]);
+      for(const side of [-1,1]){
+        const wing=new THREE.Group();wing.name=side<0?'LeftWing':'RightWing';wing.position.set(side*.17,1.48,0);body.add(wing);
+        const shape=new THREE.Shape();shape.moveTo(0,0);shape.quadraticCurveTo(side*.8,.65,side*1.5,.25);shape.lineTo(side*1.3,-.5);shape.quadraticCurveTo(side*.85,-.15,side*.68,-.6);shape.quadraticCurveTo(side*.25,-.15,0,-.35);shape.closePath();
+        mesh(new THREE.ExtrudeGeometry(shape,{depth:.055,bevelEnabled:false}),mat('#855778',{side:THREE.DoubleSide}),wing,true);
+        line([[0,0,.07],[side*.7,-.1,.07],[side*1.3,-.5,.07]],'#c28b93',wing);
+        const ear=mesh(new THREE.ConeGeometry(.18,.5,3),mat('#8a607d'),body);ear.position.set(side*.2,1.82,0);
+      }
+      eye(body,-.12,1.43,.28,.11,true);eye(body,.12,1.43,.28,.11,true);
+    } else {
+      sphere(0,.45,0,.52,'#513c4c',body,[1,.6,1.1]);sphere(0,.46,.45,.31,'#69536b',body,[1,.75,.7]);
+      for(let i=0;i<4;i++)for(const side of [-1,1]){
+        const leg=new THREE.Group();leg.name=`Leg${side<0?'L':'R'}${i}`;body.add(leg);
+        const z=(i-1.5)*.25;line([[side*.35,.45,z],[side*.8,.65,z-.15],[side*1.1,.1,z+.12]],'#a18994',leg);
+        const bone=cylinder(side*.67,.5,z,.055,.07,.7,'#5d4358',leg,5);bone.rotation.z=side*.9;
+      }
+      eye(body,-.13,.55,.68,.12,true);eye(body,.13,.55,.68,.12,true);
+      for(const s of [-1,1])sphere(s*.32,.5,.56,.06,basic('#f0bb84'),body,[1,1,.5],false);
+    }
+    const alert=new THREE.Group();root.add(alert);
+    const dangerRing=mesh(new THREE.RingGeometry(type==='spider'?1.14:.93,type==='spider'?1.2:1,40),basic('#f2aa71',{transparent:true,opacity:.65,depthWrite:false}),alert);dangerRing.rotation.x=-Math.PI/2;dangerRing.position.y=.18;dangerRing.castShadow=false;
+    const badge=new THREE.Group();badge.position.y=type==='ghost'?3.25:type==='bat'?2.6:1.5;alert.add(badge);
+    box(0,.12,0,.075,.34,.03,basic('#ffd58f'),badge,false);sphere(0,-.15,0,.055,basic('#ffd58f'),badge,[1,1,.3],false);
+    alert.visible=false;
+    const dazed=new THREE.Group();root.add(dazed);
+    for(let i=0;i<3;i++){const a=i*Math.PI*2/3;const star=mesh(new THREE.OctahedronGeometry(.12),basic('#a2dfe2'),dazed);star.position.set(Math.cos(a)*.5,type==='ghost'?2.9:type==='bat'?2.2:1,Math.sin(a)*.5);star.castShadow=false;}
+    dazed.visible=false;
+    const mixer=new THREE.AnimationMixer(root),tracks=[];
+    tracks.push(new THREE.NumberKeyframeTrack('Body.position[y]',[0,.6,1.2],[0,type==='ghost'?.2:type==='bat'?.12:.035,0]));
+    tracks.push(new THREE.NumberKeyframeTrack('Body.rotation[z]',[0,.6,1.2],[-.04,.04,-.04]));
+    if(type==='bat')for(const [name,s] of [['LeftWing',1],['RightWing',-1]])tracks.push(new THREE.NumberKeyframeTrack(`${name}.rotation[z]`,[0,.13,.26],[s*-.3,s*.65,s*-.3]));
+    if(type==='spider')for(let i=0;i<4;i++)for(const side of ['L','R'])tracks.push(new THREE.NumberKeyframeTrack(`Leg${side}${i}.rotation[y]`,[0,.2,.4],i%2?[-.1,.1,-.1]:[.1,-.1,.1]));
+    mixer.clipAction(new THREE.AnimationClip(type+' haunt',type==='bat'?.26:type==='spider'?.4:1.2,tracks)).play();
+    return {root,body,mixer,alert,dangerRing,badge,dazed,kind:type};
+  }
+  function itemModel(type,pieces=1){
+    const root=new THREE.Group(),object=new THREE.Group();object.name='Treasure';root.add(object);
+    if(type==='key'){
+      const ring=mesh(new THREE.TorusGeometry(.24,.075,6,12),mat('#e6bd67',{metalness:.55,emissive:'#87602d',emissiveIntensity:.25}),object);ring.rotation.x=Math.PI/2;ring.position.set(-.24,.1,0);
+      box(.15,.1,0,.65,.12,.12,colors.gold,object);box(.43,.1,.13,.12,.12,.3,colors.gold,object);box(.19,.1,.12,.09,.12,.26,colors.gold,object);
+    }else if(type==='scepter'){
+      const stem=cylinder(0,.15,0,.045,.06,1.1,colors.gold,object);stem.rotation.z=-.65;
+      const gem=mesh(new THREE.OctahedronGeometry(.26),mat('#91c5dd',{emissive:'#5e9dbd',emissiveIntensity:.8}),object);gem.position.set(.35,.6,0);
+      const ring=mesh(new THREE.TorusGeometry(.33,.035,5,12),mat(colors.gold),object);ring.position.copy(gem.position);ring.rotation.x=.4;
+    }else{
+      const n=typeof pieces==='number'?pieces:Array.isArray(pieces)?pieces.length:1;
+      const gold=mat('#d3ad69',{metalness:.3,emissive:'#84602a',emissiveIntensity:.18});
+      if(n===1){const shard=mesh(new THREE.CylinderGeometry(.33,.22,.45,7,1,true,0,Math.PI*1.25),gold,object,true);shard.rotation.z=.24;shard.position.y=.23;}
+      else {
+        const urn=mesh(new THREE.LatheGeometry([new THREE.Vector2(.15,0),new THREE.Vector2(.3,.08),new THREE.Vector2(.37,.3),new THREE.Vector2(.26,.6),new THREE.Vector2(.2,.69),new THREE.Vector2(.3,.73)],12),gold,object,true);urn.position.y=.05;
+        for(const side of [-1,1]){const handle=mesh(new THREE.TorusGeometry(.16,.04,5,10,Math.PI*1.4),gold,object);handle.position.set(side*.32,.52,0);handle.rotation.z=side*Math.PI/2;}
+        if(n>=3){cylinder(0,.83,0,.29,.24,.12,colors.gold,object);sphere(0,.96,0,.09,colors.gold,object);}
+      }
+      const detail=mesh(new THREE.TorusGeometry(.3,.025,4,12),mat('#8d6650'),object);detail.rotation.x=Math.PI/2;detail.position.y=.25;
+    }
+    const halo=disc(0,.02,0,.75,type==='scepter'?'#79c4dc':'#e2b96a',root,.12);
+    return {root,object,halo,type,pieces};
+  }
+  // Reusable motes and fireflies are physical geometry, never image files.
+  const motes=new THREE.InstancedMesh(new THREE.IcosahedronGeometry(.028,0),basic('#9cafad',{transparent:true,opacity:.55}),95);scene.add(motes);const temp=new THREE.Object3D();
+  const moteSeeds=Array.from({length:95},(_,i)=>({x:Math.sin(i*17.32)*20,z:Math.cos(i*7.18)*13,y:.5+(i%13)*.25}));
+  const fxMeshes=[];
+  function renderEffects(fx,time){
+    for(let i=fxMeshes.length;i<fx.length;i++){
+      const root=new THREE.Group();effects.add(root);
+      const ring=mesh(new THREE.RingGeometry(.9,1.02,40),basic('#f2cf89',{transparent:true,opacity:1,depthWrite:false}),root);ring.rotation.x=-Math.PI/2;ring.position.y=.19;
+      const sparks=[];for(let j=0;j<8;j++){const s=mesh(new THREE.OctahedronGeometry(.09),basic('#e7c48b'),root);sparks.push(s);}fxMeshes.push({root,ring,sparks});
+    }
+    fxMeshes.forEach((f,i)=>{
+      const d=fx[i];f.root.visible=!!d;if(!d)return;
+      const a=d.age||0;f.root.position.set(d.x||0,0,d.z||0);const radius=.6+a*3;f.ring.scale.setScalar(radius);f.ring.material.opacity=Math.max(0,1-a/1.2);
+      f.sparks.forEach((s,j)=>{const an=j*Math.PI/4+time;s.position.set(Math.cos(an)*radius,.5+Math.sin(a*3)*.5,Math.sin(an)*radius);s.scale.setScalar(Math.max(.01,1-a));});
+    });
+  }
+  function syncDoors(doors,floor){
+    doorById.forEach(d=>d.root.visible=false);
+    for(const d of doors||[]){
+      if(d.floor!==undefined&&d.floor!==floor)continue;
+      let v=doorById.get(d.id);
+      if(!v){
+        const root=new THREE.Group();actors.add(root);const leaf=new THREE.Group();root.add(leaf);
+        box(0,1,0,2.8,2,.22,'#486065',leaf);for(let i=-1;i<=1;i++)box(i*.78,1,.14,.035,1.8,.02,'#c5a163',leaf,false);
+        for(const yy of [.3,1.65])box(0,yy,.17,2.6,.08,.04,colors.brass,leaf,false);
+        const lock=mesh(new THREE.BoxGeometry(.42,.5,.18),mat('#d4a95c'),leaf);lock.position.set(0,1,.25);
+        const chain=mesh(new THREE.TorusGeometry(.19,.05,5,10,Math.PI),mat('#d4a95c'),leaf);chain.position.set(0,1.35,.25);
+        v={root,leaf};doorById.set(d.id,v);
+      }
+      v.root.visible=!!d.locked;v.root.position.set(d.x,0,d.z);v.root.rotation.y=d.orientation==='x'?Math.PI/2:0;
+    }
+  }
+  let lastState={};
+  function update(state,dt){
+    lastState=state;sceneTime+=dt;const time=state.time??sceneTime;
+    setFloor(state.floor||0);
+    const isTitle=state.phase==='title'||state.phase==='menu';
+    ambient.intensity=.88+Number(state.brightness??.4)*.7+(state.lightning>0?2.3:0);
+    moon.intensity=(state.phase==='won'?3.7:2.5)+(state.lightning>0?3:0);
+    const width=canvas.clientWidth||innerWidth,height=canvas.clientHeight||innerHeight;
+    if(width!==lastWidth||height!==lastHeight){lastWidth=width;lastHeight=height;renderer.setSize(width,height,false);}
+    const aspect=width/height;
+    const selected=state.players?.find(p=>p.id===state.cameraPlayerId)||state.players?.[0]||{x:0,z:5};
+    const groupView=!!state.cameraAllPlayers&&!isTitle;
+    const cameraPlayers=groupView?(state.players||[selected]):[selected];
+    const p0=cameraPlayers.reduce((p,n)=>({x:p.x+n.x/cameraPlayers.length,z:p.z+n.z/cameraPlayers.length}),{x:0,z:0});
+    let span=isTitle?33:aspect<1?35:27;
+    if(groupView&&cameraPlayers.length>1){
+      const xs=cameraPlayers.map(p=>.776*p.x-.631*p.z),ys=cameraPlayers.map(p=>-.636*(.631*p.x+.776*p.z));
+      span=Math.max(span,(Math.max(...xs)-Math.min(...xs)+9)/aspect,Math.max(...ys)-Math.min(...ys)+10);
+    }
+    camera.left=-span*aspect/2;camera.right=span*aspect/2;camera.top=span/2;camera.bottom=-span/2;camera.updateProjectionMatrix();
+    const targetX=isTitle?-8.5:Math.max(-8,Math.min(8,(p0.x||0)*(groupView ? .8 : .55)));
+    const targetZ=isTitle?6:Math.max(-3,Math.min(3,(p0.z||0)*(groupView ? .7 : .35)));
+    viewTarget.lerp(new THREE.Vector3(targetX,0,targetZ),Math.min(1,dt*3));
+    const shake=state.cameraShake||0;
+    camera.position.set(viewTarget.x+26+Math.sin(time*53)*shake,34,viewTarget.z+32+Math.cos(time*47)*shake);
+    camera.lookAt(viewTarget.x,0,viewTarget.z);
+    actorsById.forEach(a=>a.root.visible=false);
+    for(const p of state.players||[]){
+      const key='p'+p.id;let a=actorsById.get(key);if(!a){a=playerModel(p.id,(state.players||[]).indexOf(p));actorsById.set(key,a);}
+      a.root.visible=p.floor===undefined||p.floor===state.floor;
+      a.ring.material.opacity=p.id===selected.id?1:.55;
+      a.root.position.set(p.x,0,p.z);
+      // Face the lens enough for the source's eyes to remain readable while moving.
+      let dir=typeof p.dir==='number'?p.dir:0;
+      if(p.dir&&typeof p.dir==='object')dir=Math.atan2(p.dir.x||0,p.dir.z||1);
+      a.body.rotation.y=dir*.55+.35;
+      a.mixer.update(dt);const speed=Math.hypot(p.x-a.previous.x,p.z-a.previous.y)/Math.max(.001,dt);a.walkAction.timeScale=Math.min(2,.25+speed*.2);a.walkAction.weight=speed>.05?1:.1;a.previous.set(p.x,p.z);
+      const lit=!!p.lit;a.flame.visible=lit;a.light.intensity=lit?17+Math.sin(time*17)*2+Math.sin(time*29):.15;
+      a.pool.visible=lit;a.pool.scale.setScalar(1+Math.sin(time*5)*.025);a.flame.scale.y=1.5+Math.sin(time*21)*.3;
+      a.body.visible=!(p.invulnerable>0)||Math.floor(time*12)%2===0;
+      a.root.scale.setScalar(p.dashing?1.08:1);
+      const carryType=typeof p.carry==='string'?p.carry:p.carry?.type;a.ward.visible=carryType==='scepter';a.ward.scale.setScalar(1+Math.sin(time*4)*.025);const carryPieces=p.pieces||p.carry?.pieces||1;const carryKey=carryType+JSON.stringify(carryPieces);
+      if(a.carryType!==carryKey){clear(a.carry);a.carryType=carryKey;if(carryType){const item=itemModel(carryType,carryPieces);item.root.scale.setScalar(.6);a.carry.add(item.root);}}
+    }
+    for(const e of state.enemies||[]){
+      if(e.floor!==undefined&&e.floor!==state.floor)continue;
+      const key='e'+e.id;let a=actorsById.get(key);if(!a){a=enemyModel(e.type,e.id);actorsById.set(key,a);}
+      a.root.visible=true;a.root.position.set(e.x,0,e.z);a.body.rotation.y=Math.sin(time*.8+e.x)*.22+.3;a.mixer.update(dt*(e.stun>0?.2:1));
+      if(e.stun>0)a.root.rotation.z=Math.sin(time*18)*.08;else a.root.rotation.z=0;
+      a.alert.visible=!!e.alert&&!(e.stun>0);a.dangerRing.material.opacity=.38+Math.sin(time*7)*.2;a.dangerRing.scale.setScalar(1+Math.sin(time*7)*.05);a.badge.quaternion.copy(camera.quaternion);a.badge.position.y=(e.type==='ghost'?3.25:e.type==='bat'?2.6:1.5)+Math.sin(time*7)*.055;
+      a.dazed.visible=e.stun>0;a.dazed.rotation.y=time*3;
+    }
+    itemById.forEach(i=>i.root.visible=false);
+    for(const item of state.items||[]){
+      if(item.floor!==state.floor||(item.held!==undefined&&item.held!==null)||(item.carriedBy!==undefined&&item.carriedBy!==null))continue;
+      let a=itemById.get(item.id);
+      if(!a||a.type!==item.type||JSON.stringify(a.pieces)!==JSON.stringify(item.pieces)){
+        if(a){actors.remove(a.root);clear(a.root);}a=itemModel(item.type,item.pieces);actors.add(a.root);itemById.set(item.id,a);
+      }
+      const lit=(state.players||[]).some(p=>p.lit&&Math.hypot(p.x-item.x,p.z-item.z)<10);
+      a.root.visible=lit||isTitle||state.phase==='attract'||state.revealItems;
+      a.root.position.set(item.x,.4+Math.sin(time*2.6+item.x)*.1,item.z);a.object.rotation.y=time*.7;a.halo.rotation.z=time*.3;
+    }
+    syncDoors(state.doors,state.floor);
+    mixers.forEach(m=>m.update(dt));
+    for(const a of animated){if(a.kind==='flame'){a.object.scale.y=1.5+Math.sin(time*15+a.phase)*.3;a.object.scale.x=.6+Math.sin(time*12+a.phase)*.08;}}
+    moteSeeds.forEach((s,i)=>{temp.position.set(s.x+Math.sin(time*.2+i)*.4,s.y+Math.sin(time*.3+i)*.2,s.z+Math.cos(time*.3+i)*.3);temp.scale.setScalar(.6+(i%4)*.2);temp.updateMatrix();motes.setMatrixAt(i,temp.matrix);});motes.instanceMatrix.needsUpdate=true;
+    renderEffects(state.fx||[],time);
+    renderer.render(scene,camera);
+  }
+  const raycaster=new THREE.Raycaster(),plane=new THREE.Plane(new THREE.Vector3(0,1,0),0);
+  function project(x,z){const p=new THREE.Vector3(x,1,z).project(camera);return{x:(p.x*.5+.5)*lastWidth,y:(-.5*p.y+.5)*lastHeight};}
+  function unproject(x,y){raycaster.setFromCamera(new THREE.Vector2(x/lastWidth*2-1,1-y/lastHeight*2),camera);const p=new THREE.Vector3();if(raycaster.ray.intersectPlane(plane,p))return{x:p.x,z:p.z};return null;}
+  setFloor(0);
+  return {renderer,scene,camera,obstacles,setFloor,update,project,unproject,actors,backend:renderer.backend.isWebGPUBackend?'WebGPU':'WebGL 2 fallback',dispose(){renderer.dispose();},getRoomNames:()=>roomNames};
+}
+
+// All sound is synthesized. No samples, music files, or speech recordings.
+function createAudio() {
+  let context=null, master=null, musicBus=null, effectBus=null, analyser=null, reverb=null;
+  let musicVolume=.1, sfxVolume=.65, nextBeat=0, beat=0, activeVoices=0, played=0, unlocked=false, stopped=false;
+  const counts={};
+  const midi=n=>440*Math.pow(2,(n-69)/12);
+  const sequence=[69,76,72,68,74,71,67,74,70,66,72,69,65,72,69,68,71,76,69,72,77,68,71,74];
+  function envelope(ctx,dest,start,duration,volume=.2,attack=.008) {
+    const g=ctx.createGain();g.gain.setValueAtTime(.00001,start);g.gain.exponentialRampToValueAtTime(Math.max(.0001,volume),start+attack);g.gain.exponentialRampToValueAtTime(.00001,start+Math.max(duration,attack+.01));g.connect(dest);return g;
+  }
+  function tone(ctx,dest,start,freq,duration,volume=.15,type='sine',endFreq=freq,detune=0) {
+    const o=ctx.createOscillator(),g=envelope(ctx,dest,start,duration,volume);o.type=type;o.frequency.setValueAtTime(Math.max(12,freq),start);o.frequency.exponentialRampToValueAtTime(Math.max(12,endFreq),start+duration);o.detune.value=detune;o.connect(g);o.start(start);o.stop(start+duration+.03);
+    if(ctx===context){activeVoices++;o.onended=()=>{activeVoices--;g.disconnect();};}return o;
+  }
+  function noise(ctx,dest,start,duration,volume=.12,filter=1000,kind='lowpass') {
+    const length=Math.max(1,Math.ceil(ctx.sampleRate*duration)),b=ctx.createBuffer(1,length,ctx.sampleRate),data=b.getChannelData(0);let seed=117;
+    for(let i=0;i<length;i++){seed=(Math.imul(seed,1664525)+1013904223)|0;data[i]=(seed/2147483648)*.85;}
+    const source=ctx.createBufferSource(),f=ctx.createBiquadFilter(),g=envelope(ctx,dest,start,duration,volume,.015);f.type=kind;f.frequency.value=filter;f.Q.value=.6;source.buffer=b;source.connect(f);f.connect(g);source.start(start);source.stop(start+duration+.03);return source;
+  }
+  function voice(ctx,dest,start,pitch=1) {
+    const syllables=[360,540,420,660,460];
+    syllables.forEach((freq,i)=>{
+      const t=start+i*.088,f=ctx.createBiquadFilter();f.type='bandpass';f.frequency.value=850+(i%3)*420;f.Q.value=3;f.connect(dest);
+      tone(ctx,f,t,freq*pitch,.082,.18,'sawtooth',freq*pitch*(i%2?1.12:.88));
+      tone(ctx,dest,t,freq*pitch*.5,.075,.035,'triangle');
+    });
+  }
+  function synth(name,ctx,dest,start,options={}) {
+    const pitch=options.pitch||1;
+    switch(name) {
+      case 'match': noise(ctx,dest,start,.13,.35,4900,'highpass');tone(ctx,dest,start+.015,1450,.11,.09,'triangle',700);break;
+      case 'step': noise(ctx,dest,start,.065,.14,500);tone(ctx,dest,start,82,.075,.1,'sine',48);break;
+      case 'door':tone(ctx,dest,start,105,.38,.16,'sawtooth',72);noise(ctx,dest,start+.23,.12,.27,450);break;
+      case 'unlock': [74,81,86].forEach((n,i)=>tone(ctx,dest,start+i*.075,midi(n),.4,.17,'sine'));noise(ctx,dest,start,.09,.12,2400);break;
+      case 'pickup': [72,76,79].forEach((n,i)=>tone(ctx,dest,start+i*.06,midi(n)*pitch,.34,.15,'triangle'));break;
+      case 'merge':[69,72,76,81,88].forEach((n,i)=>{tone(ctx,dest,start+i*.09,midi(n),.65,.14,'sine');tone(ctx,dest,start+i*.09,midi(n)*2,.3,.025,'triangle');});break;
+      case 'stairs': [57,60,64,69].map(n=>options.down?126-n:n).forEach((n,i)=>tone(ctx,dest,start+i*.11,midi(n),.35,.14,'triangle'));break;
+      case 'wind':noise(ctx,dest,start,1.25,.24,580);tone(ctx,dest,start,220,.75,.05,'sine',110);break;
+      case 'hurt':noise(ctx,dest,start,.48,.33,750);tone(ctx,dest,start,166,.6,.23,'sawtooth',48);[0,1,2].forEach(i=>tone(ctx,dest,start+i*.09,580-i*120,.1,.1,'triangle',220));break;
+      case 'dash':noise(ctx,dest,start,.25,.19,1700,'bandpass');tone(ctx,dest,start,190,.21,.12,'sine',650);break;
+      case 'win': [57,64,69,72,76,81,88].forEach((n,i)=>{tone(ctx,dest,start+i*.14,midi(n),1.2,.15,'triangle');tone(ctx,dest,start+i*.14,midi(n)*.5,.9,.08,'sine');});voice(ctx,dest,start+.35,1.2);break;
+      case 'lose': [64,60,56,45].forEach((n,i)=>tone(ctx,dest,start+i*.23,midi(n),.8,.18,'triangle'));break;
+      case 'ui':tone(ctx,dest,start,640,.065,.12,'sine',810);break;
+      case 'voice':voice(ctx,dest,start,pitch);break;
+      case 'thunder':noise(ctx,dest,start,1.7,.38,240);noise(ctx,dest,start+.05,.25,.2,1700);break;
+      case 'ghost':tone(ctx,dest,start,440,.75,.1,'sine',240);tone(ctx,dest,start,447,.75,.065,'sine',245);break;
+    }
+  }
+  function init() {
+    if(context)return;
+    const AudioContextClass=window.AudioContext||window.webkitAudioContext;
+    if(!AudioContextClass)return;
+    context=new AudioContextClass();master=context.createGain();master.gain.value=.78;
+    const limiter=context.createDynamicsCompressor();limiter.threshold.value=-8;limiter.knee.value=15;limiter.ratio.value=9;limiter.attack.value=.003;limiter.release.value=.15;
+    analyser=context.createAnalyser();analyser.fftSize=512;master.connect(limiter);limiter.connect(analyser);analyser.connect(context.destination);
+    musicBus=context.createGain();musicBus.gain.value=musicVolume;musicBus.connect(master);
+    effectBus=context.createGain();effectBus.gain.value=sfxVolume;effectBus.connect(master);
+    reverb=context.createConvolver();const impulse=context.createBuffer(2,context.sampleRate*1.65,context.sampleRate);
+    for(let c=0;c<2;c++){const d=impulse.getChannelData(c);let seed=23+c;for(let i=0;i<d.length;i++){seed=(Math.imul(seed,1664525)+1013904223)|0;d[i]=(seed/2147483648)*Math.pow(1-i/d.length,3)*.22;}}
+    reverb.buffer=impulse;const send=context.createGain();send.gain.value=.13;effectBus.connect(send);musicBus.connect(send);send.connect(reverb);reverb.connect(master);nextBeat=context.currentTime+.1;
+  }
+  function scheduleWaltz(start,index) {
+    const n=sequence[index%sequence.length],measure=Math.floor(index/3),base=[45,41,44,40][Math.floor(measure/2)%4];
+    tone(context,musicBus,start,midi(n),1.1,.22,'sine');tone(context,musicBus,start,midi(n)*2,.56,.03,'triangle',midi(n)*2,-8);
+    if(index%3===0){tone(context,musicBus,start,midi(base),1.4,.18,'triangle');tone(context,musicBus,start,midi(base)*.5,1.1,.11,'sine');}
+    else {const chord=index%3===1?[base+12,base+15,base+19]:[base+12,base+16,base+20];chord.forEach(v=>tone(context,musicBus,start,midi(v),.5,.035,'triangle'));}
+    noise(context,musicBus,start,.025,.027,1800,'highpass');
+  }
+  return {
+    async unlock(){init();if(!context)return false;try{await context.resume();unlocked=true;stopped=false;nextBeat=Math.max(nextBeat,context.currentTime+.06);return true;}catch{return false;}},
+    setVolume(music,sfx){musicVolume=Math.max(0,Math.min(1,Number(music)||0));sfxVolume=Math.max(0,Math.min(1,Number(sfx)||0));if(context){musicBus.gain.setTargetAtTime(musicVolume,context.currentTime,.05);effectBus.gain.setTargetAtTime(sfxVolume,context.currentTime,.05);}},
+    play(name,options={}){if(!context||context.state!=='running'||stopped)return;played++;counts[name]=(counts[name]||0)+1;let dest=effectBus;if(options.pan!==undefined&&context.createStereoPanner){dest=context.createStereoPanner();dest.pan.value=Math.max(-1,Math.min(1,options.pan));dest.connect(effectBus);}synth(name,context,dest,context.currentTime+.003,options);},
+    update(state,dt){if(!context||context.state!=='running'||stopped)return;if(state?.phase==='ended'){this.stop();return;}if(nextBeat<context.currentTime-.8)nextBeat=context.currentTime+.05;let budget=4;while(nextBeat<context.currentTime+.2&&budget-->0){scheduleWaltz(nextBeat,beat++);nextBeat+=.43;}},
+    stop(){stopped=true;if(master&&context)master.gain.setTargetAtTime(0,context.currentTime,.08);},
+    resume(){stopped=false;if(master&&context)master.gain.setTargetAtTime(.78,context.currentTime,.08);},
+    stats(){let peak=0,rms=0;if(analyser){const d=new Float32Array(analyser.fftSize);analyser.getFloatTimeDomainData(d);for(const n of d){peak=Math.max(peak,Math.abs(n));rms+=n*n;}rms=Math.sqrt(rms/d.length);}return {unlocked,state:context?.state||'locked',musicVolume,sfxVolume,activeVoices,played,counts:{...counts},peak,rms};},
+    async testOffline(){const Offline=window.OfflineAudioContext||window.webkitOfflineAudioContext;if(!Offline)return {error:'OfflineAudioContext unavailable'};const c=new Offline(2,48000*3,48000),dest=c.createGain();dest.gain.value=.45;dest.connect(c.destination);const names=['match','step','door','unlock','pickup','merge','stairs','wind','hurt','dash','win','lose','ui','voice','thunder','ghost'];names.forEach((name,i)=>synth(name,c,dest,.03+i*.1,{down:i%2===0}));const buffer=await c.startRendering(),data=buffer.getChannelData(0);let peak=0,power=0,nonZeroSamples=0,finite=true;for(const value of data){peak=Math.max(peak,Math.abs(value));power+=value*value;if(Math.abs(value)>1e-7)nonZeroSamples++;if(!Number.isFinite(value))finite=false;}return {peak,rms:Math.sqrt(power/data.length),nonZeroSamples,duration:buffer.duration,sampleRate:buffer.sampleRate,finite,soundsRendered:names.length};},
+    dispose(){context?.close();context=null;unlocked=false;}
+  };
+}
+
+// AI Hub Session Protocol v1 and standalone WebRTC co-op.
+// The unmodified official session.js must be the first script in the HTML head.
+function createNetwork(callbacks = {}) {
+  const cb = (name, ...args) => callbacks[name]?.(...args);
+  let mode = 'solo', role = 'solo', me = 0, players = [{id:0,name:'You',color:'#edbd70'}];
+  let started = false, ended = false, room = '', status = 'Solo', hubInfo = null;
+  let peer = null, channel = null, connection = null, peerReady = false, sessionGeneration = 0;
+  let seq = 0, sent = 0, received = 0, lastInput = -Infinity, lastState = -Infinity;
+  const token = Array.from(crypto.getRandomValues(new Uint8Array(10)), n=>n.toString(16).padStart(2,'0')).join('');
+  const guests = new Map(), seen = new Map(), connections = new Set(), unsubscribers = [];
+  let lastSnapshot = null, joinTimer = null, lastReceived = performance.now(), pendingInput={}, hostToken=null;
+  const onPageHide=()=>{ if(mode==='standalone'&&!ended)transmit(packet('leave',{})); };
+  window.addEventListener('pagehide',onPageHide);
+  const watch=setInterval(()=>{if(mode==='standalone'&&started&&!ended&&role==='guest'&&performance.now()-lastReceived>14000){ended=true;setStatus('Connection lost. Return to the title to reconnect.',{error:true});cb('onEnd','disconnected');}},2000);
+  function setStatus(text, extra = {}) { status = text; cb('onStatus', {text,status:text,mode,role,room,me,players,started,ended,...extra}); }
+  function begin(info) { if (started || ended) return; started = true;lastReceived=performance.now(); cb('onStart', info || {me,host:0,isHost:role==='host',server:false,players,mode:'shared-world',standalone:true}); }
+  function packet(type, data) { return {hhp:1,room,from:token,seq:seq++,type,data}; }
+  function transmit(message) {
+    if (ended) return false;
+    if (mode === 'hub') { const ok=window.AIHub.send(message, role==='guest'?{to:window.AIHub.host}:{}); if(ok) sent++; return ok; }
+    let ok=false;
+    if(channel) { channel.postMessage(message); ok=true; }
+    for(const c of connections) if(c.open) { try {c.send(message);ok=true;} catch{} }
+    if(ok) sent++;
+    return ok;
+  }
+  function greeting(target, id) {
+    const msg=packet('welcome',{target,id,players}); transmit(msg);
+    if(lastSnapshot) transmit(packet('state',lastSnapshot));
+  }
+  function receive(message, sourceId) {
+    if(ended || !message || message.hhp!==1) return;
+    if(mode==='standalone' && (message.room!==room || message.from===token)) return;
+    const key=mode==='hub'?String(sourceId):message.from;
+    if(mode==='standalone') { const n=seen.get(key)??-1; if(message.seq<=n) return; seen.set(key,message.seq); }
+    received++;lastReceived=performance.now();
+    if(message.type==='hello' && role==='host' && mode==='standalone') {
+      let id=guests.get(message.from);
+      if(id===undefined) {
+        if(guests.size>=3) { transmit(packet('full',{target:message.from})); return; }
+        id=[1,2,3].find(n=>!Array.from(guests.values()).includes(n)); guests.set(message.from,id);
+        players=[{id:0,name:'Host',color:'#edbd70'},...Array.from(guests.values(),id=>({id,name:'Guest '+id,color:['','#75ded0','#bd92ef','#f8978d'][id]}))];
+      }
+      greeting(message.from,id); begin(); setStatus('Connected · '+players.length+' guests of the house');
+    } else if(message.type==='welcome' && role==='guest') {
+      if(hostToken&&message.from!==hostToken)return;hostToken=message.from;players=message.data.players;
+      if(message.data?.target===token){me=message.data.id;clearTimeout(joinTimer);begin();setStatus('Connected · player '+(me+1));}
+    } else if(message.type==='roster' && role==='guest' && message.from===hostToken) {
+      players=message.data.players;setStatus('Connected · '+players.length+' guests of the house');
+    } else if(message.type==='full' && message.data?.target===token) { setStatus('This party is full. Try another room.',{error:true});
+    } else if(message.type==='input' && role==='host') {
+      const id=mode==='hub'?sourceId:guests.get(message.from);
+      if(id!==undefined && players.some(p=>p.id===id)) cb('onInput',message.data,id);
+    } else if(message.type==='state' && role==='guest') {
+      if(mode==='hub' && sourceId!==window.AIHub.host) return;
+      if(mode==='standalone'&&message.from!==hostToken)return;
+      cb('onState',message.data);
+    } else if(message.type==='leave') {
+      if(role==='guest' && message.from===hostToken) { ended=true; setStatus('The host left the house.'); cb('onEnd','host-left'); }
+      else if(role==='host' && guests.has(message.from)) { const id=guests.get(message.from); guests.delete(message.from); players=players.filter(p=>p.id!==id); cb('onLeave',id);transmit(packet('roster',{players})); setStatus('A guest has left.'); }
+    } else if(message.type==='finish' && role==='guest') { cb('onResult',message.data); }
+  }
+  function wireConnection(c) {
+    connections.add(c);
+    c.on('data', m=>receive(m));
+    c.on('open',()=>{ if(role==='guest') c.send(packet('hello',{})); else setStatus(started?'Connected':'Room open · waiting for a guest'); });
+    c.on('close',()=>{connections.delete(c); if(mode==='standalone' && role==='guest' && !channel) { ended=true; cb('onEnd','disconnected');setStatus('Connection lost.'); }});
+    c.on('error',()=>setStatus('Connection interrupted. You can return to the title.',{error:true}));
+  }
+  async function openPeer(hosting,generation) {
+    try {
+      const {Peer}=await import('https://esm.sh/peerjs@1.5.5');
+      if(generation!==sessionGeneration) return;
+      const options={debug:0,config:{iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:global.stun.twilio.com:3478'}]}};
+      peer=hosting?new Peer('hhp-2026-'+room,options):new Peer(options);
+      peer.on('open',()=>{ if(generation!==sessionGeneration) return; peerReady=true;
+        if(hosting) setStatus(started?'Connected':'Room open · share '+room);
+        else {connection=peer.connect('hhp-2026-'+room,{reliable:true});wireConnection(connection);}
+      });
+      peer.on('connection',c=>{ if(hosting) wireConnection(c); else c.close(); });
+      peer.on('error',err=>{if(generation!==sessionGeneration) return; setStatus(started?'Connected locally · internet signaling unavailable':'Internet signaling unavailable · same-browser rooms still work',{error:!started,detail:err.type||'network'});});
+    } catch(err) { if(generation===sessionGeneration) setStatus(started?'Connected locally':'Online library unavailable · same-browser rooms still work',{error:!started,detail:String(err.message)}); }
+  }
+  function openChannel() {
+    if(typeof BroadcastChannel==='undefined') return;
+    channel=new BroadcastChannel('haunted-house-party-'+room); channel.onmessage=e=>receive(e.data);
+  }
+  function cleanup() {
+    sessionGeneration++; clearTimeout(joinTimer); channel?.close();channel=null;
+    for(const c of connections) c.close(); connections.clear(); peer?.destroy();peer=null;connection=null;peerReady=false;
+    guests.clear();seen.clear();lastSnapshot=null;pendingInput={};hostToken=null;
+  }
+  const api={
+    get mode(){return mode;},get role(){return role;},get me(){return me;},get players(){return players;},get started(){return started;},get ended(){return ended;},get status(){return status;},get room(){return room;},get server(){return !!hubInfo?.server;},
+    async initHub(){
+      const hub=window.AIHub;
+      if(!hub?.active) return null;
+      mode='hub';role='guest';setStatus('Joining AI Hub…');
+      unsubscribers.push(hub.on('message',(data,from)=>receive(data,from)));
+      unsubscribers.push(hub.on('start',()=>{setStatus('AI Hub round · ready');begin(hubInfo);}));
+      unsubscribers.push(hub.on('time-up',()=>cb('onTimeUp')));
+      unsubscribers.push(hub.on('leave',({id})=>{players=hub.players.slice();cb('onLeave',id);}));
+      unsubscribers.push(hub.on('end',({reason})=>{ended=true;setStatus('Round ended');cb('onEnd',reason);}));
+      hubInfo=await (window.__hubEarlyConnect||hub.connect({mode:'shared-world',seats:[1,4]}));
+      if(!hubInfo){mode='solo';role='solo';setStatus('Solo');return null;}
+      me=hubInfo.me;role=hubInfo.isHost?'host':'guest';players=hubInfo.players.slice();setStatus('AI Hub · '+players.length+' players');return hubInfo;
+    },
+    ready(){if(mode==='hub')window.AIHub.ready();},
+    async host(){if(mode==='hub')return null;cleanup();mode='standalone';role='host';me=0;started=false;ended=false;players=[{id:0,name:'Host',color:'#edbd70'}];room=Array.from(crypto.getRandomValues(new Uint8Array(6)),n=>'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'[n%31]).join('');openChannel();setStatus('Room open · share '+room);openPeer(true,sessionGeneration);return room;},
+    async join(code){if(mode==='hub')return false;code=String(code).trim().toUpperCase().replace(/[^A-Z0-9]/g,'');if(code.length!==6){setStatus('Enter the six-character room code.',{error:true});return false;}cleanup();mode='standalone';role='guest';me=1;room=code;started=false;ended=false;openChannel();setStatus('Looking for room '+room+'…');transmit(packet('hello',{}));openPeer(false,sessionGeneration);joinTimer=setTimeout(()=>{if(!started)setStatus('No host answered. Check the code and internet connection.',{error:true});},18000);return true;},
+    sendInput(input){if(ended||role!=='guest'||mode==='solo')return false;for(const key of ['match','interact','dash','drop'])pendingInput[key]=!!(pendingInput[key]||input[key]);pendingInput.x=Number(input.x)||0;pendingInput.z=Number(input.z)||0;const t=performance.now();if(t-lastInput<55)return false;lastInput=t;const ok=transmit(packet('input',pendingInput));if(ok)pendingInput={};return ok;},
+    sendState(snapshot){if(role!=='host'||ended)return false;lastSnapshot=snapshot;const t=performance.now();if(t-lastState<65)return false;lastState=t;return transmit(packet('state',snapshot));},
+    finish(won,score=0,stats={}){if(ended||role!=='host')return; if(mode==='hub'){window.AIHub.finish({standings:[players.map(p=>p.id)],scores:Object.fromEntries(players.map(p=>[p.id,score])),won:!!won,stats:Object.fromEntries(players.map(p=>[p.id,stats]))});}else transmit(packet('finish',{won,score,stats}));},
+    leave(){if(mode==='hub')return;transmit(packet('leave',{}));cleanup();mode='solo';role='solo';me=0;players=[{id:0,name:'You',color:'#edbd70'}];started=false;ended=false;room='';setStatus('Solo');},
+    time(){return mode==='hub'?window.AIHub.time():Infinity;},
+    stats(){return {mode,role,me,room,started,ended,sent,received,peerReady,status,players:players.length,connections:Array.from(connections,c=>({open:c.open,peer:c.peer,readyState:c.dataChannel?.readyState,connectionState:c.peerConnection?.connectionState,iceState:c.peerConnection?.iceConnectionState}))};},
+    dispose(){cleanup();clearInterval(watch);window.removeEventListener('pagehide',onPageHide);unsubscribers.forEach(fn=>fn());}
+  };
+  return api;
+}
+
+import * as THREE from "three/webgpu";
+import RAPIER from "https://esm.sh/@dimforge/rapier3d-compat@0.19.3";
+
+const $ = (id) => document.getElementById(id);
+const defaults = {
+	speed: 4.8,
+	enemySpeed: 1,
+	matchDuration: 20,
+	dashCooldown: 2.8,
+	brightness: 1,
+	music: 0.1,
+	sfx: 0.65,
+	invincible: false,
+	reveal: false,
+	autoLight: false,
+	flashes: true,
+	glyphs: "ps",
+};
+const config = { ...defaults };
+try {
+	Object.assign(
+		config,
+		JSON.parse(localStorage.getItem("hhp-settings") || "{}"),
+	);
+	config.invincible = false;
+	config.reveal = false;
+} catch {}
+const FLOOR_NAMES = [
+	"The lower house",
+	"The borrowed bedrooms",
+	"The forgotten wing",
+	"The attic above",
+];
+const ROOMS = [
+	[
+		"The Conservatory",
+		"The Long Gallery",
+		"The Dining Room",
+		"The Cobweb Parlour",
+		"The Foyer",
+		"The Clock Room",
+	],
+	[
+		"The Moonlit Study",
+		"The Doll Room",
+		"The East Library",
+		"The Blue Bedroom",
+		"The Landing",
+		"The Sealed Salon",
+	],
+	[
+		"The Winter Garden",
+		"The Mourning Room",
+		"The Observatory",
+		"The Music Room",
+		"The Dusty Landing",
+		"The Nursery",
+	],
+	[
+		"The Crooked Stair",
+		"The Family Vault",
+		"The Moth Room",
+		"The Trunk Room",
+		"The Last Landing",
+		"The Rafter Room",
+	],
+];
+let state,
+	view,
+	physics,
+	controller,
+	bodyMap = new Map(),
+	doorColliders = new Map(),
+	wallColliders = [],
+	ready = false,
+	inputMode = "keyboard",
+	localMode = false,
+	overlayPage = null,
+	backPage = null,
+	mapFloor = 0,
+	idle = 0,
+	toastLife = 0,
+	networkStatus = "",
+	hubWaiting = false,
+	hubInfo = null,
+	hubEnded = false,
+	netAccumulator = 0,
+	lastRoom = -1,
+	hurtTime = 0,
+	lastFrame = 0,
+	aiGoals = [],
+	aiIndex = 0,
+	aiPath = [],
+	aiStuck = 0,
+	endWait = 0,
+	mutedRender = false;
+const keys = new Set(),
+	remoteInputs = new Map(),
+	prevPads = new Map();
+const controls = {
+	x: 0,
+	z: 0,
+	match: false,
+	interact: false,
+	dash: false,
+	drop: false,
+};
+const touch = { active: false, id: null, sx: 0, sy: 0, x: 0, z: 0 };
+const audio = createAudio();
+audio.setVolume(config.music, config.sfx);
+const network = createNetwork({
+	onStatus(s) {
+		networkStatus = s.text;
+		if (
+			ready &&
+			network.role === "host" &&
+			state.phase === "playing" &&
+			s.players?.length
+		) {
+			for (const seat of s.players) {
+				if (!state.players.some((p) => p.id === seat.id)) {
+					const p = makePlayer(seat.id, state.players.length);
+					const host = state.players[0];
+					p.x = host.x + 1;
+					p.z = host.z;
+					state.players.push(p);
+					syncBodies();
+				}
+			}
+		}
+		const n = $("net-status");
+		if (n) n.textContent = s.text;
+		if (s.room && $("room-code")) $("room-code").textContent = s.room;
+	},
+	onStart(info) {
+		hubInfo = info;
+		localMode = false;
+		startGame("network", info);
+		hubWaiting = network.mode === "hub";
+	},
+	onInput(data, id) {
+		remoteInputs.set(id, { ...data, received: performance.now() });
+	},
+	onState(s) {
+		if (network.role === "guest" && !hubEnded) {
+			const old = state.floor;
+			state = s;
+			if (old !== s.floor) {
+				view?.setFloor(s.floor);
+				rebuildStatics();
+				rebuildDoors();
+			}
+			if (s.phase === "won" || s.phase === "lost")
+				showResult(s.phase === "won", true);
+		}
+	},
+	onLeave(id) {
+		if (state) {
+			const p = state.players.find((p) => p.id === id);
+			if (p) dropItem(p);
+			state.players = state.players.filter((p) => p.id !== id);
+			remoteInputs.delete(id);
+			toast("A guest has left the house.");
+		}
+	},
+	onEnd() {
+		hubEnded = true;
+		audio.stop();
+		keys.clear();
+		Object.assign(controls, { x: 0, z: 0 });
+		if (state) state.phase = "ended";
+		closeOverlay();
+	},
+	onTimeUp() {
+		if (network.role === "host") endGame(false);
+	},
+	onResult(r) {
+		showResult(r.won, true);
+	},
+});
+function makePlayer(id = 0, i = 0) {
+	return {
+		id,
+		x: i * 1.3 - 0.4,
+		z: 7,
+		dir: 0,
+		lit: 0,
+		carry: null,
+		pieces: 0,
+		invulnerable: 4,
+		dashing: 0,
+		dashCooldown: 0,
+		stepClock: 0,
+		moving: false,
+	};
+}
+function initialState(count = 1, ids = null) {
+	return {
+		phase: "title",
+		floor: 0,
+		time: 0,
+		elapsed: 0,
+		lives: 9,
+		matches: 0,
+		score: 0,
+		stormTimer: 22,
+		lightning: 0,
+		players: Array.from({ length: count }, (_, i) =>
+			makePlayer(ids ? ids[i] : i, i),
+		),
+		items: [
+			{ id: "key", type: "key", floor: 0, x: 4, z: 5, pieces: 0, held: null },
+			{
+				id: "scepter",
+				type: "scepter",
+				floor: 0,
+				x: -12,
+				z: 5,
+				pieces: 0,
+				held: null,
+			},
+			{
+				id: "urn-a",
+				type: "urn",
+				floor: 1,
+				x: 12,
+				z: 5.5,
+				pieces: 1,
+				held: null,
+			},
+			{
+				id: "urn-b",
+				type: "urn",
+				floor: 2,
+				x: 14,
+				z: -7,
+				pieces: 1,
+				held: null,
+			},
+			{
+				id: "urn-c",
+				type: "urn",
+				floor: 3,
+				x: 0,
+				z: -7,
+				pieces: 1,
+				held: null,
+			},
+		],
+		doors: [
+			{
+				id: "east-a",
+				floor: 1,
+				x: 6,
+				z: -5.5,
+				orientation: "x",
+				locked: true,
+				kind: "key",
+			},
+			{
+				id: "east-b",
+				floor: 1,
+				x: 6,
+				z: 5.5,
+				orientation: "x",
+				locked: true,
+				kind: "key",
+			},
+			{
+				id: "vault-a",
+				floor: 3,
+				x: -6,
+				z: -5.5,
+				orientation: "x",
+				locked: true,
+				kind: "urn",
+			},
+			{
+				id: "vault-b",
+				floor: 3,
+				x: 6,
+				z: -5.5,
+				orientation: "x",
+				locked: true,
+				kind: "urn",
+			},
+			{
+				id: "vault-c",
+				floor: 3,
+				x: 0,
+				z: 0,
+				orientation: "z",
+				locked: true,
+				kind: "urn",
+			},
+		],
+		enemies: [],
+		visited: Array.from({ length: 4 }, () => Array(6).fill(false)),
+		fx: [],
+		brightness: config.brightness,
+		cameraShake: 0,
+		objective: "Find the master key in the Foyer.",
+	};
+}
+state = initialState();
+function spawnEnemies(floor) {
+	const defs = [
+		["spider", -12, -6],
+		["bat", 12, -6],
+		["ghost", 0, -7],
+		["spider", -10, 6],
+		["bat", 10, 6],
+		["spider", 3, -5],
+		["ghost", -12, -5],
+	];
+	state.enemies = defs.slice(0, 3 + floor).map(([type, x, z], i) => ({
+		id: floor * 10 + i,
+		type,
+		x,
+		z,
+		homeX: x,
+		homeZ: z,
+		stun: 0,
+		phase: i * 1.7,
+		windCooldown: 0,
+		alert: false,
+	}));
+}
+function buildPhysics() {
+	physics = new RAPIER.World({ x: 0, y: 0, z: 0 });
+	controller = physics.createCharacterController(0.035);
+	controller.setSlideEnabled(true);
+	bodyMap.clear();
+	wallColliders = [];
+	for (const o of view.obstacles) {
+		const c = physics.createCollider(
+			RAPIER.ColliderDesc.cuboid(o.w / 2, 2, o.d / 2).setTranslation(
+				o.x,
+				0.8,
+				o.z,
+			),
+		);
+		wallColliders.push(c);
+	}
+	syncBodies();
+	rebuildDoors();
+	physics.step();
+}
+function rebuildStatics() {
+	for (const c of wallColliders) physics.removeCollider(c, true);
+	wallColliders = [];
+	for (const o of view.obstacles) {
+		wallColliders.push(
+			physics.createCollider(
+				RAPIER.ColliderDesc.cuboid(o.w / 2, 2, o.d / 2).setTranslation(
+					o.x,
+					0.8,
+					o.z,
+				),
+			),
+		);
+	}
+}
+function syncBodies() {
+	for (const p of state.players) {
+		if (!bodyMap.has(p.id)) {
+			const body = physics.createRigidBody(
+				RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
+					p.x,
+					0.7,
+					p.z,
+				),
+			);
+			const collider = physics.createCollider(
+				RAPIER.ColliderDesc.ball(0.4),
+				body,
+			);
+			bodyMap.set(p.id, { body, collider });
+		} else
+			bodyMap.get(p.id).body.setTranslation({ x: p.x, y: 0.7, z: p.z }, true);
+	}
+}
+function rebuildDoors() {
+	if (!physics) return;
+	for (const c of doorColliders.values()) physics.removeCollider(c, true);
+	doorColliders.clear();
+	for (const d of state.doors) {
+		if (d.floor === state.floor && d.locked) {
+			const c = physics.createCollider(
+				RAPIER.ColliderDesc.cuboid(
+					d.orientation === "x" ? 0.18 : 1.48,
+					2,
+					d.orientation === "x" ? 1.48 : 0.18,
+				).setTranslation(d.x, 0.8, d.z),
+			);
+			doorColliders.set(d.id, c);
+		}
+	}
+	physics.step();
+}
+function roomAt(x, z) {
+	return Math.max(0, Math.min(2, Math.floor((x + 18) / 12))) + (z >= 0 ? 3 : 0);
+}
+function me() {
+	return state.players.find((p) => p.id === network.me) || state.players[0];
+}
+function heldItem(p) {
+	return state.items.find((i) => i.held === p.id);
+}
+function clearEdges(input) {
+	input.match = false;
+	input.interact = false;
+	input.dash = false;
+	input.drop = false;
+}
+function pulse(type, x, z) {
+	state.fx.push({ type, x, z, age: 0 });
+}
+function toast(text, seconds = 3.8) {
+	$("toast").textContent = text;
+	$("toast").classList.remove("hidden");
+	toastLife = seconds;
+}
+function unlockAudio() {
+	if (!hubEnded) {
+		audio.unlock();
+		audio.resume();
+	}
+}
+function markInput(kind = "keyboard") {
+	if (hubEnded) return;
+	idle = 0;
+	if (state.phase === "attract") {
+		returnToTitle();
+		return true;
+	}
+	if (kind !== inputMode) {
+		inputMode = kind;
+		document.body.classList.toggle("touch", kind === "touch");
+	}
+	unlockAudio();
+	return false;
+}
+function startGame(mode = "solo", info = null) {
+	if (hubEnded && network.mode === "hub") return;
+	overlayPage = null;
+	$("overlay").classList.add("hidden");
+	$("title").classList.add("hidden");
+	$("attract").classList.add("hidden");
+	$("hud").classList.remove("hidden");
+	localMode = mode === "local";
+	const ids = info?.players?.map((p) => p.id);
+	state = initialState(ids?.length || (localMode ? 2 : 1), ids);
+	state.phase = mode === "attract" ? "attract" : "playing";
+	state.objective = "Light a match. Find the master key in the Foyer.";
+	spawnEnemies(0);
+	view?.setFloor(0);
+	if (physics) {
+		rebuildStatics();
+		for (const { body } of bodyMap.values()) physics.removeRigidBody(body);
+		bodyMap.clear();
+		syncBodies();
+		rebuildDoors();
+	}
+	lastRoom = -1;
+	keys.clear();
+	clearEdges(controls);
+	touch.active = false;
+	idle = 0;
+	hubEnded = false;
+	endWait = 0;
+	if (mode === "attract") {
+		config.invincible = true;
+		$("hud").classList.add("hidden");
+		$("attract").classList.remove("hidden");
+		makeAttractGoals();
+	} else {
+		config.invincible = false;
+		toast(
+			localMode
+				? "Two pairs of eyes. One extremely bad idea. P2: arrows + Enter, or a second pad."
+				: "Welcome. Do come in. The house has been expecting you.",
+			5,
+		);
+		audio.play("voice");
+	}
+	updateHUD();
+}
+function returnToTitle() {
+	if (network.mode === "hub") return;
+	network.leave();
+	hubInfo = null;
+	hubWaiting = false;
+	hubEnded = false;
+	config.invincible = false;
+	state = initialState();
+	spawnEnemies(0);
+	view?.setFloor(0);
+	if (physics) {
+		rebuildStatics();
+		syncBodies();
+		rebuildDoors();
+	}
+	overlayPage = null;
+	$("overlay").classList.add("hidden");
+	$("title").classList.remove("hidden");
+	$("hud").classList.add("hidden");
+	$("attract").classList.add("hidden");
+	$("toast").classList.add("hidden");
+	idle = 0;
+	keys.clear();
+	touch.active = false;
+}
+function dropItem(p, silent = false) {
+	const i = heldItem(p);
+	if (!i) return;
+	i.held = null;
+	i.x = p.x;
+	i.z = p.z;
+	i.floor = state.floor;
+	p.carry = null;
+	p.pieces = 0;
+	if (!silent) {
+		audio.play("pickup");
+		toast("Put down " + itemName(i) + ".");
+	}
+}
+function itemName(i) {
+	return i?.type === "key"
+		? "the master key"
+		: i?.type === "scepter"
+			? "the moon scepter"
+			: i?.type === "urn"
+				? `the urn (${i.pieces}/3)`
+				: "nothing";
+}
+function takeItem(p, i) {
+	if (!(p.lit > 0) && !config.reveal) {
+		toast("Strike a match. Things hide in the dark.");
+		return false;
+	}
+	const own = heldItem(p);
+	if (own?.type === "urn" && i.type === "urn") {
+		own.pieces += i.pieces;
+		p.pieces = own.pieces;
+		state.items = state.items.filter((a) => a !== i);
+		audio.play("merge");
+		pulse("merge", p.x, p.z);
+		toast(
+			own.pieces === 3
+				? "The urn is whole. Return it to the Foyer."
+				: "Two pieces remember how to be one.",
+		);
+	} else {
+		dropItem(p, true);
+		i.held = p.id;
+		p.carry = i.type;
+		p.pieces = i.pieces || 0;
+		audio.play("pickup");
+		pulse("pickup", i.x, i.z);
+		toast(
+			i.type === "key"
+				? "The master key. It has terrible taste in houses."
+				: i.type === "scepter"
+					? "The moon scepter. Creatures cannot touch its bearer."
+					: "An urn fragment. Keep it in hand to join the others.",
+		);
+	}
+	updateObjective();
+	return true;
+}
+function contextFor(p) {
+	if (!p) return null;
+	const dist = (x, z) => Math.hypot(p.x - x, p.z - z);
+	if (state.floor === 0 && dist(0, 9.5) < 2.3)
+		return {
+			kind: "exit",
+			text:
+				p.carry === "urn" && p.pieces === 3
+					? "Leave this dreadful party"
+					: "The front door · urn required",
+		};
+	const door = state.doors.find(
+		(d) => d.floor === state.floor && d.locked && dist(d.x, d.z) < 2.5,
+	);
+	if (door)
+		return {
+			kind: "door",
+			target: door,
+			text:
+				door.kind === "key"
+					? p.carry === "key"
+						? "Unlock the east wing"
+						: "Locked · bring the master key"
+					: p.carry === "urn" && p.pieces >= 2
+						? "Unseal the family vault"
+						: "The vault wants two urn pieces",
+		};
+	if (dist(-14, -8) < 1.05 && state.floor < 3)
+		return { kind: "up", text: "Climb to " + FLOOR_NAMES[state.floor + 1] };
+	if (dist(14, 8) < 1.05 && state.floor > 0)
+		return { kind: "down", text: "Descend to " + FLOOR_NAMES[state.floor - 1] };
+	const item = state.items
+		.filter(
+			(i) => i.floor === state.floor && i.held === null && dist(i.x, i.z) < 1.9,
+		)
+		.sort((a, b) => dist(a.x, a.z) - dist(b.x, b.z))[0];
+	if (item)
+		return {
+			kind: "item",
+			target: item,
+			text:
+				(p.carry && !(p.carry === "urn" && item.type === "urn")
+					? "Swap for "
+					: "Take ") + itemName(item),
+		};
+	if (dist(-14, -8) < 2.2 && state.floor < 3)
+		return { kind: "up", text: "Climb to " + FLOOR_NAMES[state.floor + 1] };
+	if (dist(14, 8) < 2.2 && state.floor > 0)
+		return { kind: "down", text: "Descend to " + FLOOR_NAMES[state.floor - 1] };
+	return null;
+}
+function interact(p) {
+	if (network.role === "guest") return;
+	const c = contextFor(p);
+	if (!c) return;
+	if (c.kind === "item") takeItem(p, c.target);
+	if (c.kind === "door") {
+		const d = c.target;
+		if (
+			(d.kind === "key" && p.carry === "key") ||
+			(d.kind === "urn" && p.carry === "urn" && p.pieces >= 2)
+		) {
+			for (const a of state.doors)
+				if (a.floor === state.floor && a.kind === d.kind) a.locked = false;
+			rebuildDoors();
+			audio.play("unlock");
+			pulse("unlock", d.x, d.z);
+			toast(
+				d.kind === "key"
+					? "The east wing is open. The key has done its duty."
+					: "The vault remembers its family. Come in.",
+			);
+			updateObjective();
+		} else {
+			audio.play("door");
+			toast(
+				d.kind === "key"
+					? "Only the master key fits. Find it downstairs."
+					: "Bring two joined urn pieces to the vault.",
+			);
+		}
+	}
+	if (c.kind === "up" || c.kind === "down")
+		changeFloor(c.kind === "up" ? 1 : -1);
+	if (c.kind === "exit") {
+		if (p.carry === "urn" && p.pieces === 3) endGame(true);
+		else
+			toast(
+				"Three urn pieces, joined together. That is your invitation to leave.",
+			);
+	}
+}
+function changeFloor(delta) {
+	state.floor += delta;
+	for (const [i, p] of state.players.entries()) {
+		p.x = (delta > 0 ? -14 : 14) + i * 0.75;
+		p.z = delta > 0 ? -5.5 : 5.5;
+		p.invulnerable = 3;
+	}
+	spawnEnemies(state.floor);
+	view.setFloor(state.floor);
+	rebuildStatics();
+	syncBodies();
+	rebuildDoors();
+	audio.play("stairs", { down: delta < 0 });
+	pulse("stairs", me()?.x || 0, me()?.z || 0);
+	toast(
+		FLOOR_NAMES[state.floor] +
+			". " +
+			[
+				"Mind the furniture.",
+				"Someone has locked the east wing.",
+				"The walls have begun to whisper.",
+				"The family vault wants what you carry.",
+			][state.floor],
+	);
+	lastRoom = -1;
+	aiPath = [];
+	updateObjective();
+}
+function updateObjective() {
+	const shards = state.items
+		.filter((i) => i.type === "urn" && i.held !== null)
+		.reduce((s, i) => s + i.pieces, 0);
+	if (shards === 3)
+		state.objective =
+			"The urn is whole. Return to the front door in the Foyer.";
+	else if (state.floor === 0)
+		state.objective = state.players.some((p) => p.carry === "key")
+			? "Take the north-west stairs to the bedrooms."
+			: "Find the master key in the Foyer. A scepter waits in the west parlour.";
+	else if (
+		state.floor === 1 &&
+		state.doors.some((d) => d.floor === 1 && d.locked)
+	)
+		state.objective =
+			"Use the master key to open the east wing. Search the Sealed Salon.";
+	else if (state.floor === 1)
+		state.objective =
+			"Find the urn fragment in the east salon. Then take the north-west stairs.";
+	else if (state.floor === 2)
+		state.objective = "An urn fragment waits in the north-east Observatory.";
+	else
+		state.objective =
+			"Bring two joined pieces to the Family Vault. Find the final fragment.";
+}
+function strike(p) {
+	p.lit = config.matchDuration;
+	state.matches++;
+	audio.play("match");
+	pulse("match", p.x, p.z);
+}
+function dash(p) {
+	if (p.dashCooldown > 0) return;
+	p.dashing = 0.28;
+	p.dashCooldown = config.dashCooldown;
+	p.invulnerable = Math.max(p.invulnerable, 0.42);
+	audio.play("dash");
+	pulse("dash", p.x, p.z);
+}
+function scare(p, e) {
+	if (
+		p.invulnerable > 0 ||
+		p.carry === "scepter" ||
+		config.invincible ||
+		state.phase === "attract"
+	)
+		return;
+	state.lives--;
+	p.invulnerable = 3.5;
+	p.lit = 0;
+	state.cameraShake = 0.45;
+	hurtTime = 0.65;
+	audio.play("hurt");
+	audio.play("voice", { pitch: 1.4 });
+	pulse("hurt", p.x, p.z);
+	e.stun = 2.5;
+	const dx = p.x - e.x,
+		dz = p.z - e.z,
+		l = Math.hypot(dx, dz) || 1;
+	movePlayer(p, (dx / l) * 1.2, (dz / l) * 1.2);
+	toast(
+		state.lives > 1
+			? "A fright! Keep your distance, or carry the moon scepter."
+			: "One nerve left. Make it count.",
+	);
+	if (state.lives <= 0) endGame(false);
+}
+function movePlayer(p, dx, dz) {
+	const b = bodyMap.get(p.id);
+	if (!b) return;
+	controller.computeColliderMovement(
+		b.collider,
+		{ x: dx, y: 0, z: dz },
+		undefined,
+		undefined,
+		(c) => !c.parent() || c.parent().handle === b.body.handle,
+	);
+	const m = controller.computedMovement();
+	p.x = Math.max(-17.45, Math.min(17.45, p.x + m.x));
+	p.z = Math.max(-10.45, Math.min(10.45, p.z + m.z));
+	b.body.setNextKinematicTranslation({ x: p.x, y: 0.7, z: p.z });
+}
+function simulate(dt, inputs = null) {
+	if (!["playing", "attract"].includes(state.phase) || hubEnded || hubWaiting)
+		return;
+	state.time += dt;
+	state.elapsed += dt;
+	state.lightning = Math.max(0, (state.lightning || 0) - dt);
+	state.stormTimer -= dt;
+	if (state.stormTimer <= 0) {
+		state.stormTimer = 29 + state.floor * 3;
+		state.lightning = config.flashes ? 0.32 : 0;
+		audio.play("thunder");
+		for (const p of state.players)
+			if (p.lit > 0 && p.carry !== "scepter") {
+				p.lit = 0;
+				pulse("wind", p.x, p.z);
+			}
+	}
+	state.brightness = config.brightness;
+	state.cameraShake = Math.max(0, state.cameraShake - dt);
+	for (const f of state.fx) f.age += dt;
+	state.fx = state.fx.filter((f) => f.age < 1.8);
+	for (const p of state.players) {
+		let u = inputs?.get?.(p.id) || remoteInputs.get(p.id) || { x: 0, z: 0 };
+		if (u.received && performance.now() - u.received > 1000) u = { x: 0, z: 0 };
+		p.invulnerable = Math.max(0, p.invulnerable - dt);
+		p.dashing = Math.max(0, p.dashing - dt);
+		p.dashCooldown = Math.max(0, p.dashCooldown - dt);
+		p.lit = Math.max(0, p.lit - dt);
+		if (
+			(config.autoLight ||
+				inputMode === "touch" ||
+				state.phase === "attract") &&
+			p.lit <= 0
+		)
+			strike(p);
+		if (u.match) strike(p);
+		if (u.dash) dash(p);
+		if (u.drop) dropItem(p);
+		if (u.interact) interact(p);
+		clearEdges(u);
+		let x = u.x || 0,
+			z = u.z || 0;
+		const len = Math.hypot(x, z);
+		if (len > 1) {
+			x /= len;
+			z /= len;
+		}
+		p.moving = len > 0.08;
+		if (p.moving) p.dir = Math.atan2(x, z);
+		if (p.dashing > 0 && len < 0.1) {
+			x = Math.sin(p.dir);
+			z = Math.cos(p.dir);
+		}
+		const speed = config.speed * (p.dashing > 0 ? 2.8 : 1);
+		movePlayer(p, x * speed * dt, z * speed * dt);
+		p.stepClock += p.moving ? dt : 0;
+		if (p.stepClock > 0.32) {
+			p.stepClock = 0;
+			audio.play("step", { pan: p.x / 25 });
+		}
+		const r = roomAt(p.x, p.z);
+		if (p.room !== undefined && p.room !== r)
+			audio.play("door", { pan: p.x / 25 });
+		p.room = r;
+		state.visited[state.floor][r] = true;
+		const i = heldItem(p);
+		if (i) {
+			i.x = p.x;
+			i.z = p.z;
+			i.floor = state.floor;
+		}
+		if (p.carry === "urn" && p.lit > 0) {
+			const other = state.items.find(
+				(i) =>
+					i.type === "urn" &&
+					i.floor === state.floor &&
+					i.held === null &&
+					Math.hypot(i.x - p.x, i.z - p.z) < 1,
+			);
+			if (other) takeItem(p, other);
+		}
+	}
+	physics.timestep = dt;
+	physics.step();
+	for (const e of state.enemies) {
+		e.phase += dt;
+		e.stun = Math.max(0, e.stun - dt);
+		e.windCooldown = Math.max(0, e.windCooldown - dt);
+		if (e.stun > 0) continue;
+		let p = state.players.reduce((a, b) =>
+			Math.hypot(a.x - e.x, a.z - e.z) < Math.hypot(b.x - e.x, b.z - e.z)
+				? a
+				: b,
+		);
+		if (!p) continue;
+		const dist = Math.hypot(e.x - p.x, e.z - p.z),
+			same = roomAt(p.x, p.z) === roomAt(e.x, e.z),
+			safe = p.carry === "scepter";
+		let tx = e.homeX + Math.sin(e.phase * 0.5) * 2.1,
+			tz = e.homeZ + Math.cos(e.phase * 0.6) * 1.8;
+		let speed = e.type === "ghost" ? 1.3 : e.type === "bat" ? 2 : 1;
+		if (same && dist < 8 && !safe && state.elapsed > 7) {
+			e.alert = true;
+			tx = p.x;
+			tz = p.z;
+			if (e.type === "bat") speed = Math.sin(e.phase * 1.2) > 0.3 ? 3.8 : 0.6;
+		} else e.alert = false;
+		if (safe && dist < 5) {
+			tx = e.x + (e.x - p.x);
+			tz = e.z + (e.z - p.z);
+			speed = 2.3;
+		}
+		const dl = Math.hypot(tx - e.x, tz - e.z) || 1,
+			dx = ((tx - e.x) / dl) * speed * config.enemySpeed * dt,
+			dz = ((tz - e.z) / dl) * speed * config.enemySpeed * dt;
+		const good = (x, z) =>
+			!view.obstacles.some(
+				(o) =>
+					Math.abs(x - o.x) < o.w / 2 + 0.38 &&
+					Math.abs(z - o.z) < o.d / 2 + 0.38,
+			) &&
+			!state.doors.some(
+				(d) =>
+					d.floor === state.floor &&
+					d.locked &&
+					Math.abs(x - d.x) < (d.orientation === "x" ? 0.55 : 1.8) &&
+					Math.abs(z - d.z) < (d.orientation === "x" ? 1.8 : 0.55),
+			);
+		if (e.type === "ghost" || good(e.x + dx, e.z)) e.x += dx;
+		if (e.type === "ghost" || good(e.x, e.z + dz)) e.z += dz;
+		e.x = Math.max(-17, Math.min(17, e.x));
+		e.z = Math.max(-10, Math.min(10, e.z));
+		if (
+			same &&
+			dist < 3.1 &&
+			p.lit > 0 &&
+			e.windCooldown === 0 &&
+			state.elapsed > 10
+		) {
+			p.lit = 0;
+			e.windCooldown = 11;
+			audio.play("wind");
+			pulse("wind", p.x, p.z);
+			if (state.phase === "playing" && p.id === me()?.id)
+				toast("A cold guest has blown out your match.", 2.2);
+		}
+		if (dist < (e.type === "spider" ? 0.85 : 1.05) && state.elapsed > 8)
+			scare(p, e);
+	}
+	if (state.phase === "attract") runAttract(dt);
+}
+function totalPieces() {
+	return state.items
+		.filter((i) => i.type === "urn" && i.held !== null)
+		.reduce((n, i) => n + i.pieces, 0);
+}
+function score() {
+	return Math.max(
+		0,
+		Math.round(
+			3000 +
+				state.lives * 400 -
+				state.matches * 12 -
+				state.elapsed * 2 +
+				totalPieces() * 500,
+		),
+	);
+}
+function endGame(won) {
+	if (!["playing", "attract"].includes(state.phase)) return;
+	const attract = state.phase === "attract";
+	state.phase = won ? "won" : "lost";
+	state.score = score();
+	audio.play(won ? "win" : "lose");
+	if (attract) {
+		endWait = 4;
+		return;
+	}
+	network.sendState(snapshot());
+	if (network.role === "host")
+		network.finish(won, state.score, {
+			Matches: state.matches,
+			Nerves: state.lives,
+			Seconds: Math.round(state.elapsed),
+		});
+	showResult(won);
+}
+function showResult(won, remote = false) {
+	if (hubEnded) return;
+	state.phase = won ? "won" : "lost";
+	openOverlay("result", false);
+	$("overlay").innerHTML =
+		`<div class="panel"><div class="eyebrow">${won ? "An unusually successful visit" : "The house sends its regards"}</div><h2>${won ? "Party, departed." : "Scared out of your wits."}</h2><p>${won ? "The urn is whole. The door swings open. Behind you, the house settles into a thoroughly disappointed silence." : "You have used up your last nerve. The guests have decided you should stay a little longer."}</p><div id="result-stats"><div><b>${won ? score() : totalPieces() + "/3"}</b><span>${won ? "HOUSE SCORE" : "URN PIECES"}</span></div><div><b>${state.matches}</b><span>MATCHES</span></div><div><b>${Math.floor(state.elapsed / 60)}:${String(Math.floor(state.elapsed % 60)).padStart(2, "0")}</b><span>TIME INSIDE</span></div></div>${network.mode === "hub" ? '<p class="subtle">Your party’s result has been sent to AI Hub.</p>' : `<button class="menu-button primary" data-action="retry">Another unfortunate visit <span>↗</span></button><button class="menu-button" data-action="title">Return to the invitation</button>`}</div>`;
+	focusFirst();
+}
+function snapshot() {
+	return JSON.parse(JSON.stringify(state));
+}
+function glyph(action) {
+	const ps = {
+		match: "□",
+		interact: "✕",
+		dash: "○",
+		drop: "△",
+		map: "L1",
+		pause: "Options",
+	};
+	const xbox = {
+		match: "X",
+		interact: "A",
+		dash: "B",
+		drop: "Y",
+		map: "LB",
+		pause: "Menu",
+	};
+	const key = {
+		match: "Space",
+		interact: "E",
+		dash: "Shift",
+		drop: "Q",
+		map: "Tab",
+		pause: "Esc",
+	};
+	return inputMode === "gamepad"
+		? (config.glyphs === "xbox" ? xbox : ps)[action]
+		: inputMode === "touch"
+			? "Tap"
+			: key[action];
+}
+function keyPrompt(action) {
+	return `<span class="key">${glyph(action)}</span>`;
+}
+function updateHUD() {
+	if (!ready) return;
+	const p = me();
+	if (!p) return;
+	const r = roomAt(p.x, p.z);
+	$("floor-name").textContent =
+		["I", "II", "III", "IV"][state.floor] + " · " + FLOOR_NAMES[state.floor];
+	$("room-name").textContent = ROOMS[state.floor][r];
+	$("objective").textContent = state.objective;
+	$("nerves").textContent =
+		"•".repeat(Math.max(0, state.lives)) +
+		"◦".repeat(Math.max(0, 9 - state.lives));
+	$("matches").textContent = state.matches + " matches struck";
+	const n = totalPieces();
+	document
+		.querySelectorAll(".shard")
+		.forEach((s, i) => s.classList.toggle("found", i < n));
+	$("hand-name").textContent =
+		p.carry === "key"
+			? "The master key"
+			: p.carry === "scepter"
+				? "The moon scepter"
+				: p.carry === "urn"
+					? `The urn · ${p.pieces}/3`
+					: "Nothing. Yet.";
+	$("hand-hint").textContent =
+		p.carry === "key"
+			? "Opens the east wing. You have one free hand."
+			: p.carry === "scepter"
+				? "Safe from every creature while held."
+				: p.carry === "urn"
+					? "Carry this to join it with the other pieces."
+					: "Strike a match to find what the dark is hiding.";
+	$("lightbar").firstElementChild.style.width =
+		(p.lit / config.matchDuration) * 100 + "%";
+	const c = contextFor(p);
+	$("context").classList.toggle("hidden", !c);
+	if (c) $("context").innerHTML = keyPrompt("interact") + c.text;
+	$("controls").innerHTML =
+		keyPrompt("match") +
+		" Light " +
+		keyPrompt("dash") +
+		" Dodge " +
+		keyPrompt("map") +
+		" Journal";
+	$("network-indicator").textContent =
+		network.mode === "solo"
+			? localMode
+				? "TWO PAIRS OF EYES · P2 ARROWS / ENTER"
+				: ""
+			: networkStatus;
+}
+function saveConfig() {
+	try {
+		const save = { ...config };
+		delete save.invincible;
+		delete save.reveal;
+		localStorage.setItem("hhp-settings", JSON.stringify(save));
+	} catch {}
+	audio.setVolume(config.music, config.sfx);
+	state.brightness = config.brightness;
+}
+function resetConfig() {
+	Object.assign(config, defaults);
+	saveConfig();
+}
+const panel = (name, content, wide = false) =>
+	`<div class="panel ${wide ? "wide" : ""}"><button class="close" data-action="back" aria-label="Back">×</button><div class="eyebrow">Haunted House Party</div><h2>${name}</h2>${content}</div>`;
+function slider(name, label, min, max, step) {
+	return `<div class="settings-row"><label for="cfg-${name}">${label}</label><input id="cfg-${name}" data-config="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${config[name]}"><output>${name === "music" || name === "sfx" ? Math.round(config[name] * 100) + "%" : config[name]}</output></div>`;
+}
+function openOverlay(page, pause = true) {
+	if (hubEnded) return;
+	if (state.phase === "attract") returnToTitle();
+	backPage = overlayPage;
+	overlayPage = page;
+	if (pause && state.phase === "playing" && network.mode === "solo")
+		state.phase = "paused";
+	$("overlay").classList.remove("hidden");
+	let content = "";
+	if (page === "pause")
+		content = panel(
+			"A moment to breathe.",
+			`<button class="menu-button primary" data-action="resume">Return to the house <span>↗</span></button><button class="menu-button" data-action="map">The house journal</button><button class="menu-button" data-action="settings">Settings</button><button class="menu-button" data-action="dev">Developer’s room</button><button class="menu-button" data-action="about">About & credits</button>${network.mode === "hub" ? "" : `<button class="menu-button" data-action="title">Return to the invitation</button>`}<p class="subtle">${network.mode === "solo" ? "The house can wait." : "The party continues while this menu is open."}</p>`,
+		);
+	if (page === "settings")
+		content = panel(
+			"Set the mood.",
+			`${slider("music", "Music", 0, 1, 0.01)}${slider("sfx", "Sound & little voices", 0, 1, 0.01)}${slider("brightness", "Moonlight", 0.5, 1.8, 0.1)}<div class="settings-row"><label>Controller glyphs</label><select data-config="glyphs"><option value="ps" ${config.glyphs === "ps" ? "selected" : ""}>PlayStation</option><option value="xbox" ${config.glyphs === "xbox" ? "selected" : ""}>Xbox · ABXY</option></select></div><div class="settings-row"><label for="cfg-autoLight">Automatic matches</label><input id="cfg-autoLight" type="checkbox" data-config="autoLight" ${config.autoLight ? "checked" : ""}></div><div class="settings-row"><label>Storm flashes</label><input type="checkbox" data-config="flashes" ${config.flashes ? "checked" : ""}></div><button class="menu-button" data-action="reset-settings">Restore defaults</button>`,
+		);
+	if (page === "dev")
+		content = panel(
+			"The developer’s room.",
+			`<p class="subtle">Live controls. Changes take effect as soon as you return to play.</p>${slider("speed", "Walking speed", 2, 10, 0.2)}${slider("enemySpeed", "Creature speed", 0, 2.5, 0.1)}${slider("matchDuration", "Match life · seconds", 3, 60, 1)}${slider("dashCooldown", "Dodge recharge · seconds", 0.5, 8, 0.1)}<div class="settings-row"><label>Infinite nerves</label><input type="checkbox" data-config="invincible" ${config.invincible ? "checked" : ""}></div><div class="settings-row"><label>Reveal the house</label><input type="checkbox" data-config="reveal" ${config.reveal ? "checked" : ""}></div><div class="settings-row"><label>Visit a floor</label><select data-dev="floor">${FLOOR_NAMES.map((n, i) => `<option value="${i}" ${state.floor === i ? "selected" : ""}>${i + 1} · ${n}</option>`).join("")}</select></div><button class="menu-button" data-action="dev-urn">Assemble the urn in hand</button><button class="menu-button" data-action="dev-nerves">Restore nine nerves</button><button class="menu-button" data-action="dev-unlock">Unlock every door</button><button class="menu-button" data-action="reset-dev">Reset balance to defaults</button>`,
+		);
+	if (page === "how")
+		content = panel(
+			"House rules.",
+			`<p>Old Mr. Morrow left three pieces of his favourite urn somewhere upstairs. Find them. Join them. Bring them to the front door. Do try to keep your nerves.</p><div class="instruction-grid"><div><h3>01 · A little light</h3><p>${keyPrompt("match")} Strike a match. Unlimited supply; each one counts. Cold guests and draughts can snuff it out.</p></div><div><h3>02 · One free hand</h3><p>${keyPrompt("interact")} Take or swap an object. ${keyPrompt("drop")} Put it down. Urn pieces join while carried.</p></div><div><h3>03 · Uninvited guests</h3><p>Spiders creep. Bats swoop. Mr. Morrow walks through walls. ${keyPrompt("dash")} Dodge, or carry the moon scepter for protection.</p></div><div><h3>04 · Up & away</h3><p>Use the north-west stairs to climb; south-east to descend. ${keyPrompt("map")} Open your journal. Return the complete urn to the Foyer.</p></div></div><p class="subtle">Move: WASD / left stick. P2: arrow keys, Enter to interact, right Shift to dodge, / to light, Backspace to drop; or a second controller. Touch: drag anywhere to walk; matches are automatic. Tap the contextual action or double-tap to dodge.</p><button class="menu-button primary" data-action="back">Quite clear. Probably.</button>`,
+			true,
+		);
+	if (page === "online")
+		content = panel(
+			"Misery loves company.",
+			`<p>Share one house with up to three friends. One player carries the key. Another can brave the dark with the urn.</p><button class="menu-button primary" data-action="host">Host a house party <span>↗</span></button><div class="smallcaps" style="margin-top:22px">Or enter a friend’s room code</div><input class="network-code" id="join-code" aria-label="Room code" maxlength="16" placeholder="ROOM CODE" autocomplete="off"><button class="menu-button" data-action="join">Join their party</button><p id="net-status" class="network-status">${escapeHTML(networkStatus || "Online uses WebRTC. Room codes also work between tabs.")}</p><div id="room-code" class="network-code hidden"></div><p class="subtle">In AI Hub, the lobby and connection are handled automatically. Standalone internet play needs access to the public PeerJS signalling service; some networks may block direct connections.</p>`,
+		);
+	if (page === "map") {
+		mapFloor = state.floor;
+		content = mapContent();
+	}
+	if (page === "about") content = aboutContent();
+	$("overlay").innerHTML = content;
+	focusFirst();
+}
+function mapContent() {
+	const p = me(),
+		r = p ? roomAt(p.x, p.z) : -1;
+	return panel(
+		"The house journal.",
+		`<div class="floor-tabs">${FLOOR_NAMES.map((n, i) => `<button data-map-floor="${i}" class="${i === mapFloor ? "active" : ""}">${["I", "II", "III", "IV"][i]}</button>`).join("")}</div><div class="map-rooms">${ROOMS[
+			mapFloor
+		]
+			.map((name, i) => {
+				const visited = state.visited[mapFloor][i] || config.reveal;
+				const items = state.items.filter(
+					(it) =>
+						it.floor === mapFloor &&
+						it.held === null &&
+						roomAt(it.x, it.z) === i,
+				);
+				return `<div class="map-room ${visited ? "visited" : ""} ${mapFloor === state.floor && r === i ? "current" : ""}">${visited ? name : "Unexplored"}<span>${mapFloor === state.floor && r === i ? "● YOU ARE HERE" : visited ? items.map(itemName).join(" · ") : ""}</span>${i === 0 ? "<span>↗ Stairs up</span>" : ""}${i === 5 ? "<span>↙ Stairs down</span>" : ""}${i === 4 && mapFloor === 0 ? "<span>◇ Front door</span>" : ""}</div>`;
+			})
+			.join(
+				"",
+			)}</div><p class="subtle">The journal remembers rooms you visit and objects you leave. North is the back wall. Your one free hand is part of the puzzle.</p><button class="menu-button primary" data-action="resume">Close the journal</button>`,
+		true,
+	);
+}
+function escapeHTML(s) {
+	return String(s).replace(
+		/[&<>"']/g,
+		(c) =>
+			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+				c
+			],
+	);
+}
+function aboutContent() {
+	const src = window.GAME_CREDITS?.sourceInformation || {};
+	return panel(
+		"A house with a history.",
+		`<div class="about about-columns"><div><h3>Source Information</h3><p class="subtle">Scroll with the right stick, mouse wheel, or Page Down.</p>${Object.entries(
+			src,
+		)
+			.map(([k, v]) => `<p><b>${escapeHTML(k)}:</b> ${escapeHTML(v)}</p>`)
+			.join(
+				"",
+			)}</div><div><h3>Made for a most peculiar evening</h3><p>Original game design, code, procedural geometry, ink outlines, animation and synthesized sound. No external art or audio files.</p><p>Inspired by the mechanics and atmosphere of Atari’s <i>Haunted House</i> (1982). This is an original, unofficial homage. Atari and the original game’s creators retain their respective rights.</p><p><a href="https://atari.com/pages/hauntedhouse" target="_blank" rel="noreferrer">Atari source information</a><br><a href="https://static.atariage.com/manual_html_page.php?SoftwareLabelID=233" target="_blank" rel="noreferrer">Original instruction manual</a></p><p>Three.js r180 · Rapier 0.19.3 · AI Hub Session v1.4.0 · PeerJS 1.5.5.<br>Dependencies load from CDNs. Internet is needed on first launch.</p><div class="feedback">${["testingFeedback", "engineFeedback", "promptFeedback"].map((k) => `<h3>${k === "testingFeedback" ? "Testing Feedback" : k === "engineFeedback" ? "Engine Feedback" : "Prompt Feedback"}</h3>${(window.GAME_CREDITS?.[k] || ["unknown"]).map((v) => `<p>${escapeHTML(v)}</p>`).join("")}`).join("")}</div></div></div>`,
+		true,
+	);
+}
+function closeOverlay() {
+	overlayPage = null;
+	$("overlay").classList.add("hidden");
+	if (state.phase === "paused") state.phase = "playing";
+	keys.clear();
+	clearEdges(controls);
+}
+function goBack() {
+	if (overlayPage === "pause" || overlayPage === "result") {
+		closeOverlay();
+		return;
+	}
+	if (state.phase === "title") closeOverlay();
+	else if (overlayPage === "map") closeOverlay();
+	else openOverlay("pause");
+}
+function focusFirst() {
+	requestAnimationFrame(() => {
+		const buttons = $("overlay").classList.contains("hidden")
+			? $("title").querySelectorAll("button")
+			: $("overlay").querySelectorAll("button,input,select,a");
+		const b =
+			Array.from(buttons).find((b) => !b.classList.contains("close")) ||
+			buttons[0];
+		b?.focus({ preventScroll: true });
+	});
+}
+function activate(action) {
+	if (hubEnded) return;
+	if (action === "solo") {
+		unlockAudio();
+		network.leave();
+		startGame("solo");
+	} else if (action === "local") {
+		unlockAudio();
+		network.leave();
+		startGame("local");
+	} else if (action === "retry") {
+		network.leave();
+		startGame(localMode ? "local" : "solo");
+	} else if (action === "title") returnToTitle();
+	else if (action === "resume") closeOverlay();
+	else if (action === "back") goBack();
+	else if (
+		["settings", "about", "how", "online", "map", "dev"].includes(action)
+	)
+		openOverlay(action);
+	else if (action === "pause") {
+		if (overlayPage) goBack();
+		else openOverlay("pause");
+	} else if (action === "interact") {
+		controls.interact = true;
+	} else if (action === "reset-settings" || action === "reset-dev") {
+		resetConfig();
+		openOverlay(action === "reset-dev" ? "dev" : "settings");
+	} else if (action === "dev-urn") {
+		debugCollect();
+		toast("Developer: the urn is whole.");
+	} else if (action === "dev-nerves") {
+		state.lives = 9;
+		toast("Developer: nine nerves restored.");
+	} else if (action === "dev-unlock") {
+		state.doors.forEach((d) => (d.locked = false));
+		rebuildDoors();
+		toast("Developer: every door unlocked.");
+	} else if (action === "host") {
+		unlockAudio();
+		network
+			.host()
+			.then((code) => {
+				if ($("room-code")) {
+					$("room-code").classList.remove("hidden");
+					$("room-code").textContent = code;
+				}
+				if ($("net-status"))
+					$("net-status").textContent =
+						"Send this code to a friend. The house opens when they join.";
+			})
+			.catch((e) => toast(e.message));
+	} else if (action === "join") {
+		unlockAudio();
+		const code = $("join-code")?.value.trim().toUpperCase();
+		if (code) network.join(code).catch((e) => toast(e.message));
+		else toast("Enter a room code first.");
+	}
+}
+document.addEventListener("click", (e) => {
+	const b = e.target.closest("[data-action]");
+	if (b) {
+		if (
+			markInput(
+				e.pointerType === "touch"
+					? "touch"
+					: e.detail === 0
+						? inputMode
+						: "keyboard",
+			)
+		)
+			return;
+		audio.play("ui");
+		activate(b.dataset.action);
+	}
+});
+document.addEventListener("input", (e) => {
+	const n = e.target.dataset.config;
+	if (n) {
+		config[n] =
+			e.target.type === "checkbox"
+				? e.target.checked
+				: e.target.type === "range"
+					? Number(e.target.value)
+					: e.target.value;
+		const o = e.target.nextElementSibling;
+		if (o?.tagName === "OUTPUT")
+			o.textContent =
+				n === "music" || n === "sfx"
+					? Math.round(config[n] * 100) + "%"
+					: config[n];
+		saveConfig();
+	}
+});
+document.addEventListener("change", (e) => {
+	if (e.target.dataset.config) {
+		config[e.target.dataset.config] =
+			e.target.type === "checkbox"
+				? e.target.checked
+				: e.target.type === "range"
+					? Number(e.target.value)
+					: e.target.value;
+		saveConfig();
+	}
+	if (e.target.dataset.dev === "floor") {
+		state.floor = Number(e.target.value);
+		for (const p of state.players) {
+			p.x = 0;
+			p.z = 5;
+		}
+		spawnEnemies(state.floor);
+		view.setFloor(state.floor);
+		rebuildStatics();
+		syncBodies();
+		rebuildDoors();
+		updateObjective();
+	}
+	if (e.target.dataset.mapFloor) {
+		mapFloor = +e.target.dataset.mapFloor;
+	}
+});
+document.addEventListener("click", (e) => {
+	if (window.AIHub?.active && e.target.closest("a")) e.preventDefault();
+	const b = e.target.closest("[data-map-floor]");
+	if (b) {
+		mapFloor = Number(b.dataset.mapFloor);
+		$("overlay").innerHTML = mapContent();
+	}
+});
+document.addEventListener("pointermove", (e) => {
+	if (e.pointerType !== "touch" && (e.movementX || e.movementY))
+		markInput("keyboard");
+});
+document.addEventListener("pointerover", (e) => {
+	const b = e.target.closest("button");
+	if (b && inputMode !== "touch") b.focus({ preventScroll: true });
+});
+function adjustFocusedControl(direction) {
+	const el = document.activeElement;
+	if (el?.type === "range") {
+		el.value = Number(el.value) + direction * Number(el.step || 0.1);
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		return true;
+	}
+	if (el?.tagName === "SELECT") {
+		el.selectedIndex =
+			(el.selectedIndex + direction + el.options.length) % el.options.length;
+		el.dispatchEvent(new Event("input", { bubbles: true }));
+		el.dispatchEvent(new Event("change", { bubbles: true }));
+		return true;
+	}
+	if (el?.type === "checkbox") {
+		el.click();
+		return true;
+	}
+	return false;
+}
+function activateFocused() {
+	const el = document.activeElement;
+	if (el?.tagName === "BUTTON" || el?.type === "checkbox") el.click();
+	else if (el?.tagName === "SELECT") adjustFocusedControl(1);
+	else if (!overlayPage && state.phase === "title") activate("solo");
+}
+function handleMenuDirection(direction) {
+	const parent = overlayPage ? $("overlay") : $("title");
+	const els = Array.from(
+		parent.querySelectorAll("button,input,select,a"),
+	).filter((el) => el.offsetParent !== null);
+	if (!els.length) return;
+	let index = els.indexOf(document.activeElement);
+	index = (index + direction + els.length) % els.length;
+	els[index].focus({ preventScroll: true });
+	els[index].scrollIntoView({ block: "nearest" });
+	audio.play("ui");
+}
+document.addEventListener("keydown", (e) => {
+	if (hubEnded) return;
+	const tag = e.target.tagName;
+	if (tag === "INPUT" && e.target.type === "text") return;
+	if (markInput()) return;
+	if (
+		[
+			"Enter",
+			"Space",
+			"Tab",
+			"ArrowUp",
+			"ArrowDown",
+			"ArrowLeft",
+			"ArrowRight",
+			"Backspace",
+		].includes(e.code)
+	)
+		e.preventDefault();
+	if (e.repeat) return;
+	keys.add(e.code);
+	if (overlayPage || state.phase === "title") {
+		if (e.code === "PageDown" || e.code === "PageUp") {
+			e.preventDefault();
+			$("overlay")
+				.querySelector(".panel")
+				?.scrollBy(0, e.code === "PageDown" ? 350 : -350);
+		} else if (e.code === "Escape") goBack();
+		else if (e.code === "ArrowDown" || e.code === "KeyS")
+			handleMenuDirection(1);
+		else if (e.code === "ArrowUp" || e.code === "KeyW") handleMenuDirection(-1);
+		else if (e.code === "ArrowLeft") adjustFocusedControl(-1);
+		else if (e.code === "ArrowRight") adjustFocusedControl(1);
+		else if (e.code === "Enter" || e.code === "Space") activateFocused();
+		return;
+	}
+	if (e.code === "Escape") {
+		activate("pause");
+		return;
+	}
+	if (e.code === "Tab") {
+		openOverlay("map");
+		return;
+	}
+	if (e.code === "Space") controls.match = true;
+	if (e.code === "KeyE") controls.interact = true;
+	if (e.code === "ShiftLeft") controls.dash = true;
+	if (e.code === "KeyQ") controls.drop = true;
+});
+document.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => {
+	keys.clear();
+	touch.active = false;
+});
+let clickTarget = null,
+	clickPath = [],
+	lastTap = 0;
+$("world").addEventListener("pointerdown", (e) => {
+	if (markInput(e.pointerType === "touch" ? "touch" : "keyboard")) return;
+	if (state.phase !== "playing" || overlayPage) return;
+	if (e.pointerType === "touch") {
+		touch.active = true;
+		touch.id = e.pointerId;
+		touch.sx = e.clientX;
+		touch.sy = e.clientY;
+		touch.x = 0;
+		touch.z = 0;
+		$("world").setPointerCapture(e.pointerId);
+		$("touch-ring").classList.remove("hidden");
+		$("touch-ring").style.left = e.clientX - 45 + "px";
+		$("touch-ring").style.top = e.clientY - 45 + "px";
+		if (performance.now() - lastTap < 300) controls.dash = true;
+		lastTap = performance.now();
+	} else {
+		if (e.button === 2) controls.dash = true;
+		else {
+			const v = view.unproject?.(e.clientX, e.clientY);
+			if (v) {
+				const p = me();
+				const near = state.items.find(
+					(i) =>
+						i.held === null &&
+						i.floor === state.floor &&
+						Math.hypot(i.x - v.x, i.z - v.z) < 1.7,
+				);
+				if (near && Math.hypot(p.x - near.x, p.z - near.z) < 2)
+					controls.interact = true;
+				else {
+					clickTarget = v;
+					clickPath = findPath(v.x, v.z);
+				}
+			}
+		}
+	}
+});
+$("world").addEventListener("pointermove", (e) => {
+	if (e.pointerType === "touch" && touch.active && touch.id === e.pointerId) {
+		const sx = (e.clientX - touch.sx) / 45,
+			sy = (e.clientY - touch.sy) / 45;
+		touch.x = (sx + sy) * 0.707;
+		touch.z = (sy - sx) * 0.707;
+		const l = Math.hypot(touch.x, touch.z);
+		if (l > 1) {
+			touch.x /= l;
+			touch.z /= l;
+		}
+	}
+});
+function endTouch(e) {
+	if (e.pointerId === touch.id) {
+		touch.active = false;
+		touch.x = touch.z = 0;
+		$("touch-ring").classList.add("hidden");
+	}
+}
+$("world").addEventListener("pointerup", endTouch);
+$("world").addEventListener("pointercancel", endTouch);
+$("world").addEventListener("contextmenu", (e) => e.preventDefault());
+function screenVector(x, y) {
+	return { x: (x + y) * 0.70710678, z: (y - x) * 0.70710678 };
+}
+function keyboardInput(second = false) {
+	const x = second
+		? Number(keys.has("ArrowRight")) - Number(keys.has("ArrowLeft"))
+		: Number(keys.has("KeyD")) - Number(keys.has("KeyA"));
+	const y = second
+		? Number(keys.has("ArrowDown")) - Number(keys.has("ArrowUp"))
+		: Number(keys.has("KeyS")) - Number(keys.has("KeyW"));
+	const u = screenVector(x, y);
+	if (second) {
+		u.interact = keys.delete("Enter");
+		u.dash = keys.delete("ShiftRight");
+		u.match = keys.delete("Slash");
+		u.drop = keys.delete("Backspace");
+	} else
+		Object.assign(u, {
+			match: controls.match,
+			interact: controls.interact,
+			dash: controls.dash,
+			drop: controls.drop,
+		});
+	return u;
+}
+function pollPads() {
+	const result = [];
+	for (const pad of navigator.getGamepads?.() || []) {
+		if (!pad?.connected) continue;
+		const prev = prevPads.get(pad.index) || [];
+		const now = pad.buttons.map((b) => b.pressed);
+		const edge = (i) => now[i] && !prev[i];
+		let x = Math.abs(pad.axes[0] || 0) > 0.18 ? pad.axes[0] : 0,
+			y = Math.abs(pad.axes[1] || 0) > 0.18 ? pad.axes[1] : 0;
+		x += (now[15] ? 1 : 0) - (now[14] ? 1 : 0);
+		y += (now[13] ? 1 : 0) - (now[12] ? 1 : 0);
+		const any =
+			x ||
+			y ||
+			Math.abs(pad.axes[2] || 0) > 0.2 ||
+			Math.abs(pad.axes[3] || 0) > 0.2 ||
+			now.some(Boolean);
+		if (any && inputMode !== "gamepad") {
+			if (markInput("gamepad")) {
+				prevPads.set(pad.index, now);
+				continue;
+			}
+		} else if (any) idle = 0;
+		if (any && state.phase === "attract") {
+			returnToTitle();
+			prevPads.set(pad.index, now);
+			continue;
+		}
+		if (overlayPage || state.phase === "title") {
+			if (overlayPage && Math.abs(pad.axes[3] || 0) > 0.2)
+				$("overlay")
+					.querySelector(".panel")
+					?.scrollBy(0, pad.axes[3] * 22);
+			if (edge(13) || (!prev.axisDown && y > 0.6)) handleMenuDirection(1);
+			if (edge(12) || (!prev.axisUp && y < -0.6)) handleMenuDirection(-1);
+			if (edge(0)) activateFocused();
+			if (edge(1) || (edge(9) && !now[8])) goBack();
+			if (edge(14) || edge(15)) adjustFocusedControl(edge(15) ? 1 : -1);
+		} else {
+			if (edge(9) && !now[8]) activate("pause");
+			if (edge(4)) openOverlay("map");
+			const u = screenVector(x, y);
+			Object.assign(u, {
+				interact: edge(0),
+				dash: edge(1),
+				match: edge(2),
+				drop: edge(3),
+			});
+			result.push(u);
+		}
+		now.axisDown = y > 0.6;
+		now.axisUp = y < -0.6;
+		prevPads.set(pad.index, now);
+	}
+	return result;
+}
+function getInputs() {
+	const pads = pollPads(),
+		map = new Map();
+	if (overlayPage || state.phase === "title" || hubEnded) {
+		clearEdges(controls);
+		return map;
+	}
+	let u = keyboardInput();
+	if (pads[0]) u = pads[0];
+	if (touch.active) u = { ...u, x: touch.x, z: touch.z };
+	if (clickTarget && !pads[0] && !touch.active && Math.hypot(u.x, u.z) < 0.1) {
+		const p = me();
+		while (
+			clickPath.length &&
+			Math.hypot(clickPath[0].x - p.x, clickPath[0].z - p.z) < 0.24
+		)
+			clickPath.shift();
+		const target = clickPath[0] || clickTarget,
+			dx = target.x - p.x,
+			dz = target.z - p.z,
+			l = Math.hypot(dx, dz);
+		if (l > 0.24) {
+			u.x = dx / l;
+			u.z = dz / l;
+		} else clickTarget = null;
+	} else if (Math.hypot(u.x, u.z) > 0.1) clickTarget = null;
+	if (hubInfo?.server) {
+		for (const p of state.players)
+			map.set(p.id, remoteInputs.get(p.id) || { x: 0, z: 0 });
+	} else map.set(network.mode === "solo" ? 0 : network.me, u);
+	if (localMode) map.set(1, pads[1] || keyboardInput(true));
+	clearEdges(controls);
+	return map;
+}
+function blocked(x, z, margin = 0.46) {
+	if (x < -17.4 || x > 17.4 || z < -10.4 || z > 10.4) return true;
+	if (
+		view.obstacles.some(
+			(o) =>
+				Math.abs(x - o.x) < o.w / 2 + margin &&
+				Math.abs(z - o.z) < o.d / 2 + margin,
+		)
+	)
+		return true;
+	return state.doors.some(
+		(d) =>
+			d.floor === state.floor &&
+			d.locked &&
+			Math.abs(x - d.x) < (d.orientation === "x" ? 0.18 : 1.48) + margin &&
+			Math.abs(z - d.z) < (d.orientation === "x" ? 1.48 : 0.18) + margin,
+	);
+}
+function findPath(tx, tz, p = me()) {
+	const step = 0.5,
+		W = 69,
+		H = 41;
+	const toGrid = (x, z) => [
+		Math.max(0, Math.min(W - 1, Math.round((x + 17) / step))),
+		Math.max(0, Math.min(H - 1, Math.round((z + 10) / step))),
+	];
+	const [sx, sz] = toGrid(p.x, p.z),
+		[gx, gz] = toGrid(tx, tz);
+	const key = (x, z) => z * W + x;
+	const start = key(sx, sz),
+		goal = key(gx, gz),
+		open = [start],
+		parents = new Map(),
+		g = new Map([[start, 0]]),
+		f = new Map([[start, Math.abs(sx - gx) + Math.abs(sz - gz)]]),
+		closed = new Set();
+	let end = null;
+	while (open.length) {
+		let bi = 0;
+		for (let i = 1; i < open.length; i++)
+			if (f.get(open[i]) < f.get(open[bi])) bi = i;
+		const n = open.splice(bi, 1)[0];
+		if (n === goal) {
+			end = n;
+			break;
+		}
+		closed.add(n);
+		const x = n % W,
+			z = Math.floor(n / W);
+		for (const [dx, dz] of [
+			[1, 0],
+			[-1, 0],
+			[0, 1],
+			[0, -1],
+		]) {
+			const nx = x + dx,
+				nz = z + dz,
+				k = key(nx, nz);
+			if (
+				nx < 0 ||
+				nx >= W ||
+				nz < 0 ||
+				nz >= H ||
+				closed.has(k) ||
+				blocked(nx * step - 17, nz * step - 10)
+			)
+				continue;
+			const cost = g.get(n) + 1;
+			if (cost < (g.get(k) ?? Infinity)) {
+				parents.set(k, n);
+				g.set(k, cost);
+				f.set(k, cost + Math.abs(nx - gx) + Math.abs(nz - gz));
+				if (!open.includes(k)) open.push(k);
+			}
+		}
+	}
+	if (end === null) return [];
+	const path = [];
+	while (end !== start) {
+		path.unshift({
+			x: (end % W) * step - 17,
+			z: Math.floor(end / W) * step - 10,
+		});
+		end = parents.get(end);
+	}
+	if (!blocked(tx, tz)) path.push({ x: tx, z: tz });
+	return path;
+}
+function routeTo(x, z) {
+	const path = findPath(x, z);
+	let steps = 0;
+	for (const target of path) {
+		while (
+			Math.hypot(me().x - target.x, me().z - target.z) > 0.12 &&
+			steps < 15000
+		) {
+			const p = me(),
+				dx = target.x - p.x,
+				dz = target.z - p.z,
+				l = Math.hypot(dx, dz) || 1;
+			simulate(1 / 60, new Map([[p.id, { x: dx / l, z: dz / l }]]));
+			steps++;
+		}
+		if (steps >= 15000) break;
+	}
+	return {
+		ok: Math.hypot(me().x - x, me().z - z) < 0.7,
+		steps,
+		x: me().x,
+		z: me().z,
+		pathLength: path.length,
+	};
+}
+function makeAttractGoals() {
+	aiGoals = [
+		{ x: -12, z: 5, act: "interact" },
+		{ x: 4, z: 5, act: "interact" },
+		{ x: -14, z: -8, act: "up" },
+		{ x: 8, z: 5.5, gate: true },
+		{ x: 12, z: 5.5, act: "interact" },
+		{ x: -14, z: -8, act: "up" },
+		{ x: 14, z: -7, act: "interact" },
+		{ x: -14, z: -8, act: "up" },
+		{ x: 0, z: 1.8, act: "interact" },
+		{ x: 0, z: -7, act: "interact" },
+		{ x: 14, z: 8, act: "down" },
+		{ x: 14, z: 8, act: "down" },
+		{ x: 14, z: 8, act: "down" },
+		{ x: 0, z: 9.5, act: "interact" },
+	];
+	aiIndex = 0;
+	aiPath = [];
+	aiStuck = 0;
+}
+function runAttract(dt) {
+	if (aiIndex >= aiGoals.length) return;
+	const p = me(),
+		goal = aiGoals[aiIndex];
+	if (goal.gate) {
+		const d = state.doors.find(
+			(d) => d.floor === state.floor && d.locked && d.kind === "key",
+		);
+		if (d) {
+			goal.x = d.x - 1.7;
+			goal.z = d.z;
+		} else {
+			aiIndex++;
+			aiPath = [];
+			return;
+		}
+	}
+	if (!aiPath.length) {
+		aiPath = findPath(goal.x, goal.z, p);
+		if (!aiPath.length && Math.hypot(p.x - goal.x, p.z - goal.z) > 1) {
+			aiStuck += dt;
+			if (aiStuck > 2) {
+				p.x = goal.x;
+				p.z = goal.z;
+				syncBodies();
+				aiStuck = 0;
+			}
+		}
+	}
+	const target = aiPath[0];
+	if (target) {
+		const dx = target.x - p.x,
+			dz = target.z - p.z,
+			l = Math.hypot(dx, dz);
+		if (l < 0.22) aiPath.shift();
+		else {
+			p.dir = Math.atan2(dx, dz);
+			p.moving = true;
+			movePlayer(p, (dx / l) * config.speed * dt, (dz / l) * config.speed * dt);
+		}
+	}
+	if (Math.hypot(p.x - goal.x, p.z - goal.z) < 0.55) {
+		if (goal.act || goal.gate) interact(p);
+		if (
+			goal.gate &&
+			!state.doors.some(
+				(d) => d.floor === state.floor && d.locked && d.kind === "key",
+			)
+		) {
+			aiIndex++;
+		} else if (!goal.gate) aiIndex++;
+		aiPath = [];
+	}
+}
+function debugCollect() {
+	const p = me();
+	dropItem(p, true);
+	state.items = state.items.filter((i) => i.type !== "urn");
+	state.items.push({
+		id: "debug-urn",
+		type: "urn",
+		x: p.x,
+		z: p.z,
+		floor: state.floor,
+		pieces: 3,
+		held: p.id,
+	});
+	p.carry = "urn";
+	p.pieces = 3;
+	updateObjective();
+}
+function teleport(x, z, floor = state.floor) {
+	if (floor !== state.floor) {
+		state.floor = floor;
+		spawnEnemies(floor);
+		view.setFloor(floor);
+		rebuildStatics();
+		rebuildDoors();
+	}
+	const p = me();
+	p.x = x;
+	p.z = z;
+	syncBodies();
+	physics.step();
+	updateObjective();
+}
+function frame(ms) {
+	requestAnimationFrame(frame);
+	if (!ready) return;
+	const realDt = Math.max(0, (ms - (lastFrame || ms)) / 1000),
+		dt = Math.min(0.04, realDt);
+	lastFrame = ms;
+	if (hubEnded) return;
+	if (hubWaiting && network.time() >= 0) hubWaiting = false;
+	const inputs = getInputs();
+	if (hubWaiting) {
+		$("title").classList.add("hidden");
+		$("hud").classList.remove("hidden");
+		$("objective").textContent =
+			"The party begins in " +
+			Math.max(1, Math.ceil(-network.time() / 1000)) +
+			"…";
+	}
+	if (network.role === "guest") {
+		network.sendInput(inputs.get(network.me) || { x: 0, z: 0 });
+		state.time += dt;
+	} else {
+		if (state.phase === "attract") simulate(dt, new Map());
+		else simulate(dt, inputs);
+		if (network.role === "host") network.sendState(snapshot());
+	}
+	if (state.phase === "title" && !overlayPage && !window.AIHub?.active) {
+		idle += realDt;
+		state.time += dt;
+		if (idle >= 10) startGame("attract");
+	}
+	if (endWait > 0) {
+		endWait -= dt;
+		if (endWait <= 0) startGame("attract");
+	}
+	if (toastLife > 0) {
+		toastLife -= dt;
+		if (toastLife <= 0) $("toast").classList.add("hidden");
+	}
+	hurtTime = Math.max(0, hurtTime - dt);
+	$("vignette").classList.toggle("hurt", hurtTime > 0);
+	state.revealItems = config.reveal;
+	state.cameraPlayerId = network.me;
+	state.localCoop = localMode;
+	state.cameraAllPlayers = localMode;
+	state.brightness = config.reveal ? 2 : config.brightness;
+	if (!mutedRender) view.update(state, dt);
+	audio.update(state, dt);
+	if (state.phase === "playing" || state.phase === "paused") updateHUD();
+}
+window.addEventListener("error", (e) => {
+	console.error("House error:", e.message);
+});
+async function boot() {
+	try {
+		const hubConnect = network.initHub();
+		if (window.AIHub?.active) {
+			$("title").classList.add("hidden");
+			$("loading").querySelector(".loading-note").textContent =
+				"Joining the house…";
+		}
+		await RAPIER.init();
+		view = await createScene(THREE, $("world"));
+		buildPhysics();
+		spawnEnemies(0);
+		ready = true;
+		$("loading").classList.add("hidden");
+		window.__game = {
+			freezeRender: (v) => (mutedRender = v),
+			get ready() {
+				return ready;
+			},
+			get state() {
+				return state;
+			},
+			get inputMode() {
+				return inputMode;
+			},
+			get renderer() {
+				return view.renderer.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2";
+			},
+			config,
+			audio,
+			network,
+			start: startGame,
+			action: activate,
+			tick: simulate,
+			snapshot,
+			teleport,
+			findPath,
+			routeTo,
+			resetConfig,
+			setIdle: (n) => {
+				idle = n;
+			},
+			testStep: (seconds, u = {}) => {
+				const count = Math.ceil(seconds * 60);
+				for (let i = 0; i < count; i++)
+					simulate(
+						1 / 60,
+						new Map([
+							[
+								me().id,
+								{
+									...u,
+									match: i === 0 && u.match,
+									interact: i === 0 && u.interact,
+									dash: i === 0 && u.dash,
+									drop: i === 0 && u.drop,
+								},
+							],
+						]),
+					);
+				updateHUD();
+				return snapshot();
+			},
+			debug: {
+				setInvincible: (v) => (config.invincible = v),
+				reveal: (v) => (config.reveal = v),
+				collectAll: debugCollect,
+				win: () => endGame(true),
+				lose: () => {
+					state.lives = 0;
+					endGame(false);
+				},
+				solve: () => solvePlaythrough(),
+			},
+			context: () => contextFor(me()),
+			view,
+		};
+		requestAnimationFrame(frame);
+		const info = await hubConnect;
+		if (info) {
+			hubInfo = info;
+			state.phase = "waiting";
+			$("title").classList.add("hidden");
+			network.ready();
+		} else focusFirst();
+	} catch (error) {
+		console.error(error);
+		$("loading").innerHTML =
+			`<div class="boot-error"><h2>The match would not strike.</h2><p>${escapeHTML(error.message)}</p><p>This game loads Three.js and Rapier from the internet. Check the connection and reload. A browser with WebGPU or WebGL 2 is required.</p><button onclick="location.reload()">Try again</button></div>`;
+		if (window.AIHub?.active) window.AIHub.fail(error.message);
+	}
+}
+function solvePlaythrough() {
+	config.invincible = true;
+	const log = [];
+	function route(x, z) {
+		const r = routeTo(x, z);
+		if (!r.ok)
+			throw new Error("Cannot reach " + x + "," + z + " floor " + state.floor);
+		log.push("route " + x + "," + z);
+	}
+	function act() {
+		if (me().lit <= 0) strike(me());
+		interact(me());
+	}
+	route(4, 5);
+	act();
+	route(-14, -8);
+	act();
+	route(4.2, 5.5);
+	act();
+	route(12, 5.5);
+	act();
+	route(-14, -8);
+	act();
+	route(14, -7);
+	act();
+	route(-14, -8);
+	act();
+	route(0, 1.8);
+	act();
+	route(0, -7);
+	act();
+	route(14, 8);
+	act();
+	route(14, 8);
+	act();
+	route(14, 8);
+	act();
+	route(0, 9.5);
+	act();
+	return {
+		won: state.phase === "won",
+		log,
+		elapsed: state.elapsed,
+		matches: state.matches,
+		pieces: me().pieces,
+	};
+}
+boot();
+
+</script>
+<script type="application/json" id="cc-matrix-run">{"schema":2,"tool":"cc-matrix","stampedAt":"2026-11-06T05:15:52.223Z","id":"gpt-6.1-sol-ultra__20261105-215200__x577f0c__Haunted-House-Party","lab":"OpenAI","cli":"Codex CLI","aiHub":{"name":"Haunted House Party","tagline":"The guests are dead. The evening is alive.","description":"Explore a moonlit, ink-outlined mansion by matchlight. Carry one object at a time, outwit spiders, bats and a wall-walking host, and reunite a broken urn before you lose your last nerve; bring friends for shared-house co-op.","type":"Game","genre":"Horror","source":"Haunted House (Atari 2600, 1982)","series":"Haunted House","players":"1–4","controls":"WASD/left stick move; Space/Square light; E/Cross interact; Shift/Circle dodge; Q/Triangle drop; Tab/L1 journal; Esc/Options pause; touch drag, context tap and double-tap dodge.","tags":["3d","isometric","co-op","horror","exploration","retro"],"model":"GPT-6.1 Sol","effort":"ultra","harness":"Codex","sourceDate":"2026-11-06T04:52:00.706Z","themeColor":"#0a171f","session":"1","sessionPlayers":"1-4","sessionMode":"shared-world","sessionGoal":"Join three pieces of the family urn and escape with your party.","sessionHowto":"Left stick / WASD to move; Cross / E interact; Square / Space light; Circle / Shift dodge; Triangle / Q drop; L1 / Tab journal.","sessionMinutes":"8","provenance":{"sourceKind":"cc-matrix-run","artifactId":"gpt-6.1-sol-ultra__20261105-215200__x577f0c__Haunted-House-Party","sourceDate":"2026-11-06T04:52:00.706Z"}},"result":{"id":"gpt-6.1-sol-ultra__20261105-215200__x577f0c__Haunted-House-Party","agent":"gpt-6.1-sol","provider":"codex","effort":"ultra","ultracode":false,"source":"HauntedHouse1982","genre":"genre-v3","perspective":"pov-engine-v4","gameTitle":"ttl-riff","research":"res-src","package":"pkg-html-v3","techStack":"tech-v6","artDirection":"art-cel-v2","animation":"ani-engine-v2","audio":"aud-code-v3","online":"multi-ai-hub","workspace":"ws-sub-v3","performance":"perf-max-v2","testing":"test-tools-v3","spend":"spend-free","premise":"prem-inspired","scope":"scope-inspired","attractMode":"attr-10s","multiplayer":"mp-hub","tone":"tone-src-v2","uiux":"ui-10ft-v4","done":"done-full","sourceInfo":"info-exit-v3","testingFeedback":"tf-4q","engineFeedback":"ef-6q-v2","promptFeedback":"pf-4q-v2","goal":"on-exit-v2","model":"gpt-6.1-sol","cliVersion":"0.166.0","promptVersion":"2e12c7a2","variantHashes":{"source":"ef68d856","genre":"5917dd6a","perspective":"69673a49","gameTitle":"504804f8","research":"4d1f1ee4","package":"dd8f52ae","techStack":"84a623aa","artDirection":"59b07781","animation":"25672c4c","audio":"0abe1411","online":"7601bd74","workspace":"2dd7c02e","performance":"b911bf18","testing":"42631416","spend":"9511cae8","premise":"cc0f429b","scope":"46b0fba2","attractMode":"0d642414","multiplayer":"b62eb499","tone":"3bfc327e","uiux":"f4edc796","done":"cb3a46b6","sourceInfo":"8fe63a44","testingFeedback":"95f71baf","engineFeedback":"25041b09","promptFeedback":"7ce5dc6e","goal":"7559d614"},"goalSkipped":true,"status":"ok","exitCode":0,"wallMinutes":23.85855,"costUsd":null,"costSource":"none","inputTokens":28005736,"cachedTokens":27638144,"cacheWriteTokens":0,"outputTokens":144124,"reasoningTokens":49064,"turns":1,"toolCalls":150,"tools":{"command_execution":134,"web_search":3,"collab_tool_call":1,"extension":2,"image_view":5,"collab_agent_tool_call":4,"file_change":1},"toolErrors":10,"models":{"gpt-6.1-sol":{"uncachedInputTokens":367592,"cacheReadTokens":27638144,"cacheWriteTokens":0,"outputTokens":144124,"reasoningTokens":49064}},"isError":false,"sessionLog":"read","apiCalls":288,"subagents":3,"compactions":0,"firstTokenMs":2947,"contextWindow":828400,"helpers":{"agents":3,"inputTokens":20440395,"cachedTokens":20175232,"cacheWriteTokens":0,"outputTokens":94006,"reasoningTokens":34238,"apiCalls":209},"uncachedInputTokens":367592,"totalTokens":28149860,"apiCostUsd":4.9402384,"replyChars":2287,"delivered":true,"kb":150,"loc":3206,"files":34,"todos":0,"gameSha256":"b5126520974225e48e7f9bf75ff7966d608a3eadebe61c614cba4bb94062d433","entry":"gpt-6.1-sol-ultra__20261105-215200__x577f0c__Haunted-House-Party/work/Haunted-House-Party-Haunted-House-1982-gpt-6.1-sol-ultra-20261105-215200.html","exitInterview":"ok","startedAt":"2026-11-06T04:52:00.706Z","finishedAt":"2026-11-06T05:15:52.219Z","timeZone":"America/Vancouver","isolated":true},"prompt":{"version":"2e12c7a2","number":7,"savedAt":"2026-11-06T02:02:45.318Z","firstRanAt":"2026-11-05T04:18:53.957Z","template":"SOURCE: {{source}}\n\nGenre: {{genre}}\n\nPerspective: {{perspective}}\n\nGame Title: {{gameTitle}}\n\nResearch: {{research}}\n\nPackage: {{package}}\n\nTech Stack: {{techStack}}\n\nArt Direction: {{artDirection}}\n\nAnimation: {{animation}}\n\nAudio: {{audio}}\n\nOnline: {{online}}\n\nWorking Environment and deliverable:\n{{workspace}}\n\nPerformance: {{performance}}\n\nTesting: {{testing}}\n\nEffort: {{spend}}\n\n## This computer\n{{machine}}\n\n## Goal\n\n{{premise}}\n\nScope\n\n{{scope}}\n\nAttract Mode: {{attractMode}}\n\nMultiplayer: {{multiplayer}}\n\nNarrative tone: {{tone}}\n\n## UI & UX: {{uiux}}\n\n## Done\n{{done}}\n\n## Source Information\n{{sourceInfo}}\n\nTesting Feedback\n\n{{testingFeedback}}\n\nEngine Feedback\n\n{{engineFeedback}}\n\nPrompt Feedback\n\n{{promptFeedback}}","text":"SOURCE: Haunted House - 1982\n\nGenre: Pick the game genre(s) that best fit the source and would make the best game.\n\nPerspective: Pick the camera perspective(s) that best fit the genre and source and would make the best game.\n\nGame Title: A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).\n\nResearch: Research the source before you start: its mechanics, levels, enemies, look and sound.\n\nPackage: For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-215200].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.\n\nTech Stack: Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.\n\nArt Direction: Use a stylized cel-shaded / ink look for the game.\n\nAnimation: Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.\n\nAudio: All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.\n\nOnline: https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub\n\nWorking Environment and deliverable:\nCreate a subfolder called [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-215200] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-215200].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.\n\nPerformance: Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.\n\nTesting: Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.\n\nEffort: Spend effort however you see fit.\n\n## This computer\nChecked 2026-11-05 19:08 (America/Vancouver) by node check-environment.mjs.\n\n- **Computer:** IVY-DESK-1747k: Intel(R) Core(TM) i7-14700F, 20 cores, 16 GB RAM, 8 GB swap. Ubuntu 26.04.1 LTS on WSL2 (Linux 6.18.33.2-microsoft-standard-WSL2).\n- **Space:** 757 GB free in the home folder. /tmp: 7.8 GB, in memory (tmpfs), 7.7 GB free when checked.\n- **Display:** none for runs (they run with DISPLAY unset), so a headed browser needs xvfb-run.\n- **Browsers:** Playwright 1.63.0 for Python (from playwright.sync_api import sync_playwright), with Chromium 153.0 (WebGL 2, software-rendered; WebGPU, software-rendered, when started with --enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader), Firefox 155.0 (no WebGL), WebKit 26.6 (WebGL 2) already downloaded. Phone and tablet device profiles are built in.\n  Python's Playwright is in its own environment, not the system Python (python3 can't import it): run scripts that drive a browser with `~/.local/share/pipx/venvs/playwright/bin/python script.py`, or `uv run --with playwright==1.63.0 python script.py`.\n  WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game's state instead.\n  For Node, `npm install playwright@1.63.0` in your folder uses the browsers already downloaded; another version downloads its own.\n- **Tools:** node 24.21.0, npm 12.1.0, python3 3.14.4, pip3 25.1.1, git 2.53.0, gh 2.101.0, curl 8.18.0, wget 1.25.0, jq 1.8.1, ffmpeg 9.0.2, ffprobe 9.0.2, sqlite3 3.46.1, zip 3.0, unzip 6.00, rustc 1.98.1, cargo 1.98.1, go 1.27.1, java 21.0.12, xvfb-run, magick 7.1.2, sox 14.4.2, bun 1.3.14, deno 2.9.7, uv 0.12.18, tsc 5.9.3, wasm-bindgen 0.2.129.\n- **Rust:** rustup's toolchains 1.98.1, stable; the wasm32-unknown-unknown target on 1.98.1, stable.\n- **Not installed:** lighthouse, shot-scraper, esbuild.\n- **Network:** internet works (github.com, registry.npmjs.org).\n\n### What this computer doesn't have\n\nNo script can check these, so they're written by hand. Test with the stand-ins; anything that needs the real thing is checked as far as it can be here, never required.\n\n- **No physical controller.** Emulate one: replace navigator.getGamepads with a stub that returns a pad in the standard mapping (Playwright's add_init_script / addInitScript).\n- **No touch device.** Use Playwright's phone and tablet profiles, which have touch, and tap with page.touchscreen.\n- **Nobody to listen.** Check sound by what Web Audio produces: render it with an OfflineAudioContext, or read levels from an AnalyserNode.\n- **No second player.** Play multiplayer with two browser pages (or contexts) on this computer.\n- **No real iPhone or iPad.** WebKit with an iPhone profile is the closest; it isn't iOS Safari.\n- **No TV.** Judge the 10-foot view from screenshots at 1920×1080.\n\n### Sharing this computer\n\n- Other agents run here at the same time. Keep one or two browsers open at once, and close them when you're done.\n- Keep every file you make inside your own folder, not /tmp or a parent folder: /tmp is shared.\n- The browsers are already downloaded: don't run `playwright install` or `playwright install-deps`.\n- The system Python has no packages. For one (Pillow, numpy …), use uv: `uv run --with pillow python script.py`, adding `--with playwright==1.63.0` when the script drives a browser too (a newer Playwright can't find the browsers here).\n\n## Goal\n\nBuild an original game inspired by the source.\n\nScope\n\nCreate a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.\n\nAttract Mode: After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.\n\nMultiplayer: Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.\n\nNarrative tone: Use a writing style similar to the source’s.\n\n## UI & UX: 10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible\n\n## Done\nNo TODOs, placeholders, or stubbed features. The demo is complete.\n\n## Source Information\nCRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: 2026-11-05 21:52:00\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: Codex CLI (headless); Linux\n- Model: OpenAI, gpt-6.1-sol, reasoning effort ultra\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.\n\nTesting Feedback\n\n- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?\n\nEngine Feedback\n\n- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?\n\nPrompt Feedback\n\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?\n","goal":null,"sections":{"source":{"id":"HauntedHouse1982","text":"Haunted House - 1982","hash":"ef68d856"},"genre":{"id":"genre-v3","text":"Pick the game genre(s) that best fit the source and would make the best game.","hash":"5917dd6a"},"perspective":{"id":"pov-engine-v4","text":"Pick the camera perspective(s) that best fit the genre and source and would make the best game.","hash":"69673a49"},"gameTitle":{"id":"ttl-riff","text":"A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).","hash":"504804f8"},"research":{"id":"res-src","text":"Research the source before you start: its mechanics, levels, enemies, look and sound.","hash":"4d1f1ee4"},"package":{"id":"pkg-html-v3","text":"For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.","hash":"dd8f52ae"},"techStack":{"id":"tech-v6","text":"Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.","hash":"84a623aa"},"artDirection":{"id":"art-cel-v2","text":"Use a stylized cel-shaded / ink look for the game.","hash":"59b07781"},"animation":{"id":"ani-engine-v2","text":"Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.","hash":"25672c4c"},"audio":{"id":"aud-code-v3","text":"All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.","hash":"0abe1411"},"online":{"id":"multi-ai-hub","text":"https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub","hash":"7601bd74"},"workspace":{"id":"ws-sub-v3","text":"Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.","hash":"2dd7c02e"},"performance":{"id":"perf-max-v2","text":"Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.","hash":"b911bf18"},"testing":{"id":"test-tools-v3","text":"Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.","hash":"42631416"},"spend":{"id":"spend-free","text":"Spend effort however you see fit.","hash":"9511cae8"},"premise":{"id":"prem-inspired","text":"Build an original game inspired by the source.","hash":"cc0f429b"},"scope":{"id":"scope-inspired","text":"Create a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.","hash":"46b0fba2"},"attractMode":{"id":"attr-10s","text":"After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.","hash":"0d642414"},"multiplayer":{"id":"mp-hub","text":"Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.","hash":"b62eb499"},"tone":{"id":"tone-src-v2","text":"Use a writing style similar to the source’s.","hash":"3bfc327e"},"uiux":{"id":"ui-10ft-v4","text":"10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible","hash":"f4edc796"},"done":{"id":"done-full","text":"No TODOs, placeholders, or stubbed features. The demo is complete.","hash":"cb3a46b6"},"sourceInfo":{"id":"info-exit-v3","text":"CRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: {{date}}\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: {{environment}}\n- Model: {{lab}}, {{model}}, reasoning effort {{effort}}\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.","hash":"8fe63a44"},"testingFeedback":{"id":"tf-4q","text":"- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?","hash":"95f71baf"},"engineFeedback":{"id":"ef-6q-v2","text":"- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?","hash":"25041b09"},"promptFeedback":{"id":"pf-4q-v2","text":"- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?","hash":"7ce5dc6e"},"goal":{"id":"on-exit-v2","text":"the bundled single .html file exists in this folder's root, every feature in TASK.md that can be done on this computer is implemented with no TODOs, placeholders or stubs, exit-interview.json in this folder's root parses as JSON and answers every field, and your final reply contains the Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections.","hash":"7559d614"}}},"interview":{"file":"exit-interview.json","answers":{"sourceInformation":{"date":"2026-11-05 21:52:00","source":"Haunted House (Atari 2600, 1982)","plan":"none","genre":"Survival horror and puzzle adventure","perspective":"Isometric third-person","tech":"Three.js r180 (0.180.0) WebGPURenderer; WebGPU with WebGL 2 fallback; Rapier 0.19.3; Gamepad API; Web Audio API; PeerJS 1.5.5; AI Hub Session Protocol v1, client 1.4.0; HTML/CSS/JavaScript","artDirection":"Procedural cel-shaded and ink-outlined 3D mansion, moonlit teal, warm amber matches and illustrated furnishings","animation":"Three.js AnimationMixer, AnimationClip and keyframe tracks for walking, breathing, ghosts, bat wings, spider legs and clocks; procedural secondary effects","audio":"Code-generated Web Audio waltz at 10% music volume by default, 16 synthesized sound effects and Animalese-style gibberish voices; no audio files","online":"AI Hub host-authoritative shared-world co-op for 1–4; standalone PeerJS/WebRTC co-op for 1–4 with same-origin BroadcastChannel transport; shared-screen local co-op for 1–2","testing":"Headless Chromium 153 with Playwright 1.63; software WebGPU state checks; complete normal-physics and attract playthroughs; emulated standard gamepad, keyboard, mouse and touch; OfflineAudioContext; file:// launch; TV screenshots through WebGL fallback; official AI Hub harness; actual WebRTC with loopback enabled","research":"Atari official Haunted House source page (https://atari.com/pages/hauntedhouse); original instruction manual (https://static.atariage.com/manual_html_page.php?SoftwareLabelID=233); official AI Hub documentation and harness; Three.js r180 WebGPURenderer source; Rapier character-controller documentation. Researched urn, one-hand inventory, matches, four floors/six rooms, enemies, darkness and sound cues.","environment":"Codex CLI (headless); Linux","model":"OpenAI, gpt-6.1-sol, reasoning effort ultra","usage":"added on import"},"testingFeedback":[{"question":"How many issues did testing catch?","answer":"Testing caught 2 game issues: furniture crowded a stair landing and delayed initialization could miss the four-player Hub handshake deadline. Both were fixed."},{"question":"How many would be considered critical issues / game breaking?","answer":"1 critical integration issue: the four-player Hub startup deadline could prevent a round from starting. The stair issue blocked the scripted route but could be approached from an adjacent point."},{"question":"What was the most helpful test you ran?","answer":"The complete four-floor playthrough through normal Rapier movement, pickups, locks, urn merging, stairs and escape was most helpful; it found the blocked landing."},{"question":"What was the least helpful test you ran?","answer":"Initial headless WebGPU screenshots were least helpful because they could be blank. Runtime state checks and WebGL diagnostic screenshots provided useful evidence."}],"engineFeedback":[{"question":"What did you like most about the engine?","answer":"Three.js scene graphs and AnimationMixer made it straightforward to build expressive procedural characters, distinct rooms and reusable native animation clips."},{"question":"Did you get stuck or guess wrong?","answer":"Headless WebGPU framebuffer capture was unreliable. I also initially placed the Hub handshake after expensive initialization; the final game connects in the head before loading its modules."},{"question":"What was the most important thing you had to build yourself?","answer":"The most important custom system was the shared game state: one-hand inventory, urn assembly, mansion navigation and authoritative co-op synchronization."},{"question":"What was the hardest part about using the engine?","answer":"The hardest part was keeping Rapier colliders and navigation synchronized with changing floor decorations while supporting every input device."},{"question":"What did you change in the engine, and why? (none if nothing)","answer":"none; no engine source was modified."},{"question":"If you could change one thing about the engine, what would it be?","answer":"I would improve reliable WebGPU framebuffer capture in headless software browsers."}],"promptFeedback":[{"question":"What did you like most about this prompt?","answer":"The controller-first UX, attract mode, source research and concrete packaging requirements gave the project a clear and useful target."},{"question":"What was confusing?","answer":"Haunted House (1982) can refer to the Atari 2600 game or a Gottlieb pinball table. I used the Atari 2600 game."},{"question":"What was the hardest thing to do?","answer":"The hardest requirement was completing the gameplay, four input styles, live developer tools and authoritative multiplayer together inside one shareable HTML file."},{"question":"What would you change in this prompt?","answer":"I would specify the source platform and put the mandatory feedback fields in one compact schema at the beginning."}],"aiHub":{"name":"Haunted House Party","tagline":"The guests are dead. The evening is alive.","description":"Explore a moonlit, ink-outlined mansion by matchlight. Carry one object at a time, outwit spiders, bats and a wall-walking host, and reunite a broken urn before you lose your last nerve; bring friends for shared-house co-op.","type":"Game","genre":"Horror","source":"Haunted House (Atari 2600, 1982)","series":"Haunted House","players":"1–4","controls":"WASD/left stick move; Space/Square light; E/Cross interact; Shift/Circle dodge; Q/Triangle drop; Tab/L1 journal; Esc/Options pause; touch drag, context tap and double-tap dodge.","tags":["3d","isometric","co-op","horror","exploration","retro"]}},"reply":"[Play Haunted House Party](~/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-215200__x577f0c/work/Haunted-House-Party-Haunted-House-1982-gpt-6.1-sol-ultra-20261105-215200.html) · [Exit interview JSON](~/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-215200__x577f0c/work/exit-interview.json)\n\nComplete single-file game with four floors, 24 rooms, controller/mouse/touch support, attract replay, developer tools, and local/online co-op. Internet access is needed for CDN dependencies.\n\n**Source Information:** Date: 2026-11-05 21:52:00. Source: Atari’s *Haunted House* (1982), researched through [Atari](https://atari.com/pages/hauntedhouse) and the [original manual](https://static.atariage.com/manual_html_page.php?SoftwareLabelID=233). Plan: none. Genre: survival horror/puzzle adventure. Perspective: isometric third-person. Tech: Three.js r180, WebGPU with WebGL 2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, AI Hub client 1.4.0. Art: procedural cel/ink mansion. Animation: native AnimationMixer clips. Audio: synthesized music, effects and gibberish voices; music defaults to 10%. Online: host-authoritative co-op for 1–4; local play for 1–2. Testing: headless scripts, emulated inputs, audio rendering, playthroughs and visual review. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, ultra. Usage: added on import.\n\n**Testing Feedback:** 29 automated checks passed, plus TV visual review. Testing caught two issues, including one critical Hub startup issue; both were fixed. The complete physics playthrough was most helpful. Blank headless WebGPU screenshots were least helpful.\n\n**Engine Feedback:** Scene graphs and native animation worked well. WebGPU capture and initialization timing needed correction. Custom inventory, navigation and authoritative co-op were the main systems built. Collision synchronization was hardest. Engine changes: none. Desired improvement: reliable headless WebGPU capture.\n\n**Prompt Feedback:** The controller-first and packaging requirements were useful. The source platform was ambiguous between Atari and pinball. Integrating the complete game and multiplayer was hardest. I’d specify the source platform explicitly.\n\nAll feedback is also included in About/Credits and the validated JSON."}}</script>
+</body></html>

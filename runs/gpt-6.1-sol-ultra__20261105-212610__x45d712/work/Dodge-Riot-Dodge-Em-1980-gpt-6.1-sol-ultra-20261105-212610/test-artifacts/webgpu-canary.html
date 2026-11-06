@@ -1,0 +1,59 @@
+<!doctype html><meta charset="utf-8"><title>Dodge Riot WebGPU canary</title>
+<canvas id="c" width="256" height="256"></canvas>
+<script type="module">
+window.canary={done:false,pass:false,mode:new URLSearchParams(location.search).get('mode')||'raw',errors:[]};
+addEventListener('error',e=>canary.errors.push(e.message));
+addEventListener('unhandledrejection',e=>canary.errors.push(String(e.reason)));
+let device,context,renderer;
+try{
+ const mode=canary.mode;
+ const c=document.querySelector('canvas');
+ if(mode.startsWith('three')){
+  const T=await import('https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js');
+  renderer=new T.WebGPURenderer({canvas:c,antialias:true});
+  await renderer.init(); renderer.setSize(256,256,false);
+  const scene=new T.Scene();scene.background=new T.Color('#000000');
+  const camera=new T.OrthographicCamera(-1,1,1,-1,.1,10);camera.position.set(0,0,3);
+  const material=mode==='three-toon'?new T.MeshToonMaterial({color:0xff0000}):new T.MeshBasicMaterial({color:0xff0000});
+  scene.add(new T.Mesh(new T.BoxGeometry(1,1,1),material));
+  scene.add(new T.AmbientLight(0xffffff,3));
+  device=renderer.backend.device;context=renderer.backend.context;
+  renderer.onDeviceLost=info=>{canary.lost={message:info.message,reason:info.reason};};
+  renderer.render(scene,camera);
+ }else{
+  const adapter=await navigator.gpu.requestAdapter();
+  if(!adapter)throw new Error('No WebGPU adapter');
+  window.retainedAdapter=adapter;canary.adapterFeatures=[...adapter.features];
+  device=await adapter.requestDevice(mode==='raw-all-features'?{requiredFeatures:[...adapter.features]}:{});
+  context=c.getContext('webgpu');
+  const format=navigator.gpu.getPreferredCanvasFormat();
+  context.configure({device,format,alphaMode:'opaque',usage:GPUTextureUsage.RENDER_ATTACHMENT|GPUTextureUsage.COPY_SRC});
+  const module=device.createShaderModule({code:`
+   @vertex fn v(@builtin(vertex_index) i:u32)->@builtin(position) vec4f{
+    var p=array<vec2f,3>(vec2f(-.8,-.8),vec2f(.8,-.8),vec2f(0,.8));
+    return vec4f(p[i],0,1);
+   }
+   @fragment fn f()->@location(0) vec4f{return vec4f(1,0,0,1);}
+  `});
+  const pipeline=device.createRenderPipeline({layout:'auto',vertex:{module,entryPoint:'v'},fragment:{module,entryPoint:'f',targets:[{format}]},primitive:{topology:'triangle-list'}});
+  const encoder=device.createCommandEncoder();
+  const pass=encoder.beginRenderPass({colorAttachments:[{view:context.getCurrentTexture().createView(),clearValue:{r:0,g:0,b:0,a:1},loadOp:'clear',storeOp:'store'}]});
+  pass.setPipeline(pipeline);pass.draw(3);pass.end();device.queue.submit([encoder.finish()]);
+ }
+ window.retainedDevice=device;window.retainedRenderer=renderer;
+ device.lost.then(info=>{canary.lost={message:info.message,reason:info.reason};});
+ device.addEventListener('uncapturederror',e=>canary.errors.push(e.error.message));
+ const buffer=device.createBuffer({size:256*256*4,usage:GPUBufferUsage.COPY_DST|GPUBufferUsage.MAP_READ});
+ const encoder=device.createCommandEncoder();
+ encoder.copyTextureToBuffer({texture:context.getCurrentTexture()},{buffer,bytesPerRow:256*4},{width:256,height:256});
+ device.queue.submit([encoder.finish()]);
+ await buffer.mapAsync(GPUMapMode.READ);
+ const bytes=new Uint8Array(buffer.getMappedRange());
+ canary.center=[...bytes.slice((128*256+128)*4,(128*256+128)*4+4)];
+ canary.nonzero=bytes.reduce((a,b,i)=>a+(i%4!==3&&b>0?1:0),0);
+ buffer.unmap();
+ await new Promise(r=>setTimeout(r,1000));
+ canary.pass=!canary.lost&&canary.errors.length===0&&canary.nonzero>100;
+}catch(e){canary.errors.push(String(e.stack||e));}
+canary.done=true;
+</script>

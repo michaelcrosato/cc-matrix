@@ -1,0 +1,15 @@
+import {build} from 'esbuild';
+import {readFile,writeFile} from 'node:fs/promises';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const dir=path.dirname(fileURLToPath(import.meta.url));
+const name=path.basename(dir);
+const result=await build({entryPoints:[path.join(dir,'main.js')],bundle:true,format:'esm',platform:'browser',target:'es2022',write:false,minify:true,legalComments:'none',plugins:[{name:'three-webgpu',setup(b){b.onResolve({filter:/^three$/},()=>({path:path.join(dir,'node_modules/three/build/three.webgpu.js')}));}}]});
+const template=await readFile(path.join(dir,'template.html'),'utf8');
+const hub=await readFile(path.join(dir,'hub/session.js'),'utf8');
+const credits=await readFile(path.join(dir,'../exit-interview.json'),'utf8');
+const licenses={three:await readFile(path.join(dir,'node_modules/three/LICENSE'),'utf8'),rapier:await readFile(path.join(dir,'RAPIER-LICENSE.txt'),'utf8')};
+JSON.parse(credits);
+const html=template.replace('<!-- HUB_CLIENT -->',`<script>${hub.replaceAll('</script','<\\/script')}</script>`).replace('CREDITS_DATA',credits.replaceAll('<','\\u003c')).replace('GAME_CODE',result.outputFiles[0].text.replaceAll('</script','<\\/script')).replace('</body>',`<script type="application/json" id="third-party-licenses">${JSON.stringify(licenses).replaceAll('<','\\u003c')}</script></body>`);
+await writeFile(path.join(dir,'../',name+'.html'),html);
+console.log('Built '+name+'.html');

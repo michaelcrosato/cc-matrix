@@ -1,0 +1,13 @@
+[**Play Pitfall: The Lost Lunch**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-200837__x8e2f53/work/Pitfall-The-Lost-Lunch-Pitfall-II-Lost-Caverns-gpt-6.1-sol-max-20261105-200837.html) — open directly in a browser. All dependencies are embedded.
+
+[Exit interview JSON](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-200837__x8e2f53/work/exit-interview.json) · [Controls and development files](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-200837__x8e2f53/work/Pitfall-The-Lost-Lunch-Pitfall-II-Lost-Caverns-gpt-6.1-sol-max-20261105-200837/README.md)
+
+**Source Information:** Date: 2026-11-05 20:08:37. Source: *Pitfall II: Lost Caverns* (1984). Plan: none. Genre: exploration platform adventure. Perspective: side-on 2.5D, orthographic. Tech: Three.js 0.180.0, WebGPU with WebGL2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, WebRTC, AI Hub protocol 1/client 1.4.0, esbuild 0.25.12. Art: procedural cel shading and ink outlines. Animation: native AnimationMixer clips. Audio: synthesized music, effects and Animalese-style voices; music defaults to 10%. Online: 1–4 Hub co-op; two-player couch/direct co-op. Testing: headless gameplay, input, audio, networking and visual checks. Research: none; required integration/dependency files inspected. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning max. Usage: added on import.
+
+**Testing Feedback:** Nine issues found, including two progression blockers; all addressed. **149 gameplay/network checks and 19 presentation checks passed.** Most helpful: the complete playthrough with normal hazards. Least helpful: blank headless WebGPU screenshots; WebGL2 captures supported visual review. Physical hardware feel, audible mix and internet NAT traversal remain unknown.
+
+**Engine Feedback:** Native toon materials and AnimationMixer worked well. Initial mistakes involved terrain thickness, the swim boundary and remote input pulses. I built the exploration rules, controller menus, persistence and network authority. Synchronizing physics, animation and snapshots was hardest. Engine changes: none. Desired improvement: a controller input and UI focus layer.
+
+**Prompt Feedback:** The source focus, controller philosophy and attract/dev requirements gave clear direction. The research restriction alongside a required live integration contract needed interpretation. Completing exploration and multiplayer in one file was hardest. I would include the hub contract directly or explicitly distinguish implementation downloads from research.
+
+All four information and feedback categories are also included in the game’s About screen.

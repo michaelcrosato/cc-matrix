@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 19:13:21",
+    "source": "Combat (Atari, 1977)",
+    "plan": "none",
+    "genre": "Arcade vehicle shooter; competitive arena duels",
+    "perspective": "Orthographic top-down tanks and jets; orthographic side-view biplanes",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer and TSL; Rapier 3D 0.19.3; Gamepad API; Web Audio; WebRTC; AI Hub Session Protocol v1 client 1.4.0; HTML/CSS/JavaScript",
+    "artDirection": "Stylized cel shading, ink outlines, warm printed field-manual graphics and procedural 3D toy dioramas",
+    "animation": "Native Three.js AnimationMixer and AnimationClip keyframe tracks for recoil, suspension, antenna sway, propellers, barrel rolls and jet flames",
+    "audio": "Code-generated swing march at 10% music volume by default; synthesized engines, weapons, ricochets and explosions; formant-filtered gibberish voices; no audio files",
+    "online": "Host-authoritative shared-world AI Hub sessions for 2 players; standalone direct WebRTC invite/reply duels; same-screen 2-player versus",
+    "testing": "Headless Chromium WebGPU state and geometry submission; WebGL visual captures; WebKit touch-profile gameplay; complete scripted five-round playthrough; virtual standard gamepad; touch input; OfflineAudioContext signal analysis; two-page WebRTC movement and scoring; two-seat AI Hub harness standard/server/host-leave scenarios at 150 ms latency, 50 ms jitter and 5% loss. Full suite: 37/37 checks passed. Physical controller, listening quality, real TV and real iOS behavior: unknown.",
+    "research": "Atari Combat page and original 1977 manual transcription for mechanics, playfields, vehicles, presentation and tone; published source-sound descriptions; official Three.js/Rapier documentation; AI Hub Session Protocol v1, upstream client and harness. Original audio listening: unknown.",
+    "environment": "Codex CLI (headless); Linux (Ubuntu 26.04 on WSL2)",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and visual review caught eight issues: jet AI stalemates, a texture-binding error during field changes, phone HUD/title layout overlaps, hidden map lettering, missing remote winner/statistics, an inaccurate direct-shell sight, overlapping attract-mode labels, and keyboard labels on touch prompts. All were fixed.",
+    "Two were critical: field changes could break the WebGL compatibility renderer, and jet AI duels could stall without scoring. No known critical issue remains after the final checks.",
+    "The complete five-round AI playthrough was most helpful: it exposed a 0–0 jet stalemate. The final run completed every field with 41 total hits. The full suite passed 37/37 checks, including three AI Hub harness scenarios, virtual gamepad, touch, WebKit, WebRTC scoring and offline audio.",
+    "Software-headless WebGPU screenshots and pixel readback were least helpful: the canvas could be blank and GPUBuffer mapping failed. WebGPU renderer/game-state checks and WebGL visual captures provided usable evidence."
+  ],
+  "engineFeedback": [
+    "Three.js combines direct procedural geometry, composable TSL shading and native animation with a WebGPU renderer that also supports WebGL 2 compatibility.",
+    "Aircraft contacts and symmetric steering initially produced a non-scoring jet duel. Sensor hulls, wrap-aware targeting and varied throttle resolved it. Explicit TSL texture nodes and resource cleanup fixed a field-change texture-binding error in the WebGL backend.",
+    "The complete arena rules, AI navigation and bank-shot planning, controller-first menus, procedural audio and shared-world replication.",
+    "Managing renderer-owned procedural textures and materials during arena swaps, while keeping physics, animation and network state coherent.",
+    "none",
+    "A built-in small-game input and deterministic multiplayer toolkit would reduce the amount of infrastructure each game must write."
+  ],
+  "promptFeedback": [
+    "The distinctive source, procedural audio and ten-foot controller requirements give the game a strong creative direction.",
+    "The boundary between a complete vertical slice and the original cartridge's 27 variants was unspecified; I chose five rounds that cover the main mechanics.",
+    "Making standalone and AI Hub multiplayer, touch assistance and several vehicle modes share the same complete interface.",
+    "Specify a preferred standalone signalling method and a target demo duration."
+  ],
+  "aiHub": {
+    "name": "Combaton",
+    "tagline": "Pass the blast.",
+    "description": "Out-fox your rival in five ink-and-paper vehicle duels. Bend tank shells, bank impossible shots, disappear, then take the fight into cloud cover with biplanes and jet formations.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Combat (1977)",
+    "series": "",
+    "players": "1–2",
+    "controls": "Left stick/WASD move; right stick/mouse aim; R2/left click fire and guide; L1/Cross/Space trick; Options/Esc pause.",
+    "tags": [
+      "3d",
+      "arcade",
+      "versus",
+      "top-down",
+      "vehicles",
+      "retro"
+    ]
+  }
+}

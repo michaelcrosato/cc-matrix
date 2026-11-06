@@ -1,0 +1,4181 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="theme-color" content="#122f2b">
+<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:session-mode" content="ghost">
+<meta name="hub:session-goal" content="Recover eight treasures and reach the Sun Gate. Fastest complete expedition wins; otherwise highest score.">
+<meta name="hub:session-howto" content="Move: left stick or A/D. Jump / release vine: Cross or Space. Climb: up/down. Map: Triangle or M. Pause: Options or Esc.">
+<meta name="hub:session-minutes" content="8">
+<title>Pitfalling for Adventure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#143831;--paper:#f8edcc;--gold:#f6c75d;--red:#d75c39;--muted:#acbbae;--sage:#a9c3a1;font-family:'DM Sans',sans-serif;color:var(--paper);font-synthesis:none}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#183e36}button,input,select{font:inherit}button{cursor:pointer}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--gold);outline-offset:5px}#world{position:fixed;inset:0;display:block;width:100%;height:100%;touch-action:none}#vignette{position:fixed;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 40%,transparent 45%,#071d1938 100%)}#grain{position:fixed;inset:0;pointer-events:none;opacity:.045;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Cpath fill='%23fff' filter='url(%23n)' opacity='.8' d='M0 0h200v200H0z'/%3E%3C/svg%3E")}.hidden{display:none!important}#loading{position:fixed;inset:0;display:grid;place-content:center;text-align:center;background:#153d34;z-index:30}#loading h1{font-family:'Barlow Condensed',Impact,sans-serif;font-size:clamp(42px,6vw,86px);margin:15px}#loading p{color:#b9caaa}#loading .loader{height:3px;width:260px;background:#31584a;margin:20px auto;overflow:hidden}#loading .loader:after{content:'';display:block;width:60%;height:100%;background:var(--gold);animation:load 1.5s infinite alternate}@keyframes load{to{transform:translateX(70%)}}.eyebrow{font-size:13px;font-weight:700;letter-spacing:.24em;text-transform:uppercase}.title-view{position:fixed;inset:0;background:linear-gradient(90deg,#102d29f0 0%,#102d29d9 28%,#102d2930 63%,transparent 100%);display:flex;flex-direction:column;justify-content:center;align-items:flex-start;padding:5vh 6vw}.brand-top{display:flex;align-items:center;gap:13px;color:#d6dfb5;margin-bottom:22px}.brand-top:before{content:'✦';font-size:26px;color:var(--gold)}h1.title{font-family:'Barlow Condensed',Impact,sans-serif;font-size:clamp(66px,8.9vw,150px);line-height:.84;text-transform:uppercase;letter-spacing:-.025em;margin:0;color:var(--paper);font-weight:900;text-shadow:3px 5px 0 #0d2924}.title em{display:block;font-style:normal;font-size:.55em;line-height:1.14;color:var(--gold);letter-spacing:.015em}.title-copy{font-size:clamp(15px,1.5vw,22px);line-height:1.6;color:#d0d8bc;max-width:460px;margin:23px 0 30px}.menu-stack{display:flex;flex-direction:column;gap:10px;width:min(370px,36vw)}.btn{min-height:54px;border:1px solid #dce0bb45;border-radius:3px;color:var(--paper);background:#143c34bd;padding:13px 20px;font-weight:600;font-size:17px;text-align:left;display:flex;gap:14px;align-items:center;justify-content:space-between;transition:background .15s,border-color .15s,transform .15s}.btn:hover,.btn.focused{background:#365844;border-color:var(--gold);transform:translateX(4px)}.btn.primary{background:var(--gold);border-color:var(--gold);color:#203d2f;box-shadow:0 4px 0 #102a23}.btn.primary:hover,.btn.primary.focused{background:#ffe5a0}.btn small{font-size:11px;letter-spacing:.08em;opacity:.7}.menu-inline{display:flex;gap:22px;margin-top:20px}.text-btn{background:none;border:0;color:#ced8b9;padding:5px 0;font-size:14px;letter-spacing:.02em}.text-btn:hover,.text-btn.focused{color:var(--gold);text-decoration:underline}.title-footer{position:absolute;bottom:30px;left:6vw;right:5vw;display:flex;justify-content:space-between;align-items:end;color:#b9c9ab;font-size:12px;letter-spacing:.04em}.stamp{border:1px solid #f6c75d80;color:var(--gold);padding:12px 17px;transform:rotate(-7deg);font-family:'Barlow Condensed',sans-serif;font-size:18px;letter-spacing:.12em;line-height:1.15;text-align:center}.stamp span{display:block;font-size:12px}.glyph{display:inline-flex;min-width:27px;height:27px;border:1px solid currentColor;align-items:center;justify-content:center;border-radius:5px;font:700 12px 'DM Sans',sans-serif;padding:0 6px;margin-right:5px;vertical-align:middle;opacity:.95}.glyph.pad{border-radius:50%;width:27px;padding:0;font-size:18px}.hud{position:fixed;inset:0;pointer-events:none;padding:28px 3.5vw}.hud-top{display:flex;gap:24px;justify-content:space-between;align-items:start}.chapter{background:#112e29e6;padding:13px 20px;border-left:3px solid var(--gold);box-shadow:0 4px 18px #0d211a22}.chapter .eyebrow{color:#b8c5a6;font-size:10px;letter-spacing:.2em}.chapter strong{display:block;font-family:'Barlow Condensed',sans-serif;font-size:26px;letter-spacing:.04em;margin-top:2px}.hud-stats{display:flex;align-items:center;gap:26px;color:var(--paper);background:#112e29e6;padding:11px 18px;border-bottom:2px solid #f8edcc33}.stat{display:flex;align-items:center;gap:9px;font-variant-numeric:tabular-nums}.stat b{font-size:25px}.stat small{display:block;font-size:9px;letter-spacing:.15em;color:#b5c4a5}.stat .icon{font-size:24px;color:var(--gold)}#hearts{font-size:22px;letter-spacing:4px;color:#e99062}#pauseButton{pointer-events:auto;width:47px;height:47px;color:var(--paper);background:#112e29d9;border:1px solid #e3dfb74d;border-radius:50%;font-size:22px}.hud-bottom{position:absolute;left:3.5vw;right:3.5vw;bottom:24px;display:flex;justify-content:space-between;align-items:end;gap:16px}.hintbar{background:#102e29e6;border-bottom:2px solid #b4c5a23d;padding:12px 17px;font-size:14px;color:#dbe1c7;max-width:65%}.objective{text-align:right;font-size:12px;letter-spacing:.03em;color:#e4e2c5;text-shadow:1px 2px 5px #0b211a}.objective strong{display:block;font-size:18px;color:var(--gold);margin-top:4px}#toast{position:fixed;top:20%;left:50%;transform:translateX(-50%);background:#f8edcc;color:#163c30;padding:13px 25px;border:2px solid #153c32;box-shadow:4px 5px 0 #112e29;font-weight:700;text-align:center;pointer-events:none;max-width:85%;z-index:5}#banner{position:fixed;left:50%;top:40%;transform:translate(-50%,-50%);font-family:'Barlow Condensed',sans-serif;font-weight:800;font-size:clamp(50px,7vw,100px);color:var(--paper);text-shadow:3px 4px 0 #163c32;text-align:center;pointer-events:none}#attract{position:fixed;inset:0;pointer-events:none;border:16px solid #102d295e;display:flex;flex-direction:column;justify-content:space-between;align-items:center;padding:24px;text-align:center}#attract strong{font-family:'Barlow Condensed',sans-serif;font-size:32px;letter-spacing:.15em}#attract span{background:#102d29e0;padding:12px 24px;font-size:14px;letter-spacing:.1em}.modal-shade{position:fixed;inset:0;background:#0b2724c9;display:grid;place-items:center;padding:4vh 5vw;z-index:12;backdrop-filter:blur(6px)}.panel{width:min(900px,94vw);max-height:90vh;background:#163d33;border:1px solid #c6d2ac59;padding:32px 38px;box-shadow:8px 9px 0 #082a2455;overflow:auto;scrollbar-color:#829c72 #163d33}.panel.small{width:min(480px,94vw)}.panel h2{font-family:'Barlow Condensed',sans-serif;text-transform:uppercase;font-size:48px;letter-spacing:.02em;margin:0 0 6px;line-height:1}.panel .sub{color:#b6c6a5;font-size:15px;line-height:1.6;margin:13px 0 24px}.panel-head{display:flex;justify-content:space-between;gap:16px;align-items:start;margin-bottom:20px}.close{border:1px solid #c3d0ad77;background:transparent;color:var(--paper);height:38px;width:38px;font-size:23px;border-radius:50%;flex-shrink:0}.rows{display:flex;flex-direction:column;gap:12px}.setting{display:flex;align-items:center;justify-content:space-between;gap:25px;min-height:50px;padding:11px 0;border-bottom:1px solid #d3d4b32b;font-size:17px}.setting small{display:block;font-size:12px;color:#afc29e;margin-top:5px}.setting input[type=range]{width:210px;accent-color:var(--gold)}.setting input[type=checkbox]{width:25px;height:25px;accent-color:var(--gold)}select{max-width:225px;background:#285141;color:var(--paper);padding:10px;border:1px solid #a3b38c;min-height:42px}.value{min-width:40px;display:inline-block;text-align:right;color:var(--gold);font-size:14px;margin-left:10px}.panel-footer{display:flex;gap:12px;margin-top:24px}.panel-footer .btn{flex:1;font-size:15px}.control-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.control-card{background:#0c2c2566;padding:20px;border-left:2px solid #96ae7f}.control-card h3{font-family:'Barlow Condensed',sans-serif;font-size:25px;margin:0 0 12px;color:var(--gold)}.control-card p{font-size:14px;line-height:1.8;margin:5px 0;color:#d0d7ba}.route{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:20px}.route-card{border:1px solid #b8c4a34d;position:relative;padding:16px 12px;background:#224b3b;min-height:134px}.route-card.active{border:2px solid var(--gold);background:#355d41}.route-card .num{color:var(--gold);font-size:13px;letter-spacing:.15em}.route-card h3{font-family:'Barlow Condensed',sans-serif;font-size:23px;margin:10px 0}.route-card p{color:#bcccaa;font-size:12px;margin:5px 0}.treasure-dot{color:#f6c75d}.credits-tabs{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0}.credits-tabs button{color:var(--paper);border:1px solid #aec29c80;background:#285141;padding:10px 12px;font-size:13px}.credits-tabs button.selected{color:#163d33;background:var(--gold)}.credits-copy{font-size:14px;line-height:1.65;color:#d8ddc4}.credits-copy p{margin:12px 0}.credits-copy b{color:var(--gold)}.credits-copy a{color:#f6c75d}.results{width:min(620px,94vw);text-align:center}.results .eyebrow{color:var(--gold);margin-bottom:12px}.result-number{font-family:'Barlow Condensed',sans-serif;font-size:84px;margin:18px 0;color:var(--gold)}.result-stats{display:flex;justify-content:center;gap:40px;margin-bottom:25px;font-size:15px;color:#c3d0ad}.result-stats b{font-size:24px;display:block;color:var(--paper)}#touchJump{position:fixed;right:7vw;bottom:18vh;width:80px;height:80px;border:2px solid #f5e8b698;border-radius:50%;background:#173d325c;color:var(--paper);font-size:22px;z-index:6;touch-action:none}#touchRing{position:fixed;border:2px solid #faf1ca66;border-radius:50%;height:100px;width:100px;pointer-events:none;z-index:6;background:#fff1c311}#touchDot{position:absolute;left:33px;top:33px;width:30px;height:30px;border:1px solid #faf1ca99;border-radius:50%;background:#faf1ca44}#peerNames{position:fixed;inset:0;pointer-events:none}.name-tag{position:absolute;transform:translate(-50%,-100%);padding:3px 7px;background:#123a30d0;border-bottom:2px solid currentColor;font-size:11px;white-space:nowrap}.error-detail{font-size:14px;max-width:550px;line-height:1.6;color:#e4ddc1}.dev-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px 25px}.dev-grid .setting{font-size:14px}.dev-grid input[type=range]{width:110px}.dev-tools{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:20px}.dev-tools .btn{font-size:13px;min-height:43px;padding:8px 12px}.focus-hint{font-size:12px;opacity:.65;margin-top:20px}.badge{border:1px solid #b6c59b55;padding:5px 8px;letter-spacing:.12em;font-size:10px}.hud .badge{position:absolute;top:104px;left:3.5vw;background:#173d32c0}
+.touch-mode .chapter,.touch-mode .hintbar,.touch-mode .objective,.touch-mode .badge,.touch-mode .scorestat,.touch-mode #hearts{display:none!important}.touch-mode .hud-top{justify-content:space-between;flex-wrap:nowrap}.touch-mode .hud-stats{background:#112e2990;gap:16px;padding:8px 10px;border:0;order:0;width:auto}.touch-mode .stat b{font-size:16px}.touch-mode .stat small{display:none}.touch-mode .stat .icon{font-size:18px}
+@media(min-width:1700px){.btn{min-height:63px;font-size:20px}.menu-stack{width:420px}.title-copy{max-width:530px}.panel{transform:scale(1.12)}.hud{padding-top:38px}.hud-stats{padding:16px 23px}.hintbar{font-size:18px}}
+@media(max-width:800px){.title-view{padding:5vh 5vw}.brand-top{margin-bottom:16px;font-size:10px}.title-copy{max-width:300px;font-size:14px;margin:16px 0 20px}.menu-stack{width:280px;max-width:60vw;gap:8px}.btn{min-height:43px;font-size:14px;padding:10px 14px}.menu-inline{margin-top:13px;gap:18px}.title-footer{bottom:18px;left:5vw}.title-footer .stamp{display:none}.title-footer span{font-size:10px}h1.title{font-size:clamp(59px,10vw,90px)}.hud{padding:14px 3vw}.chapter{padding:9px 12px}.chapter strong{font-size:20px}.chapter .eyebrow{font-size:8px}.hud-stats{gap:13px;padding:9px 12px}.stat b{font-size:20px}#hearts{font-size:15px;letter-spacing:2px}.stat .icon{font-size:20px}.stat.scorestat{display:none}#pauseButton{width:37px;height:37px;font-size:17px}.hud-top{gap:8px}.hintbar{font-size:11px;padding:9px 12px}.objective{font-size:10px}.objective strong{font-size:14px}.hud-bottom{bottom:15px;left:3vw;right:3vw}.panel{padding:23px;max-height:91vh}.panel h2{font-size:36px}.panel .sub{font-size:13px;margin:10px 0 16px}.setting{font-size:14px;min-height:43px}.setting input[type=range]{width:130px}.route{gap:8px}.route-card{padding:10px;min-height:110px}.route-card h3{font-size:20px}.control-card{padding:14px}.control-card p{font-size:12px}.dev-grid{gap:0 20px}.dev-grid .setting{font-size:12px}.dev-grid input[type=range]{width:75px}.value{font-size:11px;min-width:24px}.hud .badge{top:78px}.credits-copy{font-size:12px}}
+@media(max-width:540px) and (orientation:portrait){.title-view{justify-content:center;background:linear-gradient(90deg,#102d29e6,#102d2960);padding-bottom:7vh}.brand-top{font-size:9px}h1.title{font-size:20vw}.menu-stack{width:78vw;max-width:78vw}.title-copy{max-width:260px}.title-footer .edition{display:none}.hud-top{flex-wrap:wrap}.chapter{max-width:62%;padding:8px}.hud-stats{order:3;width:100%;justify-content:space-between;background:#112e29aa}.stat.scorestat{display:flex}.hintbar{display:none}.objective{max-width:65%;text-align:left}.hud-bottom{bottom:20px}#pauseButton{margin-left:auto}.route{grid-template-columns:1fr 1fr}.control-grid,.dev-grid{grid-template-columns:1fr}.control-card{padding:12px}.panel{padding:20px}.panel h2{font-size:32px}.dev-tools{grid-template-columns:1fr 1fr}.panel-footer{flex-wrap:wrap}.setting{gap:10px}.credits-tabs{gap:4px}.credits-tabs button{font-size:10px;padding:8px}.hud .badge{top:126px}.stamp{display:none}}
+@media(max-height:580px) and (orientation:landscape){.title-view{padding-top:20px;padding-bottom:20px}.brand-top{margin-bottom:10px;font-size:9px}h1.title{font-size:15vh}.title-copy{font-size:12px;margin:10px 0 12px}.menu-stack{gap:6px;width:280px}.btn{min-height:35px;padding:7px 12px;font-size:13px}.menu-inline{margin-top:7px}.title-footer{bottom:13px;left:auto;right:25px}.title-footer span{max-width:160px}.title-footer .edition{display:none}.panel{padding:20px 25px}.panel h2{font-size:32px}.panel .sub{margin:6px 0 13px}.control-card{padding:10px}.setting{padding:6px 0;min-height:36px}.hud .badge{display:none}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}</script>
+</head><body>
+<canvas id="world" aria-label="Jungle adventure game"></canvas><div id="vignette"></div><div id="grain"></div>
+<div id="loading"><div class="eyebrow">The jungle is calling</div><h1>PITFALLING<br>FOR ADVENTURE</h1><div class="loader"></div><p id="loadMessage">Drawing the trail. Waking the crocodiles.</p></div>
+<main id="title" class="title-view hidden"><div class="brand-top eyebrow">The lost trail · expedition 01</div><h1 class="title">Pitfalling<em>for Adventure</em></h1><p class="title-copy">Eight treasures. One untamed jungle.<br>Mind the gap. And the teeth.</p><nav class="menu-stack" id="titleMenu"><button class="btn primary" data-act="start"><span>Into the jungle</span><span>↗</span></button><button class="btn hidden" id="continueButton" data-act="continue"><span>Continue expedition</span><small>TRAIL SAVED</small></button><button class="btn" data-act="coop"><span>Two explorers</span><small>LOCAL CO-OP</small></button></nav><nav class="menu-inline"><button class="text-btn" data-act="howto">Field guide</button><button class="text-btn" data-act="settings">Options</button><button class="text-btn" data-act="about">About</button></nav><footer class="title-footer"><span id="titlePrompt">A / D to move · Space to leap</span><span class="edition">AN INK & CANOPY ADVENTURE</span><div class="stamp">MIND THE PIT<span>EST. 1982 · REDISCOVERED 2026</span></div></footer></main>
+<section id="hud" class="hud hidden"><div class="hud-top"><div class="chapter"><span class="eyebrow" id="zoneIndex">01 / THE LOST TRAIL</span><strong id="zoneName">FERNWOOD CAMP</strong></div><div class="hud-stats"><span id="hearts">♥ ♥ ♥</span><div class="stat"><span class="icon">◇</span><div><b id="relicCount">0 / 8</b><small>TREASURES</small></div></div><div class="stat scorestat"><div><b id="score">00000</b><small>TRAIL SCORE</small></div></div><div class="stat"><div><b id="timer">08:00</b><small>DAYLIGHT</small></div></div></div><button id="pauseButton" aria-label="Pause" data-act="pause">Ⅱ</button></div><span class="badge hidden" id="modeBadge"></span><div class="hud-bottom"><div id="hint" class="hintbar"></div><div class="objective"><span id="objectiveLine">Follow the fireflies. Bring back the gold.</span><strong id="objectiveTarget">◇ Eight treasures to find</strong></div></div></section>
+<div id="toast" class="hidden" role="status"></div><div id="banner" class="hidden"></div><div id="peerNames"></div>
+<div id="attract" class="hidden"><strong>THE JUNGLE NEVER SLEEPS</strong><span>EXPEDITION IN PROGRESS · PRESS ANY BUTTON TO PLAY</span></div>
+<div id="modal" class="modal-shade hidden"><section id="panel" class="panel"></section></div>
+<button id="touchJump" class="hidden" aria-label="Jump">↑</button><div id="touchRing" class="hidden"><div id="touchDot"></div></div>
+<script id="reportData" type="application/json">{"sourceInformation": {"date": "2026-11-05 20:09:50", "source": "Pitfall! (1982), designed by David Crane and published by Activision", "plan": "none", "genre": "Platform adventure; timed treasure hunt", "perspective": "2.5D side view with a scrolling orthographic camera", "tech": "Three.js 0.180.0 WebGPURenderer (WebGPU, automatic WebGL 2 fallback); Rapier 0.19.3; Gamepad API; Web Audio API; AI Hub session client 1.4.0", "artDirection": "Procedural cel-shaded jungle dioramas with ink contours, engraved ruins and a warm paper palette", "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for explorer poses, crocodile jaws, cobras, scorpions and treasures; procedural pendulum vines, particles and foliage", "audio": "Original code-generated pentatonic marimba music at 10% by default, synthesized effects, filtered Animalese-style gibberish and procedural percussion; no audio files", "online": "AI Hub Session Protocol v1 ghost races for 1–4 players; standalone shared-screen co-op for two players", "testing": "Headless Chromium 153 / Playwright 1.63.0 with software WebGPU, normal-control complete expedition, keyboard and emulated standard gamepads, landscape/portrait touch, file:// sharing, save/load, defeat/victory, attract replay, live analyser and offline synthesized audio. AI Hub harness: 2 players, 4 players at 150 ms latency / 50 ms jitter / 5% packet loss, and host departure. WebGL 2 screenshots for visual review. Physical controller, real touch device, hardware GPU rendering and audio listening: unknown.", "research": "Original Activision Pitfall! manual: 255 circular scenes, 32 treasures, three lives, 20-minute clock, surface hazards and faster underground route. David Crane retrospective interview for vine and crocodile inspiration; VGMPF for the original sparse sound palette. Original level, characters, art and score in this demo.", "environment": "Codex CLI (headless); Linux", "model": "OpenAI, gpt-6.1-sol, reasoning effort max", "usage": "added on import"}, "testingFeedback": ["8 product issues across API checks, automated tests and visual/control review; all resolved. Test-driver mistakes are excluded.", "3 would have blocked loading or normal movement: the Rapier import path, descriptor methods and inactive second-player collision.", "The complete expedition driven by normal movement, jump and climb controls without cheats or teleporting: eight treasures, four vine swings, both caves and the victory screen. The AI Hub harness also verified all three applicable network scenarios.", "Headless software WebGPU screenshots were blank. State checks verified WebGPU execution, and WebGL 2 captures were useful for visual review instead."], "engineFeedback": ["Three.js native animation clips and toon materials work together through WebGPURenderer, and Rapier provides reliable collision queries and a capsule controller.", "I initially used an incorrect Rapier module filename and confused rigid-body descriptor methods with runtime rigid-body methods. Checking the pinned 0.19.3 package corrected both before release.", "The platform controller and vine handoff rules, controller-first menus, expedition/save state, procedural jungle, code-only audio and ghost presentation.", "Coordinating native animation blending with collision-safe jumps, moving jaws and pendulum vines, while keeping the side-view route readable.", "none", "A maintained end-to-end WebGPU toon/outline example with a native animated character controller and deterministic headless validation."], "promptFeedback": ["The specific source, art direction, controller-first requirements, attract mode and single-file package gave the demo a clear identity and a concrete definition of done.", "The preferred multiplayer mode and whether standalone play required an internet transport were unspecified. I chose shared-screen co-op outside the hub and online ghost races inside it.", "Keeping gameplay, menus, audio and lifecycle consistent across keyboard, standard controllers, touch and multiplayer sessions.", "Specify the desired multiplayer relationship and whether standalone internet matchmaking or direct connections are required."], "aiHub": {"name": "Pitfalling for Adventure", "tagline": "Mind the gap. And the teeth.", "description": "Swing through an ink-drawn jungle, brave snapping crocodiles and explore the tunnels below to recover eight lost treasures. Play alone, share the trail in local co-op, or race ghost explorers in AI Hub.", "type": "Game", "genre": "Platformer", "source": "Pitfall! (1982)", "series": "", "players": "1–4", "controls": "Move: left stick / A,D; jump and release vine: Cross / Space; climb: up,down / W,S; map: Triangle / M; pause: Options / Esc. Local P2: arrows + Right Shift, or a second pad. Touch: left drag, right tap.", "tags": ["3d", "side-scrolling", "adventure", "co-op", "retro", "exploration"]}}</script>
+<script type="module">import * as THREE from "three/webgpu";
+import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
+
+const $ = (id) => document.getElementById(id);
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const lerp = (a, b, t) => a + (b - a) * t;
+const TAU = Math.PI * 2;
+let seed = 71382;
+function rand(a = 0, b = 1) {
+	seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+	return a + (seed / 4294967296) * (b - a);
+}
+const C = {
+	ink: 0x153c32,
+	leaf: 0x42775a,
+	jade: 0x255d4c,
+	mint: 0x7b9d68,
+	lime: 0xa8b56a,
+	gold: 0xf8c863,
+	paper: 0xffedc7,
+	soil: 0x8d6845,
+	soilDark: 0x604f39,
+	red: 0xd96640,
+	water: 0x437f70,
+};
+let scene,
+	camera,
+	renderer,
+	physics,
+	controller,
+	sunLight,
+	sunDisc,
+	backend = "unknown";
+const groundParts = [],
+	logs = [],
+	vines = [],
+	crocs = [],
+	hazards = [],
+	treasures = [],
+	coins = [],
+	sceneryMixers = [],
+	effects = [],
+	waterDetails = [],
+	movingPlatforms = [],
+	ladders = [];
+const gaps = [
+	{ a: 26, b: 34, type: "water" },
+	{ a: 52, b: 65, type: "crocs" },
+	{ a: 84, b: 89, type: "sand" },
+	{ a: 119, b: 127, type: "tar" },
+	{ a: 146, b: 154, type: "bridge" },
+	{ a: 184, b: 192, type: "water" },
+];
+const caveRanges = [
+	[72, 110],
+	[164, 180],
+];
+const treasureDefs = [
+	{ x: 16, y: 1.1, name: "The Brass Beetle", type: "idol", zone: 0 },
+	{ x: 42, y: 1.1, name: "A Rather Heavy Purse", type: "bag", zone: 1 },
+	{ x: 69, y: 1.1, name: "The Crocodile’s Ring", type: "ring", zone: 2 },
+	{ x: 94, y: -3.9, name: "Moonlit Silver", type: "silver", zone: 3 },
+	{ x: 135, y: 1.1, name: "An Unreasonably Big Emerald", type: "gem", zone: 4 },
+	{ x: 160, y: 1.1, name: "The Golden Grin", type: "idol", zone: 5 },
+	{ x: 174, y: -3.9, name: "The Buried Sun", type: "sun", zone: 6 },
+	{ x: 206, y: 1.1, name: "The Last Little Fortune", type: "chest", zone: 7 },
+];
+const zones = [
+	{
+		x: 0,
+		name: "Fernwood Camp",
+		note: "Logs roll. Explorers leap.",
+		treasure: 0,
+	},
+	{
+		x: 24,
+		name: "The Hanging Gardens",
+		note: "Jump to a vine. Jump again to let go.",
+		treasure: 1,
+	},
+	{
+		x: 50,
+		name: "Crocodile Crossing",
+		note: "Closed mouths make better stepping stones.",
+		treasure: 2,
+	},
+	{
+		x: 72,
+		name: "The Sunken Shortcut",
+		note: "Down the ladder. Mind the scorpions.",
+		treasure: 3,
+	},
+	{
+		x: 112,
+		name: "Blackwater Bend",
+		note: "A little patience. A very long vine.",
+		treasure: 4,
+	},
+	{
+		x: 143,
+		name: "Tumbledown Trail",
+		note: "One good leap deserves another.",
+		treasure: 5,
+	},
+	{
+		x: 164,
+		name: "The Amber Hollow",
+		note: "There’s gold beneath those boots.",
+		treasure: 6,
+	},
+	{
+		x: 182,
+		name: "The Sun Gate",
+		note: "One last swing. Bring every treasure.",
+		treasure: 7,
+	},
+];
+const camps = [
+	{ x: 4, y: 0.8 },
+	{ x: 39, y: 0.8 },
+	{ x: 70, y: 0.8 },
+	{ x: 111, y: 0.8 },
+	{ x: 139, y: 0.8 },
+	{ x: 162, y: 0.8 },
+	{ x: 199, y: 0.8 },
+];
+const materials = new Map();
+function mat(color, outline = false) {
+	const key = color + ":" + outline;
+	if (!materials.has(key))
+		materials.set(
+			key,
+			outline
+				? new THREE.MeshBasicMaterial({ color, side: THREE.BackSide })
+				: new THREE.MeshToonMaterial({ color, gradientMap: toonGradient }),
+		);
+	return materials.get(key);
+}
+const grad = new Uint8Array([
+	80, 80, 80, 255, 150, 150, 150, 255, 210, 210, 210, 255, 255, 255, 255, 255,
+]);
+const toonGradient = new THREE.DataTexture(grad, 4, 1, THREE.RGBAFormat);
+toonGradient.minFilter = THREE.NearestFilter;
+toonGradient.magFilter = THREE.NearestFilter;
+toonGradient.needsUpdate = true;
+const GEO = {
+	box: new THREE.BoxGeometry(1, 1, 1),
+	ball: new THREE.IcosahedronGeometry(1, 1),
+	round: new THREE.SphereGeometry(1, 12, 8),
+	cone: new THREE.ConeGeometry(1, 1, 7),
+	cylinder: new THREE.CylinderGeometry(1, 1, 1, 10),
+};
+function mesh(
+	geo,
+	color,
+	parent,
+	x = 0,
+	y = 0,
+	z = 0,
+	sx = 1,
+	sy = sx,
+	sz = sx,
+	ink = false,
+) {
+	const m = new THREE.Mesh(geo, mat(color));
+	m.position.set(x, y, z);
+	m.scale.set(sx, sy, sz);
+	m.castShadow = true;
+	m.receiveShadow = true;
+	parent.add(m);
+	if (ink) {
+		const out = new THREE.Mesh(geo, mat(C.ink, true));
+		out.scale.set(1.035, 1.035, 1.035);
+		m.add(out);
+	}
+	return m;
+}
+function box(p, c, x, y, z, sx, sy, sz, ink = false) {
+	return mesh(GEO.box, c, p, x, y, z, sx, sy, sz, ink);
+}
+function ball(p, c, x, y, z, sx, sy = sx, sz = sx, ink = false) {
+	return mesh(GEO.ball, c, p, x, y, z, sx, sy, sz, ink);
+}
+function cyl(p, c, x, y, z, r, h, r2 = r, ink = false) {
+	const g =
+		r === r2 ? GEO.cylinder : new THREE.CylinderGeometry(r2 / r, 1, 1, 10);
+	return mesh(g, c, p, x, y, z, r, h, r, ink);
+}
+function line(p, points, color = C.ink) {
+	const g = new THREE.BufferGeometry().setFromPoints(
+		points.map((v) => new THREE.Vector3(...v)),
+	);
+	const m = new THREE.Line(g, new THREE.LineBasicMaterial({ color }));
+	p.add(m);
+	return m;
+}
+function solid(x, y, w, h, z = 0, depth = 6) {
+	const rb = physics.createRigidBody(
+		RAPIER.RigidBodyDesc.fixed().setTranslation(x, y, z),
+	);
+	const collider = physics.createCollider(
+		RAPIER.ColliderDesc.cuboid(w / 2, h / 2, depth / 2).setFriction(0.8),
+		rb,
+	);
+	return { rb, collider };
+}
+function leaf(parent, x, y, z, length, width, angle, color) {
+	const s = new THREE.Shape();
+	s.moveTo(0, 0);
+	s.bezierCurveTo(-width, 0.3 * length, -width * 0.65, 0.7 * length, 0, length);
+	s.bezierCurveTo(width * 0.6, 0.75 * length, width, 0.2 * length, 0, 0);
+	const m = new THREE.Mesh(
+		new THREE.ShapeGeometry(s),
+		new THREE.MeshToonMaterial({
+			color,
+			side: THREE.DoubleSide,
+			gradientMap: toonGradient,
+		}),
+	);
+	m.position.set(x, y, z);
+	m.rotation.z = angle;
+	parent.add(m);
+	line(
+		m,
+		[
+			[0, 0.07, 0.015],
+			[0, length * 0.85, 0.015],
+		],
+		C.jade,
+	);
+	return m;
+}
+function fern(x, y, z, scale = 1, color = C.leaf) {
+	const g = new THREE.Group();
+	g.position.set(x, y, z);
+	g.scale.setScalar(scale);
+	scene.add(g);
+	for (let i = 0; i < 7; i++) {
+		const a = (i - 3) * 0.35;
+		const l = rand(0.65, 1.15);
+		const stem = new THREE.Group();
+		stem.rotation.z = a;
+		g.add(stem);
+		for (let n = 1; n < 5; n++) {
+			leaf(stem, 0, n * l * 0.18, 0, l * 0.35, 0.1, -1.05, color);
+			leaf(stem, 0, n * l * 0.18, 0.008, l * 0.35, 0.1, 1.05, color);
+		}
+		leaf(stem, 0, l * 0.65, 0, l * 0.45, 0.1, 0, color);
+	}
+	return g;
+}
+function tree(x, z, scale = 1, back = false) {
+	const g = new THREE.Group();
+	g.position.set(x, 0, z);
+	g.scale.setScalar(scale);
+	scene.add(g);
+	const bark = back ? 0x457264 : 0x3c5942;
+	const height = rand(7, 11);
+	const trunk = cyl(g, bark, 0, height / 2, 0, 0.22, height, 0.14);
+	trunk.rotation.z = rand(-0.13, 0.13);
+	for (let k = 0; k < 3; k++) {
+		const root = box(g, bark, (k - 1) * 0.32, 0.13, 0.2, 0.7, 0.18, 0.22);
+		root.rotation.z = (k - 1) * 0.5;
+	}
+	for (let j = 0; j < 3; j++) {
+		const branch = cyl(
+			g,
+			bark,
+			(j - 1) * 0.65,
+			height - j * 0.4,
+			0,
+			0.1,
+			2.8,
+			0.07,
+		);
+		branch.rotation.z = (j - 1) * 0.8;
+	}
+	for (let i = 0; i < 9; i++) {
+		const a = (i - 4) * 0.47;
+		const l = rand(2.6, 4.1);
+		const m = leaf(
+			g,
+			0,
+			height,
+			rand(-0.3, 0.3),
+			l,
+			0.5,
+			a,
+			back ? 0x528371 : [C.jade, C.leaf, C.mint][i % 3],
+		);
+		m.rotation.x = rand(-0.3, 0.3);
+	}
+	if (!back) {
+		for (let i = 0; i < 4; i++)
+			line(
+				g,
+				[
+					[0.24, i * 1.6 + 0.8, 0.15],
+					[0.17, i * 1.6 + 1.4, 0.19],
+				],
+				0x243e30,
+			);
+		const hanging = line(
+			g,
+			[
+				[1, height - 1, 0],
+				[1.2, height - 3, 0],
+				[0.85, height - 5, 0],
+			],
+			C.leaf,
+		);
+		hanging.userData.wind = true;
+	}
+	return g;
+}
+function rock(x, y, z, s = 0.5) {
+	const m = ball(
+		scene,
+		rand() > 0.5 ? 0x6d8064 : 0x8c956f,
+		x,
+		y,
+		z,
+		s,
+		rand(0.5, 0.8) * s,
+		0.7 * s,
+	);
+	m.rotation.set(rand(0, 1), rand(0, 3), rand(0, 0.5));
+	return m;
+}
+function inscription(parent, x, y, z, w = 1) {
+	for (let i = 0; i < 3; i++) {
+		const s = box(
+			parent,
+			0x37614e,
+			x + (i - 1) * w * 0.22,
+			y,
+			z,
+			0.08,
+			w * 0.4,
+			0.025,
+		);
+		s.rotation.z = i % 2 ? 0.45 : 0;
+	}
+	line(
+		parent,
+		[
+			[x - w * 0.45, y - w * 0.3, z],
+			[x - w * 0.45, y + w * 0.3, z],
+			[x + w * 0.45, y + w * 0.3, z],
+			[x + w * 0.45, y - w * 0.3, z],
+		],
+		0x3c6652,
+	);
+}
+function temple(x, z, scale = 1) {
+	const g = new THREE.Group();
+	g.position.set(x, 0, z);
+	g.scale.setScalar(scale);
+	scene.add(g);
+	for (let i = 0; i < 7; i++) {
+		const w = 12 - i * 1.3;
+		box(g, i % 2 ? 0x678674 : 0x718e77, 0, i * 0.65, 0, w, 0.7, 6 - i * 0.55);
+		for (let j = -2; j <= 2; j++)
+			line(
+				g,
+				[
+					[j * 1.7, i * 0.65 + 0.25, 3.01 - i * 0.275],
+					[j * 1.7, i * 0.65 - 0.25, 3.01 - i * 0.275],
+				],
+				0x557765,
+			);
+	}
+	box(g, 0x709276, 0, 5, 0, 3.3, 2.3, 2.6);
+	box(g, 0x294f43, 0, 4.9, 1.32, 1.2, 1.9, 0.1);
+	box(g, 0x91a37e, 0, 6.2, 0, 4, 0.5, 3);
+	inscription(g, -1.1, 5.1, 1.34, 0.6);
+	inscription(g, 1.1, 5.1, 1.34, 0.6);
+	ball(g, C.gold, 0, 6.9, 0, 0.48);
+	for (let i = 0; i < 7; i++)
+		fern(x + rand(-5, 5) * scale, 0, z + rand(2, 4), scale * 0.8, C.jade);
+	return g;
+}
+function buildTerrain() {
+	let last = -8;
+	for (const g of [...gaps, { a: 232, b: 232 }]) {
+		const w = g.a - last;
+		const x = (last + g.a) / 2;
+		solid(x, -0.8, w, 1.6);
+		const block = box(scene, C.soil, x, -0.95, 0, w, 1.9, 6);
+		box(scene, C.mint, x, -0.05, 0, w, 0.16, 6.05);
+		box(scene, C.leaf, x, -0.22, 3.04, w, 0.13, 0.1);
+		for (let n = last + 1; n < g.a; n += 2.1) {
+			line(
+				scene,
+				[
+					[n, -0.6, 3.06],
+					[n + 0.5, -0.63, 3.06],
+					[n + 0.9, -0.53, 3.06],
+				],
+				0x6a543a,
+			);
+			ball(scene, C.soilDark, n, -1.25, 3.04, 0.1, 0.07, 0.035);
+		}
+		groundParts.push({ x, w, mesh: block });
+		last = g.b;
+	}
+	// The exposed soil is a cross-section: real tunnels sit between these shelves.
+	for (const [a, b] of [
+		[-8, 71],
+		[111, 163],
+		[181, 232],
+	]) {
+		box(scene, 0x70583d, (a + b) / 2, -3.4, -0.1, b - a, 3.2, 6);
+		for (let x = a + 1; x < b; x += 2.8)
+			line(
+				scene,
+				[
+					[x, -2.2, 3.02],
+					[x + 0.8, -2.4, 3.02],
+					[x + 1.5, -2.1, 3.02],
+				],
+				0x866346,
+			);
+	}
+	box(scene, 0x405140, 112, -7.4, 0, 240, 4.8, 6);
+	solid(112, -5.5, 240, 1);
+	for (const [a, b] of caveRanges) {
+		box(scene, 0x193e36, (a + b) / 2, -3.45, -2.8, b - a + 1, 3.1, 0.2);
+		for (let x = a; x < b; x += 1.35) {
+			const h = rand(0.25, 0.8);
+			mesh(GEO.cone, 0x567160, scene, x, -1.7 - h / 2, -1.6, 0.25, h, 0.3);
+			rock(x, -4.95, 1.8, rand(0.2, 0.4));
+			if (Math.floor(x) % 3 === 0) {
+				ball(scene, 0xd8d486, x, -4.55, -1.2, 0.1, 0.25, 0.1);
+				fern(x, -5, -0.7, 0.4, 0x7a9b6a);
+			}
+		}
+	}
+	for (const pit of gaps) {
+		if (pit.type === "bridge") continue;
+		const water = box(
+			scene,
+			pit.type === "sand" ? 0xb8a267 : pit.type === "tar" ? 0x234842 : C.water,
+			(pit.a + pit.b) / 2,
+			-0.55,
+			0,
+			pit.b - pit.a,
+			0.18,
+			5.9,
+		);
+		for (let i = 0; i < 9; i++) {
+			const x = rand(pit.a + 0.2, pit.b - 0.2),
+				z = rand(-2.2, 2.2);
+			const ripple = line(
+				scene,
+				[
+					[x - 0.25, -0.44, z],
+					[x + 0.25, -0.44, z],
+				],
+				pit.type === "sand" ? 0xd4bb7c : 0x93b29b,
+			);
+			waterDetails.push({ mesh: ripple, x, y: -0.44, z, phase: rand(0, TAU) });
+		}
+		if (pit.type === "sand") {
+			const s = solid((pit.a + pit.b) / 2, -0.16, pit.b - pit.a, 0.3);
+			pit.collider = s.collider;
+			pit.mesh = water;
+		}
+		for (const x of [pit.a + 0.1, pit.b - 0.1]) {
+			fern(x, 0, -1.9, 1.1);
+			rock(x, -0.1, 2.4, 0.5);
+		}
+	}
+	for (const x of [147, 150, 153]) {
+		const g = new THREE.Group();
+		scene.add(g);
+		box(g, 0x9b8957, 0, -0.15, 0, 1.55, 0.3, 3.3, true);
+		for (let i = 0; i < 3; i++)
+			box(g, 0xbda66a, (i - 1) * 0.4, 0.015, 0, 0.3, 0.06, 3.2);
+		g.position.set(x, 0.15, 0);
+		const s = solid(x, 0, 1.55, 0.3, 0, 3.3);
+		movingPlatforms.push({
+			mesh: g,
+			rb: s.rb,
+			collider: s.collider,
+			x,
+			phase: x,
+			y: 0,
+		});
+	}
+}
+function buildLadder(x, bottom = -5) {
+	const g = new THREE.Group();
+	g.position.x = x;
+	scene.add(g);
+	for (const side of [-0.44, 0.44])
+		cyl(g, 0xd1b77b, side, bottom / 2, 2.2, 0.055, -bottom + 0.3);
+	for (let y = bottom + 0.2; y < 0.3; y += 0.38)
+		box(g, 0xd9bf86, 0, y, 2.2, 0.93, 0.08, 0.11);
+	ladders.push({ x, bottom, mesh: g });
+	const sign = box(g, C.ink, 0, 0.7, -0.9, 1.2, 0.65, 0.12);
+	line(
+		sign,
+		[
+			[-0.28, 0.1, 0.6],
+			[0, -0.12, 0.6],
+			[0.28, 0.1, 0.6],
+		],
+		C.gold,
+	);
+}
+function buildCamp(c, i) {
+	const g = new THREE.Group();
+	scene.add(g);
+	g.position.x = c.x;
+	for (let n = 0; n < 3; n++) {
+		const b = box(
+			g,
+			0x684f35,
+			1.5,
+			0.08 + (n % 2) * 0.06,
+			0.1,
+			0.65,
+			0.12,
+			0.16,
+		);
+		b.rotation.y = (n * TAU) / 3;
+	}
+	const flame = mesh(GEO.cone, C.gold, g, 1.5, 0.42, 0.1, 0.2, 0.7, 0.2);
+	const f2 = mesh(GEO.cone, C.red, flame, 0, -0.1, 0, 0.7, 0.7, 0.7);
+	sceneryMixers.push({
+		custom: (t) => {
+			flame.scale.y = 0.8 + Math.sin(t * 13 + i) * 0.17;
+			flame.rotation.y = t;
+		},
+	});
+	cyl(g, 0x897953, -1.2, 1.3, -1, 0.045, 2.6);
+	const flag = box(
+		g,
+		i === 0 ? C.gold : 0xb5bd84,
+		-0.72,
+		2.2,
+		-1,
+		0.9,
+		0.5,
+		0.05,
+	);
+	flag.rotation.z = 0.07;
+	for (let n = 0; n < 5; n++)
+		rock(c.x + rand(-1, 2.2), 0.1, rand(1.7, 2.5), rand(0.12, 0.25));
+	c.flag = flag;
+}
+function createExplorer(color = C.red, ghost = false) {
+	const root = new THREE.Group();
+	scene.add(root);
+	const model = new THREE.Group();
+	root.add(model);
+	model.name = "Rig";
+	const torso = new THREE.Group();
+	torso.name = "Torso";
+	model.add(torso);
+	box(torso, 0x9aa276, 0, 0.05, 0, 0.55, 0.6, 0.36, true);
+	box(torso, 0x765637, 0, -0.21, 0.03, 0.58, 0.09, 0.4);
+	box(torso, 0xd6ba85, 0, -0.04, 0.215, 0.07, 0.33, 0.045);
+	box(torso, 0x6c7250, -0.08, 0.15, -0.3, 0.47, 0.53, 0.24, true);
+	ball(torso, 0x9e9165, -0.09, 0.4, -0.3, 0.24, 0.1, 0.16);
+	cyl(torso, 0xe6b885, 0, 0.43, 0, 0.12, 0.18);
+	const head = new THREE.Group();
+	head.name = "Head";
+	head.position.y = 0.65;
+	torso.add(head);
+	ball(head, 0xe6b885, 0, 0, 0, 0.25, 0.28, 0.24, true);
+	ball(head, 0xca945e, 0, -0.01, 0.245, 0.08, 0.085, 0.07);
+	for (const x of [-0.095, 0.095]) {
+		ball(head, C.paper, x, 0.04, 0.205, 0.065, 0.073, 0.04);
+		ball(head, C.ink, x + 0.012, 0.035, 0.24, 0.03, 0.04, 0.018);
+	}
+	box(head, 0x4f4a32, 0, 0.16, -0.14, 0.4, 0.15, 0.18);
+	cyl(head, 0xddbc77, 0, 0.23, 0, 0.43, 0.07, 0.43, true);
+	cyl(head, 0xe9ce8d, 0, 0.4, 0, 0.26, 0.3, 0.2, true);
+	cyl(head, 0x755738, 0, 0.29, 0, 0.265, 0.07);
+	box(torso, color, 0, 0.35, 0.02, 0.6, 0.12, 0.41, true);
+	const scarf = mesh(
+		GEO.cone,
+		color,
+		torso,
+		0.24,
+		0.11,
+		-0.07,
+		0.16,
+		0.5,
+		0.08,
+	);
+	scarf.rotation.z = 0.5;
+	for (const side of [-1, 1]) {
+		const arm = new THREE.Group();
+		arm.name = side < 0 ? "LArm" : "RArm";
+		arm.position.set(side * 0.32, 0.25, side * 0.02);
+		torso.add(arm);
+		ball(arm, 0x96a174, 0, -0.11, 0, 0.14, 0.21, 0.14);
+		box(arm, 0xdba576, 0, -0.34, 0, 0.17, 0.32, 0.17, true);
+		ball(arm, 0xe4b481, 0, -0.51, 0, 0.12, 0.13, 0.12);
+		const leg = new THREE.Group();
+		leg.name = side < 0 ? "LLeg" : "RLeg";
+		leg.position.set(side * 0.16, -0.25, side * 0.03);
+		torso.add(leg);
+		box(leg, 0x6f7050, 0, -0.15, 0, 0.24, 0.28, 0.28, true);
+		box(leg, 0xd3a475, 0, -0.34, 0, 0.17, 0.25, 0.18);
+		box(leg, 0x4c4934, 0, -0.48, 0.07, 0.23, 0.24, 0.37, true);
+	}
+	const mixer = new THREE.AnimationMixer(model);
+	const track = (part, vals) =>
+		new THREE.NumberKeyframeTrack(
+			part + ".rotation[z]",
+			[0, 0.25, 0.5, 0.75, 1],
+			vals,
+		);
+	const run = new THREE.AnimationClip("run", 1, [
+		track("LLeg", [-0.8, 0, 0.8, 0, -0.8]),
+		track("RLeg", [0.8, 0, -0.8, 0, 0.8]),
+		track("LArm", [0.65, 0, -0.65, 0, 0.65]),
+		track("RArm", [-0.65, 0, 0.65, 0, -0.65]),
+		new THREE.NumberKeyframeTrack(
+			"Torso.position[y]",
+			[0, 0.25, 0.5, 0.75, 1],
+			[0, 0.065, 0, 0.065, 0],
+		),
+	]);
+	const idle = new THREE.AnimationClip("idle", 2, [
+		new THREE.NumberKeyframeTrack(
+			"Torso.position[y]",
+			[0, 1, 2],
+			[0, 0.045, 0],
+		),
+		track("LArm", [-0.08, -0.1, -0.08, -0.06, -0.08]),
+		track("RArm", [0.08, 0.1, 0.08, 0.06, 0.08]),
+	]);
+	const jump = new THREE.AnimationClip("jump", 1, [
+		track("LLeg", [-0.6, -0.6, -0.6, -0.6, -0.6]),
+		track("RLeg", [0.65, 0.65, 0.65, 0.65, 0.65]),
+		track("LArm", [-1.4, -1.4, -1.4, -1.4, -1.4]),
+		track("RArm", [1.4, 1.4, 1.4, 1.4, 1.4]),
+	]);
+	const swing = new THREE.AnimationClip("swing", 1, [
+		track("LArm", [-2.8, -2.8, -2.8, -2.8, -2.8]),
+		track("RArm", [2.8, 2.8, 2.8, 2.8, 2.8]),
+		track("LLeg", [-0.3, -0.4, -0.3, -0.2, -0.3]),
+		track("RLeg", [0.45, 0.55, 0.45, 0.35, 0.45]),
+	]);
+	const climb = new THREE.AnimationClip("climb", 1, [
+		track("LArm", [-2.7, -1.7, -0.7, -1.7, -2.7]),
+		track("RArm", [0.7, 1.7, 2.7, 1.7, 0.7]),
+		track("LLeg", [-0.7, 0, 0.7, 0, -0.7]),
+		track("RLeg", [0.7, 0, -0.7, 0, 0.7]),
+	]);
+	const actions = {};
+	for (const clip of [idle, run, jump, swing, climb]) {
+		const a = mixer.clipAction(clip).play();
+		a.setEffectiveWeight(clip.name === "idle" ? 1 : 0);
+		actions[clip.name] = a;
+	}
+	if (ghost)
+		root.traverse((o) => {
+			if (o.isMesh) {
+				o.material = o.material.clone();
+				o.material.transparent = true;
+				o.material.opacity = 0.47;
+				o.castShadow = false;
+			}
+		});
+	const shadow = new THREE.Mesh(
+		new THREE.CircleGeometry(0.53, 20),
+		new THREE.MeshBasicMaterial({
+			color: 0x0e362a,
+			transparent: true,
+			opacity: 0.2,
+			depthWrite: false,
+		}),
+	);
+	shadow.rotation.x = -Math.PI / 2;
+	scene.add(shadow);
+	return { root, model, mixer, actions, shadow, anim: "idle" };
+}
+function animateExplorer(avatar, mode, speed, dt) {
+	for (const [name, a] of Object.entries(avatar.actions)) {
+		a.setEffectiveWeight(
+			lerp(a.getEffectiveWeight(), name === mode ? 1 : 0, Math.min(1, dt * 16)),
+		);
+		if (name === "run") a.timeScale = Math.max(0.35, Math.abs(speed) * 0.23);
+	}
+	avatar.mixer.update(dt);
+	avatar.anim = mode;
+}
+function makeVine(x, y = 8, length = 6.5, phase = 0) {
+	const group = new THREE.Group();
+	group.position.set(x, y, 0);
+	scene.add(group);
+	const rope = cyl(group, 0x769052, 0, -length / 2, 0, 0.048, length);
+	const core = cyl(group, C.ink, 0, -length / 2, -0.02, 0.063, length);
+	for (let n = 1; n < 5; n++)
+		leaf(
+			group,
+			0,
+			(-n * length) / 5,
+			0,
+			0.45,
+			0.08,
+			n % 2 ? 0.8 : -0.8,
+			C.leaf,
+		);
+	cyl(group, C.gold, 0, -length + 0.2, 0, 0.065, 0.42);
+	const marker = mesh(
+		new THREE.TorusGeometry(0.15, 0.025, 4, 16),
+		C.gold,
+		group,
+		0,
+		-length,
+		0,
+	);
+	const end = new THREE.Vector3();
+	const v = { x, y, length, phase, group, end, angle: 0, vel: 0 };
+	vines.push(v);
+	box(scene, 0x40563c, x, y + 0.25, -0.5, 3.7, 0.3, 0.3);
+	return v;
+}
+function makeCroc(x, phase) {
+	const g = new THREE.Group();
+	scene.add(g);
+	g.position.set(x, -0.28, 0);
+	ball(g, 0x557b4e, 0, 0, 0, 1.35, 0.35, 0.45, true);
+	const tail = mesh(
+		GEO.cone,
+		0x3e684b,
+		g,
+		-1.6,
+		-0.02,
+		0,
+		0.36,
+		1.4,
+		0.35,
+		true,
+	);
+	tail.rotation.z = Math.PI / 2;
+	for (let k = -2; k <= 2; k++)
+		mesh(GEO.cone, 0x82935c, g, k * 0.35, 0.33, 0, 0.12, 0.2, 0.13);
+	box(g, 0x66844c, 0.72, 0.1, 0, 0.95, 0.24, 0.65, true);
+	const jaw = new THREE.Group();
+	jaw.name = "Jaw";
+	jaw.position.set(0.25, 0.12, 0);
+	g.add(jaw);
+	box(jaw, 0x7b9859, 0.6, 0.13, 0, 1.25, 0.2, 0.67, true);
+	for (let k = 0; k < 5; k++) {
+		for (const z of [-0.27, 0.27]) {
+			const tooth = mesh(
+				GEO.cone,
+				C.paper,
+				jaw,
+				0.19 + k * 0.2,
+				-0.03,
+				z,
+				0.06,
+				0.16,
+				0.06,
+			);
+			tooth.rotation.z = Math.PI;
+			mesh(GEO.cone, C.paper, g, 0.45 + k * 0.2, 0.24, z, 0.06, 0.16, 0.06);
+		}
+	}
+	for (const z of [-0.26, 0.26]) {
+		ball(jaw, C.gold, 0.2, 0.29, z, 0.13, 0.14, 0.12);
+		ball(jaw, C.ink, 0.24, 0.32, z + 0.04, 0.05, 0.065, 0.04);
+	}
+	const mix = new THREE.AnimationMixer(g);
+	const clip = new THREE.AnimationClip("snap", 5, [
+		new THREE.NumberKeyframeTrack(
+			"Jaw.rotation[z]",
+			[0, 2.5, 2.8, 3.4, 4.3, 4.55, 5],
+			[0, 0, 0.56, 0.56, 0.56, 0, 0],
+		),
+	]);
+	const act = mix.clipAction(clip).play();
+	act.time = phase;
+	const s = solid(x, -0.12, 2.2, 0.28, 0, 1.2);
+	crocs.push({
+		x,
+		phase,
+		mesh: g,
+		mixer: mix,
+		action: act,
+		collider: s.collider,
+		closed: true,
+	});
+}
+function makeSnake(x, y = 0) {
+	const g = new THREE.Group();
+	g.position.set(x, y, 0);
+	scene.add(g);
+	for (let i = 0; i < 3; i++) {
+		const coil = mesh(
+			new THREE.TorusGeometry(0.3 - i * 0.04, 0.12, 5, 12),
+			i % 2 ? 0xb6a54e : 0x7f8847,
+			g,
+			0,
+			0.15 + i * 0.09,
+			0,
+			1,
+			1,
+			1,
+			true,
+		);
+		coil.rotation.x = Math.PI / 2;
+	}
+	const h = new THREE.Group();
+	h.name = "Cobra";
+	g.add(h);
+	const hood = ball(h, 0x899447, 0.1, 0.62, 0, 0.29, 0.4, 0.14, true);
+	ball(h, C.gold, 0.15, 0.73, 0.12, 0.18, 0.13, 0.15, true);
+	for (const dx of [-0.09, 0.09]) ball(h, C.ink, 0.15 + dx, 0.77, 0.24, 0.035);
+	box(h, C.red, 0.15, 0.65, 0.31, 0.04, 0.02, 0.14);
+	const mixer = new THREE.AnimationMixer(g);
+	mixer
+		.clipAction(
+			new THREE.AnimationClip("sway", 2, [
+				new THREE.NumberKeyframeTrack(
+					"Cobra.rotation[z]",
+					[0, 1, 2],
+					[-0.13, 0.13, -0.13],
+				),
+			]),
+		)
+		.play();
+	sceneryMixers.push({ mixer });
+	hazards.push({ type: "cobra", x, y, mesh: g, radius: 0.65 });
+}
+function makeScorpion(x, y = -5, range = 3) {
+	const g = new THREE.Group();
+	g.position.set(x, y, 0);
+	scene.add(g);
+	ball(g, 0xa76f4d, 0, 0.25, 0, 0.43, 0.2, 0.27, true);
+	for (let i = 0; i < 4; i++)
+		for (const s of [-1, 1]) {
+			const leg = box(
+				g,
+				0xc59564,
+				(i - 1.5) * 0.18,
+				0.13,
+				s * 0.32,
+				0.08,
+				0.07,
+				0.5,
+			);
+			leg.rotation.y = (i - 1.5) * 0.3;
+		}
+	for (const s of [-1, 1])
+		ball(g, 0xcf9e6e, 0.53, 0.28, s * 0.23, 0.24, 0.1, 0.15, true);
+	const tail = new THREE.Group();
+	tail.name = "Tail";
+	tail.position.set(-0.35, 0.2, 0);
+	g.add(tail);
+	for (let i = 0; i < 6; i++) {
+		const a = (i / 5) * Math.PI * 0.9;
+		ball(tail, 0xb68156, -Math.sin(a) * 0.45, 0.2 + i * 0.11, 0, 0.1);
+	}
+	mesh(GEO.cone, C.gold, tail, 0.08, 0.68, 0, 0.09, 0.27, 0.07);
+	const mixer = new THREE.AnimationMixer(g);
+	mixer
+		.clipAction(
+			new THREE.AnimationClip("sting", 1.6, [
+				new THREE.NumberKeyframeTrack(
+					"Tail.rotation[z]",
+					[0, 0.8, 1.6],
+					[-0.2, 0.25, -0.2],
+				),
+			]),
+		)
+		.play();
+	sceneryMixers.push({ mixer });
+	hazards.push({
+		type: "scorpion",
+		x,
+		y,
+		origin: x,
+		range,
+		mesh: g,
+		radius: 0.65,
+	});
+}
+function makeFire(x) {
+	const g = new THREE.Group();
+	g.position.x = x;
+	scene.add(g);
+	for (let k = 0; k < 3; k++) {
+		const l = box(g, 0x745437, 0, 0.1, 0, 0.7, 0.18, 0.2);
+		l.rotation.y = (k * Math.PI) / 3;
+	}
+	const flames = [];
+	for (let n = 0; n < 5; n++) {
+		const f = mesh(
+			GEO.cone,
+			n % 2 ? C.gold : C.red,
+			g,
+			rand(-0.25, 0.25),
+			0.5,
+			rand(-0.2, 0.2),
+			rand(0.17, 0.3),
+			rand(0.6, 1.1),
+			0.2,
+		);
+		flames.push(f);
+	}
+	sceneryMixers.push({
+		custom: (t) =>
+			flames.forEach((f, i) => {
+				f.scale.y = 0.7 + Math.sin(t * 10 + i) * 0.23;
+				f.rotation.z = Math.sin(t * 9 + i) * 0.12;
+			}),
+	});
+	hazards.push({ type: "fire", x, y: 0, mesh: g, radius: 0.65 });
+}
+function makeLog(x, a, b) {
+	const g = new THREE.Group();
+	scene.add(g);
+	const body = cyl(g, 0x8b603c, 0, 0, 0, 0.46, 1.4, 0.46, true);
+	body.rotation.x = Math.PI / 2;
+	for (const z of [-0.71, 0.71]) {
+		const face = cyl(g, 0xd5b87e, 0, 0, z, 0.41, 0.025);
+		face.rotation.x = Math.PI / 2;
+		for (const r of [0.14, 0.29]) {
+			const ring = mesh(
+				new THREE.TorusGeometry(r, 0.018, 4, 14),
+				0x785b3b,
+				g,
+				0,
+				0,
+				z + Math.sign(z) * 0.02,
+			);
+		}
+	}
+	for (let i = 0; i < 7; i++) {
+		const a1 = (i / 7) * TAU;
+		box(
+			g,
+			0x644e33,
+			Math.sin(a1) * 0.445,
+			Math.cos(a1) * 0.445,
+			0,
+			0.035,
+			0.04,
+			1.3,
+		);
+	}
+	const rb = physics.createRigidBody(
+		RAPIER.RigidBodyDesc.dynamic()
+			.setTranslation(x, 0.53, 0)
+			.enabledTranslations(true, true, false)
+			.enabledRotations(false, false, true)
+			.setLinearDamping(0.05),
+	);
+	physics.createCollider(
+		RAPIER.ColliderDesc.ball(0.46)
+			.setFriction(0.9)
+			.setRestitution(0.1)
+			.setMass(3),
+		rb,
+	);
+	logs.push({ mesh: g, rb, a, b, dir: -1, x });
+}
+function makeTreasure(def, index) {
+	const g = new THREE.Group();
+	scene.add(g);
+	g.position.set(def.x, def.y, 0);
+	g.name = "Treasure" + index;
+	const rot = new THREE.Group();
+	rot.name = "Relic";
+	g.add(rot);
+	if (def.type === "ring") {
+		const ring = mesh(
+			new THREE.TorusGeometry(0.32, 0.09, 6, 14),
+			C.gold,
+			rot,
+			0,
+			0.03,
+			0,
+			1,
+			1,
+			1,
+			true,
+		);
+		mesh(
+			new THREE.OctahedronGeometry(0.17),
+			0xc9e6c3,
+			rot,
+			0,
+			0.42,
+			0,
+			1,
+			1,
+			1,
+			true,
+		);
+	} else if (def.type === "gem") {
+		mesh(
+			new THREE.OctahedronGeometry(0.43),
+			0x72b796,
+			rot,
+			0,
+			0,
+			0,
+			1,
+			1.2,
+			1,
+			true,
+		);
+		mesh(new THREE.OctahedronGeometry(0.15), C.paper, rot, -0.12, 0.2, 0.24);
+	} else if (def.type === "bag") {
+		ball(rot, 0xddb773, 0, 0, 0, 0.34, 0.4, 0.29, true);
+		cyl(rot, 0x745832, 0, 0.29, 0, 0.16, 0.12);
+		mesh(GEO.cone, C.gold, rot, 0, 0.43, 0, 0.2, 0.23, 0.18);
+		box(rot, C.ink, 0, 0.02, 0.28, 0.04, 0.25, 0.025);
+		box(rot, C.ink, 0, 0.02, 0.29, 0.16, 0.04, 0.025);
+	} else if (def.type === "silver") {
+		for (let k = 0; k < 3; k++)
+			box(
+				rot,
+				[0xaec8bd, 0xe0e2cb, 0xabc3ae][k],
+				(k - 1) * 0.22,
+				(k % 2) * 0.14,
+				0,
+				0.32,
+				0.22,
+				0.55,
+				true,
+			);
+	} else if (def.type === "chest") {
+		box(rot, 0xb58340, 0, 0, 0, 0.75, 0.5, 0.5, true);
+		for (const x of [-0.26, 0.26])
+			box(rot, C.gold, x, 0.03, 0.02, 0.09, 0.55, 0.55);
+		box(rot, C.gold, 0, 0.05, 0.29, 0.16, 0.2, 0.06);
+		box(rot, 0x64482e, 0, 0.02, 0.325, 0.045, 0.08, 0.02);
+	} else if (def.type === "sun") {
+		ball(rot, C.gold, 0, 0, 0, 0.28, 0.28, 0.09, true);
+		for (let n = 0; n < 10; n++) {
+			const a = (n / 10) * TAU;
+			const ray = mesh(
+				GEO.cone,
+				C.gold,
+				rot,
+				Math.sin(a) * 0.41,
+				Math.cos(a) * 0.41,
+				0,
+				0.08,
+				0.2,
+				0.07,
+			);
+			ray.rotation.z = -a;
+		}
+		ball(rot, C.paper, 0, 0.04, 0.11, 0.09, 0.09, 0.02);
+	} else {
+		ball(rot, C.gold, 0, 0, 0, 0.3, 0.38, 0.23, true);
+		ball(rot, 0xe9bd55, 0, 0.43, 0, 0.23, 0.22, 0.2, true);
+		for (const x of [-0.11, 0.11])
+			ball(rot, C.ink, x, 0.47, 0.17, 0.05, 0.06, 0.04);
+		box(rot, C.ink, 0, 0.34, 0.19, 0.23, 0.045, 0.025);
+		for (const x of [-0.32, 0.32])
+			box(rot, C.gold, x, -0.12, 0, 0.12, 0.5, 0.13, true);
+	}
+	const ring = new THREE.Mesh(
+		new THREE.TorusGeometry(0.7, 0.018, 4, 32),
+		new THREE.MeshBasicMaterial({
+			color: C.gold,
+			transparent: true,
+			opacity: 0.45,
+		}),
+	);
+	ring.rotation.x = Math.PI / 2;
+	ring.position.y = -0.75;
+	g.add(ring);
+	const mixer = new THREE.AnimationMixer(g);
+	mixer
+		.clipAction(
+			new THREE.AnimationClip("treasure", 3, [
+				new THREE.NumberKeyframeTrack("Relic.rotation[y]", [0, 3], [0, TAU]),
+				new THREE.NumberKeyframeTrack(
+					"Relic.position[y]",
+					[0, 1.5, 3],
+					[0, 0.18, 0],
+				),
+			]),
+		)
+		.play();
+	treasures.push({ ...def, index, mesh: g, mixer, collected: false });
+}
+function buildScenery() {
+	box(scene, 0x65836c, 112, -0.18, -30, 260, 0.3, 54);
+	scene.add(new THREE.HemisphereLight(0xfff1cf, 0x405d4d, 1.7));
+	sunLight = new THREE.DirectionalLight(0xffd491, 2.1);
+	sunLight.position.set(0, 18, 12);
+	sunLight.castShadow = true;
+	sunLight.shadow.mapSize.set(2048, 2048);
+	sunLight.shadow.camera.left = -23;
+	sunLight.shadow.camera.right = 23;
+	sunLight.shadow.camera.top = 18;
+	sunLight.shadow.camera.bottom = -14;
+	sunLight.shadow.normalBias = 0.1;
+	sunLight.shadow.bias = -0.0002;
+	scene.add(sunLight, sunLight.target);
+	sunDisc = new THREE.Mesh(
+		new THREE.CircleGeometry(5.4, 64),
+		new THREE.MeshBasicMaterial({ color: 0xf6d68d }),
+	);
+	sunDisc.position.set(39, 6, -20);
+	scene.add(sunDisc);
+	const halo = new THREE.Mesh(
+		new THREE.RingGeometry(5.65, 5.73, 64),
+		new THREE.MeshBasicMaterial({ color: 0xe5d69c, side: THREE.DoubleSide }),
+	);
+	halo.position.z = -0.05;
+	sunDisc.add(halo);
+	for (let x = -20; x < 260; x += 13) {
+		const s = new THREE.Shape();
+		s.moveTo(-12, -3);
+		for (let i = -12; i <= 12; i += 2)
+			s.lineTo(i, rand(3, 9) + (1 - Math.abs(i) / 15) * 3);
+		s.lineTo(12, -3);
+		const m = new THREE.Mesh(
+			new THREE.ShapeGeometry(s),
+			new THREE.MeshBasicMaterial({ color: 0x83a991 }),
+		);
+		m.position.set(x, 0, -43);
+		scene.add(m);
+	}
+	for (let x = -8; x < 240; x += 6.8) tree(x, -18, rand(0.8, 1.3), true);
+	temple(43, -16, 1.2);
+	temple(140, -20, 2.3);
+	temple(215, -12, 1.6);
+	// A curtain of stylized falls behind the hanging gardens.
+	for (let n = 0; n < 7; n++) {
+		const f = box(
+			scene,
+			n % 2 ? 0x9fc9b3 : 0x71ae9e,
+			46 + n * 0.48,
+			3.7,
+			-13,
+			0.35,
+			8,
+			1,
+		);
+		waterDetails.push({
+			mesh: f,
+			x: 46 + n * 0.48,
+			y: 3.7,
+			z: -13,
+			phase: n,
+			fall: true,
+		});
+	}
+	for (let n = 0; n < 8; n++) rock(45 + rand(-1, 4), 0, -12, rand(0.6, 1.4));
+	for (let x = -5; x < 230; x += 7.5) {
+		tree(x, -4.6, rand(0.85, 1.18));
+		if (rand() > 0.35) tree(x + 3, -8, rand(0.65, 0.9));
+	}
+	for (let x = -3; x < 230; x += 1.9) {
+		if (gaps.some((g) => x > g.a && x < g.b)) continue;
+		fern(
+			x,
+			0,
+			rand(1.8, 2.6),
+			rand(0.45, 0.85),
+			[C.leaf, C.jade, C.mint][Math.floor(rand(0, 3))],
+		);
+		if (rand() > 0.35) rock(x, 0.04, rand(-2.6, -1.8), rand(0.18, 0.5));
+		if (rand() > 0.64) {
+			const flower = new THREE.Group();
+			scene.add(flower);
+			flower.position.set(x, 0.15, 2.2);
+			for (let i = 0; i < 5; i++) {
+				const a = (i / 5) * TAU;
+				ball(
+					flower,
+					rand() > 0.5 ? C.red : 0xe1bf68,
+					Math.sin(a) * 0.12,
+					Math.cos(a) * 0.12,
+					0,
+					0.09,
+					0.14,
+					0.04,
+				);
+			}
+			ball(flower, C.gold, 0, 0, 0.06, 0.055);
+		}
+	}
+	// Mossy ruin fragments, engraved with original little sun marks.
+	for (const x of [19, 38, 49, 78, 115, 130, 157, 179, 200]) {
+		const g = new THREE.Group();
+		g.position.set(x, 0, -2.5);
+		g.rotation.z = rand(-0.13, 0.13);
+		scene.add(g);
+		box(g, 0x809071, 0, 0.8, 0, 0.7, 1.6, 0.65, true);
+		box(g, 0x9ba37c, 0, 1.65, 0, 0.95, 0.25, 0.9, true);
+		inscription(g, 0, 1, 0.34, 0.52);
+		fern(x, 0, -1.9, 0.65);
+	}
+	for (let x = -2; x < 230; x += 11) {
+		const g = new THREE.Group();
+		scene.add(g);
+		g.position.set(x, 0, -2.9);
+		for (let n = 0; n < 5; n++) {
+			const a = (n - 2) * 0.55;
+			const stem = cyl(g, 0x416c4c, Math.sin(a) * 0.3, 0.45, 0, 0.032, 0.9);
+			stem.rotation.z = -a;
+			const l = leaf(
+				g,
+				Math.sin(a) * 0.55,
+				0.65,
+				0,
+				rand(1.1, 2.0),
+				0.36,
+				a,
+				[C.leaf, C.jade, C.mint][n % 3],
+			);
+			l.rotation.y = (n - 2) * 0.13;
+		}
+	}
+	const gate = new THREE.Group();
+	scene.add(gate);
+	gate.position.x = 219;
+	for (const s of [-1, 1]) {
+		box(gate, 0x7e8f69, s * 2.2, 2.4, -0.7, 1.15, 4.8, 1.4, true);
+		box(gate, 0xa9ae7a, s * 2.2, 4.9, -0.7, 1.65, 0.35, 1.9, true);
+		inscription(gate, s * 2.2, 3.1, 0.03, 0.8);
+	}
+	box(gate, 0x8e9d70, 0, 5.4, -0.7, 6.2, 0.7, 1.8, true);
+	ball(gate, C.gold, 0, 6.3, -0.5, 0.72, 0.72, 0.18, true);
+	for (let i = 0; i < 8; i++) {
+		const a = (i / 8) * TAU;
+		const r = mesh(
+			GEO.cone,
+			C.gold,
+			gate,
+			Math.sin(a) * 1.0,
+			6.3 + Math.cos(a) * 1.0,
+			-0.5,
+			0.12,
+			0.4,
+			0.1,
+		);
+		r.rotation.z = -a;
+	}
+}
+async function makeScene() {
+	await RAPIER.init();
+	physics = new RAPIER.World({ x: 0, y: -25, z: 0 });
+	controller = physics.createCharacterController(0.025);
+	controller.enableAutostep(0.25, 0.1, true);
+	controller.enableSnapToGround(0.14);
+	controller.setMaxSlopeClimbAngle(0.8);
+	controller.setMinSlopeSlideAngle(0.9);
+	scene = new THREE.Scene();
+	scene.background = new THREE.Color(0xa9c4a6);
+	scene.fog = new THREE.Fog(0xa9c4a6, 38, 100);
+	camera = new THREE.OrthographicCamera(-18, 18, 10, -10, 0.1, 150);
+	renderer = new THREE.WebGPURenderer({
+		canvas: $("world"),
+		antialias: true,
+		alpha: false,
+		forceWebGL:
+			new URLSearchParams(location.search).get("renderer") === "webgl",
+	});
+	renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+	renderer.shadowMap.enabled = true;
+	renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+	renderer.outputColorSpace = THREE.SRGBColorSpace;
+	renderer.toneMapping = THREE.ACESFilmicToneMapping;
+	renderer.toneMappingExposure = 1.02;
+	await renderer.init();
+	backend = renderer.backend.isWebGPUBackend ? "WebGPU" : "WebGL2 fallback";
+	buildTerrain();
+	buildScenery();
+	for (const x of [73, 109, 165, 179]) buildLadder(x);
+	camps.forEach(buildCamp);
+	makeVine(30, 8, 6.5, 0.1);
+	makeVine(59, 9.5, 8.2, 1.3);
+	makeVine(123, 8, 6.5, 1.0);
+	makeVine(188, 8, 6.5, 2.1);
+	for (const x of [55, 58.5, 62]) makeCroc(x, 0);
+	for (const x of [22, 46, 132, 181]) makeSnake(x);
+	for (const [x, r] of [
+		[85, 2.5],
+		[101, 2.5],
+		[170, 1.5],
+	])
+		makeScorpion(x, -5, r);
+	makeFire(113);
+	makeFire(201);
+	makeLog(12, 8, 19);
+	makeLog(99, 94, 107);
+	makeLog(158, 155, 162);
+	treasureDefs.forEach(makeTreasure);
+	for (let x = 8; x < 215; x += 5) {
+		if (gaps.some((g) => x > g.a - 1 && x < g.b + 1)) continue;
+		const cave = (x > 76 && x < 106) || (x > 166 && x < 177);
+		const y = cave ? -3.9 : 1.05;
+		const m = mesh(
+			new THREE.OctahedronGeometry(0.12),
+			C.gold,
+			scene,
+			x,
+			y,
+			0.1,
+		);
+		coins.push({ x, y, mesh: m, taken: false });
+	}
+	for (let i = 0; i < 100; i++) {
+		const m = ball(
+			scene,
+			C.gold,
+			rand(0, 224),
+			rand(0.7, 7),
+			rand(-5, 2),
+			rand(0.017, 0.038),
+		);
+		waterDetails.push({
+			mesh: m,
+			x: m.position.x,
+			y: m.position.y,
+			z: m.position.z,
+			phase: rand(0, TAU),
+			size: m.scale.x,
+			firefly: true,
+		});
+	}
+	resizeScene();
+	return true;
+}
+function resizeScene() {
+	if (!renderer) return;
+	const w = innerWidth,
+		h = innerHeight;
+	renderer.setSize(w, h, false);
+	let halfH = 7.8;
+	if (w / h < 1) halfH = 11.5;
+	let halfW = (halfH * w) / h;
+	if (halfW < 8.5) {
+		halfW = 8.5;
+		halfH = (halfW * h) / w;
+	}
+	camera.left = -halfW;
+	camera.right = halfW;
+	camera.top = halfH;
+	camera.bottom = -halfH;
+	camera.updateProjectionMatrix();
+}
+function burst(x, y, color = C.gold, n = 18) {
+	for (let i = 0; i < n; i++) {
+		const m = mesh(
+			GEO.box,
+			color,
+			scene,
+			x,
+			y,
+			rand(-0.2, 0.5),
+			rand(0.035, 0.08),
+			rand(0.04, 0.13),
+			0.035,
+		);
+		effects.push({
+			mesh: m,
+			vx: rand(-3, 3),
+			vy: rand(1, 5),
+			vz: rand(-1, 1),
+			life: rand(0.4, 1.1),
+		});
+	}
+}
+function updateScene(t, dt, hazardTempo = 1) {
+	for (const v of vines) {
+		v.angle = Math.sin(t * 1.2 + v.phase) * 0.94;
+		v.vel = Math.cos(t * 1.2 + v.phase) * 1.128;
+		v.group.rotation.z = v.angle;
+		v.end.set(
+			v.x + Math.sin(v.angle) * v.length,
+			v.y - Math.cos(v.angle) * v.length,
+			0,
+		);
+	}
+	for (const c of crocs) {
+		c.action.time = (t * hazardTempo) % 5;
+		c.mixer.update(0);
+		const p = (t * hazardTempo) % 5;
+		c.closed = p < 2.55 || p > 4.5;
+		c.collider.setEnabled(c.closed);
+	}
+	for (const m of sceneryMixers) {
+		if (m.mixer) m.mixer.update(dt * hazardTempo);
+		if (m.custom) m.custom(t);
+	}
+	for (const h of hazards)
+		if (h.type === "scorpion") {
+			h.x = h.origin + Math.sin(t * 0.9 * hazardTempo + h.origin) * h.range;
+			h.mesh.position.x = h.x;
+			h.mesh.rotation.y =
+				Math.cos(t * 0.9 * hazardTempo + h.origin) > 0 ? 0 : Math.PI;
+		}
+	for (const g of gaps)
+		if (g.type === "sand") {
+			g.open = (t * hazardTempo) % 5.8 < 3.5;
+			g.collider.setEnabled(!g.open);
+			g.mesh.position.y = g.open ? -0.55 : -0.08;
+			g.mesh.material = mat(g.open ? 0xa68d51 : 0xbba96c);
+		}
+	for (const p of movingPlatforms) {
+		p.y = 0.13 + Math.sin(t * 1.7 + p.phase) * 0.12;
+		p.mesh.position.y = p.y;
+		p.rb.setTranslation({ x: p.x, y: p.y - 0.15, z: 0 }, false);
+	}
+	for (const l of logs) {
+		const pos = l.rb.translation();
+		if (pos.x < l.a) {
+			l.dir = 1;
+		}
+		if (pos.x > l.b) {
+			l.dir = -1;
+		}
+		l.rb.setLinvel(
+			{
+				x: l.dir * 2.1 * hazardTempo,
+				y: pos.y < -0.5 ? 0 : l.rb.linvel().y,
+				z: 0,
+			},
+			true,
+		);
+		l.rb.setAngvel({ x: 0, y: 0, z: -l.dir * 4.5 * hazardTempo }, true);
+		if (pos.y < -2)
+			l.rb.setTranslation({ x: (l.a + l.b) / 2, y: 0.6, z: 0 }, true);
+		l.mesh.position.copy(l.rb.translation());
+		l.mesh.quaternion.copy(l.rb.rotation());
+	}
+	for (const a of treasures) {
+		a.mixer.update(dt);
+		a.mesh.visible = !a.collected;
+	}
+	for (const c of coins) {
+		c.mesh.visible = !c.taken;
+		c.mesh.rotation.y = t * 2;
+		c.mesh.position.y = c.y + Math.sin(t * 3 + c.x) * 0.12;
+	}
+	for (const d of waterDetails) {
+		if (d.firefly) {
+			d.mesh.position.y = d.y + Math.sin(t * 0.8 + d.phase) * 0.5;
+			d.mesh.position.x = d.x + Math.cos(t * 0.4 + d.phase) * 0.45;
+			d.mesh.scale.setScalar(d.size * (0.7 + Math.sin(t * 2 + d.phase) * 0.3));
+		} else if (d.fall) d.mesh.scale.x = 0.8 + Math.sin(t * 4 + d.phase) * 0.18;
+		else d.mesh.position.y = d.y + Math.sin(t * 2 + d.phase) * 0.035;
+	}
+	for (let i = effects.length - 1; i >= 0; i--) {
+		const e = effects[i];
+		e.life -= dt;
+		e.vy -= dt * 7;
+		e.mesh.position.x += e.vx * dt;
+		e.mesh.position.y += e.vy * dt;
+		e.mesh.position.z += e.vz * dt;
+		e.mesh.rotation.z += dt * 5;
+		e.mesh.scale.multiplyScalar(Math.exp(-dt * 0.8));
+		if (e.life <= 0) {
+			scene.remove(e.mesh);
+			effects.splice(i, 1);
+		}
+	}
+}
+function moveCamera(x, y, dt, snap = false) {
+	const targetY = y < -1 ? -1.8 : 3.0;
+	const tx = clamp(x + 3, 12, 214);
+	const f = snap ? 1 : 1 - Math.exp(-dt * 4);
+	const old = camera.userData.cx ?? tx,
+		oy = camera.userData.cy ?? targetY;
+	const cx = lerp(old, tx, f),
+		cy = lerp(oy, targetY, f);
+	camera.userData.cx = cx;
+	camera.userData.cy = cy;
+	camera.position.set(cx + 1.3, cy + 6.5, 28);
+	camera.lookAt(cx, cy, 0);
+	sunLight.position.set(cx - 8, 18, 10);
+	sunLight.target.position.set(cx, 0, 0);
+	sunDisc.position.x = cx + 10;
+}
+
+
+const audio = {
+	ctx: null,
+	master: null,
+	music: null,
+	sfx: null,
+	analyser: null,
+	next: 0,
+	beat: 0,
+	events: 0,
+	voices: 0,
+};
+function tone(
+	ctx,
+	dest,
+	freq,
+	start,
+	duration = 0.2,
+	type = "sine",
+	gain = 0.16,
+	endFreq = freq,
+) {
+	const osc = ctx.createOscillator(),
+		env = ctx.createGain();
+	osc.type = type;
+	osc.frequency.setValueAtTime(freq, start);
+	osc.frequency.exponentialRampToValueAtTime(
+		Math.max(20, endFreq),
+		start + duration,
+	);
+	env.gain.setValueAtTime(0, start);
+	env.gain.linearRampToValueAtTime(gain, start + 0.006);
+	env.gain.exponentialRampToValueAtTime(0.0001, start + duration);
+	osc.connect(env).connect(dest);
+	osc.start(start);
+	osc.stop(start + duration + 0.01);
+	return osc;
+}
+function noise(ctx, dest, start, duration = 0.09, gain = 0.1, cutoff = 1500) {
+	const buffer = ctx.createBuffer(
+			1,
+			Math.ceil(ctx.sampleRate * duration),
+			ctx.sampleRate,
+		),
+		data = buffer.getChannelData(0);
+	let ns = 47;
+	for (let i = 0; i < data.length; i++) {
+		ns = (Math.imul(ns, 1664525) + 1013904223) >>> 0;
+		data[i] = (ns / 2147483648 - 1) * (1 - i / data.length);
+	}
+	const src = ctx.createBufferSource(),
+		filter = ctx.createBiquadFilter(),
+		env = ctx.createGain();
+	src.buffer = buffer;
+	filter.type = "lowpass";
+	filter.frequency.value = cutoff;
+	env.gain.value = gain;
+	src.connect(filter).connect(env).connect(dest);
+	src.start(start);
+}
+function unlockAudio() {
+	if (hubEnded) return;
+	if (!audio.ctx) {
+		const ctx = new AudioContext();
+		audio.ctx = ctx;
+		audio.master = ctx.createGain();
+		audio.music = ctx.createGain();
+		audio.sfx = ctx.createGain();
+		audio.analyser = ctx.createAnalyser();
+		audio.analyser.fftSize = 1024;
+		const limiter = ctx.createDynamicsCompressor();
+		limiter.threshold.value = -12;
+		limiter.ratio.value = 8;
+		audio.music.connect(audio.master);
+		audio.sfx.connect(audio.master);
+		audio.master
+			.connect(limiter)
+			.connect(audio.analyser)
+			.connect(ctx.destination);
+		audio.master.gain.value = 0.65;
+		audio.next = ctx.currentTime + 0.05;
+	}
+	audio.ctx.resume().catch(() => {});
+	setAudioVolumes();
+}
+function setAudioVolumes() {
+	if (!audio.ctx) return;
+	audio.music.gain.setTargetAtTime(
+		settings.music / 100,
+		audio.ctx.currentTime,
+		0.04,
+	);
+	audio.sfx.gain.setTargetAtTime(
+		settings.sfx / 100,
+		audio.ctx.currentTime,
+		0.04,
+	);
+}
+function sound(kind) {
+	if (
+		!audio.ctx ||
+		audio.ctx.state !== "running" ||
+		game.mode === "attract" ||
+		game.mode === "hubEnded"
+	)
+		return;
+	const ctx = audio.ctx,
+		t = ctx.currentTime,
+		dest = audio.sfx;
+	audio.events++;
+	if (kind === "jump") tone(ctx, dest, 220, t, 0.13, "triangle", 0.18, 480);
+	if (kind === "step") noise(ctx, dest, t, 0.035, 0.06, 650);
+	if (kind === "coin") {
+		tone(ctx, dest, 880, t, 0.13, "sine", 0.12);
+		tone(ctx, dest, 1320, t + 0.045, 0.13, "sine", 0.08);
+	}
+	if (kind === "treasure") {
+		[0, 4, 7, 12].forEach((n, i) =>
+			tone(
+				ctx,
+				dest,
+				440 * 2 ** (n / 12),
+				t + i * 0.09,
+				0.35,
+				"triangle",
+				0.18,
+			),
+		);
+		gibberish(1.2);
+	}
+	if (kind === "hurt") {
+		noise(ctx, dest, t, 0.2, 0.24, 900);
+		tone(ctx, dest, 160, t, 0.35, "sawtooth", 0.1, 55);
+		gibberish(0.72);
+	}
+	if (kind === "swing") {
+		gibberish(1.5);
+		tone(ctx, dest, 180, t, 0.42, "sine", 0.1, 540);
+	}
+	if (kind === "camp") {
+		[0, 7, 12].forEach((n, i) =>
+			tone(ctx, dest, 330 * 2 ** (n / 12), t + i * 0.12, 0.4, "sine", 0.12),
+		);
+	}
+	if (kind === "win") {
+		[0, 4, 7, 12, 7, 12, 16].forEach((n, i) =>
+			tone(ctx, dest, 330 * 2 ** (n / 12), t + i * 0.15, 0.5, "triangle", 0.19),
+		);
+		gibberish(1.4);
+	}
+	if (kind === "ui") tone(ctx, dest, 470, t, 0.045, "sine", 0.07, 620);
+}
+function gibberish(pitch = 1) {
+	if (!audio.ctx) return;
+	const ctx = audio.ctx,
+		t = ctx.currentTime;
+	audio.voices++;
+	for (let i = 0; i < 4; i++) {
+		const f = ctx.createBiquadFilter();
+		f.type = "bandpass";
+		f.frequency.value = [700, 1200, 900, 1500][i] * pitch;
+		f.Q.value = 3;
+		f.connect(audio.sfx);
+		tone(
+			ctx,
+			f,
+			[210, 285, 245, 340][i] * pitch,
+			t + i * 0.075,
+			0.1,
+			"sawtooth",
+			0.12,
+			[270, 235, 320, 230][i] * pitch,
+		);
+	}
+}
+function musicTick() {
+	if (!audio.ctx || audio.ctx.state !== "running" || game.mode === "hubEnded")
+		return;
+	const ctx = audio.ctx;
+	const notes = [0, 7, 12, 14, 16, 12, 7, 4, 0, 7, 12, 19, 16, 14, 12, 7];
+	if (audio.next < ctx.currentTime - 0.2) audio.next = ctx.currentTime + 0.03;
+	while (audio.next < ctx.currentTime + 0.12) {
+		const n = notes[audio.beat % notes.length];
+		const freq = 196 * 2 ** (n / 12);
+		tone(ctx, audio.music, freq, audio.next, 0.46, "sine", 0.23);
+		tone(ctx, audio.music, freq * 2, audio.next, 0.13, "triangle", 0.055);
+		if (audio.beat % 4 === 0)
+			tone(
+				ctx,
+				audio.music,
+				98 * (audio.beat % 16 < 8 ? 1 : 0.75),
+				audio.next,
+				0.7,
+				"sine",
+				0.22,
+			);
+		if (audio.beat % 2 === 0)
+			noise(ctx, audio.music, audio.next, 0.06, 0.06, 2600);
+		audio.next += 0.265;
+		audio.beat++;
+	}
+}
+async function audioProof() {
+	const ctx = new OfflineAudioContext(1, 22050, 22050);
+	const g = ctx.createGain();
+	g.gain.value = 0.5;
+	g.connect(ctx.destination);
+	tone(ctx, g, 440, 0, 0.3, "triangle", 0.3, 660);
+	noise(ctx, g, 0.35, 0.1, 0.12);
+	const f = ctx.createBiquadFilter();
+	f.type = "bandpass";
+	f.frequency.value = 1100;
+	f.connect(g);
+	tone(ctx, f, 240, 0.5, 0.18, "sawtooth", 0.3, 340);
+	const rendered = await ctx.startRendering();
+	const d = rendered.getChannelData(0);
+	let sum = 0,
+		peak = 0;
+	for (const x of d) {
+		sum += x * x;
+		peak = Math.max(peak, Math.abs(x));
+	}
+	return { rms: Math.sqrt(sum / d.length), peak, samples: d.length };
+}
+
+
+const DEFAULTS = {
+	speed: 6.2,
+	jump: 10.2,
+	gravity: 25,
+	hazard: 1,
+	daylight: 480,
+	timeScale: 1,
+	music: 10,
+	sfx: 65,
+	glyphs: "ps",
+	vineAssist: true,
+	shake: true,
+};
+const settings = { ...DEFAULTS };
+const dev = { god: false, fly: false, wire: false, reveal: false };
+const SAVE_KEY = "pitfalling-expedition-v1";
+let saved = null;
+try {
+	saved = JSON.parse(localStorage.getItem(SAVE_KEY));
+	const opts = JSON.parse(localStorage.getItem(SAVE_KEY + "-options"));
+	if (opts)
+		for (const k of ["music", "sfx", "glyphs", "vineAssist", "shake"])
+			if (k in opts) settings[k] = opts[k];
+} catch {}
+const input = {
+	keys: new Set(),
+	last: navigator.maxTouchPoints > 0 ? "touch" : "keyboard",
+	jump: false,
+	map: false,
+	pause: false,
+	up: false,
+	down: false,
+	touchX: 0,
+	touchY: 0,
+	touchId: null,
+	touchStart: null,
+	padsPrev: new Map(),
+	lastActivity: performance.now(),
+	navAt: 0,
+	menuRepeat: 0,
+};
+const game = {
+	mode: "loading",
+	players: [],
+	elapsed: 0,
+	worldTime: 0,
+	lives: 3,
+	score: 2000,
+	collected: [],
+	coinIds: [],
+	camp: 0,
+	zone: 0,
+	coop: false,
+	won: false,
+	toast: 0,
+	banner: 0,
+	saveAt: 0,
+	attractTime: 0,
+	manual: new URLSearchParams(location.search).has("test"),
+	steps: 0,
+	deaths: 0,
+	metrics: { jumps: 0, swings: 0, climbs: 0, treasures: 0, damage: 0 },
+	hudStamp: 0,
+};
+let hubInfo = null,
+	hubStarted = false,
+	hubEnded = false,
+	hubReported = false,
+	hubNetAt = 0;
+const ghosts = new Map();
+function saveOptions() {
+	try {
+		localStorage.setItem(SAVE_KEY + "-options", JSON.stringify(settings));
+	} catch {}
+	setAudioVolumes();
+}
+function createPlayer(id, color) {
+	const avatar = createExplorer(color);
+	const rb = physics.createRigidBody(
+		RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(
+			4 + id,
+			0.8,
+			0,
+		),
+	);
+	const collider = physics.createCollider(
+		RAPIER.ColliderDesc.capsule(0.42, 0.3)
+			.setFriction(0)
+			.setCollisionGroups(0x00020001),
+		rb,
+	);
+	return {
+		id,
+		avatar,
+		rb,
+		collider,
+		x: 4 + id,
+		y: 0.8,
+		vx: 0,
+		vy: 0,
+		dir: 1,
+		grounded: false,
+		coyote: 0,
+		jumpBuffer: 0,
+		invuln: 0,
+		grabCooldown: 0,
+		vine: null,
+		vineTime: 0,
+		climbing: null,
+		jumpHeld: false,
+		jumpPrev: false,
+		stepAt: 0,
+		gateWarn: 0,
+		seenCamps: new Set([0]),
+	};
+}
+function positionPlayer(p, x, y, reset = true) {
+	p.x = x;
+	p.y = y;
+	p.rb.setTranslation({ x, y, z: 0 }, false);
+	p.rb.setNextKinematicTranslation({ x, y, z: 0 });
+	if (reset) {
+		p.vx = 0;
+		p.vy = 0;
+		p.vine = null;
+		p.climbing = null;
+		p.grounded = false;
+		p.coyote = 0;
+		p.jumpBuffer = 0;
+	}
+	p.avatar.root.position.set(x, y, 0);
+}
+function resetExpedition(coop = false, restore = null) {
+	game.elapsed = restore?.elapsed ?? 0;
+	game.worldTime = 0;
+	game.lives = restore?.lives ?? 3;
+	game.score = restore?.score ?? 2000;
+	game.collected =
+		restore?.collected?.filter((i) => Number.isInteger(i) && i >= 0 && i < 8) ??
+		[];
+	game.coinIds = restore?.coinIds ?? [];
+	game.camp = clamp(restore?.camp ?? 0, 0, camps.length - 1);
+	game.coop = coop;
+	game.zone = 0;
+	game.won = false;
+	game.deaths = 0;
+	game.metrics = { jumps: 0, swings: 0, climbs: 0, treasures: 0, damage: 0 };
+	game.saveAt = 0;
+	game.attractTime = 0;
+	for (const t of treasures) t.collected = game.collected.includes(t.index);
+	for (let i = 0; i < coins.length; i++)
+		coins[i].taken = game.coinIds.includes(i);
+	for (const p of game.players) {
+		p.avatar.root.visible = p.id === 0 || coop;
+		p.avatar.shadow.visible = p.id === 0 || coop;
+		p.rb.setEnabled(p.id === 0 || coop);
+		p.collider.setEnabled(p.id === 0 || coop);
+		p.invuln = 0;
+		p.seenCamps = new Set([game.camp]);
+		const c = camps[game.camp];
+		positionPlayer(p, c.x + p.id, c.y);
+	}
+	for (const l of logs) {
+		l.rb.setTranslation({ x: (l.a + l.b) / 2, y: 0.55, z: 0 }, true);
+		l.dir = -1;
+	}
+	game.players[0].x = camps[game.camp].x;
+	game.metrics.treasures = game.collected.length;
+}
+function startGame(coop = false, restore = false) {
+	if (AIHub.active) return;
+	unlockAudio();
+	closeModal();
+	resetExpedition(coop, restore ? saved : null);
+	game.mode = "play";
+	$("title").classList.add("hidden");
+	$("attract").classList.add("hidden");
+	$("hud").classList.remove("hidden");
+	updateTouch();
+	moveCamera(game.players[0].x, 0.8, 0, true);
+	toast(
+		coop
+			? "Two explorers. One glorious bad idea."
+			: "Good boots. Deep breath. Into the jungle!",
+		3.2,
+	);
+	if (coop)
+		toast(
+			"P1: A / D + Space   ·   P2: ← / → + Right Shift   ·   or two controllers",
+			5,
+		);
+	updateHud(true);
+}
+function returnTitle() {
+	if (AIHub.active) return;
+	closeModal();
+	game.mode = "title";
+	$("title").classList.remove("hidden");
+	$("hud").classList.add("hidden");
+	$("attract").classList.add("hidden");
+	$("toast").classList.add("hidden");
+	$("banner").classList.add("hidden");
+	$("touchJump").classList.add("hidden");
+	$("touchRing").classList.add("hidden");
+	input.lastActivity = performance.now();
+	resetExpedition(false);
+	positionPlayer(game.players[0], 36, 0.77);
+	game.players[0].dir = -1;
+	game.players[1].avatar.root.visible = false;
+	game.players[1].avatar.shadow.visible = false;
+	moveCamera(28, 0.8, 0, true);
+	$("continueButton").classList.toggle("hidden", !saved);
+	setMenuFocus(0);
+}
+function startAttract() {
+	closeModal();
+	resetExpedition(false);
+	game.mode = "attract";
+	game.attractTime = 0;
+	$("title").classList.add("hidden");
+	$("hud").classList.remove("hidden");
+	$("attract").classList.remove("hidden");
+	$("toast").classList.add("hidden");
+	$("touchJump").classList.add("hidden");
+}
+function activity(type) {
+	input.lastActivity = performance.now();
+	if (input.last !== type) {
+		input.last = type;
+		updatePrompts();
+		updateTouch();
+	}
+	if (game.mode === "attract") {
+		returnTitle();
+		return true;
+	}
+	return false;
+}
+function saveGame() {
+	if (AIHub.active || game.mode !== "play" || game.won || dev.god || dev.fly)
+		return;
+	const data = {
+		elapsed: game.elapsed,
+		lives: game.lives,
+		score: game.score,
+		collected: game.collected,
+		coinIds: game.coinIds,
+		camp: game.camp,
+	};
+	try {
+		localStorage.setItem(SAVE_KEY, JSON.stringify(data));
+		saved = data;
+	} catch {}
+}
+function jumpPlayer(p) {
+	p.vy = settings.jump;
+	p.grounded = false;
+	p.coyote = 0;
+	p.jumpBuffer = 0;
+	game.metrics.jumps++;
+	sound("jump");
+	burst(p.x, p.y - 0.65, 0xb2b481, 5);
+}
+function releaseVine(p, control) {
+	const v = p.vine;
+	const dx = Math.cos(v.angle) * v.length * v.vel,
+		dy = Math.sin(v.angle) * v.length * v.vel;
+	p.vx = clamp(dx + (control.x || p.dir) * 1.8, -11, 11);
+	p.vy = Math.max(3, dy + 3);
+	p.vine = null;
+	p.grabCooldown = 0.6;
+	sound("jump");
+}
+function damage(p, reason) {
+	if (p.invuln > 0 || dev.god || game.mode !== "play") return;
+	game.metrics.damage++;
+	game.deaths++;
+	game.lives--;
+	game.score = Math.max(0, game.score - 250);
+	sound("hurt");
+	burst(p.x, p.y, C.red, 26);
+	if (settings.shake) camera.userData.shake = 0.22;
+	if (game.lives <= 0) {
+		endGame(false, reason);
+		return;
+	}
+	const c = camps[game.camp];
+	positionPlayer(p, c.x + p.id * 0.7, c.y);
+	p.invuln = 2.3;
+	toast(reason + " · Back to camp!", 2.5);
+	saveGame();
+}
+function tryLadder(p, control) {
+	if (p.climbing || p.vine) return;
+	const near = ladders.find((l) => Math.abs(l.x - p.x) < 1.0);
+	if (!near) return;
+	const wantDown = control.y > 0.45 && p.y > -0.5,
+		wantUp = control.y < -0.45 && p.y < -2;
+	if (wantDown || wantUp) {
+		p.climbing = { x: near.x, from: p.y, to: wantDown ? -4.23 : 0.78, t: 0 };
+		p.vx = 0;
+		p.vy = 0;
+		p.grabCooldown = 1;
+		game.metrics.climbs++;
+		sound("ui");
+	}
+}
+function collectNear(p) {
+	for (const t of treasures) {
+		if (t.collected || Math.abs(p.x - t.x) > 1.0 || Math.abs(p.y - t.y) > 1.5)
+			continue;
+		t.collected = true;
+		game.collected.push(t.index);
+		game.metrics.treasures++;
+		game.score += 2000 + t.index * 250;
+		burst(t.x, t.y, C.gold, 30);
+		sound("treasure");
+		toast("◇ " + t.name + "   ·   " + game.collected.length + " / 8", 3.3);
+		saveGame();
+	}
+	coins.forEach((c, i) => {
+		if (!c.taken && Math.abs(c.x - p.x) < 0.55 && Math.abs(c.y - p.y) < 1.15) {
+			c.taken = true;
+			game.coinIds.push(i);
+			game.score += 100;
+			burst(c.x, c.y, C.gold, 4);
+			sound("coin");
+		}
+	});
+}
+function movePlayer(p, control, dt) {
+	p.invuln = Math.max(0, p.invuln - dt);
+	p.grabCooldown = Math.max(0, p.grabCooldown - dt);
+	p.gateWarn = Math.max(0, p.gateWarn - dt);
+	const jumpPressed = control.jump && !p.jumpPrev;
+	p.jumpPrev = control.jump;
+	const pos = p.rb.translation();
+	p.x = pos.x;
+	p.y = pos.y;
+	if (control.x > 0.1) p.dir = 1;
+	else if (control.x < -0.1) p.dir = -1;
+	if (dev.fly) {
+		p.vx = control.x * settings.speed * 1.8;
+		p.vy = -control.y * settings.speed;
+		positionPlayer(
+			p,
+			clamp(p.x + p.vx * dt, 1, 224),
+			clamp(p.y + p.vy * dt, -4.2, 12),
+			false,
+		);
+		return;
+	}
+	if (p.climbing) {
+		const c = p.climbing;
+		c.t += dt / 1.05;
+		const f = clamp(c.t, 0, 1);
+		p.x = c.x;
+		p.y = lerp(c.from, c.to, f);
+		p.rb.setNextKinematicTranslation({ x: p.x, y: p.y, z: 0 });
+		if (f >= 1) {
+			p.climbing = null;
+			p.invuln = Math.max(p.invuln, 0.6);
+			p.vy = 0;
+			p.grounded = false;
+		}
+		return;
+	}
+	tryLadder(p, control);
+	if (p.climbing) return;
+	if (p.vine) {
+		const v = p.vine;
+		p.vineTime += dt;
+		p.x = v.end.x;
+		p.y = v.end.y - 0.68;
+		p.rb.setNextKinematicTranslation({ x: p.x, y: p.y, z: 0 });
+		const g = gaps.find((g) => v.x > g.a && v.x < g.b);
+		const assist =
+			settings.vineAssist && (input.last === "touch" || control.assist);
+		if (
+			(jumpPressed && p.vineTime > 0.16) ||
+			(assist &&
+				g &&
+				p.dir * (p.x - (p.dir > 0 ? g.b : g.a)) > -0.15 &&
+				p.dir * v.vel > 0)
+		) {
+			releaseVine(p, control);
+		} else return;
+	}
+	if (jumpPressed) p.jumpBuffer = 0.13;
+	else p.jumpBuffer = Math.max(0, p.jumpBuffer - dt);
+	if (p.grounded) p.coyote = 0.11;
+	else p.coyote = Math.max(0, p.coyote - dt);
+	if (
+		input.last === "touch" &&
+		settings.vineAssist &&
+		Math.abs(control.x) > 0.2 &&
+		p.grounded
+	) {
+		const ahead = p.x + Math.sign(control.x) * 1.1;
+		const pit = gaps.find(
+			(g) => ahead > g.a && ahead < g.b && (g.type !== "sand" || g.open),
+		);
+		const h = hazards.find(
+			(h) => Math.abs(h.x - ahead) < 1.1 && Math.abs(p.y - h.y) < 1.4,
+		);
+		const log = logs.find(
+			(l) => Math.abs(l.rb.translation().x - ahead) < 1.1 && p.y > 0,
+		);
+		if (pit || h || log) p.jumpBuffer = 0.1;
+	}
+	if (p.jumpBuffer > 0 && p.coyote > 0) jumpPlayer(p);
+	if (!control.jump && p.jumpHeld && p.vy > 4) p.vy *= 0.55;
+	p.jumpHeld = control.jump;
+	const target = control.x * settings.speed;
+	const accel = p.grounded ? 35 : 21;
+	p.vx += clamp(target - p.vx, -accel * dt, accel * dt);
+	p.vy = Math.max(-20, p.vy - settings.gravity * dt);
+	const move = { x: p.vx * dt, y: p.vy * dt, z: 0 };
+	controller.computeColliderMovement(
+		p.collider,
+		move,
+		RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
+		0x00020001,
+	);
+	const corrected = controller.computedMovement();
+	p.rb.setNextKinematicTranslation({
+		x: clamp(p.x + corrected.x, 1, 224),
+		y: p.y + corrected.y,
+		z: 0,
+	});
+	p.grounded = controller.computedGrounded();
+	if (p.grounded && p.vy < 0) p.vy = 0;
+	if (corrected.y < move.y - 0.01 && p.vy > 0) p.vy = 0;
+	p.x = clamp(p.x + corrected.x, 1, 224);
+	p.y += corrected.y;
+	if (!p.grounded && p.grabCooldown <= 0 && p.y > 0 && p.y < 7) {
+		for (const v of vines) {
+			const dx = p.x - v.end.x,
+				dy = p.y + 0.68 - v.end.y;
+			if (dx * dx + dy * dy < 1.35 * 1.35) {
+				p.vine = v;
+				p.vineTime = 0;
+				p.jumpBuffer = 0;
+				game.metrics.swings++;
+				sound("swing");
+				break;
+			}
+		}
+	}
+	if (p.grounded && Math.abs(p.vx) > 2) {
+		p.stepAt += dt;
+		if (p.stepAt > 0.28) {
+			p.stepAt = 0;
+			sound("step");
+			if (game.steps++ % 2 === 0) burst(p.x, p.y - 0.7, 0xb6b784, 2);
+		}
+	}
+}
+function checkPlayer(p) {
+	collectNear(p);
+	if (
+		dev.god &&
+		p.y < -1.4 &&
+		!caveRanges.some(([a, b]) => p.x > a - 1 && p.x < b + 1)
+	) {
+		const gap = gaps.find((g) => p.x > g.a - 1 && p.x < g.b + 1);
+		positionPlayer(
+			p,
+			gap ? (p.dir > 0 ? gap.b + 0.8 : gap.a - 0.8) : camps[game.camp].x,
+			0.8,
+		);
+	}
+	if (
+		p.y < -1.4 &&
+		!caveRanges.some(([a, b]) => p.x > a - 1 && p.x < b + 1) &&
+		!p.climbing
+	)
+		damage(p, "That pit had other plans");
+	if (p.y < -6) damage(p, "A rather long way down");
+	if (p.invuln <= 0 && !p.vine && !p.climbing) {
+		for (const h of hazards) {
+			if (Math.abs(p.x - h.x) < h.radius && p.y > h.y - 0.3 && p.y < h.y + 1.25)
+				damage(
+					p,
+					h.type === "cobra"
+						? "Never argue with a cobra"
+						: h.type === "fire"
+							? "A little too toasty"
+							: "A sting in the tale",
+				);
+		}
+		for (const c of crocs)
+			if (!c.closed && Math.abs(p.x - c.x) < 1.15 && p.y < 1.1 && p.y > -0.8)
+				damage(p, "Mind the teeth");
+		for (const l of logs) {
+			const pos = l.rb.translation();
+			if (Math.abs(p.x - pos.x) < 0.73 && Math.abs(p.y - pos.y) < 0.95)
+				damage(p, "The log won that round");
+		}
+	}
+	for (let i = 0; i < camps.length; i++) {
+		if (
+			Math.abs(p.x - camps[i].x) < 1.0 &&
+			p.y > 0 &&
+			p.y < 1.2 &&
+			!p.seenCamps.has(i)
+		) {
+			p.seenCamps.add(i);
+			if (i > game.camp) {
+				game.camp = i;
+				camps[i].flag.material = mat(C.gold);
+				sound("camp");
+				toast("Camp reached · Your trail is safe", 2.5);
+				saveGame();
+			}
+		}
+	}
+	if (p.x > 216 && p.y > 0) {
+		if (game.collected.length === 8) endGame(true);
+		else if (p.gateWarn <= 0) {
+			p.gateWarn = 6;
+			toast("The Sun Gate needs all eight treasures. Check your field map.", 4);
+		}
+	}
+}
+function endGame(
+	won,
+	reason = "Daylight’s gone. The jungle keeps its secrets.",
+) {
+	if (game.mode === "result" || hubReported) return;
+	game.won = won;
+	if (won) {
+		game.score +=
+			Math.floor(Math.max(0, settings.daylight - game.elapsed) * 10) +
+			game.lives * 1000;
+		sound("win");
+		for (let n = 0; n < 5; n++)
+			burst(219 + rand(-3, 3), rand(2, 7), C.gold, 20);
+		if (!AIHub.active) {
+			saved = null;
+			try {
+				localStorage.removeItem(SAVE_KEY);
+			} catch {}
+		}
+	}
+	if (AIHub.active) {
+		hubReported = true;
+		if (won)
+			AIHub.result({
+				time: Math.max(0, AIHub.time()),
+				stats: { Treasures: game.collected.length, "Trail score": game.score },
+			});
+		else
+			AIHub.result({
+				score: game.score,
+				stats: { Treasures: game.collected.length },
+			});
+	}
+	game.mode = "result";
+	showResults(won, reason);
+}
+function tickAttract(dt) {
+	game.attractTime += dt;
+	let x = Math.min(219, 4 + game.attractTime * 4.2);
+	const p = game.players[0];
+	let y = 0.77;
+	let anim = "run";
+	for (const [a, b] of [
+		[73, 109],
+		[165, 179],
+	]) {
+		if (x > a && x < b) y = -4.23;
+		if (x > a - 1 && x < a + 1) {
+			y = lerp(0.77, -4.23, clamp((x - a + 1) / 2, 0, 1));
+			anim = "climb";
+		}
+		if (x > b - 1 && x < b + 1) {
+			y = lerp(-4.23, 0.77, clamp((x - b + 1) / 2, 0, 1));
+			anim = "climb";
+		}
+	}
+	for (const g of gaps)
+		if (x > g.a - 2 && x < g.b + 2 && y > 0) {
+			const f = (x - g.a + 2) / (g.b - g.a + 4);
+			y = 0.77 + Math.sin(f * Math.PI) * 3.8;
+			anim = g.type === "bridge" || g.type === "crocs" ? "jump" : "swing";
+		}
+	for (const h of hazards)
+		if (Math.abs(x - h.x) < 2 && Math.abs(y - h.y) < 1.5) {
+			y += Math.sin(((x - h.x + 2) / 4) * Math.PI) * 2.1;
+			anim = "jump";
+		}
+	positionPlayer(p, x, y, false);
+	p.vx = 4.2;
+	p.dir = 1;
+	animateExplorer(p.avatar, anim, 4.2, dt);
+	collectAttract(p);
+	moveCamera(x, y, dt);
+	if (game.attractTime > 57) {
+		game.attractTime = 0;
+		for (const t of treasures) t.collected = false;
+		game.collected = [];
+	}
+}
+function collectAttract(p) {
+	for (const t of treasures)
+		if (!t.collected && Math.abs(p.x - t.x) < 1.1 && Math.abs(p.y - t.y) < 2) {
+			t.collected = true;
+			game.collected.push(t.index);
+			burst(t.x, t.y, C.gold, 12);
+		}
+}
+function sampleControl(p) {
+	let x = 0,
+		y = 0,
+		jump = false;
+	const k = input.keys;
+	if (p.id === 0) {
+		x = (k.has("KeyD") ? 1 : 0) - (k.has("KeyA") ? 1 : 0);
+		y = (k.has("KeyS") ? 1 : 0) - (k.has("KeyW") ? 1 : 0);
+		jump = k.has("Space");
+		if (!game.coop) {
+			x += (k.has("ArrowRight") ? 1 : 0) - (k.has("ArrowLeft") ? 1 : 0);
+			y += (k.has("ArrowDown") ? 1 : 0) - (k.has("ArrowUp") ? 1 : 0);
+			jump =
+				jump ||
+				(k.has("ArrowUp") &&
+					Math.abs(
+						p.x - (ladders.find((l) => Math.abs(l.x - p.x) < 1)?.x ?? 999),
+					) > 1);
+		}
+		x += input.touchX;
+		y += input.touchY;
+		jump = jump || input.jump;
+	} else {
+		x = (k.has("ArrowRight") ? 1 : 0) - (k.has("ArrowLeft") ? 1 : 0);
+		y = (k.has("ArrowDown") ? 1 : 0) - (k.has("ArrowUp") ? 1 : 0);
+		jump = k.has("ShiftRight") || k.has("Numpad0");
+	}
+	const pads = Array.from(navigator.getGamepads?.() ?? []).filter(Boolean);
+	const pad = pads[p.id];
+	if (pad) {
+		const axis = pad.axes[0] ?? 0,
+			vertical = pad.axes[1] ?? 0;
+		if (Math.abs(axis) > 0.18) x += axis;
+		if (Math.abs(vertical) > 0.35) y += vertical;
+		if (pad.buttons[14]?.pressed) x--;
+		if (pad.buttons[15]?.pressed) x++;
+		if (pad.buttons[12]?.pressed) y--;
+		if (pad.buttons[13]?.pressed) y++;
+		jump = jump || !!pad.buttons[0]?.pressed;
+	}
+	return { x: clamp(x, -1, 1), y: clamp(y, -1, 1), jump };
+}
+function updatePlayerVisual(p, dt) {
+	const pos = p.rb.translation();
+	if (game.mode === "play") p.avatar.root.position.set(pos.x, pos.y, 0);
+	p.avatar.model.rotation.y = lerp(
+		p.avatar.model.rotation.y,
+		p.dir * 0.75,
+		Math.min(1, dt * 13),
+	);
+	p.avatar.root.visible = p.id === 0 || game.coop;
+	p.avatar.shadow.visible = p.avatar.root.visible;
+	p.avatar.shadow.position.set(p.x, p.y < -1 ? -4.975 : 0.035, 0.1);
+	const height = Math.max(0, p.y - (p.y < -1 ? -4.23 : 0.77));
+	p.avatar.shadow.scale.setScalar(Math.max(0.3, 1 - height * 0.12));
+	if (p.invuln > 0) p.avatar.model.visible = Math.sin(p.invuln * 30) > -0.2;
+	else p.avatar.model.visible = true;
+	if (game.mode === "play")
+		animateExplorer(
+			p.avatar,
+			p.climbing
+				? "climb"
+				: p.vine
+					? "swing"
+					: !p.grounded
+						? "jump"
+						: Math.abs(p.vx) > 0.3
+							? "run"
+							: "idle",
+			p.vx,
+			dt,
+		);
+}
+function fixedTick(dt, controls = null) {
+	if (hubEnded) return;
+	const canPlay = game.mode === "play" && (!modalName || AIHub.active);
+	if (
+		game.mode === "title" ||
+		game.mode === "loading" ||
+		game.mode === "hubWaiting"
+	) {
+		game.worldTime += dt;
+		updateScene(game.worldTime, dt, settings.hazard);
+		physics.timestep = dt;
+		physics.step();
+		animateExplorer(game.players[0].avatar, "idle", 0, dt);
+		return;
+	}
+	if (game.mode === "attract") {
+		game.worldTime += dt;
+		updateScene(game.worldTime, dt, settings.hazard);
+		tickAttract(dt);
+		physics.timestep = dt;
+		physics.step();
+		updateHud();
+		return;
+	}
+	if (!canPlay) return;
+	if (AIHub.active && AIHub.time() < 0) {
+		$("banner").classList.remove("hidden");
+		$("banner").textContent = Math.ceil(-AIHub.time() / 1000);
+		return;
+	}
+	if (AIHub.active && game.banner === 0) $("banner").classList.add("hidden");
+	game.elapsed += dt;
+	game.worldTime += dt;
+	updateScene(game.worldTime, dt, settings.hazard);
+	const active = game.coop ? game.players : [game.players[0]];
+	for (const p of active)
+		movePlayer(p, controls?.[p.id] ?? sampleControl(p), dt);
+	physics.timestep = dt;
+	physics.step();
+	for (const p of active) {
+		const pos = p.rb.translation();
+		p.x = pos.x;
+		p.y = pos.y;
+		checkPlayer(p);
+		updatePlayerVisual(p, dt);
+	}
+	if (game.coop) {
+		const [a, b] = active;
+		if (Math.abs(a.x - b.x) > 22) {
+			const behind = a.x < b.x ? a : b,
+				ahead = behind === a ? b : a;
+			positionPlayer(behind, ahead.x - ahead.dir * 2, ahead.y);
+			behind.invuln = 1.5;
+			toast("Stick together, explorers!", 2);
+		}
+	}
+	const center = game.coop ? (active[0].x + active[1].x) / 2 : active[0].x;
+	const cy = game.coop ? Math.min(active[0].y, active[1].y) : active[0].y;
+	moveCamera(center, cy, dt);
+	if (game.elapsed >= settings.daylight) endGame(false);
+	game.saveAt += dt;
+	if (game.saveAt > 2) {
+		saveGame();
+		game.saveAt = 0;
+	}
+	game.toast -= dt;
+	if (game.toast <= 0) $("toast").classList.add("hidden");
+	updateHud();
+}
+function sendHub() {
+	if (
+		!AIHub.active ||
+		!hubInfo ||
+		!hubStarted ||
+		hubEnded ||
+		game.mode === "hubWaiting"
+	)
+		return;
+	const now = performance.now();
+	if (now - hubNetAt < 100) return;
+	hubNetAt = now;
+	const p = game.players[0];
+	AIHub.send(
+		{
+			x: +p.x.toFixed(3),
+			y: +p.y.toFixed(3),
+			dir: p.dir,
+			anim: p.avatar.anim,
+			score: game.score,
+			n: game.collected.length,
+		},
+		{ reliable: false },
+	);
+	if (Math.floor(now / 1000) !== game.lastProgress) {
+		game.lastProgress = Math.floor(now / 1000);
+		AIHub.progress({
+			score: game.score,
+			label: game.collected.length + "/8 treasures",
+		});
+	}
+}
+function updateGhosts(dt) {
+	for (const [id, g] of ghosts) {
+		g.avatar.root.position.lerp(
+			new THREE.Vector3(g.x, g.y, 0),
+			Math.min(1, dt * 12),
+		);
+		g.avatar.model.rotation.y = g.dir * 0.75;
+		const local = game.players[0];
+		const visible =
+			Math.abs(g.x - local.x) < 35 && Math.abs(g.y - local.y) < 4.5;
+		g.avatar.root.visible = visible;
+		g.avatar.shadow.visible = false;
+		animateExplorer(g.avatar, g.anim ?? "run", 4, dt);
+		const v = new THREE.Vector3(
+			g.avatar.root.position.x,
+			g.avatar.root.position.y + 1.5,
+			0,
+		).project(camera);
+		g.tag.style.left = ((v.x + 1) * innerWidth) / 2 + "px";
+		g.tag.style.top = ((-v.y + 1) * innerHeight) / 2 + "px";
+		g.tag.style.display = visible ? "block" : "none";
+	}
+}
+async function initHub() {
+	if (!AIHub.active) return;
+	game.mode = "hubWaiting";
+	$("title").classList.add("hidden");
+	$("hud").classList.remove("hidden");
+	hubInfo = await AIHub.connect({ mode: "ghost", seats: [1, 4] });
+	if (!hubInfo) {
+		returnTitle();
+		return;
+	}
+	for (const peer of hubInfo.players) {
+		if (peer.id === hubInfo.me) continue;
+		const avatar = createExplorer(new THREE.Color(peer.color).getHex(), true);
+		avatar.root.visible = false;
+		avatar.shadow.visible = false;
+		const tag = document.createElement("span");
+		tag.className = "name-tag";
+		tag.textContent = peer.name;
+		tag.style.color = peer.color;
+		$("peerNames").append(tag);
+		ghosts.set(peer.id, { avatar, tag, x: 4, y: 0.8, dir: 1, anim: "idle" });
+	}
+	AIHub.on("message", (data, from) => {
+		if (
+			hubEnded ||
+			!data ||
+			!Number.isFinite(data.x) ||
+			!Number.isFinite(data.y)
+		)
+			return;
+		const g = ghosts.get(from);
+		if (g) {
+			g.x = clamp(data.x, -10, 240);
+			g.y = clamp(data.y, -10, 20);
+			g.dir = data.dir === -1 ? -1 : 1;
+			g.anim = ["idle", "run", "jump", "swing", "climb"].includes(data.anim)
+				? data.anim
+				: "idle";
+		}
+	});
+	AIHub.on("start", () => {
+		hubStarted = true;
+		resetExpedition(false);
+		game.mode = "play";
+		moveCamera(4, 0.8, 0, true);
+		updateHud(true);
+	});
+	AIHub.on("leave", ({ id }) => {
+		const g = ghosts.get(id);
+		if (g) {
+			scene.remove(g.avatar.root, g.avatar.shadow);
+			g.tag.remove();
+			ghosts.delete(id);
+		}
+	});
+	AIHub.on("time-up", () => {
+		if (!hubReported) endGame(false, "The expedition clock has run out.");
+	});
+	AIHub.on("end", () => {
+		hubEnded = true;
+		game.mode = "hubEnded";
+		input.keys.clear();
+		closeModal();
+		if (audio.ctx) audio.ctx.suspend();
+		$("banner").textContent = "EXPEDITION COMPLETE";
+		$("banner").classList.remove("hidden");
+	});
+	AIHub.ready();
+}
+
+
+let modalName = null,
+	modalOrigin = "title",
+	focusIndex = 0,
+	focusItems = [];
+const report = JSON.parse($("reportData").textContent);
+const esc = (s) =>
+	String(s).replace(
+		/[&<>"']/g,
+		(c) =>
+			({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+				c
+			],
+	);
+function glyph(action) {
+	const ps = {
+			jump: "✕",
+			map: "△",
+			pause: "☰",
+			back: "○",
+			move: "L",
+			climb: "L ↕",
+			accept: "✕",
+		},
+		xb = {
+			jump: "A",
+			map: "Y",
+			pause: "☰",
+			back: "B",
+			move: "L",
+			climb: "L ↕",
+			accept: "A",
+		},
+		kb = {
+			jump: "Space",
+			map: "M",
+			pause: "Esc",
+			back: "Esc",
+			move: "A / D",
+			climb: "W / S",
+			accept: "Enter",
+		};
+	const pad = input.last === "gamepad";
+	const text = (pad ? (settings.glyphs === "xbox" ? xb : ps) : kb)[action];
+	return '<span class="glyph ' + (pad ? "pad" : "") + '">' + text + "</span>";
+}
+function updatePrompts() {
+	$("titlePrompt").innerHTML =
+		input.last === "touch"
+			? "Left thumb to move · Right thumb to leap"
+			: glyph("move") + " Move &nbsp; " + glyph("jump") + " Leap";
+	if (game.mode === "play") updateHud(true);
+}
+function toast(text, duration = 2.5) {
+	$("toast").textContent = text;
+	$("toast").classList.remove("hidden");
+	game.toast = duration;
+	game.toastUntil = performance.now() + duration * 1000;
+}
+function updateTouch() {
+	document.body.classList.toggle("touch-mode", input.last === "touch");
+	const active = input.last === "touch" && game.mode === "play" && !modalName;
+	const p = game.players[0];
+	const near =
+		p &&
+		(p.vine ||
+			!p.grounded ||
+			gaps.some((g) => Math.abs(p.x - g.a) < 3 || Math.abs(p.x - g.b) < 3) ||
+			hazards.some((h) => Math.abs(h.x - p.x) < 4));
+	$("touchJump").classList.toggle("hidden", !active || !near);
+	$("touchJump").textContent = p?.vine ? "↗" : "↑";
+	if (!active) $("touchRing").classList.add("hidden");
+}
+function updateHud(force = false) {
+	const now = performance.now();
+	if (!force && now - game.hudStamp < 100) return;
+	game.hudStamp = now;
+	const p = game.players[0];
+	if (!p) return;
+	const zi = zones.reduce((n, z, i) => (p.x >= z.x ? i : n), 0);
+	game.zone = zi;
+	$("zoneIndex").textContent =
+		String(zi + 1).padStart(2, "0") + " / THE LOST TRAIL";
+	$("zoneName").textContent =
+		(p.y < -1 ? "BENEATH · " : "") + zones[zi].name.toUpperCase();
+	$("relicCount").textContent = game.collected.length + " / 8";
+	$("score").textContent = String(game.score).padStart(5, "0");
+	const seconds = Math.max(0, Math.ceil(settings.daylight - game.elapsed));
+	$("timer").textContent =
+		String(Math.floor(seconds / 60)).padStart(2, "0") +
+		":" +
+		String(seconds % 60).padStart(2, "0");
+	$("timer").style.color = seconds < 60 ? "#ef9868" : "";
+	$("hearts").textContent =
+		"♥ ".repeat(Math.max(0, game.lives)) +
+		"♡ ".repeat(Math.max(0, 3 - game.lives));
+	let hint = zones[zi].note;
+	if (p.vine)
+		hint = glyph("jump") + " Let go when the far bank is beneath your boots.";
+	else if (p.climbing) hint = "Keep your boots on the rungs.";
+	else if (ladders.some((l) => Math.abs(l.x - p.x) < 2))
+		hint = glyph("climb") + " Climb the ladder · Treasure lies below.";
+	else if (zi === 0)
+		hint =
+			glyph("move") +
+			" Move &nbsp; " +
+			glyph("jump") +
+			" Jump &nbsp; " +
+			glyph("map") +
+			" Map";
+	else if (zi === 1 || zi === 4 || zi === 7)
+		hint = glyph("jump") + " Jump to catch a vine. Press again to release.";
+	$("hint").innerHTML = hint;
+	if (game.collected.length === 8) {
+		$("objectiveLine").textContent = "A full pack. A fine adventure.";
+		$("objectiveTarget").textContent = "☀ Reach the Sun Gate →";
+	} else {
+		let target = treasures
+			.filter((t) => !t.collected)
+			.sort((a, b) => Math.abs(a.x - p.x) - Math.abs(b.x - p.x))[0];
+		$("objectiveLine").textContent =
+			target?.y < 0
+				? "Some fortunes are under your feet."
+				: "Follow the fireflies. Mind the teeth.";
+		$("objectiveTarget").textContent = target
+			? (target.x < p.x ? "← " : "") +
+				"◇ " +
+				(8 - game.collected.length) +
+				" treasure" +
+				(game.collected.length === 7 ? "" : "s") +
+				" to find" +
+				(target.x >= p.x ? " →" : "")
+			: "◇ Eight treasures to find";
+	}
+	const badge = AIHub.active
+		? "LIVE TRAIL RACE · " + (hubInfo?.players.length ?? 1) + " EXPLORERS"
+		: game.coop
+			? "TWO EXPLORERS · SHARED FORTUNE"
+			: dev.god || dev.fly
+				? "FIELD LAB · ASSISTS ACTIVE"
+				: "";
+	$("modeBadge").textContent = badge;
+	$("modeBadge").classList.toggle("hidden", !badge);
+	updateTouch();
+}
+function refreshFocus() {
+	const parent = modalName ? $("panel") : $("title");
+	focusItems = Array.from(
+		parent.querySelectorAll("button,input,select"),
+	).filter((e) => !e.disabled && e.offsetParent !== null);
+	focusIndex = clamp(focusIndex, 0, Math.max(0, focusItems.length - 1));
+}
+function setMenuFocus(index, focus = false) {
+	refreshFocus();
+	focusIndex = (index + focusItems.length) % Math.max(1, focusItems.length);
+	for (const e of focusItems) e.classList.remove("focused");
+	const e = focusItems[focusIndex];
+	if (e) {
+		e.classList.add("focused");
+		if (focus) {
+			e.focus({ preventScroll: true });
+			e.scrollIntoView({ block: "nearest" });
+		}
+	}
+}
+function navigateMenu(n) {
+	refreshFocus();
+	setMenuFocus(focusIndex + n, true);
+	sound("ui");
+}
+function changeFocused(n) {
+	refreshFocus();
+	const e = focusItems[focusIndex];
+	if (!e) return;
+	if (e.type === "range") {
+		e.value = String(
+			clamp(
+				Number(e.value) + Number(e.step || 1) * n,
+				Number(e.min),
+				Number(e.max),
+			),
+		);
+		e.dispatchEvent(new Event("input", { bubbles: true }));
+	} else if (e.tagName === "SELECT") {
+		e.selectedIndex = clamp(e.selectedIndex + n, 0, e.options.length - 1);
+		e.dispatchEvent(new Event("change", { bubbles: true }));
+	} else navigateMenu(n);
+}
+function menuHeader(title, sub = "") {
+	return (
+		'<div class="panel-head"><div><h2>' +
+		title +
+		"</h2>" +
+		(sub ? '<p class="sub">' + sub + "</p>" : "") +
+		'</div><button class="close" data-act="back" aria-label="Back">×</button></div>'
+	);
+}
+function openModal(name) {
+	if (game.mode === "attract") returnTitle();
+	if (!modalName) modalOrigin = game.mode === "title" ? "title" : "pause";
+	modalName = name;
+	$("modal").classList.remove("hidden");
+	$("touchJump").classList.add("hidden");
+	$("panel").className = "panel" + (name === "pause" ? " small" : "");
+	input.keys.clear();
+	input.jump = false;
+	input.touchX = 0;
+	input.touchY = 0;
+	input.touchId = null;
+	input.touchStart = null;
+	$("touchRing").classList.add("hidden");
+	let html = "";
+	if (name === "pause") {
+		html =
+			menuHeader(
+				AIHub.active ? "Trail kit" : "Take a breather",
+				AIHub.active
+					? "The race continues while you check your kit."
+					: "A good explorer knows when to stop.",
+			) +
+			'<div class="rows">' +
+			[
+				["resume", "Back to the trail"],
+				["map", "Field map"],
+				["howto", "Field guide"],
+				["settings", "Options"],
+				["dev", "Developer field lab"],
+				["about", "About & credits"],
+				...(!AIHub.active ? [["quit", "Save & return to camp"]] : []),
+			]
+				.map(
+					([a, b], i) =>
+						'<button class="btn ' +
+						(i === 0 ? "primary" : "") +
+						'" data-act="' +
+						a +
+						'">' +
+						b +
+						"<span>" +
+						(i === 0 ? "↗" : "→") +
+						"</span></button>",
+				)
+				.join("") +
+			"</div>";
+	}
+	if (name === "howto") {
+		html =
+			menuHeader(
+				"A field guide",
+				"Recover all eight treasures. Reach the Sun Gate before your eight minutes of daylight run out.",
+			) +
+			'<div class="control-grid"><div class="control-card"><h3>01 · Good boots</h3><p>' +
+			glyph("move") +
+			" Move left / right<br>" +
+			glyph("jump") +
+			" Jump; hold for a higher leap<br>" +
+			glyph("climb") +
+			' Climb a nearby ladder</p><p>Closed crocodile mouths can be crossed. Open ones are a poor idea. Jump logs, cobras, fire and scorpions.</p></div><div class="control-card"><h3>02 · A little courage</h3><p>Jump near a vine to grab it automatically. ' +
+			glyph("jump") +
+			' Press again to let go.</p><p>Watch the quicksand breathe. The tunnels hold two treasures. Camp flags save your progress, even if you lose a life.</p></div><div class="control-card"><h3>03 · Keep your bearings</h3><p>' +
+			glyph("map") +
+			" Open the treasure map<br>" +
+			glyph("pause") +
+			' Pause & options</p><p>Gold fireflies add to your score. You have three lives. Lost treasures stay in your pack when you respawn.</p></div><div class="control-card"><h3>04 · Bring a friend</h3><p>Local co-op: share three lives and eight treasures. Two pads, or P1 A/D + Space, P2 arrows + Right Shift. Up/down climbs.</p><p>AI Hub: 1–4 explorers race with visible ghosts. Touch: drag the left side; tap the right to jump. Climbing and vine release are assisted.</p></div></div><div class="panel-footer"><button class="btn primary" data-act="back">Boots on. Got it. <span>↗</span></button></div>';
+	}
+	if (name === "settings") {
+		html =
+			menuHeader(
+				"Pack light. Play your way.",
+				"Changes are saved on this device.",
+			) +
+			'<div class="rows">' +
+			slider(
+				"music",
+				"Music",
+				0,
+				100,
+				1,
+				"%",
+				"A little marimba goes a long way. Default: 10%.",
+			) +
+			slider("sfx", "Sound & gibberish", 0, 100, 1, "%") +
+			'<label class="setting"><span>Controller symbols</span><select id="glyphSetting"><option value="ps" ' +
+			(settings.glyphs === "ps" ? "selected" : "") +
+			'>PlayStation · ✕ ○ □ △</option><option value="xbox" ' +
+			(settings.glyphs === "xbox" ? "selected" : "") +
+			">Xbox · A B X Y</option></select></label>" +
+			toggle(
+				"vineAssist",
+				"Touch trail assist",
+				"Auto-jump hazards and release vines on touch.",
+			) +
+			toggle("shake", "A little camera rumble") +
+			'</div><div class="panel-footer"><button class="btn" data-act="fullscreen">Full screen <span>⛶</span></button><button class="btn primary" data-act="back">Back to it <span>↗</span></button></div>';
+	}
+	if (name === "map") {
+		html =
+			menuHeader(
+				"The lost trail",
+				"Eight treasures. Two underground detours. Camp flags save the expedition.",
+			) +
+			'<div class="route">' +
+			zones
+				.map((z, i) => {
+					const t = treasures[z.treasure];
+					return (
+						'<div class="route-card ' +
+						(game.zone === i ? "active" : "") +
+						'"><span class="num">' +
+						String(i + 1).padStart(2, "0") +
+						" " +
+						(game.zone === i ? "· YOU ARE HERE" : "") +
+						"</span><h3>" +
+						z.name +
+						'</h3><p class="treasure-dot">' +
+						(t.collected ? "◆ Treasure recovered" : "◇ Treasure waiting") +
+						"</p><p>" +
+						(t.y < 0
+							? "↓ Below ground · use the ladders"
+							: i === 1 || i === 4 || i === 7
+								? "⌁ Vine crossing"
+								: i === 2
+									? "⌁ Watch the jaws"
+									: "⚑ Keep to the trail") +
+						"</p></div>"
+					);
+				})
+				.join("") +
+			'</div><p class="sub">The Sun Gate is at the eastern end →<br>The caves connect 73 ↔ 109 and 165 ↔ 179. ' +
+			(game.coop
+				? "Both explorers share the pack."
+				: "You can always go back for a missed treasure.") +
+			'</p><button class="btn primary" data-act="back">Return to the trail <span>↗</span></button>';
+	}
+	if (name === "dev") {
+		html =
+			menuHeader(
+				"Developer field lab",
+				"Live balance controls. Cheats disable saving; your regular trail stays safe.",
+			) +
+			'<div class="dev-grid">' +
+			slider("speed", "Run speed", 3, 11, 0.1, "") +
+			slider("jump", "Jump impulse", 6, 17, 0.1, "") +
+			slider("gravity", "Gravity", 12, 40, 1, "") +
+			slider("hazard", "Hazard tempo", 0.3, 2, 0.05, "×") +
+			slider("daylight", "Daylight budget", 120, 1200, 30, "s") +
+			slider("timeScale", "Simulation speed", 0.25, 2, 0.05, "×") +
+			devToggle("god", "Invulnerable") +
+			devToggle("fly", "Free flight · move / up / down") +
+			devToggle("wire", "Physics colliders") +
+			devToggle("reveal", "Reveal treasure bearings") +
+			'</div><div class="dev-tools">' +
+			[
+				["warpBack", "Previous camp"],
+				["warpNext", "Next camp"],
+				["respawn", "Respawn at camp"],
+				["allRelics", "Recover all treasures"],
+				["step", "Single physics step"],
+				["resetDev", "Reset all defaults"],
+			]
+				.map(
+					([a, b]) =>
+						'<button class="btn" data-act="' + a + '">' + b + "</button>",
+				)
+				.join("") +
+			'</div><p class="focus-hint">' +
+			backend +
+			' · Three.js r180 · Rapier 0.19.3 · fixed 60 Hz simulation</p><div class="panel-footer"><button class="btn primary" data-act="resume">Back to the trail <span>↗</span></button></div>';
+	}
+	if (name === "about") {
+		html =
+			menuHeader(
+				"A little jungle history",
+				"An original pocket expedition, inspired by a very big adventure in 4 KB.",
+			) +
+			'<div class="credits-tabs">' +
+			[
+				["sourceInformation", "Source Information"],
+				["testingFeedback", "Testing Feedback"],
+				["engineFeedback", "Engine Feedback"],
+				["promptFeedback", "Prompt Feedback"],
+			]
+				.map(
+					([id, label], i) =>
+						'<button data-credit="' +
+						id +
+						'" class="' +
+						(i === 0 ? "selected" : "") +
+						'">' +
+						label +
+						"</button>",
+				)
+				.join("") +
+			'</div><div id="creditCopy" class="credits-copy"></div><p class="focus-hint">Original game, characters, geometry, score and synth voices created for this demo. Pitfall! (1982): David Crane / Activision. Three.js: MIT. Rapier: Apache-2.0. DM Sans & Barlow Condensed: SIL OFL. AI Hub client 1.4.0: used unmodified.</p>';
+	}
+	$("panel").innerHTML = html;
+	bindPanelControls();
+	if (name === "about") showCredit("sourceInformation");
+	focusIndex = name === "pause" ? 1 : 0;
+	setMenuFocus(focusIndex);
+}
+function slider(key, label, min, max, step, suffix, sub = "") {
+	return (
+		'<label class="setting"><span>' +
+		label +
+		(sub ? "<small>" + sub + "</small>" : "") +
+		'</span><span><input type="range" data-setting="' +
+		key +
+		'" aria-label="' +
+		label +
+		'" min="' +
+		min +
+		'" max="' +
+		max +
+		'" step="' +
+		step +
+		'" value="' +
+		settings[key] +
+		'"><output class="value" id="val-' +
+		key +
+		'">' +
+		settings[key] +
+		suffix +
+		"</output></span></label>"
+	);
+}
+function toggle(key, label, sub = "") {
+	return (
+		'<label class="setting"><span>' +
+		label +
+		(sub ? "<small>" + sub + "</small>" : "") +
+		'</span><input type="checkbox" data-setting="' +
+		key +
+		'" aria-label="' +
+		label +
+		'" ' +
+		(settings[key] ? "checked" : "") +
+		"></label>"
+	);
+}
+function devToggle(key, label) {
+	return (
+		'<label class="setting"><span>' +
+		label +
+		'</span><input type="checkbox" data-dev="' +
+		key +
+		'" aria-label="' +
+		label +
+		'" ' +
+		(dev[key] ? "checked" : "") +
+		"></label>"
+	);
+}
+function bindPanelControls() {
+	for (const el of $("panel").querySelectorAll("[data-setting]"))
+		el.addEventListener("input", () => {
+			const key = el.dataset.setting;
+			settings[key] = el.type === "checkbox" ? el.checked : Number(el.value);
+			const out = $("val-" + key);
+			if (out)
+				out.textContent =
+					Number(el.value).toFixed(Number(el.step) < 1 ? 1 : 0) +
+					(key === "music" || key === "sfx"
+						? "%"
+						: key === "hazard" || key === "timeScale"
+							? "×"
+							: key === "daylight"
+								? "s"
+								: "");
+			if (physics) physics.gravity = { x: 0, y: -settings.gravity, z: 0 };
+			saveOptions();
+		});
+	for (const el of $("panel").querySelectorAll("[data-dev]"))
+		el.addEventListener("input", () => {
+			dev[el.dataset.dev] = el.checked;
+		});
+	$("glyphSetting")?.addEventListener("change", (e) => {
+		settings.glyphs = e.target.value;
+		saveOptions();
+		updatePrompts();
+	});
+}
+const testQuestions = [
+	"How many issues did testing catch?",
+	"How many were critical / game breaking?",
+	"Most helpful test",
+	"Least helpful test",
+];
+const engineQuestions = [
+	"What worked best",
+	"Where I got stuck or guessed wrong",
+	"Most important system built here",
+	"Hardest part of the engine",
+	"Engine changes",
+	"One desired engine improvement",
+];
+const promptQuestions = [
+	"What worked best in the prompt",
+	"What was confusing",
+	"Hardest part of the request",
+	"Suggested prompt change",
+];
+function showCredit(id) {
+	const data = report[id];
+	const title = (k) =>
+		k.replace(/([A-Z])/g, " $1").replace(/^./, (c) => c.toUpperCase());
+	if (Array.isArray(data)) {
+		const labels =
+			id === "testingFeedback"
+				? testQuestions
+				: id === "engineFeedback"
+					? engineQuestions
+					: promptQuestions;
+		$("creditCopy").innerHTML = data
+			.map((v, i) => "<p><b>" + labels[i] + "</b><br>" + esc(v) + "</p>")
+			.join("");
+	} else
+		$("creditCopy").innerHTML =
+			Object.entries(data)
+				.map(([k, v]) => "<p><b>" + title(k) + "</b> · " + esc(v) + "</p>")
+				.join("") +
+			"<p><b>Research sources</b><br>Activision’s original Pitfall! manual; David Crane’s retrospective interview; Video Game Music Preservation Foundation’s sound reference. " +
+			(!AIHub.active
+				? '<a href="https://www.ataricompendium.com/archives/manuals/vcs/pitfall.pdf" target="_blank" rel="noopener">Read the original manual ↗</a>'
+				: "") +
+			"</p>";
+	for (const b of $("panel").querySelectorAll("[data-credit]"))
+		b.classList.toggle("selected", b.dataset.credit === id);
+}
+function closeModal() {
+	modalName = null;
+	$("modal").classList.add("hidden");
+	$("panel").innerHTML = "";
+	input.keys.clear();
+	input.jump = false;
+	updateTouch();
+}
+function backMenu() {
+	if (
+		modalName === "pause" ||
+		modalOrigin === "title" ||
+		game.mode === "result"
+	) {
+		closeModal();
+		setMenuFocus(0);
+	} else openModal("pause");
+}
+function showResults(won, reason) {
+	closeModal();
+	modalName = "results";
+	$("modal").classList.remove("hidden");
+	$("panel").className = "panel results";
+	$("panel").innerHTML =
+		'<div class="eyebrow">' +
+		(won ? "A fine day’s exploring" : "A tale for another campfire") +
+		"</div><h2>" +
+		(won ? "FORTUNE FAVOURS<br>THE MUDDY." : "THE JUNGLE<br>HAS OTHER PLANS.") +
+		'</h2><p class="sub">' +
+		(won
+			? "Eight treasures, a pair of tired boots, and a very good story."
+			: esc(reason)) +
+		'</p><div class="result-number">' +
+		String(game.score).padStart(5, "0") +
+		'</div><div class="result-stats"><span><b>' +
+		game.collected.length +
+		" / 8</b>Treasures</span><span><b>" +
+		Math.floor(game.elapsed / 60) +
+		":" +
+		String(Math.floor(game.elapsed % 60)).padStart(2, "0") +
+		"</b>Trail time</span><span><b>" +
+		game.metrics.swings +
+		"</b>Vine swings</span></div>" +
+		(!AIHub.active
+			? '<div class="rows"><button class="btn primary" data-act="retry">Another adventure <span>↗</span></button><button class="btn" data-act="title">Back to camp <span>→</span></button></div>'
+			: '<p class="sub">Waiting for the expedition results.</p>');
+	focusIndex = 0;
+	setMenuFocus(0);
+}
+function act(action) {
+	sound("ui");
+	switch (action) {
+		case "start":
+			startGame(false);
+			break;
+		case "continue":
+			startGame(false, true);
+			break;
+		case "coop":
+			startGame(true);
+			break;
+		case "pause":
+			if (game.mode === "play") openModal("pause");
+			break;
+		case "resume":
+			closeModal();
+			break;
+		case "howto":
+		case "settings":
+		case "about":
+		case "dev":
+		case "map":
+			openModal(action);
+			break;
+		case "back":
+			backMenu();
+			break;
+		case "quit":
+			if (!AIHub.active) {
+				saveGame();
+				returnTitle();
+			}
+			break;
+		case "title":
+			if (!AIHub.active) returnTitle();
+			break;
+		case "retry":
+			if (!AIHub.active) startGame(game.coop);
+			break;
+		case "fullscreen":
+			if (document.fullscreenElement)
+				document.exitFullscreen?.().catch(() => {});
+			else document.documentElement.requestFullscreen?.().catch(() => {});
+			break;
+		case "warpBack":
+		case "warpNext":
+			game.camp = clamp(
+				game.camp + (action === "warpNext" ? 1 : -1),
+				0,
+				camps.length - 1,
+			);
+			for (const p of game.players)
+				positionPlayer(p, camps[game.camp].x + p.id, 0.8);
+			dev.god = true;
+			toast("Camp " + (game.camp + 1) + " · " + camps[game.camp].x + "m");
+			updateHud(true);
+			openModal("dev");
+			break;
+		case "respawn":
+			for (const p of game.players) {
+				positionPlayer(p, camps[game.camp].x + p.id, 0.8);
+				p.invuln = 2;
+			}
+			game.lives = 3;
+			break;
+		case "allRelics":
+			for (const t of treasures) t.collected = true;
+			game.collected = treasures.map((t) => t.index);
+			game.metrics.treasures = 8;
+			dev.god = true;
+			updateHud(true);
+			toast("Eight treasures packed. The Sun Gate awaits.");
+			break;
+		case "step": {
+			const old = modalName;
+			modalName = null;
+			fixedTick(1 / 60, [{ x: 0, y: 0, jump: false }]);
+			modalName = old;
+			break;
+		}
+		case "resetDev":
+			Object.assign(settings, DEFAULTS);
+			Object.assign(dev, {
+				god: false,
+				fly: false,
+				wire: false,
+				reveal: false,
+			});
+			physics.gravity = { x: 0, y: -settings.gravity, z: 0 };
+			saveOptions();
+			openModal("dev");
+			toast("Field lab reset to expedition defaults");
+			break;
+	}
+}
+document.addEventListener("click", (e) => {
+	if (hubEnded) return;
+	const btn = e.target.closest("[data-act]");
+	if (btn) {
+		if (
+			activity(
+				input.last === "gamepad" && !e.isTrusted
+					? "gamepad"
+					: e.pointerType === "touch"
+						? "touch"
+						: "keyboard",
+			)
+		)
+			return;
+		unlockAudio();
+		act(btn.dataset.act);
+	}
+	const credit = e.target.closest("[data-credit]");
+	if (credit) showCredit(credit.dataset.credit);
+});
+document.addEventListener("pointerover", (e) => {
+	const el = e.target.closest("button,input,select");
+	if (el) {
+		refreshFocus();
+		const n = focusItems.indexOf(el);
+		if (n >= 0) setMenuFocus(n);
+	}
+});
+document.addEventListener("pointerdown", (e) => {
+	if (hubEnded) return;
+	activity(e.pointerType === "touch" ? "touch" : "keyboard");
+	unlockAudio();
+});
+document.addEventListener("keydown", (e) => {
+	if (hubEnded) return;
+	if (
+		[
+			"ArrowLeft",
+			"ArrowRight",
+			"ArrowUp",
+			"ArrowDown",
+			"Space",
+			"Escape",
+			"Tab",
+		].includes(e.code)
+	)
+		e.preventDefault();
+	if (e.repeat && ["Escape", "KeyM"].includes(e.code)) return;
+	if (activity("keyboard")) return;
+	unlockAudio();
+	if (modalName === "map" && e.code === "KeyM") {
+		closeModal();
+		return;
+	}
+	if (modalName || game.mode === "title") {
+		if (e.code === "ArrowDown" || e.code === "Tab") navigateMenu(1);
+		else if (e.code === "ArrowUp") navigateMenu(-1);
+		else if (e.code === "ArrowLeft") changeFocused(-1);
+		else if (e.code === "ArrowRight") changeFocused(1);
+		else if (e.code === "Enter" || e.code === "Space") {
+			refreshFocus();
+			focusItems[focusIndex]?.click();
+		} else if (e.code === "Escape") backMenu();
+		return;
+	}
+	if (e.code === "Escape" || e.code === "KeyP") {
+		if (game.mode === "play") openModal("pause");
+		return;
+	}
+	if (e.code === "KeyM" && game.mode === "play") {
+		openModal("map");
+		return;
+	}
+	input.keys.add(e.code);
+});
+document.addEventListener("keyup", (e) => input.keys.delete(e.code));
+addEventListener("blur", () => {
+	input.keys.clear();
+	input.jump = false;
+	input.touchX = 0;
+	input.touchY = 0;
+});
+document.addEventListener("visibilitychange", () => {
+	if (document.hidden && !AIHub.active && game.mode === "play" && !modalName) {
+		saveGame();
+		openModal("pause");
+	}
+});
+function pollPads() {
+	if (hubEnded) return;
+	const pads = Array.from(navigator.getGamepads?.() ?? []).filter(Boolean);
+	const now = performance.now();
+	for (const pad of pads) {
+		const prev = input.padsPrev.get(pad.index) ?? [];
+		const buttons = pad.buttons.map((b) => b.pressed);
+		const pressed = (n) => buttons[n] && !prev[n];
+		const active =
+			buttons.some(Boolean) || pad.axes.some((a) => Math.abs(a) > 0.25);
+		const exited = active && activity("gamepad");
+		if (active) unlockAudio();
+		if (!exited) {
+			if (modalName === "map" && pressed(3)) {
+				closeModal();
+				input.padsPrev.set(pad.index, buttons);
+				continue;
+			}
+			if (modalName || game.mode === "title") {
+				let nav = pressed(13) ? 1 : pressed(12) ? -1 : 0;
+				const axis = pad.axes[1] ?? 0;
+				if (Math.abs(axis) > 0.6 && now - input.navAt > 210) {
+					nav = axis > 0 ? 1 : -1;
+					input.navAt = now;
+				}
+				if (nav) navigateMenu(nav);
+				if (pressed(14)) changeFocused(-1);
+				if (pressed(15)) changeFocused(1);
+				if (pressed(0)) {
+					refreshFocus();
+					const e = focusItems[focusIndex];
+					if (e?.type === "checkbox") {
+						e.checked = !e.checked;
+						e.dispatchEvent(new Event("input", { bubbles: true }));
+					} else e?.click();
+				}
+				if (pressed(1) || (pressed(9) && !buttons[8])) backMenu();
+			} else if (game.mode === "play") {
+				if (pressed(9) && !buttons[8]) openModal("pause");
+				if (pressed(3)) openModal("map");
+			}
+		}
+		input.padsPrev.set(pad.index, buttons);
+	}
+}
+function touchStart(e) {
+	if (hubEnded) return;
+	if (activity("touch")) return;
+	if (game.mode !== "play" || modalName) return;
+	unlockAudio();
+	e.preventDefault();
+	const onLeft = e.clientX < innerWidth * 0.53;
+	if (onLeft && input.touchId === null) {
+		input.touchId = e.pointerId;
+		input.touchStart = { x: e.clientX, y: e.clientY };
+		$("touchRing").style.left = e.clientX - 50 + "px";
+		$("touchRing").style.top = e.clientY - 50 + "px";
+		$("touchRing").classList.remove("hidden");
+		try {
+			e.target.setPointerCapture?.(e.pointerId);
+		} catch {}
+	} else {
+		input.jump = true;
+		try {
+			e.target.setPointerCapture?.(e.pointerId);
+		} catch {}
+	}
+}
+function touchMove(e) {
+	if (
+		e.pointerType !== "touch" ||
+		e.pointerId !== input.touchId ||
+		!input.touchStart
+	)
+		return;
+	const dx = e.clientX - input.touchStart.x,
+		dy = e.clientY - input.touchStart.y;
+	input.touchX = clamp(dx / 45, -1, 1);
+	input.touchY = Math.abs(dy) > 25 ? clamp(dy / 45, -1, 1) : 0;
+	$("touchDot").style.transform =
+		"translate(" + clamp(dx, -35, 35) + "px," + clamp(dy, -35, 35) + "px)";
+	input.lastActivity = performance.now();
+}
+function touchEnd(e) {
+	if (e.pointerId === input.touchId) {
+		input.touchId = null;
+		input.touchStart = null;
+		input.touchX = 0;
+		input.touchY = 0;
+		$("touchRing").classList.add("hidden");
+	} else input.jump = false;
+}
+for (const el of [$("world"), $("touchJump")]) {
+	el.addEventListener("pointerdown", (e) => {
+		if (e.pointerType === "touch") touchStart(e);
+	});
+	el.addEventListener("pointermove", touchMove);
+	el.addEventListener("pointerup", touchEnd);
+	el.addEventListener("pointercancel", touchEnd);
+}
+let debugLines = null;
+const revealTags = [];
+function renderReveal() {
+	if (dev.reveal && revealTags.length === 0) {
+		for (const t of treasures) {
+			const tag = document.createElement("span");
+			tag.className = "name-tag";
+			tag.style.color = "#f6c75d";
+			tag.textContent = "◇ " + t.name;
+			$("peerNames").append(tag);
+			revealTags.push({ t, tag });
+		}
+	}
+	for (const { t, tag } of revealTags) {
+		const visible =
+			dev.reveal && !t.collected && Math.abs(t.x - game.players[0].x) < 28;
+		tag.style.display = visible ? "block" : "none";
+		if (visible) {
+			const v = new THREE.Vector3(t.x, t.y + 1, 0).project(camera);
+			tag.style.left = ((v.x + 1) * innerWidth) / 2 + "px";
+			tag.style.top = ((-v.y + 1) * innerHeight) / 2 + "px";
+		}
+	}
+}
+function renderDebug() {
+	if (!dev.wire) {
+		if (debugLines) debugLines.visible = false;
+		return;
+	}
+	const data = physics.debugRender();
+	if (!debugLines) {
+		const geo = new THREE.BufferGeometry();
+		debugLines = new THREE.LineSegments(
+			geo,
+			new THREE.LineBasicMaterial({
+				vertexColors: true,
+				depthTest: false,
+				transparent: true,
+				opacity: 0.8,
+			}),
+		);
+		debugLines.frustumCulled = false;
+		scene.add(debugLines);
+	}
+	debugLines.visible = true;
+	debugLines.geometry.setAttribute(
+		"position",
+		new THREE.BufferAttribute(data.vertices, 3),
+	);
+	debugLines.geometry.setAttribute(
+		"color",
+		new THREE.BufferAttribute(data.colors, 4),
+	);
+}
+let previousFrame = 0,
+	accumulator = 0;
+function frame(now) {
+	requestAnimationFrame(frame);
+	if (!renderer || game.mode === "loading") return;
+	const dt = Math.min(0.1, (now - (previousFrame || now)) / 1000);
+	previousFrame = now;
+	pollPads();
+	if (game.mode === "title" && !modalName && now - input.lastActivity > 10000)
+		startAttract();
+	if (!game.manual) {
+		accumulator += dt * settings.timeScale;
+		let loops = 0;
+		while (accumulator >= 1 / 60 && loops++ < 12) {
+			fixedTick(1 / 60);
+			accumulator -= 1 / 60;
+		}
+	}
+	if (game.mode === "title") {
+		moveCamera(28, 0.8, dt);
+		game.players[0].avatar.model.rotation.y = -0.6;
+	}
+	updateGhosts(dt);
+	sendHub();
+	if (game.toastUntil < now) $("toast").classList.add("hidden");
+	if (camera.userData.shake > 0 && settings.shake) {
+		camera.userData.shake -= dt;
+		camera.position.x += Math.sin(now * 0.13) * 0.06;
+	}
+	renderDebug();
+	renderReveal();
+	renderer.render(scene, camera);
+	musicTick();
+}
+function stateSnapshot() {
+	return {
+		title: document.title,
+		mode: game.mode,
+		modal: modalName,
+		backend,
+		three: THREE.REVISION,
+		rapier: RAPIER.version(),
+		lives: game.lives,
+		score: game.score,
+		elapsed: game.elapsed,
+		collected: [...game.collected],
+		camp: game.camp,
+		coop: game.coop,
+		won: game.won,
+		worldTime: game.worldTime,
+		metrics: { ...game.metrics },
+		settings: { ...settings },
+		dev: { ...dev },
+		players: game.players.map((p) => ({
+			x: p.x,
+			y: p.y,
+			vx: p.vx,
+			vy: p.vy,
+			grounded: p.grounded,
+			vine: p.vine?.x ?? null,
+			climbing: !!p.climbing,
+			anim: p.avatar.anim,
+		})),
+		ghosts: [...ghosts].map(([id, g]) => ({ id, x: g.x, y: g.y })),
+		audio: {
+			state: audio.ctx?.state ?? "locked",
+			events: audio.events,
+			voices: audio.voices,
+			music: settings.music,
+		},
+		save: !!saved,
+		hub: {
+			active: AIHub.active,
+			started: hubStarted,
+			ended: hubEnded,
+			reported: hubReported,
+		},
+		focus: focusItems[focusIndex]?.textContent?.trim() ?? "",
+	};
+}
+async function boot() {
+	try {
+		await makeScene();
+		game.players = [createPlayer(0, C.red), createPlayer(1, 0x659cb3)];
+		$("loading").classList.add("hidden");
+		returnTitle();
+		updatePrompts();
+		window.__game = {
+			state: stateSnapshot,
+			start: startGame,
+			act,
+			advance: (frames, controls = null) => {
+				for (let n = 0; n < frames; n++) fixedTick(1 / 60, controls);
+				updateHud(true);
+				return stateSnapshot();
+			},
+			manual: (value) => (game.manual = value),
+			warp: (x, y = 0.8, id = 0) => {
+				positionPlayer(game.players[id], x, y);
+				moveCamera(x, y, 0, true);
+			},
+			set: (key, value) => {
+				if (key in settings) settings[key] = value;
+				if (key in dev) dev[key] = value;
+			},
+			damage: (reason = "Test hazard") => damage(game.players[0], reason),
+			audioProof,
+			audioMeter: () => {
+				if (!audio.analyser) return 0;
+				const d = new Uint8Array(audio.analyser.frequencyBinCount);
+				audio.analyser.getByteFrequencyData(d);
+				return Math.max(...d);
+			},
+			save: saveGame,
+			attract: startAttract,
+			title: returnTitle,
+			sceneInfo: () => ({
+				objects: scene.children.length,
+				treasures: treasures.map((t) => ({
+					x: t.x,
+					y: t.y,
+					collected: t.collected,
+				})),
+				vines: vines.map((v) => ({
+					x: v.x,
+					endX: v.end.x,
+					endY: v.end.y,
+					vel: v.vel,
+				})),
+				crocs: crocs.map((c) => ({ x: c.x, closed: c.closed })),
+				gaps: gaps.map((g) => ({ a: g.a, b: g.b, type: g.type, open: g.open })),
+				hazards: hazards.map((h) => ({ x: h.x, y: h.y, type: h.type })),
+				logs: logs.map((l) => ({ ...l.rb.translation() })),
+			}),
+		};
+		await initHub();
+		requestAnimationFrame(frame);
+	} catch (error) {
+		console.error(error);
+		$("loading").classList.remove("hidden");
+		$("loadMessage").innerHTML =
+			'<span class="error-detail">The trail could not open. Check your connection and use a current browser with WebGPU or WebGL 2.<br>' +
+			esc(error.message) +
+			"</span>";
+		document.querySelector(".loader").style.display = "none";
+		if (AIHub.active) AIHub.fail(error.message);
+		window.__bootError = error.message;
+	}
+}
+addEventListener("resize", resizeScene);
+boot();
+</script>
+
+<script type="application/json" id="cc-matrix-run">{"schema":2,"tool":"cc-matrix","stampedAt":"2026-11-06T03:48:11.608Z","id":"gpt-6.1-sol-max__20261105-200950__x70cd8b__Pitfalling-for-Adventure","lab":"OpenAI","cli":"Codex CLI","aiHub":{"name":"Pitfalling for Adventure","tagline":"Mind the gap. And the teeth.","description":"Swing through an ink-drawn jungle, brave snapping crocodiles and explore the tunnels below to recover eight lost treasures. Play alone, share the trail in local co-op, or race ghost explorers in AI Hub.","type":"Game","genre":"Platformer","source":"Pitfall! (1982)","players":"1–4","controls":"Move: left stick / A,D; jump and release vine: Cross / Space; climb: up,down / W,S; map: Triangle / M; pause: Options / Esc. Local P2: arrows + Right Shift, or a second pad. Touch: left drag, right tap.","tags":["3d","side-scrolling","adventure","co-op","retro","exploration"],"model":"GPT-6.1 Sol","effort":"max","harness":"Codex","sourceDate":"2026-11-06T03:09:50.700Z","themeColor":"#122f2b","session":"1","sessionPlayers":"1-4","sessionMode":"ghost","sessionGoal":"Recover eight treasures and reach the Sun Gate. Fastest complete expedition wins; otherwise highest score.","sessionHowto":"Move: left stick or A/D. Jump / release vine: Cross or Space. Climb: up/down. Map: Triangle or M. Pause: Options or Esc.","sessionMinutes":"8","provenance":{"sourceKind":"cc-matrix-run","artifactId":"gpt-6.1-sol-max__20261105-200950__x70cd8b__Pitfalling-for-Adventure","sourceDate":"2026-11-06T03:09:50.700Z"}},"result":{"id":"gpt-6.1-sol-max__20261105-200950__x70cd8b__Pitfalling-for-Adventure","agent":"gpt-6.1-sol","provider":"codex","effort":"max","ultracode":false,"source":"Pitfall1982","genre":"genre-v3","perspective":"pov-engine-v4","gameTitle":"ttl-riff","research":"res-src","package":"pkg-html-v3","techStack":"tech-v6","artDirection":"art-cel-v2","animation":"ani-engine-v2","audio":"aud-code-v3","online":"multi-ai-hub","workspace":"ws-sub-v3","performance":"perf-max-v2","testing":"test-tools-v3","spend":"spend-free","premise":"prem-inspired","scope":"scope-inspired","attractMode":"attr-10s","multiplayer":"mp-hub","tone":"tone-src-v2","uiux":"ui-10ft-v4","done":"done-full","sourceInfo":"info-exit-v3","testingFeedback":"tf-4q","engineFeedback":"ef-6q-v2","promptFeedback":"pf-4q-v2","goal":"on-exit-v2","model":"gpt-6.1-sol","cliVersion":"0.166.0","promptVersion":"2e12c7a2","variantHashes":{"source":"6e0c40aa","genre":"5917dd6a","perspective":"69673a49","gameTitle":"504804f8","research":"4d1f1ee4","package":"dd8f52ae","techStack":"84a623aa","artDirection":"59b07781","animation":"25672c4c","audio":"0abe1411","online":"7601bd74","workspace":"2dd7c02e","performance":"b911bf18","testing":"42631416","spend":"9511cae8","premise":"cc0f429b","scope":"46b0fba2","attractMode":"0d642414","multiplayer":"b62eb499","tone":"3bfc327e","uiux":"f4edc796","done":"cb3a46b6","sourceInfo":"8fe63a44","testingFeedback":"95f71baf","engineFeedback":"25041b09","promptFeedback":"7ce5dc6e","goal":"7559d614"},"goalSkipped":true,"status":"ok","exitCode":0,"wallMinutes":38.348366666666664,"costUsd":null,"costSource":"none","inputTokens":4839172,"cachedTokens":4768512,"cacheWriteTokens":0,"outputTokens":89881,"reasoningTokens":35233,"turns":1,"toolCalls":53,"tools":{"command_execution":41,"web_search":3,"file_change":9},"toolErrors":8,"models":{"gpt-6.1-sol":{"uncachedInputTokens":70660,"cacheReadTokens":4768512,"cacheWriteTokens":0,"outputTokens":89881,"reasoningTokens":35233}},"isError":false,"sessionLog":"read","apiCalls":43,"subagents":0,"compactions":0,"firstTokenMs":3364,"contextWindow":828400,"uncachedInputTokens":70660,"totalTokens":4929053,"apiCostUsd":1.5169812,"replyChars":2166,"delivered":true,"kb":135,"loc":4180,"files":39,"todos":0,"gameSha256":"547b51162109305a9262a8d8cbb6a128a08b6814c7db7eb2448b41dadd580706","entry":"gpt-6.1-sol-max__20261105-200950__x70cd8b__Pitfalling-for-Adventure/work/Pitfalling-for-Adventure-Pitfall-1982-gpt-6.1-sol-max-20261105-200950.html","exitInterview":"ok","startedAt":"2026-11-06T03:09:50.700Z","finishedAt":"2026-11-06T03:48:11.602Z","timeZone":"America/Vancouver","isolated":true},"prompt":{"version":"2e12c7a2","number":7,"savedAt":"2026-11-06T02:02:45.318Z","firstRanAt":"2026-11-05T04:18:53.957Z","template":"SOURCE: {{source}}\n\nGenre: {{genre}}\n\nPerspective: {{perspective}}\n\nGame Title: {{gameTitle}}\n\nResearch: {{research}}\n\nPackage: {{package}}\n\nTech Stack: {{techStack}}\n\nArt Direction: {{artDirection}}\n\nAnimation: {{animation}}\n\nAudio: {{audio}}\n\nOnline: {{online}}\n\nWorking Environment and deliverable:\n{{workspace}}\n\nPerformance: {{performance}}\n\nTesting: {{testing}}\n\nEffort: {{spend}}\n\n## This computer\n{{machine}}\n\n## Goal\n\n{{premise}}\n\nScope\n\n{{scope}}\n\nAttract Mode: {{attractMode}}\n\nMultiplayer: {{multiplayer}}\n\nNarrative tone: {{tone}}\n\n## UI & UX: {{uiux}}\n\n## Done\n{{done}}\n\n## Source Information\n{{sourceInfo}}\n\nTesting Feedback\n\n{{testingFeedback}}\n\nEngine Feedback\n\n{{engineFeedback}}\n\nPrompt Feedback\n\n{{promptFeedback}}","text":"SOURCE: Pitfall - 1982\n\nGenre: Pick the game genre(s) that best fit the source and would make the best game.\n\nPerspective: Pick the camera perspective(s) that best fit the genre and source and would make the best game.\n\nGame Title: A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).\n\nResearch: Research the source before you start: its mechanics, levels, enemies, look and sound.\n\nPackage: For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-gpt-6.1-sol-max-20261105-200950].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.\n\nTech Stack: Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.\n\nArt Direction: Use a stylized cel-shaded / ink look for the game.\n\nAnimation: Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.\n\nAudio: All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.\n\nOnline: https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub\n\nWorking Environment and deliverable:\nCreate a subfolder called [GameTitle-SOURCE-gpt-6.1-sol-max-20261105-200950] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-gpt-6.1-sol-max-20261105-200950].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.\n\nPerformance: Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.\n\nTesting: Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.\n\nEffort: Spend effort however you see fit.\n\n## This computer\nChecked 2026-11-05 19:08 (America/Vancouver) by node check-environment.mjs.\n\n- **Computer:** IVY-DESK-1747k: Intel(R) Core(TM) i7-14700F, 20 cores, 16 GB RAM, 8 GB swap. Ubuntu 26.04.1 LTS on WSL2 (Linux 6.18.33.2-microsoft-standard-WSL2).\n- **Space:** 757 GB free in the home folder. /tmp: 7.8 GB, in memory (tmpfs), 7.7 GB free when checked.\n- **Display:** none for runs (they run with DISPLAY unset), so a headed browser needs xvfb-run.\n- **Browsers:** Playwright 1.63.0 for Python (from playwright.sync_api import sync_playwright), with Chromium 153.0 (WebGL 2, software-rendered; WebGPU, software-rendered, when started with --enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader), Firefox 155.0 (no WebGL), WebKit 26.6 (WebGL 2) already downloaded. Phone and tablet device profiles are built in.\n  Python's Playwright is in its own environment, not the system Python (python3 can't import it): run scripts that drive a browser with `~/.local/share/pipx/venvs/playwright/bin/python script.py`, or `uv run --with playwright==1.63.0 python script.py`.\n  WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game's state instead.\n  For Node, `npm install playwright@1.63.0` in your folder uses the browsers already downloaded; another version downloads its own.\n- **Tools:** node 24.21.0, npm 12.1.0, python3 3.14.4, pip3 25.1.1, git 2.53.0, gh 2.101.0, curl 8.18.0, wget 1.25.0, jq 1.8.1, ffmpeg 9.0.2, ffprobe 9.0.2, sqlite3 3.46.1, zip 3.0, unzip 6.00, rustc 1.98.1, cargo 1.98.1, go 1.27.1, java 21.0.12, xvfb-run, magick 7.1.2, sox 14.4.2, bun 1.3.14, deno 2.9.7, uv 0.12.18, tsc 5.9.3, wasm-bindgen 0.2.129.\n- **Rust:** rustup's toolchains 1.98.1, stable; the wasm32-unknown-unknown target on 1.98.1, stable.\n- **Not installed:** lighthouse, shot-scraper, esbuild.\n- **Network:** internet works (github.com, registry.npmjs.org).\n\n### What this computer doesn't have\n\nNo script can check these, so they're written by hand. Test with the stand-ins; anything that needs the real thing is checked as far as it can be here, never required.\n\n- **No physical controller.** Emulate one: replace navigator.getGamepads with a stub that returns a pad in the standard mapping (Playwright's add_init_script / addInitScript).\n- **No touch device.** Use Playwright's phone and tablet profiles, which have touch, and tap with page.touchscreen.\n- **Nobody to listen.** Check sound by what Web Audio produces: render it with an OfflineAudioContext, or read levels from an AnalyserNode.\n- **No second player.** Play multiplayer with two browser pages (or contexts) on this computer.\n- **No real iPhone or iPad.** WebKit with an iPhone profile is the closest; it isn't iOS Safari.\n- **No TV.** Judge the 10-foot view from screenshots at 1920×1080.\n\n### Sharing this computer\n\n- Other agents run here at the same time. Keep one or two browsers open at once, and close them when you're done.\n- Keep every file you make inside your own folder, not /tmp or a parent folder: /tmp is shared.\n- The browsers are already downloaded: don't run `playwright install` or `playwright install-deps`.\n- The system Python has no packages. For one (Pillow, numpy …), use uv: `uv run --with pillow python script.py`, adding `--with playwright==1.63.0` when the script drives a browser too (a newer Playwright can't find the browsers here).\n\n## Goal\n\nBuild an original game inspired by the source.\n\nScope\n\nCreate a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.\n\nAttract Mode: After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.\n\nMultiplayer: Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.\n\nNarrative tone: Use a writing style similar to the source’s.\n\n## UI & UX: 10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible\n\n## Done\nNo TODOs, placeholders, or stubbed features. The demo is complete.\n\n## Source Information\nCRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: 2026-11-05 20:09:50\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: Codex CLI (headless); Linux\n- Model: OpenAI, gpt-6.1-sol, reasoning effort max\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.\n\nTesting Feedback\n\n- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?\n\nEngine Feedback\n\n- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?\n\nPrompt Feedback\n\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?\n","goal":null,"sections":{"source":{"id":"Pitfall1982","text":"Pitfall - 1982","hash":"6e0c40aa"},"genre":{"id":"genre-v3","text":"Pick the game genre(s) that best fit the source and would make the best game.","hash":"5917dd6a"},"perspective":{"id":"pov-engine-v4","text":"Pick the camera perspective(s) that best fit the genre and source and would make the best game.","hash":"69673a49"},"gameTitle":{"id":"ttl-riff","text":"A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).","hash":"504804f8"},"research":{"id":"res-src","text":"Research the source before you start: its mechanics, levels, enemies, look and sound.","hash":"4d1f1ee4"},"package":{"id":"pkg-html-v3","text":"For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.","hash":"dd8f52ae"},"techStack":{"id":"tech-v6","text":"Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.","hash":"84a623aa"},"artDirection":{"id":"art-cel-v2","text":"Use a stylized cel-shaded / ink look for the game.","hash":"59b07781"},"animation":{"id":"ani-engine-v2","text":"Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.","hash":"25672c4c"},"audio":{"id":"aud-code-v3","text":"All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.","hash":"0abe1411"},"online":{"id":"multi-ai-hub","text":"https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub","hash":"7601bd74"},"workspace":{"id":"ws-sub-v3","text":"Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.","hash":"2dd7c02e"},"performance":{"id":"perf-max-v2","text":"Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.","hash":"b911bf18"},"testing":{"id":"test-tools-v3","text":"Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.","hash":"42631416"},"spend":{"id":"spend-free","text":"Spend effort however you see fit.","hash":"9511cae8"},"premise":{"id":"prem-inspired","text":"Build an original game inspired by the source.","hash":"cc0f429b"},"scope":{"id":"scope-inspired","text":"Create a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.","hash":"46b0fba2"},"attractMode":{"id":"attr-10s","text":"After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.","hash":"0d642414"},"multiplayer":{"id":"mp-hub","text":"Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.","hash":"b62eb499"},"tone":{"id":"tone-src-v2","text":"Use a writing style similar to the source’s.","hash":"3bfc327e"},"uiux":{"id":"ui-10ft-v4","text":"10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible","hash":"f4edc796"},"done":{"id":"done-full","text":"No TODOs, placeholders, or stubbed features. The demo is complete.","hash":"cb3a46b6"},"sourceInfo":{"id":"info-exit-v3","text":"CRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: {{date}}\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: {{environment}}\n- Model: {{lab}}, {{model}}, reasoning effort {{effort}}\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.","hash":"8fe63a44"},"testingFeedback":{"id":"tf-4q","text":"- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?","hash":"95f71baf"},"engineFeedback":{"id":"ef-6q-v2","text":"- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?","hash":"25041b09"},"promptFeedback":{"id":"pf-4q-v2","text":"- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?","hash":"7ce5dc6e"},"goal":{"id":"on-exit-v2","text":"the bundled single .html file exists in this folder's root, every feature in TASK.md that can be done on this computer is implemented with no TODOs, placeholders or stubs, exit-interview.json in this folder's root parses as JSON and answers every field, and your final reply contains the Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections.","hash":"7559d614"}}},"interview":{"file":"exit-interview.json","answers":{"sourceInformation":{"date":"2026-11-05 20:09:50","source":"Pitfall! (1982), designed by David Crane and published by Activision","plan":"none","genre":"Platform adventure; timed treasure hunt","perspective":"2.5D side view with a scrolling orthographic camera","tech":"Three.js 0.180.0 WebGPURenderer (WebGPU, automatic WebGL 2 fallback); Rapier 0.19.3; Gamepad API; Web Audio API; AI Hub session client 1.4.0","artDirection":"Procedural cel-shaded jungle dioramas with ink contours, engraved ruins and a warm paper palette","animation":"Three.js AnimationMixer, AnimationClip and keyframe tracks for explorer poses, crocodile jaws, cobras, scorpions and treasures; procedural pendulum vines, particles and foliage","audio":"Original code-generated pentatonic marimba music at 10% by default, synthesized effects, filtered Animalese-style gibberish and procedural percussion; no audio files","online":"AI Hub Session Protocol v1 ghost races for 1–4 players; standalone shared-screen co-op for two players","testing":"Headless Chromium 153 / Playwright 1.63.0 with software WebGPU, normal-control complete expedition, keyboard and emulated standard gamepads, landscape/portrait touch, file:// sharing, save/load, defeat/victory, attract replay, live analyser and offline synthesized audio. AI Hub harness: 2 players, 4 players at 150 ms latency / 50 ms jitter / 5% packet loss, and host departure. WebGL 2 screenshots for visual review. Physical controller, real touch device, hardware GPU rendering and audio listening: unknown.","research":"Original Activision Pitfall! manual: 255 circular scenes, 32 treasures, three lives, 20-minute clock, surface hazards and faster underground route. David Crane retrospective interview for vine and crocodile inspiration; VGMPF for the original sparse sound palette. Original level, characters, art and score in this demo.","environment":"Codex CLI (headless); Linux","model":"OpenAI, gpt-6.1-sol, reasoning effort max","usage":"added on import"},"testingFeedback":[{"question":"How many issues did testing catch?","answer":"8 product issues across API checks, automated tests and visual/control review; all resolved. Test-driver mistakes are excluded."},{"question":"How many would be considered critical issues / game breaking?","answer":"3 would have blocked loading or normal movement: the Rapier import path, descriptor methods and inactive second-player collision."},{"question":"What was the most helpful test you ran?","answer":"The complete expedition driven by normal movement, jump and climb controls without cheats or teleporting: eight treasures, four vine swings, both caves and the victory screen. The AI Hub harness also verified all three applicable network scenarios."},{"question":"What was the least helpful test you ran?","answer":"Headless software WebGPU screenshots were blank. State checks verified WebGPU execution, and WebGL 2 captures were useful for visual review instead."}],"engineFeedback":[{"question":"What did you like most about the engine?","answer":"Three.js native animation clips and toon materials work together through WebGPURenderer, and Rapier provides reliable collision queries and a capsule controller."},{"question":"Did you get stuck or guess wrong?","answer":"I initially used an incorrect Rapier module filename and confused rigid-body descriptor methods with runtime rigid-body methods. Checking the pinned 0.19.3 package corrected both before release."},{"question":"What was the most important thing you had to build yourself?","answer":"The platform controller and vine handoff rules, controller-first menus, expedition/save state, procedural jungle, code-only audio and ghost presentation."},{"question":"What was the hardest part about using the engine?","answer":"Coordinating native animation blending with collision-safe jumps, moving jaws and pendulum vines, while keeping the side-view route readable."},{"question":"What did you change in the engine, and why? (none if nothing)","answer":"none"},{"question":"If you could change one thing about the engine, what would it be?","answer":"A maintained end-to-end WebGPU toon/outline example with a native animated character controller and deterministic headless validation."}],"promptFeedback":[{"question":"What did you like most about this prompt?","answer":"The specific source, art direction, controller-first requirements, attract mode and single-file package gave the demo a clear identity and a concrete definition of done."},{"question":"What was confusing?","answer":"The preferred multiplayer mode and whether standalone play required an internet transport were unspecified. I chose shared-screen co-op outside the hub and online ghost races inside it."},{"question":"What was the hardest thing to do?","answer":"Keeping gameplay, menus, audio and lifecycle consistent across keyboard, standard controllers, touch and multiplayer sessions."},{"question":"What would you change in this prompt?","answer":"Specify the desired multiplayer relationship and whether standalone internet matchmaking or direct connections are required."}],"aiHub":{"name":"Pitfalling for Adventure","tagline":"Mind the gap. And the teeth.","description":"Swing through an ink-drawn jungle, brave snapping crocodiles and explore the tunnels below to recover eight lost treasures. Play alone, share the trail in local co-op, or race ghost explorers in AI Hub.","type":"Game","genre":"Platformer","source":"Pitfall! (1982)","series":"","players":"1–4","controls":"Move: left stick / A,D; jump and release vine: Cross / Space; climb: up,down / W,S; map: Triangle / M; pause: Options / Esc. Local P2: arrows + Right Shift, or a second pad. Touch: left drag, right tap.","tags":["3d","side-scrolling","adventure","co-op","retro","exploration"]}},"reply":"[Open **Pitfalling for Adventure**](./Pitfalling-for-Adventure-Pitfall-1982-gpt-6.1-sol-max-20261105-200950.html) · [Exit interview](./exit-interview.json)\n\nComplete single-file demo with eight treasures, local co-op, AI Hub ghost racing, attract mode, saves, and live developer tools. CDN dependencies require internet access.\n\n**Source Information:** Date: 2026-11-05 20:09:50. Source: Pitfall! (1982). Given plan: none. Genre: platform adventure. Perspective: scrolling 2.5D side view. Tech: Three.js r180, WebGPU with WebGL 2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, AI Hub client 1.4.0. Art: procedural cel shading and ink contours. Animation: native Three.js mixers and clips, plus procedural motion. Audio: synthesized music, effects and gibberish voices; music defaults to 10%. Online: 1–4-player Hub races; standalone two-player co-op. Research: [original manual](https://www.ataricompendium.com/archives/manuals/vcs/pitfall.pdf), Crane interview and sound references. Testing: headless scripts, emulated controllers/touch, audio analysis and network harness. Physical hardware results: unknown. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort max. Usage: added on import.\n\n**Testing Feedback:** **68/68 checks passed.** Eight product issues resolved; three critical. Most helpful: the complete expedition using normal controls without cheats. Least helpful: blank software WebGPU screenshots; WebGL 2 captures supported visual review.\n\n**Engine Feedback:** Best: native animation and toon materials. Initial mistakes: Rapier import and descriptor APIs. Main custom system: movement and vine handoffs. Hardest: coordinating animation with collisions. Engine changes: none. Desired improvement: a maintained animated WebGPU character-controller example.\n\n**Prompt Feedback:** Best: clear source, presentation and delivery requirements. Confusing: preferred multiplayer mode. Hardest: consistent controls and lifecycle across devices and Hub sessions. Suggested change: specify whether standalone internet multiplayer is required.\n\nAll four information and feedback groups are also included in-game and in the JSON."}}</script>
+</body></html>

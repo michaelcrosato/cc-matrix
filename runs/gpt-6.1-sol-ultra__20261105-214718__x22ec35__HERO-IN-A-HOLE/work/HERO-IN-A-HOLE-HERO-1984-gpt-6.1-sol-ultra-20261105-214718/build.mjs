@@ -1,0 +1,11 @@
+import {build} from 'esbuild';
+import {readFileSync,writeFileSync} from 'node:fs';
+import {Script} from 'node:vm';
+const stem='HERO-IN-A-HOLE-HERO-1984-gpt-6.1-sol-ultra-20261105-214718';
+const result=await build({entryPoints:['main.js'],bundle:true,format:'iife',target:'es2022',write:false,minify:true,legalComments:'eof',define:{'process.env.NODE_ENV':'"production"'}});
+const js=result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script');
+new Script(js);
+const session=readFileSync('hub-docs/session.js','utf8');
+let html=readFileSync('shell.html','utf8').replace('<meta charset="UTF-8">',()=>'<meta charset="UTF-8">\n<script>'+session+'</script>').replace('<!-- IMPORT_MAP -->','').replace('<!-- GAME_SCRIPT -->',()=>'<script>'+js+'</script>');
+writeFileSync('../'+stem+'.html',html);writeFileSync('index.html',html);
+console.log('Built '+stem+'.html ('+(Buffer.byteLength(html)/1024/1024).toFixed(2)+' MB)');

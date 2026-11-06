@@ -1,0 +1,1847 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>
+/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-2">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-goal" content="Find the lost Hieroglyph: trade for tools, decode the sun map, cross the canyon and escape the vault together.">
+<meta name="hub:session-howto" content="Left stick move; right stick aim; Square whip, Cross dodge, Triangle interact, Circle flute; L1 notes. WASD, mouse, E, Space, Q, Tab on keyboard.">
+<meta name="hub:session-minutes" content="8">
+<meta name="hub:webgpu" content="required">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#14323b"><title>Raiders of the Lost Hieroglyph</title>
+<style>@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap');
+:root{--ink:#152c31;--cream:#fff0c9;--gold:#f8bc55;--teal:#8ee0d0;--dark:#10262bea}*{box-sizing:border-box}body{margin:0;overflow:hidden;background:#132d35;color:var(--cream);font-family:'DM Sans',sans-serif;font-size:20px}button,input{font:inherit}button{cursor:pointer}canvas{display:block;width:100%;height:100%;touch-action:none}#viewport{position:fixed;inset:0}#vignette{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 150px #0b242c66;background:repeating-linear-gradient(0deg,#ffffff02 0px,#ffffff02 1px,transparent 1px,transparent 4px)}#loading{position:fixed;inset:0;z-index:99;display:grid;place-content:center;background:#122e35;text-align:center}#loading b{font:700 48px 'Barlow Condensed',sans-serif;letter-spacing:4px;color:var(--gold)}#loading p{font-size:18px;color:#c6d6ce}.spinner{width:48px;height:48px;border:2px solid #466264;border-top-color:var(--gold);border-radius:50%;animation:spin 1s linear infinite;margin:30px auto}@keyframes spin{to{transform:rotate(360deg)}}#title{position:fixed;inset:0;display:flex;align-items:center;padding:5vh 5vw;background:linear-gradient(90deg,#10262bf7 0%,#10262beb 29%,#10262b70 48%,transparent 70%)}.title-copy{width:min(540px,43vw)}.eyebrow{font:600 clamp(15px,1.15vw,22px) 'Barlow Condensed',sans-serif;letter-spacing:4px;text-transform:uppercase;color:var(--gold);display:flex;align-items:center;gap:15px}.eyebrow:before{content:'';width:38px;height:2px;background:var(--gold)}h1{font-family:Georgia,serif;font-weight:900;font-style:italic;font-size:clamp(54px,5.9vw,115px);line-height:.84;letter-spacing:-4px;margin:30px 0 24px;text-shadow:4px 5px 0 #061c22}h1 .small{display:block;font-family:'Barlow Condensed',sans-serif;font-style:normal;font-size:.27em;letter-spacing:7px;line-height:1.6;color:#dfb875}h1 .gold{color:var(--gold)}.subtitle{max-width:410px;font-size:clamp(16px,1.35vw,25px);line-height:1.55;color:#c1cfbe;margin:0 0 26px}.menu-stack{display:flex;flex-direction:column;gap:9px;max-width:400px}.btn{background:#18373cdb;border:1px solid #64837c70;color:var(--cream);padding:13px 22px;text-align:left;font:600 clamp(18px,1.5vw,27px) 'Barlow Condensed',sans-serif;letter-spacing:1.3px;text-transform:uppercase;transition:background .15s,transform .15s;min-height:50px}.btn:hover,.btn:focus-visible,.btn.focused{outline:0;border-color:var(--gold);background:#2e5152;transform:translateX(5px)}.btn.primary{background:var(--gold);color:var(--ink);border-color:var(--gold)}.btn.primary:hover,.btn.primary.focused{background:#ffe5a6}.btn small{float:right;color:inherit;opacity:.65;font-size:.7em;margin-top:5px}.title-footer{position:absolute;bottom:3.5vh;left:5vw;right:5vw;display:flex;justify-content:space-between;align-items:center;color:#d1d4bd;font:500 16px 'Barlow Condensed',sans-serif;letter-spacing:2px}.stamp{position:absolute;right:4vw;top:5vh;border:1px solid #f7d29290;border-radius:50%;height:105px;width:105px;display:grid;place-content:center;text-align:center;transform:rotate(12deg);font:700 15px 'Barlow Condensed',sans-serif;letter-spacing:3px;line-height:1.5;color:#ffe4ad}.title-coord{position:absolute;right:4vw;bottom:12vh;writing-mode:vertical-rl;font:600 14px 'Barlow Condensed';letter-spacing:3px;color:#fff0c999}#hud{position:fixed;inset:0;pointer-events:none}.topbar{position:absolute;left:3vw;right:3vw;top:3vh;display:flex;align-items:flex-start;justify-content:space-between}.chapter{display:flex;align-items:center;gap:16px;padding:15px 22px;background:#10262be8;border-left:3px solid var(--gold)}.chapter-number{font:600 50px 'Barlow Condensed';color:var(--gold);border-right:1px solid #819a8144;padding-right:16px}.chapter-name{font:700 clamp(20px,1.75vw,32px) 'Barlow Condensed';letter-spacing:1px}.objective{font-size:clamp(14px,1.05vw,20px);color:#b7d4ca;margin-top:4px}.status{background:#10262bde;padding:12px 18px;display:flex;align-items:center;gap:18px}.health{color:#f7c05c;font-size:27px;letter-spacing:4px}.menu-icon{pointer-events:auto;background:transparent;border:1px solid #8aaba388;color:var(--cream);width:44px;height:42px}.score{font:700 28px 'Barlow Condensed';letter-spacing:1px}.bottom{position:absolute;bottom:3vh;left:3vw;right:3vw;display:flex;justify-content:space-between;align-items:flex-end;gap:20px}.inventory{display:flex;gap:5px}.item{width:66px;height:67px;border:1px solid #c6d3a740;background:#10262bdb;display:grid;place-content:center;position:relative;font-size:30px}.item.active{border-color:var(--gold);box-shadow:inset 0 -3px var(--gold)}.item span{position:absolute;bottom:3px;left:0;right:0;text-align:center;font:500 10px 'Barlow Condensed';letter-spacing:1px;text-transform:uppercase}.item.locked{opacity:.26}.controls{background:#10262bde;padding:13px 18px;font:500 clamp(15px,1.1vw,21px) 'Barlow Condensed';letter-spacing:.4px;display:flex;gap:20px}.key{display:inline-grid;place-content:center;min-width:25px;height:25px;border:1px solid #a0b4a8;border-radius:4px;font:700 15px 'DM Sans';padding:1px 5px;margin-right:5px;color:var(--gold)}#context{position:absolute;left:50%;bottom:16vh;transform:translateX(-50%);background:var(--cream);color:var(--ink);font:700 24px 'Barlow Condensed';letter-spacing:.6px;padding:12px 24px;border:2px solid #152c31;box-shadow:4px 5px 0 #152c31aa;pointer-events:auto;cursor:pointer;white-space:nowrap}#toast{position:fixed;left:50%;top:20vh;transform:translateX(-50%);padding:12px 24px;background:#10262bea;border-top:2px solid var(--gold);color:var(--cream);font:600 24px 'Barlow Condensed';text-align:center;max-width:80vw;pointer-events:none;z-index:11;transition:opacity .3s}#dialogue{position:fixed;left:3vw;bottom:14vh;max-width:470px;background:#10262bf0;border-left:3px solid var(--gold);padding:16px 22px;pointer-events:none;z-index:10;font-size:clamp(16px,1.2vw,23px);line-height:1.5}#dialogue b{display:block;color:var(--gold);font:700 17px 'Barlow Condensed';letter-spacing:2px;margin-bottom:5px}#markers{position:fixed;inset:0;pointer-events:none}.marker{position:absolute;transform:translate(-50%,-100%);font:700 16px 'Barlow Condensed';letter-spacing:1px;color:#fff1c9;white-space:nowrap;text-shadow:1px 2px #112a30;background:#18343dc9;padding:5px 9px;border-bottom:2px solid #f8bc55;cursor:pointer;pointer-events:auto}.marker em{color:var(--gold);font-style:normal}.screen{position:fixed;inset:0;background:#0a2129d9;backdrop-filter:blur(8px);z-index:20;display:flex;align-items:center;justify-content:center;padding:4vh 5vw}.panel{width:min(880px,92vw);max-height:91vh;overflow-y:auto;background:#16343b;border:1px solid #718e7b77;padding:32px 40px;box-shadow:12px 12px 0 #061e26aa}.panel.wide{width:min(1150px,94vw)}h2{font:700 clamp(32px,3.3vw,58px) 'Barlow Condensed';letter-spacing:1px;margin:0 0 10px;color:var(--gold)}.panel p{line-height:1.55;font-size:clamp(16px,1.15vw,22px);color:#ccdbca}.panel .menu-stack{max-width:none}.panel .btn{width:100%}.panel .overline{font:600 16px 'Barlow Condensed';letter-spacing:3px;color:#a0c9b9}.row{display:flex;justify-content:space-between;gap:25px;align-items:center;padding:14px 0;border-bottom:1px solid #719a8440}.row label{font:600 23px 'Barlow Condensed';letter-spacing:.5px}.row output{color:var(--gold);font:600 24px 'Barlow Condensed';min-width:55px;text-align:right}input[type=range]{width:42%;accent-color:var(--gold);height:28px}input[type=text]{width:100%;background:#0c272f;color:var(--cream);border:1px solid #6c9b8b;padding:16px;text-transform:uppercase;font-size:25px;letter-spacing:5px}.columns{display:grid;grid-template-columns:1fr 1fr;gap:25px}.hint{font:500 16px 'Barlow Condensed';letter-spacing:1px;color:#a7c2b4}.credits{font-size:15px!important;line-height:1.55}.credits dt{font-weight:700;color:var(--gold);display:inline}.credits dd{display:inline;margin:0}.credits dd:after{content:'';display:block;margin-bottom:7px}.feedback-block{margin-top:18px;font-size:15px;line-height:1.55}.feedback-block b{color:var(--gold)}a{color:#a1e5cf}.chapter-banner{position:fixed;top:33%;left:0;right:0;text-align:center;pointer-events:none;z-index:12;text-shadow:3px 3px #122b31;animation:banner 3.6s forwards}.chapter-banner small{font:600 19px 'Barlow Condensed';letter-spacing:6px;color:var(--gold)}.chapter-banner strong{display:block;font:italic 700 clamp(34px,4vw,70px) Georgia;color:#fff0c9;margin-top:12px}@keyframes banner{0%{opacity:0;transform:translateY(20px)}15%,70%{opacity:1;transform:translateY(0)}100%{opacity:0}}#demo-tag{position:fixed;top:4vh;left:50%;transform:translateX(-50%);z-index:15;border:1px solid #f2c46d;background:#10262be8;padding:12px 28px;text-align:center;font:600 19px 'Barlow Condensed';letter-spacing:3px}#demo-tag small{display:block;font-size:13px;letter-spacing:1px;margin-top:5px}#damage{position:fixed;inset:0;pointer-events:none;box-shadow:inset 0 0 130px #d95529;opacity:0;z-index:12;transition:opacity .3s}#touch-action{position:fixed;bottom:9vh;right:5vw;z-index:16;width:90px;height:90px;border-radius:50%;border:2px solid #f8bc55;background:#132e36b0;color:var(--cream);font:600 18px 'Barlow Condensed';display:none}.hidden{display:none!important}.journal-entry{border-left:2px solid #e8bb6e;padding:0 0 0 20px;margin:22px 0}.journal-entry b{font:600 26px 'Barlow Condensed';color:var(--gold)}.journal-entry p{margin:7px 0}.victory-stats{display:flex;gap:30px;margin:25px 0}.victory-stats strong{font:700 48px 'Barlow Condensed';color:var(--gold);display:block}.victory-stats span{font:500 17px 'Barlow Condensed';letter-spacing:2px}.touch .controls,.touch .inventory{display:none}.touch #touch-action:not(.hidden){display:block}.touch .chapter{padding:8px 12px}.touch .chapter-number{font-size:34px}.touch .status{padding:8px}.touch .health{font-size:20px}.touch #context{display:none}.touch #dialogue{bottom:5vh;max-width:60vw}.touch #toast{top:19vh;font-size:19px}.touch .marker{font-size:13px}.touch .title-footer{font-size:11px}.touch .title-copy{width:60vw}.touch h1{font-size:9vw}.touch .title-copy .subtitle{font-size:14px}.touch .btn{min-height:42px;padding:10px 18px;font-size:20px}.touch .title-copy .menu-stack{gap:6px}.touch .stamp{height:75px;width:75px;font-size:11px}.touch .eyebrow{font-size:12px;letter-spacing:2px}@media(max-height:600px){h1{margin:17px 0;font-size:10vh}.subtitle{margin-bottom:15px}.title-footer{bottom:2vh}.title-copy .btn{padding:8px 18px;min-height:36px;font-size:18px}.title-copy .menu-stack{gap:5px}.stamp{width:70px;height:70px;font-size:10px}.panel{padding:20px 30px}.panel .row{padding:7px 0}.panel p{margin:8px 0}.chapter{padding:8px 15px}.controls{font-size:15px;gap:10px}.item{width:52px;height:52px;font-size:23px}.health{font-size:21px}.chapter-number{font-size:37px}}@media(max-width:600px){.columns{grid-template-columns:1fr;gap:0}.panel{padding:22px}.title-copy{width:83vw!important}.stamp{display:none}.title-coord{display:none}.title-footer span:last-child{display:none}.chapter{max-width:75vw}.chapter-name{font-size:19px}.objective{font-size:12px}.score{display:none}.status{gap:5px}.topbar{left:3vw;right:3vw}.health{letter-spacing:1px;font-size:17px}.chapter-number{font-size:30px}.item{width:42px}.controls{display:none}.subtitle{max-width:300px}.marker{font-size:12px}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js","rapier":"https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm"}}</script>
+</head><body>
+<div id="viewport"></div><div id="vignette"></div>
+<div id="loading"><b>UNEARTHING AN ADVENTURE</b><div class="spinner"></div><p>Preparing the expedition · Three.js / WebGPU</p><p id="load-detail">Packing a hat. Checking for snakes.</p></div>
+<div id="title"><div class="title-copy"><div class="eyebrow">A pulp expedition in four acts</div><h1>Raiders<span class="small">of the lost</span><span class="gold">Hieroglyph</span></h1><p class="subtitle">One map. One magnificent mistake.<br>Some things are better left buried.</p><div class="menu-stack"><button class="btn primary" data-action="start">Begin expedition <small>01 — SOLO</small></button><button class="btn" data-action="coop">Bring a partner <small>02 — CO-OP</small></button><button class="btn" data-action="settings">Settings & controls</button><button class="btn" data-action="about">About the expedition</button></div></div><div class="stamp">FIELD NOTES<br>VOL. 01<br>✦ TANIS ✦</div><div class="title-coord">30° 58′ N &nbsp; 31° 53′ E · THE DESERT KEEPS ITS SECRETS</div><div class="title-footer"><span id="title-hint">WASD / ARROWS TO MOVE · ENTER TO SELECT</span><span>ORIGINAL ADVENTURE · INSPIRED BY ATARI, 1982</span></div></div>
+<div id="hud" class="hidden"><div class="topbar"><div class="chapter"><div class="chapter-number" id="chapter-number">01</div><div><div class="chapter-name" id="chapter-name"></div><div class="objective" id="objective"></div></div></div><div class="status"><div class="health" id="health"></div><div class="score" id="score"></div><button class="menu-icon" data-action="pause" aria-label="Pause">Ⅱ</button></div></div><div class="bottom"><div class="inventory" id="inventory"></div><div class="controls" id="controls"></div></div><button id="context" class="hidden"></button></div>
+<div id="markers"></div><div id="toast" class="hidden"></div><div id="dialogue" class="hidden"></div><div id="damage"></div><div id="demo-tag" class="hidden">EXPEDITION IN PROGRESS<small>ATTRACT DEMO · ANY INPUT TO RETURN</small></div><div id="overlay" class="screen hidden"></div><button id="touch-action" class="hidden">INTERACT</button>
+<script type="module">import * as THREE from 'three';
+import RAPIER from 'rapier';
+const EXIT_INTERVIEW={
+  "sourceInformation": {
+    "date": "2026-11-05 22:23:00",
+    "source": "Raiders of the Lost Ark (Atari 2600, 1982)",
+    "plan": "none",
+    "genre": "Action adventure with exploration, inventory puzzles and cooperative play",
+    "perspective": "Third-person tilted orthographic 3D",
+    "tech": "Three.js r180 (0.180.0), WebGPU with engine WebGL2 fallback, Rapier 3D 0.19.3, Web Audio API, Gamepad API, AI Hub Session Protocol v1 / client 1.4.0, PeerJS 1.5.5",
+    "artDirection": "Procedural cel-shaded desert dioramas with ink edges, warm sandstone, teal shadows and pulp expedition typography",
+    "animation": "Three.js AnimationMixer and AnimationClip: breathing, running, whipping, dodging and flute playing; procedural environmental motion",
+    "audio": "Original code-synthesized expedition score, procedural sound effects and Animalese-style gibberish voices; music defaults to 10 percent",
+    "online": "1–2 shared-world cooperative play through AI Hub; standalone WebRTC room codes and same-browser BroadcastChannel; local second-controller co-op",
+    "testing": "Headless Chromium 153 with software WebGPU; complete scripted expedition at default balance; simulated standard gamepad and touch; direct file URL deployment; two-page co-op; official AI Hub standard, dedicated-server, host-leave and 150 ms latency / 50 ms jitter / 5 percent loss scenarios; offline synthesized audio. Physical controller, real mobile hardware and listening quality unknown.",
+    "research": "Atari 1982 instruction manual: rooms, inventory, enemies, whip, flute, shovel, parachute, sun-map and mesa mechanics; Raiders2600 reverse-engineering notes on abstract room rendering and two-channel TIA music/effects; AI Hub integration documentation; official Three.js and Rapier documentation.",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing caught five distinct issues: missing AI Hub metadata, an obscured east dial, overlapping dial labels, an exit lintel obscuring the explorer, and shader-loading time incorrectly counting toward title inactivity. All were corrected; review also corrected gameplay and control defects.",
+    "One testing issue blocked AI Hub acceptance. Review additionally found two progression blockers: unrecoverable stolen coins and touch controls unable to break supply crates; both were fixed.",
+    "The scripted four-chapter playthrough and official AI Hub harness were most useful for checking progression and network lifecycle behavior.",
+    "Syntax-only checking was least useful because it could not assess progression, input focus or visual visibility."
+  ],
+  "engineFeedback": [
+    "Three.js made custom modeled dioramas, toon shading and native character animation straightforward.",
+    "Collider origin conventions, menu focus and guest snapshot handling needed corrections. Headless WebGPU screenshots were blank; state checks and the engine WebGL fallback supported verification.",
+    "The complete adventure layer: inventory puzzles, interaction, camera, controls, co-op replication and procedural audio.",
+    "Coordinating asynchronous WebGPU startup, Rapier collision movement and authoritative network state.",
+    "none",
+    "A smaller first-party controller and physics integration layer would simplify polished game creation."
+  ],
+  "promptFeedback": [
+    "The source-first research, TV-friendly controller design and complete expedition scope gave the game a clear identity.",
+    "The source year identifies the Atari game rather than the 1981 film; that distinction needed research.",
+    "Integrating a complete four-chapter adventure with standalone and hosted co-op in one HTML file.",
+    "Specify an approximate target playtime and whether online play should include public matchmaking or private room codes."
+  ],
+  "aiHub": {
+    "name": "Raiders of the Lost Hieroglyph",
+    "tagline": "One map. One magnificent mistake.",
+    "description": "Crack open a desert mystery in a cel-shaded pulp expedition. Trade for tools, decode the sun map, whip across a canyon and charm the vault's snakes before a very large boulder interrupts your research.",
+    "type": "Game",
+    "genre": "Adventure",
+    "source": "Raiders of the Lost Ark (1982)",
+    "series": "Indiana Jones",
+    "players": "1–2",
+    "controls": "WASD/arrows move, mouse aim/click whip, E interact, Space dodge, Q flute, Tab notes, Esc pause; standard gamepad supported; touch drag movement with assisted combat.",
+    "tags": [
+      "3d",
+      "adventure",
+      "co-op",
+      "puzzle",
+      "third-person",
+      "exploration"
+    ]
+  }
+}
+;
+
+const {createAudio,testAudioOffline}=(()=>{
+// Every sound in the expedition is synthesized here; no sampled audio is used.
+const clamp = (v, lo = 0, hi = 1) => Math.max(lo, Math.min(hi, Number(v) || 0));
+const hz = (note) => 440 * 2 ** ((note - 69) / 12);
+
+function makeSynth(ctx, music, sfx) {
+  let seed = 41971;
+  const noise = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
+  const samples = noise.getChannelData(0);
+  for (let i = 0; i < samples.length; i++) {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    samples[i] = (seed / 2147483648 - 1) * 0.7;
+  }
+  let sounds = 0;
+  const cleanup = (source, nodes) => {
+    source.onended = () => {
+      source.disconnect();
+      for (const node of nodes) node.disconnect();
+    };
+  };
+  function tone(f, at, duration, volume, type = 'triangle', bus = sfx, endFrequency = f, cutoff = 6000) {
+    if (!(f > 0) || !(duration > 0)) return;
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    const filter = ctx.createBiquadFilter();
+    osc.type = type;
+    osc.frequency.setValueAtTime(f, at);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(10, endFrequency), at + duration);
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(cutoff, at);
+    filter.Q.value = 0.5;
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), at + Math.min(0.012, duration * 0.12));
+    env.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    osc.connect(filter).connect(env).connect(bus);
+    osc.start(at);
+    osc.stop(at + duration + 0.025);
+    cleanup(osc, [filter, env]);
+    sounds++;
+  }
+  function hiss(at, duration, volume, center = 1300, q = 0.6, bus = sfx, descend = 1) {
+    const source = ctx.createBufferSource();
+    const filter = ctx.createBiquadFilter();
+    const env = ctx.createGain();
+    source.buffer = noise;
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(center, at);
+    filter.frequency.exponentialRampToValueAtTime(Math.max(30, center * descend), at + duration);
+    filter.Q.value = q;
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(Math.max(0.0002, volume), at + Math.min(0.02, duration * 0.15));
+    env.gain.exponentialRampToValueAtTime(0.0001, at + duration);
+    source.connect(filter).connect(env).connect(bus);
+    source.start(at, (sounds * 0.073) % 0.8);
+    source.stop(at + duration + 0.025);
+    cleanup(source, [filter, env]);
+    sounds++;
+  }
+  function pluck(note, at, duration = 0.36, volume = 0.25) {
+    const frequency = hz(note);
+    tone(frequency, at, duration, volume, 'triangle', music, frequency * 0.998, 4000);
+    tone(frequency * 2, at, duration * 0.4, volume * 0.22, 'sine', music, frequency * 2, 6000);
+    hiss(at, 0.025, volume * 0.18, 3600, 0.3, music);
+  }
+  function marimba(note, at, volume = 0.25) {
+    tone(hz(note), at, 0.32, volume, 'sine', music);
+    tone(hz(note) * 3, at, 0.055, volume * 0.2, 'sine', music);
+  }
+  function brass(note, at, duration = 0.4, volume = 0.17) {
+    tone(hz(note), at, duration, volume, 'sawtooth', music, hz(note) * 0.997, 1300);
+    tone(hz(note) * 1.003, at + 0.006, duration * 0.92, volume * 0.3, 'triangle', music, hz(note), 1700);
+  }
+  function drum(at, strong = false) {
+    tone(strong ? 130 : 95, at, strong ? 0.2 : 0.13, strong ? 0.35 : 0.2, 'sine', music, 42, 1000);
+    hiss(at, 0.075, strong ? 0.16 : 0.08, strong ? 1400 : 2200, 0.4, music, 0.4);
+  }
+  function effect(name, when = ctx.currentTime) {
+    const at = Math.max(ctx.currentTime, when) + 0.003;
+    switch (name) {
+      case 'whip':
+        hiss(at, 0.18, 0.5, 500, 0.65, sfx, 9);
+        hiss(at + 0.105, 0.055, 0.9, 5500, 0.5);
+        tone(1100, at + 0.1, 0.045, 0.17, 'square', sfx, 140, 6000);
+        break;
+      case 'hit':
+        hiss(at, 0.16, 0.6, 700, 0.45, sfx, 0.3);
+        tone(180, at, 0.18, 0.38, 'triangle', sfx, 44, 1200);
+        break;
+      case 'coin':
+        tone(hz(88), at, 0.18, 0.21, 'sine');
+        tone(hz(95), at + 0.08, 0.28, 0.2, 'sine');
+        break;
+      case 'step':
+        hiss(at, 0.065, 0.14, 550, 0.2);
+        tone(82, at, 0.05, 0.06, 'sine', sfx, 50);
+        break;
+      case 'roll':
+        hiss(at, 0.34, 0.3, 500, 0.3, sfx, 2);
+        tone(110, at + 0.12, 0.16, 0.17, 'triangle', sfx, 48);
+        break;
+      case 'puzzle':
+        [64, 69, 73, 76].forEach((note, i) => tone(hz(note), at + i * 0.09, 0.7, 0.19, 'triangle', sfx, hz(note), 2800));
+        hiss(at + 0.06, 0.55, 0.16, 180, 0.6, sfx, 4);
+        break;
+      case 'win':
+        [62, 66, 69, 74, 73, 74, 78, 81, 86].forEach((note, i) => {
+          const t = at + i * 0.15;
+          tone(hz(note), t, i === 8 ? 1.35 : 0.44, 0.2, 'sawtooth', sfx, hz(note), 1800);
+          tone(hz(note - 12), t, 0.4, 0.1, 'triangle');
+        });
+        break;
+      case 'snake':
+        hiss(at, 0.5, 0.32, 5000, 1.1, sfx, 0.5);
+        break;
+      case 'rumble':
+        hiss(at, 0.95, 0.65, 100, 0.3, sfx, 0.5);
+        tone(48, at, 0.85, 0.3, 'triangle', sfx, 24, 180);
+        break;
+      case 'swing':
+        hiss(at, 0.6, 0.22, 300, 0.3, sfx, 5);
+        tone(190, at, 0.25, 0.08, 'sine', sfx, 480);
+        break;
+      case 'dig':
+        for (let i = 0; i < 3; i++) {
+          hiss(at + i * 0.18, 0.15, 0.4, 380 + i * 150, 0.3, sfx, 0.5);
+          tone(320, at + i * 0.18, 0.05, 0.09, 'triangle', sfx, 110);
+        }
+        break;
+      case 'menu':
+        tone(620, at, 0.07, 0.13, 'sine', sfx, 810);
+        break;
+      case 'flute':
+        [74, 77, 79, 81, 79, 77, 74].forEach((note, i) => {
+          tone(hz(note), at + i * 0.15, 0.26, 0.15, 'sine');
+          hiss(at + i * 0.15, 0.15, 0.025, 2800, 0.4);
+        });
+        break;
+      default:
+        tone(440, at, 0.08, 0.1, 'sine', sfx, 520);
+    }
+  }
+  function voice(text, when = ctx.currentTime) {
+    const syllables = Math.min(15, Math.max(4, Math.ceil(String(text || 'Well then').length / 4)));
+    let hash = 7;
+    for (const char of String(text)) hash = (Math.imul(hash, 31) + char.charCodeAt(0)) >>> 0;
+    for (let i = 0; i < syllables; i++) {
+      const at = Math.max(ctx.currentTime, when) + 0.02 + i * 0.085;
+      const vowel = (hash >>> ((i % 7) * 4)) % 5;
+      const frequency = 170 + ((hash >>> (i % 13)) % 160);
+      tone(frequency, at, 0.065, 0.13, 'sawtooth', sfx, frequency * (i % 3 === 0 ? 1.25 : 0.9), [850, 1400, 2100, 600, 1100][vowel]);
+      tone(frequency * 2.01, at, 0.045, 0.04, 'sine', sfx, frequency * 2, 3000);
+    }
+  }
+  return { tone, hiss, pluck, marimba, brass, drum, effect, voice, get sounds() { return sounds; } };
+}
+
+function createAudio() {
+  let ctx = null;
+  let synth = null;
+  let master = null;
+  let music = null;
+  let sfx = null;
+  let analyser = null;
+  let scratch = null;
+  let musicVolume = 0.1;
+  let sfxVolume = 0.65;
+  let paused = false;
+  let nextTick = 0;
+  let tick = 0;
+  let stage = 0;
+  let disposed = false;
+  let peakEver = 0;
+  let energyEver = 0;
+  const melody = [0, null, 7, 12, 10, 7, 3, 5, 7, null, 3, 2, 0, null, -2, null, 0, 3, 7, 12, 14, 12, 10, 7, 5, 3, 2, 7, 0, null, 7, null];
+  const darkMelody = [0, null, 1, 7, 5, null, 3, 1, 0, null, -2, null, 1, 3, 5, null, 7, null, 8, 7, 5, 3, 1, null, 0, null, -2, 1, 0, null, null, null];
+  const setGain = (node, value) => {
+    if (node && ctx && ctx.state !== 'closed') node.gain.setTargetAtTime(value, ctx.currentTime, 0.035);
+  };
+  async function unlock() {
+    if (disposed) return false;
+    if (!ctx) {
+      const Audio = globalThis.AudioContext || globalThis.webkitAudioContext;
+      if (!Audio) return false;
+      try {
+        ctx = new Audio({ latencyHint: 'interactive' });
+        master = ctx.createGain();
+        music = ctx.createGain();
+        sfx = ctx.createGain();
+        analyser = ctx.createAnalyser();
+        analyser.fftSize = 1024;
+        scratch = new Float32Array(analyser.fftSize);
+        const compressor = ctx.createDynamicsCompressor();
+        compressor.threshold.value = -12;
+        compressor.knee.value = 12;
+        compressor.ratio.value = 4;
+        music.gain.value = musicVolume;
+        sfx.gain.value = sfxVolume;
+        master.gain.value = paused ? 0 : 0.85;
+        music.connect(master);
+        sfx.connect(master);
+        master.connect(compressor).connect(analyser).connect(ctx.destination);
+        synth = makeSynth(ctx, music, sfx);
+        nextTick = ctx.currentTime + 0.04;
+      } catch {
+        return false;
+      }
+    }
+    try {
+      if (ctx.state === 'suspended') await ctx.resume();
+      return ctx.state === 'running';
+    } catch {
+      return false;
+    }
+  }
+  function update(dt, newStage = 0, danger = false) {
+    stage = Math.max(0, Math.floor(Number(newStage) || 0));
+    if (!synth || !ctx || ctx.state !== 'running' || paused || disposed) return;
+    const urgency = typeof danger === 'number' ? clamp(danger) : danger ? 1 : 0;
+    const beat = 60 / (stage === 3 ? 96 + urgency * 32 : 108 + urgency * 8) / 2;
+    if (nextTick < ctx.currentTime - 0.5) nextTick = ctx.currentTime + 0.025;
+    let scheduled = 0;
+    while (nextTick < ctx.currentTime + 0.13 && scheduled++ < 8) {
+      const step = tick % 32;
+      const bar = Math.floor(tick / 8) % 4;
+      const root = stage === 3 ? 50 : stage === 2 ? 55 : stage === 1 ? 57 : 62;
+      const chord = [0, -3, 5, -2][bar];
+      const note = (stage === 3 ? darkMelody : melody)[step];
+      if (note !== null) {
+        synth.pluck(root + 12 + note, nextTick, beat * 1.8, 0.32);
+        if (stage !== 3 && step % 4 === 0) synth.brass(root + 12 + note, nextTick, beat * 1.55, 0.11);
+      }
+      if (step % 2 === 0) synth.marimba(root + chord + (step % 4 ? 7 : 0), nextTick, 0.22);
+      if (step % 4 === 0) synth.tone(hz(root - 12 + chord), nextTick, beat * 3, 0.35, 'triangle', music, hz(root - 12 + chord), 500);
+      if (step % 4 === 0 || (urgency > 0 && step % 2 === 0)) synth.drum(nextTick, step % 8 === 0);
+      if (step % 2 === 1) synth.hiss(nextTick, 0.055, 0.09 + urgency * 0.04, 5000, 0.3, music);
+      nextTick += beat;
+      tick++;
+    }
+    // Keep a cumulative signal measurement so tests needn't catch a single note.
+    analyser.getFloatTimeDomainData(scratch);
+    let energy = 0;
+    let peak = 0;
+    for (const sample of scratch) {
+      peak = Math.max(peak, Math.abs(sample));
+      energy += sample * sample;
+    }
+    peakEver = Math.max(peakEver, peak);
+    energyEver = Math.max(energyEver, Math.sqrt(energy / scratch.length));
+  }
+  return {
+    unlock,
+    update,
+    setMusic(value) { musicVolume = clamp(value); setGain(music, musicVolume); },
+    setSfx(value) { sfxVolume = clamp(value); setGain(sfx, sfxVolume); },
+    effect(name) { if (synth && ctx?.state === 'running' && !paused && !disposed) synth.effect(name); },
+    voice(text) { if (synth && ctx?.state === 'running' && !paused && !disposed) synth.voice(text); },
+    pause(value) {
+      paused = Boolean(value);
+      setGain(master, paused ? 0 : 0.85);
+      if (!paused && ctx) nextTick = Math.max(nextTick, ctx.currentTime + 0.03);
+    },
+    dispose() {
+      disposed = true;
+      if (ctx && ctx.state !== 'closed') ctx.close().catch(() => {});
+    },
+    getStats() {
+      return { state: ctx?.state || 'locked', music: musicVolume, sfx: sfxVolume, paused, stage, notes: synth?.sounds || 0, peak: peakEver, rms: energyEver };
+    },
+  };
+}
+
+async function testAudioOffline() {
+  const OfflineAudio = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
+  if (!OfflineAudio) return { supported: false, finite: false, rms: 0, peak: 0, samples: 0 };
+  const ctx = new OfflineAudio(2, 44100 * 3, 44100);
+  const music = ctx.createGain();
+  const sfx = ctx.createGain();
+  music.gain.value = 0.1;
+  sfx.gain.value = 0.65;
+  music.connect(ctx.destination);
+  sfx.connect(ctx.destination);
+  const synth = makeSynth(ctx, music, sfx);
+  [62, 69, 74, 72, 69, 65, 67, 69].forEach((note, i) => {
+    synth.pluck(note, i * 0.22, 0.4, 0.3);
+    if (i % 2 === 0) synth.drum(i * 0.22, i % 4 === 0);
+  });
+  synth.effect('whip', 0.2);
+  synth.effect('coin', 0.7);
+  synth.effect('flute', 1.3);
+  synth.voice('That belongs in a museum, probably.', 0.8);
+  const rendered = await ctx.startRendering();
+  let energy = 0;
+  let peak = 0;
+  let finite = true;
+  const data = rendered.getChannelData(0);
+  for (const sample of data) {
+    if (!Number.isFinite(sample)) finite = false;
+    energy += sample * sample;
+    peak = Math.max(peak, Math.abs(sample));
+  }
+  return { supported: true, finite, rms: Math.sqrt(energy / data.length), peak, samples: data.length, sounds: synth.sounds };
+}
+
+return {createAudio,testAudioOffline};
+})();
+
+const {createExplorer,createEnemy,createWhip}=(()=>{
+
+const ink = new THREE.LineBasicMaterial({ color: 0x202528, transparent: true, opacity: 0.85 });
+const palette = new Map();
+function material(color) {
+  if (!palette.has(color)) palette.set(color, new THREE.MeshToonMaterial({ color }));
+  return palette.get(color);
+}
+function mesh(parent, geometry, color, position = [0, 0, 0], outlined = true) {
+  const object = new THREE.Mesh(geometry, material(color));
+  object.position.set(...position);
+  object.castShadow = true;
+  object.receiveShadow = true;
+  if (outlined) {
+    const edge = new THREE.LineSegments(new THREE.EdgesGeometry(geometry, 28), ink);
+    object.add(edge);
+  }
+  parent.add(object);
+  return object;
+}
+function box(parent, size, color, position, outlined = true) {
+  return mesh(parent, new THREE.BoxGeometry(...size), color, position, outlined);
+}
+function ball(parent, radius, color, position, scale = [1, 1, 1], outlined = false) {
+  const object = mesh(parent, new THREE.SphereGeometry(radius, 10, 7), color, position, outlined);
+  object.scale.set(...scale);
+  return object;
+}
+function cylinder(parent, top, bottom, height, color, position, sides = 10, outlined = true) {
+  return mesh(parent, new THREE.CylinderGeometry(top, bottom, height, sides), color, position, outlined);
+}
+function group(parent, name, position = [0, 0, 0]) {
+  const object = new THREE.Group();
+  object.name = name;
+  object.position.set(...position);
+  parent.add(object);
+  return object;
+}
+function track(path, times, values) {
+  return new THREE.NumberKeyframeTrack(path, times, values);
+}
+
+function createExplorer(color = 0xb95b34, alternate = false) {
+  const root = new THREE.Group();
+  const body = group(root, 'body');
+  const skin = alternate ? 0xb97b50 : 0xe6b076;
+  const coat = color;
+  const leather = alternate ? 0x35454d : 0x5f3c2d;
+  const trousers = alternate ? 0xc8b78a : 0xb19a65;
+  const shirt = 0xe9d9ad;
+  box(body, [0.47, 0.47, 0.3], coat, [0, 1.08, 0]);
+  box(body, [0.22, 0.33, 0.025], shirt, [0, 1.15, 0.165]);
+  const lapelL = box(body, [0.12, 0.32, 0.04], leather, [-0.16, 1.16, 0.18]);
+  lapelL.rotation.z = -0.2;
+  const lapelR = box(body, [0.12, 0.32, 0.04], leather, [0.16, 1.16, 0.18]);
+  lapelR.rotation.z = 0.2;
+  box(body, [0.48, 0.065, 0.32], leather, [0, 0.86, 0]);
+  box(body, [0.095, 0.08, 0.027], 0xd1a953, [0, 0.86, 0.18]);
+  box(body, [0.045, 0.045, 0.031], leather, [0, 0.86, 0.196], false);
+  box(body, [0.43, 0.12, 0.27], trousers, [0, 0.77, 0]);
+  for (const sign of [-1, 1]) {
+    const leg = group(body, sign < 0 ? 'legL' : 'legR', [sign * 0.13, 0.75, 0]);
+    box(leg, [0.18, 0.42, 0.21], trousers, [0, -0.2, 0]);
+    box(leg, [0.19, 0.17, 0.22], leather, [0, -0.47, 0]);
+    box(leg, [0.21, 0.18, 0.32], 0x343332, [0, -0.61, 0.05]);
+    box(leg, [0.22, 0.035, 0.33], 0x202528, [0, -0.7, 0.055]);
+    const arm = group(body, sign < 0 ? 'armL' : 'armR', [sign * 0.31, 1.27, 0]);
+    cylinder(arm, 0.105, 0.088, 0.39, coat, [0, -0.18, 0], 8);
+    cylinder(arm, 0.09, 0.09, 0.06, leather, [0, -0.39, 0], 8);
+    ball(arm, 0.09, skin, [0, -0.47, 0.015], [0.9, 1.1, 0.9], true);
+  }
+  const head = group(body, 'head', [0, 1.55, 0]);
+  ball(head, 0.22, skin, [0, 0, 0], [0.85, 1.07, 0.88], true);
+  ball(head, 0.065, skin, [-0.195, -0.025, 0]);
+  ball(head, 0.065, skin, [0.195, -0.025, 0]);
+  box(head, [0.038, 0.028, 0.025], 0x202528, [-0.075, 0.01, 0.183], false);
+  box(head, [0.038, 0.028, 0.025], 0x202528, [0.075, 0.01, 0.183], false);
+  ball(head, 0.046, skin, [0, -0.034, 0.2], [0.75, 0.85, 1]);
+  box(head, [0.092, 0.017, 0.016], 0x644531, [0, -0.098, 0.17], false);
+  box(head, [0.075, 0.021, 0.019], 0x4e3a29, [-0.074, 0.052, 0.178], false).rotation.z = -0.12;
+  box(head, [0.075, 0.021, 0.019], 0x4e3a29, [0.074, 0.052, 0.178], false).rotation.z = 0.12;
+  if (alternate) {
+    ball(head, 0.245, 0x519998, [0, 0.13, -0.01], [1, 0.68, 0.95], true);
+    cylinder(head, 0.235, 0.245, 0.07, 0x9dc5b3, [0, 0.1, 0], 12);
+    const tail = box(body, [0.12, 0.45, 0.035], 0x519998, [0.15, 1.35, -0.23]);
+    tail.rotation.z = -0.18;
+    box(body, [0.37, 0.09, 0.37], 0x86b8ad, [0, 1.32, 0]);
+  } else {
+    cylinder(head, 0.43, 0.43, 0.045, 0x6c4730, [0, 0.155, 0], 16);
+    const crown = cylinder(head, 0.22, 0.26, 0.25, 0x8e623b, [0, 0.3, -0.01], 10);
+    crown.scale.z = 0.9;
+    cylinder(head, 0.258, 0.265, 0.065, 0x3d3029, [0, 0.21, -0.01], 10).scale.z = 0.91;
+    box(head, [0.07, 0.014, 0.15], 0x533a2a, [0, 0.434, -0.02], false);
+    box(body, [0.28, 0.085, 0.32], 0xc2633e, [0, 1.33, 0]);
+    const scarf = box(body, [0.12, 0.28, 0.04], 0xc2633e, [-0.12, 1.18, 0.205]);
+    scarf.rotation.z = -0.12;
+  }
+  const strap = box(body, [0.065, 0.6, 0.035], leather, [-0.025, 1.08, 0.2]);
+  strap.rotation.z = -0.58;
+  const satchel = box(body, [0.27, 0.28, 0.15], alternate ? 0x876f44 : 0x8b6842, [-0.3, 0.78, -0.015]);
+  satchel.rotation.z = -0.06;
+  box(body, [0.25, 0.07, 0.17], leather, [-0.3, 0.91, -0.015]);
+  box(body, [0.043, 0.05, 0.025], 0xd2ad61, [-0.3, 0.85, 0.08]);
+  const coil = mesh(body, new THREE.TorusGeometry(0.115, 0.024, 5, 15), leather, [0.3, 0.78, 0.08]);
+  coil.rotation.y = 0.35;
+  cylinder(body, 0.028, 0.028, 0.19, 0x3b2922, [0.35, 0.88, 0.1], 7).rotation.z = -0.25;
+
+  const mixer = new THREE.AnimationMixer(root);
+  const idle = mixer.clipAction(new THREE.AnimationClip('idle-breathe', 2.4, [
+    track('body.position[y]', [0, 1.2, 2.4], [0, 0.025, 0]),
+    track('head.rotation[y]', [0, 0.9, 1.6, 2.4], [-0.035, 0.055, -0.035, -0.035]),
+    track('armL.rotation[z]', [0, 1.2, 2.4], [0.045, 0.09, 0.045]),
+    track('armR.rotation[z]', [0, 1.2, 2.4], [-0.045, -0.09, -0.045]),
+  ]));
+  const run = mixer.clipAction(new THREE.AnimationClip('expedition-run', 0.64, [
+    track('body.position[y]', [0, 0.16, 0.32, 0.48, 0.64], [0, 0.065, 0, 0.065, 0]),
+    track('legL.rotation[x]', [0, 0.16, 0.32, 0.48, 0.64], [-0.6, 0, 0.6, 0, -0.6]),
+    track('legR.rotation[x]', [0, 0.16, 0.32, 0.48, 0.64], [0.6, 0, -0.6, 0, 0.6]),
+    track('armL.rotation[x]', [0, 0.32, 0.64], [0.5, -0.5, 0.5]),
+    track('armR.rotation[x]', [0, 0.32, 0.64], [-0.5, 0.5, -0.5]),
+    track('body.rotation[z]', [0, 0.16, 0.32, 0.48, 0.64], [-0.025, 0, 0.025, 0, -0.025]),
+  ]));
+  const lash = mixer.clipAction(new THREE.AnimationClip('whip-crack', 0.4, [
+    track('armR.rotation[x]', [0, 0.08, 0.2, 0.4], [0, -2.55, -1.3, 0]),
+    track('armR.rotation[y]', [0, 0.13, 0.25, 0.4], [0, -0.8, 0.4, 0]),
+    track('body.rotation[y]', [0, 0.1, 0.23, 0.4], [0, -0.22, 0.22, 0]),
+  ]));
+  lash.setLoop(THREE.LoopOnce, 1);
+  const tumble = mixer.clipAction(new THREE.AnimationClip('sand-roll', 0.48, [
+    track('body.rotation[x]', [0, 0.12, 0.24, 0.36, 0.48], [0, -1.5, -3.14, -4.7, -6.283185]),
+    track('body.position[y]', [0, 0.15, 0.32, 0.48], [0, 0.3, 0.3, 0]),
+    track('legL.rotation[x]', [0, 0.1, 0.38, 0.48], [0, -1, -1, 0]),
+    track('legR.rotation[x]', [0, 0.1, 0.38, 0.48], [0, -1, -1, 0]),
+  ]));
+  tumble.setLoop(THREE.LoopOnce, 1);
+  const fluteAction = mixer.clipAction(new THREE.AnimationClip('charm-the-snakes', 1.1, [
+    track('armL.rotation[x]', [0, 0.55, 1.1], [-1.8, -1.86, -1.8]),
+    track('armL.rotation[z]', [0, 0.55, 1.1], [-0.5, -0.45, -0.5]),
+    track('armR.rotation[x]', [0, 0.55, 1.1], [-1.8, -1.86, -1.8]),
+    track('armR.rotation[z]', [0, 0.55, 1.1], [0.5, 0.45, 0.5]),
+  ]));
+  const fluteMesh = cylinder(body, 0.025, 0.025, 0.48, 0xe5c474, [0, 1.45, 0.31], 8);
+  fluteMesh.rotation.z = Math.PI / 2;
+  fluteMesh.visible = false;
+  idle.play();
+  run.play().setEffectiveWeight(0);
+  fluteAction.play().setEffectiveWeight(0);
+  let previousAttack = false;
+  let previousRoll = false;
+  let weight = 0;
+  let fluteWeight = 0;
+  return {
+    group: root,
+    mixer,
+    update(dt, { moving = false, attack = false, rolling = false, flute = false } = {}) {
+      dt = Math.max(0, Math.min(0.1, Number(dt) || 0));
+      weight = THREE.MathUtils.damp(weight, moving && !rolling && !flute ? 1 : 0, 15, dt);
+      fluteWeight = THREE.MathUtils.damp(fluteWeight, flute ? 1 : 0, 18, dt);
+      run.setEffectiveWeight(weight);
+      idle.setEffectiveWeight(Math.max(0, 1 - weight - fluteWeight));
+      fluteAction.setEffectiveWeight(fluteWeight);
+      if (attack && !previousAttack) lash.reset().setEffectiveWeight(1).play();
+      if (rolling && !previousRoll) tumble.reset().setEffectiveWeight(1).play();
+      previousAttack = attack;
+      previousRoll = rolling;
+      fluteMesh.visible = flute;
+      mixer.update(dt);
+      // The native roll clip rotates around the adventurer's waist.
+      // Keeping this offset outside the clip lets idle and running share a rig.
+      if (tumble.isRunning()) {
+        body.position.y += 0.9 * (1 - Math.cos(body.rotation.x));
+        body.position.z = -0.9 * Math.sin(body.rotation.x);
+      } else body.position.z = 0;
+    },
+  };
+}
+
+function createEnemy(kind = 'thief') {
+  if (kind === 'snake') {
+    const root = new THREE.Group();
+    const body = group(root, 'serpent');
+    const points = [];
+    for (let i = 0; i < 18; i++) points.push(new THREE.Vector3(Math.sin(i * 0.65) * 0.27, 0.14 + i * 0.012, -0.8 + i * 0.072));
+    mesh(body, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 28, 0.09, 6, false), 0x68834e, [0, 0, 0], true);
+    const neck = group(body, 'neck', [0, 0.32, 0.43]);
+    cylinder(neck, 0.095, 0.12, 0.3, 0x779556, [0, 0.12, 0], 7);
+    const hood = ball(neck, 0.19, 0x6b884c, [0, 0.3, 0.02], [1.35, 1.1, 0.5], true);
+    ball(neck, 0.14, 0x88a05e, [0, 0.32, 0.11], [1, 0.65, 1.2], true);
+    for (const side of [-1, 1]) {
+      ball(neck, 0.037, 0xffd26d, [side * 0.09, 0.36, 0.185]);
+      box(neck, [0.012, 0.04, 0.015], 0x202528, [side * 0.09, 0.36, 0.215], false);
+    }
+    box(neck, [0.016, 0.012, 0.13], 0xb85c43, [0, 0.275, 0.27], false);
+    const mixer = new THREE.AnimationMixer(root);
+    mixer.clipAction(new THREE.AnimationClip('serpent-sway', 1.6, [
+      track('neck.rotation[z]', [0, 0.4, 0.8, 1.2, 1.6], [-0.14, 0, 0.14, 0, -0.14]),
+      track('serpent.rotation[y]', [0, 0.8, 1.6], [-0.12, 0.12, -0.12]),
+    ])).play();
+    return { group: root, mixer, update(dt, moving = true) { mixer.timeScale = moving ? 1.5 : 0.65; mixer.update(dt); } };
+  }
+  const actor = createExplorer(0x596263, true);
+  const body = actor.group.getObjectByName('body');
+  const head = actor.group.getObjectByName('head');
+  // A wrapped mouth and long curved saber distinguish rival treasure hunters.
+  box(head, [0.34, 0.14, 0.075], 0x405059, [0, -0.1, 0.17]);
+  cylinder(head, 0.24, 0.25, 0.08, 0xc9b886, [0, 0.17, 0], 12);
+  const arm = actor.group.getObjectByName('armR');
+  const bladePoints = [new THREE.Vector3(0, 0, 0), new THREE.Vector3(0, 0.2, 0.16), new THREE.Vector3(0.04, 0.45, 0.26), new THREE.Vector3(0.1, 0.62, 0.24)];
+  const blade = mesh(arm, new THREE.TubeGeometry(new THREE.CatmullRomCurve3(bladePoints), 9, 0.035, 4, false), 0xd6ddcc, [0, -0.48, 0.02]);
+  blade.rotation.x = 0.7;
+  box(arm, [0.2, 0.035, 0.06], 0xc7a55c, [0, -0.47, 0.025]);
+  let elapsed = 0;
+  return {
+    group: actor.group,
+    mixer: actor.mixer,
+    update(dt, moving = true) {
+      elapsed += dt;
+      actor.update(dt, { moving });
+      if (!moving) body.rotation.y += Math.sin(elapsed * 1.6) * dt * 0.04;
+    },
+  };
+}
+
+function createWhip() {
+  const root = new THREE.Group();
+  const segments = [];
+  const geometry = new THREE.CylinderGeometry(0.022, 0.028, 1, 5);
+  const ropeMat = material(0x67432d);
+  for (let i = 0; i < 24; i++) {
+    const segment = new THREE.Mesh(geometry, ropeMat);
+    segment.castShadow = true;
+    root.add(segment);
+    segments.push(segment);
+  }
+  const up = new THREE.Vector3(0, 1, 0);
+  const delta = new THREE.Vector3();
+  root.visible = false;
+  return {
+    group: root,
+    update(progress) {
+      const p = Math.max(0, Math.min(1, Number(progress) || 0));
+      root.visible = p > 0 && p < 1;
+      const reach = 0.4 + Math.sin(p * Math.PI) * 3.6;
+      const points = [];
+      for (let i = 0; i <= segments.length; i++) {
+        const u = i / segments.length;
+        points.push(new THREE.Vector3(Math.sin(u * 7 - p * 12) * 0.38 * u * (1 - p), 1.04 + Math.sin(u * Math.PI) * (0.7 - p * 0.45), 0.4 + u * reach));
+      }
+      segments.forEach((segment, i) => {
+        const a = points[i];
+        const b = points[i + 1];
+        delta.subVectors(b, a);
+        segment.position.copy(a).add(b).multiplyScalar(0.5);
+        segment.quaternion.setFromUnitVectors(up, delta.clone().normalize());
+        segment.scale.set(1 - i / 36, delta.length(), 1 - i / 36);
+      });
+    },
+  };
+}
+
+return {createExplorer,createEnemy,createWhip};
+})();
+
+const {buildWorld}=(()=>{
+
+// Every surface is modeled: warm gouache colors, hard light bands, and ink edges.
+function buildWorld(stage, scene) {
+  const group = new THREE.Group();
+  group.name = `Expedition set ${stage}`;
+  scene.add(group);
+  const solids = [], props = {}, animated = [], torches = [];
+  let trapState = {enabled: true, time: 0, escapeTime: 0};
+  props.setHazards = state => { trapState = {...trapState, ...state}; };
+  let trapVisual = null;
+  let seed = 3729 + stage * 101;
+  const rand = () => { seed = (seed * 1664525 + 1013904223) >>> 0; return seed / 4294967296; };
+  const palette = stage === 3 ? {sand:0x314851,stone:0x46616b,light:0x6e8581,dark:0x192d38,ink:0x11222b,gold:0xdda949} : {sand:0xe4b875,stone:0xcb955c,light:0xf2d598,dark:0x96603e,ink:0x44312e,gold:0xf3c35b};
+  const materials = new Map();
+  const mat = c => { if (!materials.has(c)) materials.set(c,new THREE.MeshToonMaterial({color:c})); return materials.get(c); };
+  const ink = new THREE.LineBasicMaterial({color:palette.ink,transparent:true,opacity:0.72});
+  const glow = c => new THREE.MeshBasicMaterial({color:c});
+  function mesh(geo,c,x,y,z,parent=group,edges=true) {
+    const m = new THREE.Mesh(geo,typeof c==='number'?mat(c):c);
+    m.position.set(x,y,z);m.castShadow=true;m.receiveShadow=true;
+    if(edges){const e=new THREE.LineSegments(new THREE.EdgesGeometry(geo,28),ink);m.add(e);}
+    parent.add(m);return m;
+  }
+  const box=(x,y,z,w,h,d,c,parent=group,edges=true)=>mesh(new THREE.BoxGeometry(w,h,d),c,x,y,z,parent,edges);
+  const cyl=(x,y,z,r,h,c,parent=group,n=8,r2=r)=>mesh(new THREE.CylinderGeometry(r2,r,h,n),c,x,y,z,parent);
+  const ball=(x,y,z,r,c,parent=group)=>mesh(new THREE.IcosahedronGeometry(r,1),c,x,y,z,parent,false);
+  const solid=(x,z,w,d,h,y=0)=>solids.push({x,z,w,d,h,y});
+  function line(points,c=palette.ink,parent=group){const g=new THREE.BufferGeometry().setFromPoints(points.map(p=>new THREE.Vector3(...p)));const m=new THREE.Line(g,new THREE.LineBasicMaterial({color:c}));parent.add(m);return m;}
+  function glyph(x,y,z,size=.55,parent=group,c=palette.dark) {
+    const g=new THREE.Group();g.position.set(x,y,z);parent.add(g);
+    const style=Math.floor(rand()*6);
+    if(style===0){line([[-size*.3,0,.01],[0,size*.65,.01],[size*.3,0,.01],[-size*.3,0,.01]],c,g);line([[0,.15,0],[0,-size*.3,0]],c,g);}
+    else if(style===1){const r=mesh(new THREE.TorusGeometry(size*.23,.025,4,12),c,0,size*.2,0,g,false);line([[-size*.35,-size*.2,0],[size*.35,-size*.2,0]],c,g);}
+    else if(style===2){line([[-size*.4,.15,0],[-size*.1,.4,0],[size*.3,.18,0],[-size*.1,-.1,0],[-size*.4,.15,0]],c,g);line([[0,.08,0],[0,-.3,0],[.2,-.3,0]],c,g);}
+    else if(style===3){line([[-size*.3,.4,0],[-size*.3,-.2,0],[size*.3,-.2,0],[size*.3,.4,0]],c,g);line([[-size*.3,.15,0],[size*.3,.15,0]],c,g);}
+    else if(style===4){line([[-size*.3,.3,0],[0,.05,0],[size*.3,.3,0]],c,g);line([[0,.05,0],[0,-.25,0],[-size*.2,-.25,0]],c,g);}
+    else {line([[-size*.35,.1,0],[size*.35,.1,0],[size*.15,.4,0],[-size*.1,.4,0]],c,g);line([[0,.1,0],[0,-.3,0],[size*.25,-.3,0]],c,g);}
+    return g;
+  }
+  function frieze(x,z,w,y=3,parent=group){box(x,y,z,w,.28,.22,palette.gold,parent);for(let i=0;i<Math.floor(w/.8);i++) glyph(x-w/2+.45+i*.8,y-.5,z+.14,.45,parent);}
+  function column(x,z,height=4,r=.65,c=palette.stone,parent=group,collide=true){
+    box(x,.15,z,r*2.8,.3,r*2.8,palette.dark,parent);
+    cyl(x,.42,z,r*1.23,.35,palette.light,parent,8);
+    cyl(x,height/2+.45,z,r,height-.5,c,parent,12,r*.84);
+    for(let j=0;j<4;j++) {const a=j*Math.PI/2;box(x+Math.sin(a)*r*.88,height/2+.4,z+Math.cos(a)*r*.88,.045,height-.7,.045,palette.dark,parent,false);}
+    cyl(x,height+.18,z,r*1.3,.35,palette.light,parent,8);
+    box(x,height+.46,z,r*2.7,.22,r*2.7,palette.dark,parent);
+    if(collide)solid(x,z,r*2.4,r*2.4,height);
+  }
+  function pot(x,z,r=.45,c=0xb66345,y=0,parent=group){
+    const pts=[[0,0],[r*.62,0],[r*.94,r*.32],[r,r*.85],[r*.65,r*1.4],[r*.58,r*1.6],[r*.72,r*1.64],[r*.72,r*1.8],[r*.55,r*1.8],[r*.55,r*1.65]].map(p=>new THREE.Vector2(...p));
+    return mesh(new THREE.LatheGeometry(pts,10),c,x,y,z,parent);
+  }
+  function crate(x,z,w=.85,y=0,parent=group){
+    const q=box(x,y+w/2,z,w,w,w,0x96704a,parent);for(let i of [-1,1]){box(x+i*w*.38,y+w/2,z+w*.51,.1,w,.06,0x583c30,parent);box(x,y+w*.1,z+w*.53,w,.1,.06,0x583c30,parent);box(x,y+w*.9,z+w*.53,w,.1,.06,0x583c30,parent);}const a=box(x,y+w/2,z+w*.54,w*1.15,.085,.04,0x62402e,parent);a.rotation.z=.72;return q;
+  }
+  function torch(x,z,y=1.2,parent=group){
+    cyl(x,y,z,.065,.9,0x583b2e,parent,6);
+    const f=mesh(new THREE.ConeGeometry(.2,.6,5),glow(0xffbd52),x,y+.63,z,parent,false);const small=mesh(new THREE.ConeGeometry(.1,.35,5),glow(0xffedb0),x,y+.6,z,parent,false);
+    torches.push({f,small,phase:rand()*6});
+    const light=new THREE.PointLight(0xffb859,stage===3?12:3,7,2);light.position.set(x,y+1,z);parent.add(light);
+  }
+  function palm(x,z,s=1){
+    const root=new THREE.Group();root.position.set(x,0,z);root.scale.setScalar(s);group.add(root);
+    const trunk=cyl(0,2.35,0,.23,4.7,0x97623b,root,7,.16);trunk.rotation.z=.12;
+    for(let k=0;k<7;k++){const a=k*Math.PI*2/7,leaf=new THREE.Group();root.add(leaf);leaf.position.set(-.28,4.7,0);leaf.rotation.y=a;const shape=new THREE.Shape();shape.moveTo(0,0);shape.quadraticCurveTo(.65,.45,2.3,-.75);shape.quadraticCurveTo(.4,-.1,0,0);const m=mesh(new THREE.ShapeGeometry(shape),new THREE.MeshToonMaterial({color:k%2?0x506e45:0x738b4e,side:THREE.DoubleSide}),0,0,0,leaf,false);m.rotation.y=Math.PI/2;for(let q=1;q<4;q++)line([[0,0,0],[0,-q*.08,q*.48]],0x37503c,leaf);}
+    for(let k=0;k<3;k++)ball(-.1+rand()*.35,4.5,rand()*.4-.2,.18,0x705234,root);
+    solid(x,z,.55*s,.55*s,4*s);
+  }
+  function obelisk(x,z,h=4.5){
+    box(x,.25,z,1.5,.5,1.5,palette.dark);box(x,h/2+.5,z,.8,h,.8,palette.stone);
+    const p=mesh(new THREE.ConeGeometry(.57,.85,4),palette.gold,x,h+.92,z);p.rotation.y=Math.PI/4;
+    for(let j=0;j<5;j++)glyph(x,.9+j*.6,z+.413,.52);
+    solid(x,z,1.3,1.3,h);
+  }
+  function carpet(x,z,w,d,c=0x994c49,parent=group){box(x,.035,z,w,.05,d,c,parent,false);box(x,.07,z,w-.25,.02,d-.25,0xcb985e,parent,false);box(x,.085,z,w-.4,.015,d-.4,c,parent,false);for(let i=0;i<5;i++){const a=box(x-w/2+.4+i*(w-.8)/4,.1,z,.2,.02,d*.6,0xdbbd79,parent,false);a.rotation.y=.3;}for(let i=0;i<Math.floor(w/.2);i++){box(x-w/2+i*.2,.04,z-d/2-.12,.055,.03,.24,0xd8be90,parent,false);box(x-w/2+i*.2,.04,z+d/2+.12,.055,.03,.24,0xd8be90,parent,false);}}
+  function flag(x,z,c=0x397d80,parent=group,y=4.8){
+    cyl(x,y/2,z,.06,y,0x614732,parent,6);
+    const cloth=box(x+.55,y-.45,z,1.1,.75,.055,c,parent,false);animated.push({kind:'flag',m:cloth,phase:rand()*6});
+    const tri=new THREE.Shape();tri.moveTo(0,0);tri.lineTo(.35,.35);tri.lineTo(0,.7);tri.closePath();mesh(new THREE.ShapeGeometry(tri),mat(c),x+1.1,y-.82,z,parent,false);
+  }
+  function stall(x,z,c){
+    const root=new THREE.Group();root.position.set(x,0,z);group.add(root);
+    for(const a of [-1,1])for(const b of [-1,1])cyl(a*1.8,1.45,b*1.4,.065,2.9,0x745138,root,6);
+    // Alternating broad canvas stripes and scalloped valance.
+    for(let k=0;k<7;k++){const cloth=box(-1.65+k*.55,2.93,0,.57,.08,3.35,k%2?0xe9cf97:c,root,false);cloth.rotation.x=-.10;box(-1.65+k*.55,2.6,1.62,.55,.5,.08,k%2?0xe9cf97:c,root,false);}
+    box(0,.75,0,3.8,1.5,1.15,0x9b6c48,root);box(0,1.53,0,4,.12,1.4,0xe1bd80,root);
+    for(let j=0;j<7;j++)pot(-1.5+j*.47,.05,.16,j%2?0xa2533c:0xceab68,1.6,root);
+    for(let j=0;j<3;j++)crate(-1.5+j*1.3,-1, .72,0,root);
+    solid(x,z,3.9,1.5,1.7);
+  }
+  function rock(x,z,r=1,c=palette.dark,y=0){const m=mesh(new THREE.DodecahedronGeometry(r,0),c,x,y+r*.55,z);m.scale.y=.65;m.rotation.set(rand(),rand()*3,rand()*.2);return m;}
+  function sign(text, subtitle, x, y, z, width=1.8, height=.95, parent=group) {
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;
+    const ctx=canvas.getContext('2d');ctx.fillStyle='#d9bc7b';ctx.fillRect(0,0,512,256);
+    ctx.strokeStyle='#584432';ctx.lineWidth=9;ctx.strokeRect(8,8,496,240);
+    ctx.textAlign='center';ctx.fillStyle='#3c4137';ctx.font='bold 92px Georgia';ctx.fillText(text,256,116);
+    ctx.font='bold 44px Georgia';ctx.fillText(subtitle,256,192);
+    const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
+    const m=mesh(new THREE.PlaneGeometry(width,height),new THREE.MeshBasicMaterial({map:texture,side:THREE.DoubleSide}),x,y,z,parent,false);
+    box(x,y,z-.045,width+.1,height+.1,.08,palette.dark,parent);return m;
+  }
+  function merchant(x,z){
+    const root=new THREE.Group();root.position.set(x,0,z);group.add(root);props.merchant=root;
+    cyl(0,.65,0,.43,1.2,0x4b7880,root,9,.28);cyl(0,.13,0,.46,.18,0x32515c,root,9);
+    box(0,.96,.27,.64,.12,.12,0xddb45d,root);box(0,1.13,.19,.2,.42,.15,0xa95245,root);
+    for(const side of [-1,1]){const arm=cyl(side*.37,1.04,0,.11,.6,0x739a98,root,7);arm.rotation.z=side*.38;ball(side*.48,.77,.04,.13,0xbb845f,root);box(side*.2,.09,.16,.27,.17,.42,0x523d32,root);}
+    ball(0,1.47,0,.265,0xbb845f,root);cyl(0,1.71,0,.31,.26,0xf1d493,root,10);cyl(0,1.85,0,.21,.15,0xe0bd7e,root,10);
+    for(const side of [-1,1]){ball(side*.09,1.52,.235,.027,0x312d2a,root);const brow=box(side*.09,1.58,.24,.1,.025,.025,0x312d2a,root);brow.rotation.z=side*.12;}
+    box(0,1.38,.25,.22,.05,.045,0x513b2e,root);box(0,1.48,.27,.07,.12,.07,0xcc9870,root);
+    // A flute, folded chute, and shovel make the inventory kit tangible.
+    crate(x-1.4,z-.4,.7);cyl(x-1.4,.92,z-.4,.065,1,0xd8ba75).rotation.z=Math.PI/2;
+    box(x-1.3,.47,z+.7,.6,.7,.35,0x9b6b4c);box(x-1.3,.54,z+.9,.65,.12,.08,0xd7be87);
+    const shovel=cyl(x-2,.7,z-.3,.04,1.4,0x6d4c35);shovel.rotation.z=.28;box(x-2.18,.12,z-.3,.3,.36,.055,0x587579);
+    animated.push({kind:'merchant',m:root,phase:0});
+  }
+  function dartCrossing(z){
+    const root=new THREE.Group();group.add(root);props.darts=root;
+    const warningMat=new THREE.MeshBasicMaterial({color:0x816041});const lamps=[];
+    for(let i=0;i<20;i++){const x=-9.5+i;box(x,.065,z,.68,.04,.2,warningMat,root,false);}
+    for(const side of [-1,1]){const x=side*10.4;box(x,.8,z,.65,1.6,1.9,palette.dark,root);box(x,1.65,z,.9,.18,2.1,palette.light,root);for(let j=0;j<3;j++){box(x-side*.34,.45+j*.4,z,.05,.15,.85,0x142b32,root);const lamp=ball(x,1.85,z-.6+j*.6,.09,warningMat,root);lamps.push(lamp);}}
+    const bolts=[];for(let i=0;i<7;i++){const bolt=new THREE.Group();root.add(bolt);const shaft=cyl(0,0,0,.025,1.2,0xa78b5b,bolt,5);shaft.rotation.z=Math.PI/2;const point=mesh(new THREE.ConeGeometry(.07,.28,4),0xe9dec0,.7,0,0,bolt);point.rotation.z=-Math.PI/2;box(-.45,0,0,.25,.15,.025,0x9a5143,bolt);bolts.push(bolt);}
+    trapVisual={root,warningMat,bolts,z};return root;
+  }
+  function templeFront(z=-11.7,w=26){
+    box(-w/4-1.6,3.0,z,w/2-3.2,6,2.2,palette.stone);box(w/4+1.6,3,z,w/2-3.2,6,2.2,palette.stone);
+    box(0,6.2,z,6.2,1.1,2.6,palette.light);box(0,6.85,z,7,.3,2.8,palette.dark);
+    box(0,2.65,z-.7,4.3,5.3,.3,stage===3?0x0e202b:0x39454a);
+    for(const s of [-1,1]){box(s*2.55,2.6,z+.45,.7,5.2,.6,palette.dark);box(s*2.55,2.6,z+.78,.38,5.2,.1,palette.light);for(let j=0;j<6;j++)glyph(s*2.55,.5+j*.75,z+.85,.5);column(s*7,z+1.2,5.2,.78);}
+    frieze(-8,z+1.15,8.5,5.2);frieze(8,z+1.15,8.5,5.2);
+    // Sun disk and stone wings.
+    mesh(new THREE.TorusGeometry(.68,.13,5,24),palette.gold,0,6.2,z+1.36);
+    for(let s of [-1,1])for(let i=0;i<5;i++){const b=box(s*(1+i*.3),6.16-i*.05,z+1.35,.19,.58-i*.05,.15,palette.gold);b.rotation.z=s*-.55;}
+    for(let i=0;i<3;i++)box(0,.07+i*.1,z+2.3-i*.25,4.8,.14,.65,palette.light);
+    solid(-8,z,9,2.6,6);solid(8,z,9,2.6,6);
+  }
+  function dunes(){
+    for(let i=0;i<10;i++){const x=(i-4.5)*8,z=-24-rand()*14;const hill=mesh(new THREE.SphereGeometry(6+rand()*4,12,5,0,Math.PI*2,0,Math.PI/2),i%2?0xc58b62:0xd9a672,x,-1.5,z,group,false);hill.scale.z=.6;hill.scale.y=.28;}
+    for(let i=0;i<3;i++){const p=mesh(new THREE.ConeGeometry(7-i*1.3,9-i,4),0xbb8a64,-24+i*10,-.7+4-i*.5,-34-i*6,group,false);p.rotation.y=Math.PI/4;}
+    // Teal horizon silhouettes frame the sand rather than a flat back wall.
+  }
+  if(stage===2){
+    box(-8,-1.15,0,12,2.3,26,palette.dark);box(8.5,-1.15,0,11,2.3,26,palette.dark);
+    box(-8,-.12,0,12,.25,26,palette.sand);box(8.5,-.12,0,11,.25,26,palette.sand);
+    box(.5,-5,0,5,1,30,0x43626c,group,false);
+    for(let k=0;k<15;k++){box(-2.25-rand()*.4,-.5-k*.18,-12+k*1.8,.5,.35,.8,0xb87d4d);box(3.2+rand()*.35,-.5-k*.18,-12+k*1.8,.5,.35,.8,0xca935c);}
+  } else {
+    box(0,-1.0,0,29,1.8,27,palette.dark);box(0,-.18,0,29,.22,27,palette.stone);box(0,-.035,0,28.6,.12,26.6,palette.sand);
+    for(let i=0;i<19;i++)box(-13.2+i*1.45,-.55,13.52,1.15,.25,.05,i%2?palette.dark:palette.stone,group,false);
+  }
+  // Fine weathered fragments, dry tufts, and cobbles.
+  for(let i=0;i<90;i++){
+    let x=(rand()-.5)*27,z=(rand()-.5)*24;
+    if(stage===2&&x>-2.5&&x<3.5)continue;
+    if(rand()>.5){const s=.08+rand()*.15;const b=box(x,.02,z,s,.03,s*.55,stage===3?0x627777:0xc28f56,group,false);b.rotation.y=rand()*3;}
+    else if(Math.abs(x)>9){for(let q=0;q<3;q++){const t=box(x+q*.05,.1,z,.025,.2+rand()*.17,.025,stage===3?0x4b7473:0x9c8c51,group,false);t.rotation.z=(q-1)*.4;}}
+  }
+  if(stage===0){
+    dunes();templeFront();
+    stall(-10,1.7,0xa54d49);stall(10,-.8,0x398084);
+    carpet(-6,0,3.4,4.5,0xa95243);carpet(6,1,2.7,3,0x3f7774);merchant(-6,0);
+    palm(-12,7,1.2);palm(11,7,.95);palm(-12,-6,.8);palm(12,-7,1.15);
+    obelisk(-10,-7,3.5);
+    for(let i=0;i<8;i++){pot(8.5+rand()*3,5+rand()*2,.25+rand()*.3,[0xb96747,0xc49663,0x768379][i%3]);pot(-11+rand()*3,-4+rand()*1.6,.25+rand()*.3);}
+    for(let i=0;i<4;i++)crate(8.8+i*.85,7.5,.72+(i%2)*.2);
+    // Resting pack camel, angular saddle and rolled blankets.
+    const camel=new THREE.Group();camel.position.set(-10,0,8.5);camel.rotation.y=-.5;group.add(camel);
+    const body=ball(0,.75,0,.8,0xb78c59,camel);body.scale.set(1.6,.8,.7);ball(-.4,1.2,0,.4,0xaa784a,camel);ball(.4,1.2,0,.4,0xaa784a,camel);
+    const neck=cyl(.95,1.2,0,.2,1.2,0xb78c59,camel,6);neck.rotation.z=-.6;box(1.25,1.8,0,.6,.3,.35,0xc09664,camel);
+    box(0,1.35,0,1.2,.15,1.1,0x8d4141,camel);cyl(-.2,1.55,0,.22,1.2,0x3d747a,camel,8).rotation.x=Math.PI/2;
+    flag(-8,-4,0xa94740);flag(8,3,0x3b7b80);
+    for(const x of [-3.5,3.5])torch(x,-8,1);
+    // Winding hand-laid paving leads towards the dark temple doorway.
+    for(let j=0;j<10;j++)for(let k=-1;k<=1;k++){const p=box(k*.85+(rand()-.5)*.2,.015,8-j*1.7,.75,.025,1.1,0xd4a86e,group,false);p.rotation.y=(rand()-.5)*.15;}
+  }
+  if(stage===1){
+    templeFront(-12);group.children[0].material=mat(0x465f66);group.children[2].material=mat(0xb3986f);
+    for(const x of [-10,10])for(const z of [-7,0,7])column(x,z,4.5,.7);
+    box(-10,5.0,0,1.8,.55,16,palette.light);
+    // The tiny valley is a physical map, with three mesas under a brass orbit.
+    const map=new THREE.Group();map.position.set(0,0,1);group.add(map);props.map=map;
+    cyl(0,.25,0,2.1,.5,0x4b6a6d,map,12);cyl(0,.54,0,1.9,.1,0xe1c78b,map,12);
+    for(let i=0;i<6;i++){const a=i*Math.PI/3;const p=mesh(new THREE.CylinderGeometry(.3,.5,.4+(i%2)*.2,5),0xb97b4e,Math.sin(a)*1.2,.75,Math.cos(a)*1.2,map);}
+    const orbit=mesh(new THREE.TorusGeometry(2.2,.045,4,48),palette.gold,0,1.1,0,map,false);orbit.rotation.x=Math.PI/2;
+    const inner=mesh(new THREE.TorusGeometry(1.6,.03,4,36),palette.gold,0,1.12,0,map,false);inner.rotation.x=Math.PI/2;
+    props.dials=[];
+    for(const [i,x,z] of [[0,-6,-2],[1,0,-5],[2,6,-2]]){
+      box(x,.18,z,1.9,.35,1.9,palette.dark);box(x,.8,z,1.25,1.1,1.25,0x548080);box(x,1.45,z,1.55,.22,1.55,palette.light);
+      for(let j=0;j<2;j++)glyph(x,.6+j*.45,z+.64,.6,group,0x233f43);
+      const dial=new THREE.Group();dial.position.set(x,1.68,z);group.add(dial);props.dials.push(dial);
+      cyl(0,.05,0,.68,.2,palette.gold,dial,8);box(0,.25,-.24,.16,.25,.7,0x71452f,dial);const gem=mesh(new THREE.OctahedronGeometry(.15),glow(0xffe5a0),0,.42,-.52,dial,false);
+      solid(x,z,1.4,1.4,1.6);
+      sign(['I','II','III'][i],['DAWN','NOON','DUSK'][i],x,2.65,z-.06,1.75,.85);
+      const tile=box(x,.035,z+1.8,1.2,.045,1.2,0x54797b);glyph(x,.06,z+1.8,.75).rotation.x=-Math.PI/2;
+    }
+    // The clue is carved into three stelae facing the player.
+    for(const [i,x] of [-3,0,3].entries()){box(x,1.9,-10.3,1.45,2.5,.45,0x53797a);for(let k=0;k<3;k++)glyph(x,1.25+k*.6,-10.04,.6,group,0xdac78e);}
+    for(const x of [-8,8])for(const z of [-9,5])torch(x,z,1.5);
+    for(let j=0;j<6;j++)box(-4+j*1.6,.015,6,1.4,.035,1.4,j%2?0x72918b:0xc7b184,group,false);
+    dartCrossing(4);
+  }
+  if(stage===2){
+    dunes();
+    for(const s of [-1,1])for(let j=0;j<5;j++){const x=s*(13.5+rand()*5),z=-13+j*6;const h=5+rand()*7;const m=mesh(new THREE.CylinderGeometry(1.8,3,h,6),j%2?0xb97c51:0xcf9563,x,h/2-2,z);for(let k=0;k<3;k++)cyl(x,h/2-1+k,z,2.15,.15,0xddad79,group,6);}
+    for(const x of [-8,8]){for(let j=0;j<3;j++){box(x,.04,-9+j*.65,3.5,.08,.45,palette.light);}}
+    // Rope anchor is a sun-battered stone crane above the gorge.
+    const anchor=new THREE.Group();anchor.position.set(-2,0,1);group.add(anchor);props.anchor=anchor;
+    box(-2.3,2.8,0,.65,5.6,.65,palette.stone,anchor);box(-.9,5.5,0,3.5,.5,.65,palette.light,anchor);
+    const hook=mesh(new THREE.TorusGeometry(.38,.09,5,16),palette.gold,0,5.2,0,anchor);hook.rotation.y=Math.PI/2;
+    line([[0,5.2,0],[-1,2.5,0],[-1.5,.15,0]],0x64432f,anchor);
+    flag(-5,3,0xac5149);flag(6,3,0x4b8584);
+    // Parachute landing canopy snagged over a camp on the right plateau.
+    const canopy=mesh(new THREE.SphereGeometry(1.4,8,4,0,Math.PI*2,0,Math.PI/2),new THREE.MeshToonMaterial({color:0xe6cf9d,side:THREE.DoubleSide}),9,3,5);
+    for(let i=0;i<8;i++){const a=i*Math.PI/4;line([[9+Math.sin(a)*1.4,3,5+Math.cos(a)*1.4],[9,1.2,5]],0x6e5540);}
+    crate(10,6,.8);pot(10.7,5,.4);carpet(-8,7,2.4,2.6,0x8e5143);
+    // Excavation frame: suspended screen, golden sand and discarded tools.
+    box(8,.02,-5,3,.05,3,0xba8757);for(let i=0;i<8;i++){const a=i*Math.PI/4;rock(8+Math.sin(a)*1.5,-5+Math.cos(a)*1.5,.35,0xddb77b);}
+    cyl(10.3,.4,-4,.045,.9,0x60422d).rotation.z=-.5;box(10.1,.1,-4,.3,.3,.08,0x52777a);
+    const gate=new THREE.Group();gate.position.set(8,0,-11);group.add(gate);for(const x of [-2,2]){box(x,2,0,1.2,4,1.3,palette.stone,gate);for(let i=0;i<4;i++)glyph(x,.8+i*.7,.67,.5,gate);}box(0,4.2,0,5.4,.65,1.5,palette.light,gate);box(0,2.1,-.6,2.8,4.2,.1,0x304650,gate);mesh(new THREE.TorusGeometry(.45,.08,5,18),palette.gold,0,4.2,.81,gate);solid(6,-11,1.3,1.5,4);solid(10,-11,1.3,1.5,4);
+    for(let i=0;i<9;i++)rock(-11+rand()*4,-6+rand()*7,.3+rand()*.5);
+    for(let i=0;i<8;i++)rock(10+rand()*2,-3+rand()*8,.3+rand()*.4);
+  }
+  if(stage===3){
+    // A vault of blue-black sandstone, with gold revealing the path.
+    box(0,3,-12,28,6,1.4,0x243b48);for(let i=0;i<17;i++)frieze(-12+i*1.5,-11.25,1.2,4.8);
+    for(const x of [-11,11])for(const z of [-8,-1,6])column(x,z,4.6,.7,0x3c5966);
+    box(-11,5,0,2,.6,21,0x6e8581);
+    for(const x of [-8,8])for(const z of [-8,0,7])torch(x,z,1.1);
+    // Monumental guardian statues, intentionally offset from the player's lane.
+    for(const s of [-1,1]){const st=new THREE.Group();st.position.set(s*5.7,0,-8.5);group.add(st);box(0,.25,0,2,.5,2,0x1d3542,st);box(0,1.6,0,1.35,2.4,1,0x557781,st);box(0,3.1,0,1.1,.8,1.15,0x557781,st);const snout=box(0,3.08,.8,.55,.45,1.1,0x557781,st);for(const a of [-1,1]){const ear=mesh(new THREE.ConeGeometry(.24,1.2,4),0x557781,a*.38,4,0,st);box(a*.26,3.27,.59,.15,.07,.04,glow(0xffd06c),st,false);box(a*.75,1.5,0,.25,1.5,.4,0x45636e,st);}box(0,2.1,.55,1.3,.18,.1,palette.gold,st);solid(s*5.7,-8.5,2,2,4);}
+    for(let j=0;j<3;j++)box(0,.08+j*.16,-6.8-j*.25,5.3-j*.5,.16,3.3-j*.3,0x6c817c);
+    const ark=new THREE.Group();ark.position.set(0,.55,-7);group.add(ark);props.ark=ark;
+    box(0,.65,0,2.7,1.2,1.4,palette.gold,ark);box(0,1.3,0,3,.18,1.65,0xf4cd6d,ark);box(0,.1,0,2.95,.22,1.6,0xb97a32,ark);
+    for(const s of [-1,1]){box(s*1.1,.7,.72,.18,1.1,.1,0x9d672e,ark);box(s*1.1,.7,-.72,.18,1.1,.1,0x9d672e,ark);const rail=cyl(0,.8,s*.95,.07,4.4,0xb7782f,ark,8);rail.rotation.z=Math.PI/2;
+      // Winged geometric guardians above the lid.
+      const body=mesh(new THREE.ConeGeometry(.28,.7,5),0xffdc79,s*.8,1.68,0,ark);for(let w=0;w<4;w++){const feather=box(s*(.8-w*.13),1.95+w*.1,0,.17,.7-w*.07,.1,0xffdc79,ark);feather.rotation.z=s*(.4+w*.16);}ball(s*.8,2.14,0,.17,0xffdc79,ark);}
+    for(let i=0;i<4;i++)glyph(-.9+i*.6,.6,.711,.4,ark,0x9d672e);
+    const aura=mesh(new THREE.TorusGeometry(2,.025,4,64),glow(0xeac676),0,.45,-7,group,false);aura.rotation.x=Math.PI/2;animated.push({kind:'aura',m:aura,phase:0});
+    const light=new THREE.PointLight(0xffcf70,18,10,2);light.position.set(0,3,-7);group.add(light);
+    for(let i=0;i<9;i++){const p=box(0,.02,9-i*1.5,2,.04,1.1,i%2?0x5b7779:0x9f926a,group,false);}
+    // Scattered bones and broken offerings give the cold chamber its own character.
+    for(let i=0;i<16;i++){const x=(rand()>.5?1:-1)*(7+rand()*2),z=-7+rand()*16;const b=cyl(x,.08,z,.055,.4+rand()*.4,0xc3c3a7,group,5);b.rotation.z=Math.PI/2;ball(x-.24,.08,z,.09,0xc3c3a7);pot(x+.5,z+.5,.2+rand()*.2,0x617475);}
+    // Extraction gateway.
+    for(const x of [-2.5,2.5])box(x,1.7,12,.9,3.4,1,0x667e7b);flag(-3,10,0xc09248,group,3.5);
+    dartCrossing(4);trapState.enabled=false;
+  }
+  // Dust motes are geometry, so they remain visible with either rendering backend.
+  const dustGeo=new THREE.BufferGeometry();const dustArray=new Float32Array(150*3);for(let i=0;i<150;i++){dustArray[i*3]=(rand()-.5)*29;dustArray[i*3+1]=.5+rand()*7;dustArray[i*3+2]=(rand()-.5)*27;}dustGeo.setAttribute('position',new THREE.BufferAttribute(dustArray,3));const dust=new THREE.Points(dustGeo,new THREE.PointsMaterial({color:stage===3?0xe5cc8e:0xffe7b1,size:.045,transparent:true,opacity:.5,sizeAttenuation:true}));group.add(dust);
+  return {group,solids,props,
+    update(t,dt){for(const o of torches){o.f.scale.set(1+Math.sin(t*8+o.phase)*.12,1+Math.sin(t*13+o.phase)*.17,1);o.small.scale.y=1+Math.sin(t*11+o.phase)*.2;}for(const o of animated){if(o.kind==='flag')o.m.rotation.y=Math.sin(t*1.8+o.phase)*.12;else if(o.kind==='merchant')o.m.rotation.y=Math.sin(t*.7)*.09;else if(o.kind==='aura'){o.m.scale.setScalar(1+Math.sin(t*2)*.05);o.m.rotation.z=t*.12;}}dust.rotation.y=Math.sin(t*.04)*.035;dust.position.y=Math.sin(t*.3)*.15;
+      if(trapVisual){const clock=stage===3?trapState.escapeTime*1.5:trapState.time;const period=stage===3?1:3.8;const phase=((clock%period)+period)%period;const warning=trapState.enabled&&phase>period-(stage===3?.4:.8);trapVisual.warningMat.color.setHex(warning?(Math.sin(t*22)>0?0xffd273:0xb57836):0x735b40);for(let i=0;i<trapVisual.bolts.length;i++){const b=trapVisual.bolts[i];b.visible=trapState.enabled&&phase<.23;b.position.set(-11+phase/.23*22-i*.17,.45+(i%3)*.4,trapVisual.z+(i%3-1)*.25);}}
+    },
+    dispose(){scene.remove(group);const gs=new Set(),ms=new Set();group.traverse(o=>{if(o.geometry)gs.add(o.geometry);if(o.material){if(Array.isArray(o.material))o.material.forEach(m=>ms.add(m));else ms.add(o.material);}});gs.forEach(g=>g.dispose());ms.forEach(m=>{m.map?.dispose();m.dispose();});}
+  };
+}
+
+return {buildWorld};
+})();
+
+const {createNetwork}=(()=>{
+/* Multiplayer adapter for AI Hub Session Protocol v1 and standalone co-op.
+ * AI Hub's unmodified vendor/session.js MUST be the first script in <head>.
+ * Standalone: same-origin tabs use BroadcastChannel; other devices use
+ * PeerJS 1.5.5's public signaling service and a reliable WebRTC data channel.
+ * No external network transport is created while AIHub.active is true.
+ */
+function createNetwork(callbacks = {}) {
+  const notify = (key, ...args) => callbacks[key]?.(...args);
+  const hub = globalThis.AIHub;
+  const active = !!hub?.active;
+  const token = crypto.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+  const prefix = 'lost-hieroglyph-v1-';
+  let hosting = false, room = '', linked = false, begun = false, ended = false;
+  let peers = [], mySeat = 0, noPlayer = false, hubConnected = false;
+  let peer = null, connection = null, channel = null, peerToken = '', mode = '';
+  let generation = 0, heartbeat = null, retry = null, lastSeen = 0;
+  let seq = 0, lastState = -1, startTimer = null, finished = false;
+  const status = text => notify('onStatus', text);
+  const peerEvent = (id, connected) => notify('onPeer', {id, connected, name: id === 0 ? 'Dr. Vale' : 'Rafi'});
+  const envelope = (kind, data) => ({game:'lost-hieroglyph', kind, data, seq:++seq, from:token});
+  const hubOffs = [];
+
+  function receive(message, from) {
+    if (!message || message.game !== 'lost-hieroglyph' || ended) return;
+    lastSeen = performance.now();
+    if (message.kind === 'state' && !hosting) {
+      if ((message.seq ?? 0) < lastState) return;
+      lastState = message.seq ?? 0;
+      notify('onState', message.data, from);
+    } else if (message.kind === 'input' && hosting) {
+      notify('onInput', message.data, from ?? 1);
+    } else if (message.kind === 'depart') {
+      linked = false;
+      peerEvent(hosting ? 1 : 0, false);
+      status(hosting ? `Room ${room} · partner left` : 'The expedition leader disconnected.');
+    }
+  }
+
+  function transmit(kind, data) {
+    if (ended) return false;
+    const message = envelope(kind, data);
+    if (active) {
+      if (!hubConnected) return false;
+      return hub.send(message, hosting ? {reliable:true} : {to:hub.host,reliable:true});
+    }
+    if (!linked && kind !== 'depart') return false;
+    if (mode === 'local') { channel?.postMessage(message); return true; }
+    if (connection?.open) { connection.send(message); return true; }
+    return false;
+  }
+
+  function markLinked(transport) {
+    if (linked) return;
+    linked = true;
+    mode = transport;
+    lastSeen = performance.now();
+    clearInterval(retry); retry = null;
+    peerEvent(hosting ? 1 : 0, true);
+    status(`${transport === 'local' ? 'Local' : 'Online'} co-op connected · ${room}`);
+  }
+
+  function createLocalChannel() {
+    if (!globalThis.BroadcastChannel) return;
+    channel = new BroadcastChannel(prefix + room);
+    channel.onmessage = event => {
+      const m = event.data;
+      if (!m || m.from === token || m.game !== 'lost-hieroglyph') return;
+      if (hosting && m.kind === 'hello') {
+        if ((linked && mode !== 'local') || (peerToken && peerToken !== m.from)) {
+          channel.postMessage({...envelope('full',null), to:m.from});
+          return;
+        }
+        peerToken = m.from;
+        channel.postMessage({...envelope('welcome',null), to:m.from});
+        markLinked('local');
+      } else if (!hosting && m.kind === 'welcome' && m.to === token) {
+        if (linked && mode !== 'local') return;
+        peerToken = m.from;
+        markLinked('local');
+        // Stop remote signaling after an entirely local connection is made.
+        connection?.close(); connection = null;
+        peer?.destroy(); peer = null;
+      } else if (!hosting && m.kind === 'full' && m.to === token) {
+        status('That expedition already has two explorers.');
+      } else if (mode === 'local' && m.from === peerToken) receive(m, hosting ? 1 : 0);
+    };
+  }
+
+  function wireConnection(conn, transportGeneration) {
+    conn.on('open', () => {
+      if (transportGeneration !== generation || (linked && mode === 'local')) { conn.close(); return; }
+      if (hosting && connection?.open && connection !== conn) { conn.send(envelope('full',null)); conn.close(); return; }
+      connection = conn;
+      markLinked('webrtc');
+    });
+    conn.on('data', message => {
+      if (connection !== conn || transportGeneration !== generation) return;
+      if (message?.kind === 'full') { status('That expedition already has two explorers.'); return; }
+      receive(message, hosting ? 1 : 0);
+    });
+    conn.on('close', () => {
+      if (connection !== conn || transportGeneration !== generation) return;
+      connection = null;
+      if (mode !== 'webrtc') return;
+      linked = false;
+      peerEvent(hosting ? 1 : 0, false);
+      status(hosting ? `Room ${room} · partner disconnected` : 'Connection lost. Return to the lobby to reconnect.');
+    });
+    conn.on('error', () => {
+      if (transportGeneration === generation && mode !== 'local') status('Connection interrupted. Check the room code and try again.');
+    });
+  }
+
+  async function startRemote(transportGeneration) {
+    // Import only upon an explicit standalone host/join action, never in AI Hub.
+    try {
+      const {Peer} = await import('https://esm.sh/peerjs@1.5.5?bundle');
+      if (active || transportGeneration !== generation || (linked && mode === 'local')) return;
+      peer = hosting ? new Peer(prefix + room) : new Peer();
+      peer.on('open', () => {
+        if (transportGeneration !== generation) return;
+        if (hosting) status(`Online room ${room} · waiting for your partner`);
+        else wireConnection(peer.connect(prefix + room, {reliable:true,serialization:'json'}), transportGeneration);
+      });
+      peer.on('connection', conn => {
+        if (hosting) wireConnection(conn, transportGeneration); else conn.close();
+      });
+      peer.on('error', err => {
+        if (transportGeneration !== generation || mode === 'local') return;
+        const text = err.type === 'peer-unavailable' ? 'Room not found. Check the code or ask the host to reopen it.' :
+          err.type === 'unavailable-id' ? 'Room code already in use. Host a new expedition.' :
+          `Online service unavailable. Same-device co-op remains available with code ${room}.`;
+        status(text);
+      });
+    } catch {
+      if (transportGeneration === generation && !linked) status(`Online service unavailable. Same-device co-op remains available with code ${room}.`);
+    }
+  }
+
+  function startHeartbeat() {
+    clearInterval(heartbeat);
+    heartbeat = setInterval(() => {
+      if (!linked) return;
+      transmit('ping', null);
+      if (performance.now() - lastSeen > 15000) {
+        linked = false;
+        peerToken = '';
+        peerEvent(hosting ? 1 : 0, false);
+        status(hosting ? `Room ${room} · partner disconnected` : 'The expedition leader disconnected.');
+      }
+    }, 2000);
+  }
+
+  function resetStandalone() {
+    ++generation;
+    clearInterval(heartbeat); clearInterval(retry);
+    heartbeat = null; retry = null;
+    channel?.close(); channel = null;
+    connection?.close(); connection = null;
+    peer?.destroy(); peer = null;
+    linked = false; peerToken = ''; mode = ''; begun = false; ended = false;
+    lastState = -1; finished = false; peers = []; room = '';
+  }
+
+  async function connectHub() {
+    if (!active) return null;
+    if (hubConnected) return hub;
+    hubOffs.push(hub.on('start', event => {
+      clearTimeout(startTimer);
+      const delay = Math.max(0, Number(event.in) || 0);
+      notify('onCountdown', delay);
+      startTimer = setTimeout(() => { if (!ended) { begun = true; notify('onStart'); } }, delay);
+    }));
+    hubOffs.push(hub.on('message', (message, from) => {
+      if (message?.kind === 'state' && from !== hub.host) return;
+      receive(message, from);
+    }));
+    hubOffs.push(hub.on('leave', event => {
+      peers = peers.filter(p => p.id !== event.id);
+      peerEvent(event.id, false);
+    }));
+    hubOffs.push(hub.on('time-up', event => {
+      notify('onTimeUp', event);
+      // Always submit a valid team result even if the game is still animating.
+      if (hosting && !finished) finish({won:false,score:0});
+    }));
+    hubOffs.push(hub.on('end', event => {
+      ended = true; begun = false; linked = false;
+      clearTimeout(startTimer);
+      notify('onEnd', event);
+    }));
+    const info = await hub.connect({mode:'shared-world',seats:[1,2]});
+    if (!info) return null;
+    hosting = !!info.isHost;
+    noPlayer = !!info.server;
+    mySeat = info.me;
+    peers = [...info.players];
+    hubConnected = true;
+    linked = peers.length > 1 || noPlayer;
+    status(`AI Hub expedition · ${info.players.length} explorer${info.players.length === 1 ? '' : 's'}`);
+    for (const p of peers) if (p.id !== mySeat) peerEvent(p.id, true);
+    return info;
+  }
+
+  async function host() {
+    if (active) return connectHub();
+    resetStandalone();
+    hosting = true; mySeat = 0;
+    const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    const random = new Uint8Array(6); crypto.getRandomValues(random);
+    room = [...random].map(n => alphabet[n % alphabet.length]).join('');
+    peers = [{id:0,name:'Dr. Vale'},{id:1,name:'Rafi'}];
+    createLocalChannel(); startHeartbeat();
+    status(`Room ${room} · opening online expedition`);
+    void startRemote(generation);
+    return room;
+  }
+
+  async function join(code) {
+    if (active) return connectHub();
+    const cleaned = String(code ?? '').trim().toUpperCase().replace(/[^A-Z0-9]/g,'');
+    if (!/^[A-Z0-9]{6}$/.test(cleaned)) { status('Enter the host’s six-character room code.'); return false; }
+    resetStandalone(); hosting = false; mySeat = 1; room = cleaned;
+    peers = [{id:0,name:'Dr. Vale'},{id:1,name:'Rafi'}];
+    createLocalChannel(); startHeartbeat();
+    const hello = () => channel?.postMessage(envelope('hello',null));
+    hello(); retry = setInterval(hello,700);
+    const current = generation;
+    setTimeout(() => { if (generation === current && !linked) void startRemote(current); },350);
+    status(`Joining expedition ${room}…`);
+    return true;
+  }
+
+  function leave() {
+    if (active) return false; // The hub owns leaving, restarts and the round.
+    if (linked) transmit('depart',null);
+    resetStandalone(); hosting = false; mySeat = 0;
+    status('Solo expedition');
+    return true;
+  }
+
+  function finish({won = true, score = 0, stats} = {}) {
+    if (!active || !hosting || finished || ended || !hubConnected) return false;
+    finished = true;
+    const ids = peers.map(p => p.id);
+    hub.finish({standings:[ids],scores:Object.fromEntries(ids.map(id => [id,Number(score)||0])),won:!!won,...(stats ? {stats} : {})});
+    return true;
+  }
+
+  return {
+    host, join, leave, connectHub, finish,
+    ready() { if (active && hubConnected) hub.ready(); },
+    sendState(data) { return hosting && transmit('state',data); },
+    sendInput(data) { return !hosting && transmit('input',data); },
+    update() {},
+    get active() { return active; },
+    get isHost() { return hosting; },
+    get connected() { return linked; },
+    get peerCount() { return active ? peers.filter(p => p.id !== mySeat).length : linked ? 1 : 0; },
+    get code() { return room; },
+    get me() { return mySeat; },
+    get players() { return peers; },
+    get server() { return noPlayer; },
+    get started() { return begun; },
+    get ended() { return ended; },
+    get transport() { return active ? 'hub' : mode || 'none'; },
+  };
+}
+
+return {createNetwork};
+})();
+
+
+
+
+
+
+const $=id=>document.getElementById(id), clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+const TITLE='Raiders of the Lost Hieroglyph';
+const CHAPTERS=['Bazaar of Bad Decisions','The Sunken Orrery','Needle Mesa','Vault of the Hush'];
+const DEFAULTS={speed:5.4,enemySpeed:1.65,damage:1,whipRange:3.5,trapSpeed:1,difficulty:1};
+const balance={...DEFAULTS};
+const settings={music:.1,sfx:.65,glyphs:'ps',assist:false,shake:true,...readStore('hieroglyph-settings',{})};
+const audio=createAudio();audio.setMusic(settings.music);audio.setSfx(settings.sfx);
+let renderer,scene,camera,world,physics,controller,floor,mode='title',screen='',screenBack='title',stage=-1;
+let t=0,lastTime=0,toastUntil=0,dialogueUntil=0,idleSince=performance.now(),isAttract=false,attractT=0,attractStep=0;
+let focused=0,lastInput='keyboard',touchMode=false,mouseAim=null,contextTarget=null,saveEnabled=true,netTimer=0;
+let game={stage:0,health:6,coins:0,score:0,time:0,deaths:0,flags:{},dials:[0,0,0],escape:0,escapeTime:0,flute:0,won:false};
+const actors=new Map(),enemies=[],particles=[],markers=[],keys=new Set(),pressed=new Set(),remoteInputs=new Map();
+let queuedGuest={}, pendingGuest={};
+let activeDialogue=null,dialogueSeq=0,seenDialogue=0;
+let padPrev=[], menuAxisPrev=false, touch={id:null,x:0,y:0,mx:0,mz:0}, mouseNDC=new THREE.Vector2(),clickWalk=null;
+let lastStepSfx=0, testing=false,shake=0,boulder=null,beamGroup=null,gameReady=false;
+const btn=(label,action,cls='')=>`<button class="btn ${cls}" data-action="${action}">${label}</button>`;
+function readStore(k,f){try{return JSON.parse(localStorage.getItem(k))??f}catch{return f}}
+function store(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch{}}
+function glyph(name){const k={attack:'LMB',roll:'SPACE',interact:'E',tool:'Q',journal:'TAB',pause:'ESC',confirm:'ENTER',back:'ESC'};const ps={attack:'□',roll:'✕',interact:'△',tool:'○',journal:'L1',pause:'≡',confirm:'✕',back:'○'};const xbox={attack:'X',roll:'A',interact:'Y',tool:'B',journal:'LB',pause:'≡',confirm:'A',back:'B'};return lastInput==='gamepad'?(settings.glyphs==='xbox'?xbox:ps)[name]:k[name]}
+function keycap(name){return `<span class="key">${glyph(name)}</span>`}
+function inputActivity(type='keyboard'){idleSince=performance.now();if(isAttract){stopAttract();return true}if(lastInput!==type){lastInput=type;updateControls()}if(type==='touch'){touchMode=true;document.body.classList.add('touch')}return false}
+function updateControls(){ $('controls').innerHTML=`<span>${keycap('attack')}Whip</span><span>${keycap('roll')}Dodge</span><span>${keycap('tool')}Flute</span><span>${keycap('journal')}Field notes</span>`;$('title-hint').textContent=lastInput==='gamepad'?`${glyph('confirm')} SELECT · LEFT STICK / D-PAD TO NAVIGATE`:'WASD / ARROWS TO MOVE · ENTER TO SELECT';}
+function toast(text,seconds=3){$('toast').textContent=text;$('toast').classList.remove('hidden');toastUntil=t+seconds;}
+function say(name,text,seconds=6){activeDialogue={id:++dialogueSeq,name,text};$('dialogue').innerHTML=`<b>${name.toUpperCase()}</b>${text}`;$('dialogue').classList.remove('hidden');dialogueUntil=t+seconds;audio.voice(text)}
+function banner(){document.querySelector('.chapter-banner')?.remove();const e=document.createElement('div');e.className='chapter-banner';e.innerHTML=`<small>CHAPTER ${['I','II','III','IV'][stage]}</small><strong>${CHAPTERS[stage]}</strong>`;document.body.append(e);setTimeout(()=>e.remove(),3800)}
+function panel(html,wide=false){$('overlay').innerHTML=`<div class="panel ${wide?'wide':''}">${html}</div>`;$('overlay').classList.remove('hidden');focused=0;focusMenu();}
+function focusMenu(delta=0){document.querySelectorAll('.focused').forEach(e=>e.classList.remove('focused'));const list=[...document.querySelectorAll('#overlay:not(.hidden) button,#overlay:not(.hidden) input, #title:not(.hidden) button')].filter(e=>!e.disabled);if(!list.length)return;focused=(focused+delta+list.length)%list.length;list.forEach((e,i)=>e.classList.toggle('focused',i===focused));list[focused].scrollIntoView({block:'nearest'});}
+function closeScreen(){screen='';$('overlay').classList.add('hidden');if(mode==='playing')audio.pause(false);}
+function ensureContinue(){let b=$('title').querySelector('[data-action=continue]');const saved=readStore('hieroglyph-checkpoint',null);if(saved&&!b){b=document.createElement('button');b.className='btn';b.dataset.action='continue';b.textContent='Continue saved expedition';$('title').querySelector('.menu-stack').insertBefore(b,$('title').querySelector('[data-action=coop]'));}if(!saved&&b)b.remove();}
+function showTitle(){mode='title';screen='';isAttract=false;audio.pause(false);$('title').classList.remove('hidden');$('hud').classList.add('hidden');$('overlay').classList.add('hidden');$('demo-tag').classList.add('hidden');$('markers').classList.add('hidden');$('dialogue').classList.add('hidden');$('context').classList.add('hidden');$('touch-action').classList.add('hidden');if(gameReady)loadStage(0,false);idleSince=performance.now();ensureContinue();focusMenu();}
+function showPause(){if(mode!=='playing'||isAttract)return;screen='pause';audio.pause(true);panel(`<div class="overline">EXPEDITION ON HOLD</div><h2>A moment to catch your breath.</h2><p>The sand can wait. Probably.</p><div class="menu-stack">${btn('Resume expedition','resume','primary')}${btn('Field notes & map','journal')}${btn('Settings & controls','settings')}${btn('Developer field kit','dev')}${btn('About / credits','about')}${net.active?'':btn('Return to title','title')}</div>`)}
+function showSettings(){screenBack=screen||mode;screen='settings';panel(`<div class="overline">MAKE YOURSELF COMFORTABLE</div><h2>Expedition settings</h2><div class="row"><label for="music">Music</label><input id="music" type="range" min="0" max="1" step=".01" value="${settings.music}" data-setting="music"><output>${Math.round(settings.music*100)}%</output></div><div class="row"><label for="sfx">Effects & gibberish voices</label><input id="sfx" type="range" min="0" max="1" step=".01" value="${settings.sfx}" data-setting="sfx"><output>${Math.round(settings.sfx*100)}%</output></div><div class="menu-stack" style="margin-top:16px">${btn(`Controller glyphs: ${settings.glyphs==='ps'?'PlayStation':'Xbox'}`,'glyphs')}${btn(`Explorer assist: ${settings.assist?'ON':'OFF'}`,'assist')}${btn(`Camera shake: ${settings.shake?'ON':'OFF'}`,'shake')}</div><div class="columns"><p><b>Keyboard & mouse</b><br>WASD / arrows: move<br>Mouse: aim · click: whip<br>E: interact · Space: dodge<br>Q: flute · Tab: field notes · Esc: pause</p><p><b>Standard controller</b><br>Left stick: move · Right stick: aim<br>□ / X: whip · ✕ / A: dodge<br>△ / Y: interact · ○ / B: flute<br>L1 / LB: notes · Options: pause</p></div><p class="hint">Touch: drag anywhere on the left to move. Combat is assisted. Tap the context button to interact; a second finger dodges. Assist increases whip reach and reduces incoming damage.</p>${btn('Back','back','primary')}`,true)}
+function showJournal(){screenBack=screen||mode;screen='journal';panel(`<div class="overline">DR. MIRA VALE · POCKET JOURNAL</div><h2>A perfectly respectable dig.</h2><p>Find the lost Hieroglyph before the Gilt Hand sells it to the highest bidder. Try to bring the temple back in one piece.</p><div class="journal-entry"><b>01 — The bazaar</b><p>Break the three supply crates with your whip. Trade three coins to Nima for the sun seal and expedition kit. The Gilt Hand has other ideas.</p></div><div class="journal-entry"><b>02 — The sun map</b><p>Place the seal on the central map. The inscription reads: <b>“Dawn wakes the west. Noon crowns the center. Dusk closes the east.”</b> Turn the three dials to I, II, III, from left to right. Then read the map.</p></div><div class="journal-entry"><b>03 — Needle Mesa</b><p>The chasm is too wide to jump. Approach the brass anchor at the west lip and interact to swing. Dig at the sun-marked eastern mound. Your parachute handles the descent.</p></div><div class="journal-entry"><b>04 — The hush below</b><p>Play the flute to charm the snakes. Take the golden casket, then run south toward daylight. Dodge the darts; keep ahead of the rolling welcome committee.</p></div><p class="hint">Checkpoint: ${CHAPTERS[Math.max(stage,0)]}. Checkpoints save at chapter entrances. Supplies carry with you. Co-op shares health and discoveries.</p>${btn('Close field notes','back','primary')}`,true)}
+function showDev(){screen='dev';panel(`<div class="overline">DEVELOPER FIELD KIT · LIVE TUNING</div><h2>Rewrite the expedition.</h2><p>Changes apply immediately. Developer use marks the expedition as assisted.</p>${[['speed','Explorer speed',2,12,.1],['enemySpeed','Enemy pursuit',0,5,.1],['damage','Incoming damage',0,3,.25],['whipRange','Whip reach',1.5,8,.1],['trapSpeed','Trap / boulder speed',.2,2,.1]].map(([id,label,min,max,step])=>`<div class="row"><label for="${id}">${label}</label><input id="${id}" type="range" min="${min}" max="${max}" step="${step}" value="${balance[id]}" data-balance="${id}"><output>${balance[id]}</output></div>`).join('')}<div class="columns" style="margin:15px 0"><div class="menu-stack">${btn('Restore default balance','reset-balance')}${btn('Heal & stock expedition kit','dev-kit')}${btn(`Invulnerability: ${game.flags.god?'ON':'OFF'}`,'god')}</div><div class="menu-stack">${CHAPTERS.map((s,i)=>btn(`${i+1} · ${s}`,`warp-${i}`)).join('')}</div></div>${btn('Return to pause menu','pause-back','primary')}`,true)}
+function showCoop(){screen='coop';panel(`<div class="overline">TWO HATS. TWICE THE TROUBLE.</div><h2>Bring a partner</h2><p>Explore together in a shared world. One expedition, shared discoveries. A second controller can join instantly.</p><div class="menu-stack">${btn('Local co-op · second controller','local','primary')}${btn('Host online expedition','host')}</div><div class="row"><label for="room-code">Join a room</label><input type="text" id="room-code" maxlength="6" placeholder="ABC123" aria-label="Six character room code" style="width:52%"></div><div class="menu-stack" style="margin-top:12px">${btn('Join expedition','join')}${btn('Back','back')}</div><p class="hint" id="network-status">WebRTC room codes work across devices. Same-browser tabs connect locally. Online play needs an internet connection.</p>`)}
+function showWin(){if(isAttract)return;screen='win';audio.effect('win');panel(`<div class="overline">THE HIEROGLYPH HAS BEEN FOUND</div><h2>It belongs in a very sturdy museum.</h2><p>“Next time,” Rafi said, “we collect stamps.”<br>Mira adjusted her hat. “Less exercise.”</p><div class="victory-stats"><div><strong>${game.score}</strong><span>ADVENTURE POINTS</span></div><div><strong>${Math.floor(game.time/60)}:${String(Math.floor(game.time%60)).padStart(2,'0')}</strong><span>EXPEDITION TIME</span></div><div><strong>${game.deaths}</strong><span>CLOSE CALLS</span></div></div><p>${game.flags.assisted?'An assisted expedition. Every hat made it home.':'Expedition complete. All four chapters survived.'}</p><div class="menu-stack">${net.active?'':btn('Another perfectly good idea','restart','primary')}${btn('About the expedition','about')}${net.active?'':btn('Return to title','title')}</div>`)}
+function showAbout(){screenBack=screen||mode;screen='about';const info=EXIT_INTERVIEW.sourceInformation;panel(`<div class="overline">FIELD CREDITS & SOURCE NOTES</div><h2>About the expedition</h2><p>An original pulp adventure by OpenAI / Codex. Procedural art, animation, sound and score made for this expedition. Research: the 1982 Atari manual, room descriptions, inventory and mesa mechanics. ${net.active?'Original manual: Atari, 1982.':'<a href="https://www.atariage.com/2600/manuals_old/raiders_of_the_lost_ark.html" target="_blank" rel="noopener">Read the original manual</a>.'}</p><dl class="credits">${Object.entries(info).map(([k,v])=>`<dt>${k.replace(/([A-Z])/g,' $1')}: </dt><dd>${v}</dd>`).join('')}</dl>${[['Testing Feedback','testingFeedback'],['Engine Feedback','engineFeedback'],['Prompt Feedback','promptFeedback']].map(([name,id])=>`<div class="feedback-block"><b>${name}</b>${EXIT_INTERVIEW[id].map((s,i)=>`<div>${i+1}. ${s}</div>`).join('')}</div>`).join('')}<p class="hint">Title selected with node:crypto.randomInt from 50 silently brainstormed candidates. No engine modifications. External CDN libraries and optional fonts require network on first load.</p>${btn('Back','back','primary')}`,true)}
+
+function back(){if(screenBack==='win'&&screen!=='win'){showWin();screenBack='playing';return}if(screenBack==='coop'&&screen!=='coop'){showCoop();return}if(screen==='pause'){closeScreen();return}if(screenBack==='pause'||mode==='playing'){showPause()}else{closeScreen();showTitle()}}
+document.addEventListener('click',async e=>{const b=e.target.closest('[data-action]');if(b){inputActivity(e.pointerType==='touch'?'touch':e.detail===0&&lastInput==='gamepad'?'gamepad':'keyboard');audio.unlock();audio.effect('menu');await action(b.dataset.action)}else if(e.target.closest('#context,#touch-action'))interact(localActor());});
+document.addEventListener('pointerover',e=>{const b=e.target.closest('.btn');if(b){const list=[...document.querySelectorAll('#overlay:not(.hidden) button,#overlay:not(.hidden) input,#title:not(.hidden) button')];focused=list.indexOf(b);document.querySelectorAll('.focused').forEach(e=>e.classList.remove('focused'));list.forEach(x=>x.classList.toggle('focused',x===b));}});
+document.addEventListener('input',e=>{const el=e.target;if(el.dataset.setting){settings[el.dataset.setting]=+el.value;el.nextElementSibling.textContent=Math.round(+el.value*100)+'%';audio.setMusic(settings.music);audio.setSfx(settings.sfx);store('hieroglyph-settings',settings)}if(el.dataset.balance){balance[el.dataset.balance]=+el.value;el.nextElementSibling.textContent=el.value;game.flags.assisted=true}});
+async function action(a){
+ if(a==='continue'){window.__game.restoreCheckpoint();return}
+ if(a==='start'||a==='restart'){net.leave();startGame(false);return}
+ if(a==='resume'){closeScreen();return}if(a==='pause'){showPause();return}if(a==='pause-back'){showPause();return}
+ if(a==='settings'){showSettings();return}if(a==='journal'){showJournal();return}if(a==='about'){showAbout();return}if(a==='dev'){showDev();return}
+ if(a==='back'){back();return}if(a==='coop'){showCoop();return}
+ if(a==='glyphs'){settings.glyphs=settings.glyphs==='ps'?'xbox':'ps';store('hieroglyph-settings',settings);showSettings();updateControls();return}
+ if(a==='assist'||a==='shake'){settings[a]=!settings[a];store('hieroglyph-settings',settings);showSettings();return}
+ if(a==='reset-balance'){Object.assign(balance,DEFAULTS);showDev();return}if(a==='god'){game.flags.god=!game.flags.god;game.flags.assisted=true;showDev();return}
+ if(a==='dev-kit'){game.health=6;game.coins=9;Object.assign(game.flags,{kit:true,seal:true,assisted:true});toast('Field kit replenished. Hat included.');return}
+ if(a.startsWith('warp-')){game.flags.assisted=true;game.flags.kit=true;game.flags.seal=true;game.flags.map=true;loadStage(+a.slice(-1));closeScreen();return}
+ if(a==='title'){net.leave();showTitle();return}
+ if(a==='local'){net.leave();startGame(false);addActor(1);toast('Rafi joins the expedition · second controller',4);return}
+ if(a==='host'){const code=await net.host();screen='lobby';panel(`<div class="overline">EXPEDITION ROOM</div><h2 style="letter-spacing:10px">${code}</h2><p>Share this code with your partner. They can join at any point in the expedition.</p><p id="network-status">Opening a path through the desert…</p><div class="menu-stack">${btn('Begin together','host-start','primary')}${btn('Cancel','cancel-host')}</div>`);return}
+ if(a==='host-start'){startGame(false);return}if(a==='cancel-host'){net.leave();showCoop();return}
+ if(a==='join'){const code=$('room-code').value;if(await net.join(code)){screen='joining';panel(`<div class="overline">FOLLOWING THE MAP</div><h2>Joining expedition ${net.code}</h2><p id="network-status">Waiting for the expedition leader. The host can begin when ready.</p>${btn('Cancel','cancel-host')}`)}return}
+}
+
+window.addEventListener('keydown',e=>{if(['Space','Tab','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)&&e.target.tagName!=='INPUT')e.preventDefault();if(inputActivity('keyboard'))return;if(e.target.tagName==='INPUT'&&e.target.type==='text')return;audio.unlock();if(!keys.has(e.code))pressed.add(e.code);keys.add(e.code);if(mode==='title'||screen){if(e.code==='ArrowLeft'||e.code==='ArrowRight'){const range=document.querySelector('input.focused');if(range?.type==='range'){range.value=+range.value+(e.code==='ArrowLeft'?-1:1)*Number(range.step||.1);range.dispatchEvent(new Event('input',{bubbles:true}))}}if(e.code==='ArrowDown'||e.code==='KeyS')focusMenu(1);if(e.code==='ArrowUp'||e.code==='KeyW')focusMenu(-1);if(e.code==='Enter'||e.code==='Space')document.querySelector('#overlay:not(.hidden) .btn.focused,#title:not(.hidden) .btn.focused')?.click();if(e.code==='Escape')back();}else if(e.code==='Escape')showPause();else if(e.code==='Tab')showJournal();});
+window.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();pressed.clear();if(mode==='playing'&&!screen&&!isAttract&&!net.active&&!net.connected)showPause()});
+function pointerWorld(e){mouseNDC.set(e.clientX/innerWidth*2-1,-e.clientY/innerHeight*2+1);const ray=new THREE.Raycaster();ray.setFromCamera(mouseNDC,camera);return ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,1,0),0),new THREE.Vector3())}
+$('viewport').addEventListener('pointerdown',e=>{if(inputActivity(e.pointerType==='touch'?'touch':'keyboard'))return;audio.unlock();if(mode!=='playing'||screen)return;if(e.pointerType==='touch'){if(touch.id===null){touch.id=e.pointerId;touch.x=e.clientX;touch.y=e.clientY;$('viewport').setPointerCapture(e.pointerId)}else pressed.add('Space');return}mouseAim=pointerWorld(e);if(e.button===0)pressed.add('Attack');});
+window.addEventListener('pointermove',e=>{if(e.pointerType==='touch'&&touch.id===e.pointerId){touch.mx=clamp((e.clientX-touch.x)/65,-1,1);touch.mz=clamp((e.clientY-touch.y)/65,-1,1);inputActivity('touch')}else if(e.pointerType!=='touch'){if(Math.abs(e.movementX)+Math.abs(e.movementY)>2)inputActivity('keyboard');if(camera)mouseAim=pointerWorld(e)}});
+window.addEventListener('pointerup',e=>{if(e.pointerId===touch.id){touch.id=null;touch.mx=touch.mz=0}});window.addEventListener('contextmenu',e=>e.preventDefault());
+
+function material(color){return new THREE.MeshToonMaterial({color})}
+function addActor(id){if(actors.has(id))return actors.get(id);const rig=createExplorer(id===0?0xa65c38:0x3d9e99,id!==0);scene.add(rig.group);const ring=new THREE.Mesh(new THREE.RingGeometry(.5,.59,32),new THREE.MeshBasicMaterial({color:id===0?0xf8bc55:0x82e4dc,side:THREE.DoubleSide}));ring.rotation.x=-Math.PI/2;ring.position.y=.035;rig.group.add(ring);const body=physics.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(id%2*1.5,0.8,8));const collider=physics.createCollider(RAPIER.ColliderDesc.capsule(.45,.32),body);const whip=createWhip();rig.group.add(whip.group);const chute=new THREE.Group();const canopy=new THREE.Mesh(new THREE.SphereGeometry(1.6,16,8,0,Math.PI*2,0,Math.PI/2),material(0xffdc9a));canopy.position.y=3.5;canopy.material.side=THREE.DoubleSide;chute.add(canopy);for(let j=0;j<6;j++){const an=j*Math.PI/3;chute.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(Math.sin(an)*1.55,3.5,Math.cos(an)*1.55),new THREE.Vector3(0,1.5,0)]),new THREE.LineBasicMaterial({color:0x29434a})))}chute.visible=false;rig.group.add(chute);const rope=new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(),new THREE.Vector3()]),new THREE.LineBasicMaterial({color:0x3c2b20}));rope.visible=false;scene.add(rope);const a={id,...rig,body,collider,whip,chute,rope,parachute:0,x:0,z:8,y:0,angle:Math.PI,attack:0,cooldown:0,roll:0,invuln:0,swing:0,swingFrom:0,swingTo:0,moving:false};actors.set(id,a);return a;}
+function removeActor(id){const a=actors.get(id);if(!a)return;scene.remove(a.group);scene.remove(a.rope);physics.removeRigidBody(a.body);actors.delete(id);}
+function localActor(){return actors.get(net.active||net.connected?net.me:0)||actors.values().next().value}
+function positionActor(a,x,z){a.x=x;a.z=z;a.y=0;a.body.setTranslation({x,y:.8,z},true);a.body.setNextKinematicTranslation({x,y:.8,z});a.group.position.set(x,0,z)}
+function createPhysics(){physics=new RAPIER.World({x:0,y:-20,z:0});floor=physics.createCollider(RAPIER.ColliderDesc.cuboid(50,.5,50).setTranslation(0,-.5,0));controller=physics.createCharacterController(.02);controller.setSlideEnabled(true);}
+let solidColliders=[];
+function loadStage(i,announce=true){
+ stage=i;game.stage=i;scene.background.set(i===3?0x19333e:0x87afa9);scene.fog.color.copy(scene.background);scene.children.filter(c=>c.isHemisphereLight).forEach(c=>c.intensity=i===3?1.25:2.5);game.flute=0;game.escape=0;game.escapeTime=0;game.dials=[0,0,0];
+ if(world)world.dispose();for(const c of solidColliders)physics.removeCollider(c,true);solidColliders=[];
+ for(const e of enemies)scene.remove(e.rig.group);enemies.length=0;for(const p of particles)scene.remove(p.mesh);particles.length=0;
+ for(const m of markers)m.el.remove();markers.length=0;if(beamGroup)scene.remove(beamGroup);if(boulder)scene.remove(boulder);boulder=null;
+ world=buildWorld(i,scene);for(const s of world.solids){solidColliders.push(physics.createCollider(RAPIER.ColliderDesc.cuboid(s.w/2,s.h/2,s.d/2).setTranslation(s.x,(s.y??0)+s.h/2,s.z)))}
+ const spawn=i===2?[-8,8]:[0,8];[...actors.values()].forEach((a,j)=>{positionActor(a,spawn[0]+j*1.3,spawn[1]);a.swing=0;a.roll=0;a.attack=0;a.parachute=0;a.chute.visible=false;a.rope.visible=false;});
+ if(i===0){[[4,-4],[-4,-5],[0,-7]].forEach(([x,z],j)=>spawnEnemy('thief',x,z,j));if(!game.flags.kit){addMarker('NIMA · OUTFITTER',-6,0,'merchant');[[5,3],[7,1],[5,-1]].forEach(([x,z],j)=>makeCrate(x,z,j));}addMarker('TEMPLE GATE',0,-9,'exit')}
+ if(i===1){addMarker('SUN MAP',0,1,'map');[-6,0,6].forEach((x,j)=>addMarker(`DIAL ${['WEST','CENTER','EAST'][j]}`,x,j===1?-5:-2,`dial${j}`));addMarker('MESA PASSAGE',0,-10,'exit');beamGroup=new THREE.Group();scene.add(beamGroup);}
+ if(i===2){addMarker('WHIP ANCHOR',-4.5,1,'swing');addMarker('SUN-MARKED MOUND',8,-5,'dig');addMarker('DESCENT',8,-9,'exit');spawnEnemy('thief',7,5,0);}
+ if(i===3){for(let j=0;j<8;j++)spawnEnemy('snake',-8+j*2.1,-2+Math.sin(j)*2,j);addMarker('GOLDEN CASKET',0,-7,'ark');addMarker('DAYLIGHT',0,10,'exit');boulder=new THREE.Mesh(new THREE.IcosahedronGeometry(1.8,1),material(0x776e5f));boulder.add(new THREE.LineSegments(new THREE.EdgesGeometry(boulder.geometry),new THREE.LineBasicMaterial({color:0x172a2c})));boulder.position.set(0,1.7,-12);boulder.visible=false;boulder.castShadow=true;scene.add(boulder)}
+ if(announce){banner();game.health=6;saveCheckpoint();if(i===0)say('Dr. Mira Vale','A quiet market. A respectable dig. I give it five minutes.');if(i===1)say('Rafi','Dawn in the west, noon in the middle, dusk in the east. Whoever built this enjoyed a riddle.');if(i===2)say('Mira','That is not a bridge. That is an invitation to regret.');if(i===3)say('Rafi','The flute, professor. Unless you would rather negotiate with the snakes.');}
+ updateHUD();
+}
+function addMarker(text,x,z,id){const el=document.createElement('div');el.className='marker';el.innerHTML=`<em>◇</em> ${text}`;$('markers').append(el);el.addEventListener('click',e=>{e.stopPropagation();if(inputActivity('keyboard'))return;audio.unlock();const a=localActor();if(!a)return;const m=markers.find(m=>m.id===id);if(Math.hypot(a.x-x,a.z-z)<2.5)interact(a,id);else{clickWalk={x,z,id};toast('Moving to '+text.toLowerCase(),1.5)}});const m={text,x,z,id,el};markers.push(m);return m;}
+function makeCrate(x,z,j){const mesh=new THREE.Mesh(new THREE.BoxGeometry(1.05,1.1,1.05),material(0xb77a3e));mesh.add(new THREE.LineSegments(new THREE.EdgesGeometry(mesh.geometry),new THREE.LineBasicMaterial({color:0x233336})));mesh.position.set(x,.55,z);mesh.castShadow=true;const coin=new THREE.Mesh(new THREE.TorusGeometry(.23,.065,5,12),new THREE.MeshBasicMaterial({color:0xffd25c}));coin.position.y=.7;coin.rotation.x=-Math.PI/2;mesh.add(coin);world.group.add(mesh);enemies.push({type:'crate',x,z,hp:1,rig:{group:mesh,update(){}},id:j,hit:0});}
+function spawnEnemy(type,x,z,id){const rig=createEnemy(type);rig.group.position.set(x,0,z);scene.add(rig.group);enemies.push({type,x,z,homeX:x,homeZ:z,hp:type==='snake'?2:3,rig,id,hit:0,attack:0,stun:0});}
+function startGame(attract=false){isAttract=attract;mode='playing';screen='';game={stage:0,health:6,coins:0,score:0,time:0,deaths:0,flags:{},dials:[0,0,0],escape:0,escapeTime:0,flute:0,won:false};for(const id of [...actors.keys()])removeActor(id);const ids=net.active?net.players.map(p=>p.id):[0];ids.forEach(addActor);if(net.connected&&!net.active)addActor(1);loadStage(0,!attract);$('title').classList.add('hidden');$('overlay').classList.add('hidden');$('hud').classList.remove('hidden');$('markers').classList.remove('hidden');$('demo-tag').classList.toggle('hidden',!attract);audio.pause(false);keys.clear();pressed.clear();updateControls();}
+function saveCheckpoint(){if(!isAttract&&saveEnabled&&!net.active&&!net.connected)store('hieroglyph-checkpoint',{stage,score:game.score,coins:game.coins,flags:{...game.flags},time:game.time})}
+function objective(){if(stage===0&&game.coins<3&&enemies.some(e=>e.hp>0&&e.stolenCoins>0))return 'A thief has your coins. Whip the thief to recover them.';if(stage===0)return game.flags.kit?'Find the temple gate beyond the market.':game.coins>=3?'Trade with Nima for the expedition kit.':'Whip supply crates. Collect 3 coins. Trade with Nima.';if(stage===1)return !game.flags.sealPlaced?'Place the sun seal on the central map.':!game.flags.map?'Turn the dials: Dawn · Noon · Dusk. Read the map.':'The map points to Needle Mesa. Take the north passage.';if(stage===2)return !game.flags.swung?'Cross the chasm using the whip anchor.':!game.flags.dug?'Dig beneath the sun mark on the eastern mesa.':'Open the descent. Your parachute will do the rest.';return game.escape?'RUN SOUTH TO DAYLIGHT · DODGE THE DARTS':'Charm the snakes with the flute. Reach the golden casket.'}
+function updateHUD(){if(stage<0)return;$('chapter-number').textContent=String(stage+1).padStart(2,'0');$('chapter-name').textContent=CHAPTERS[stage];$('objective').textContent=objective();$('health').textContent='●'.repeat(Math.ceil(game.health))+'○'.repeat(Math.max(0,6-Math.ceil(game.health)));$('score').textContent=String(game.score).padStart(4,'0');const items=[['➰','WHIP',true],['☼','SEAL',game.flags.seal],['♫','FLUTE',game.flags.kit],['⚒','SHOVEL',game.flags.kit],['◠','CHUTE',game.flags.kit],['◇','CASKET',game.flags.ark]];$('inventory').innerHTML=items.map(([icon,name,on],i)=>`<div class="item ${on?'':'locked'} ${i===0||i===2&&game.flute>0?'active':''}" title="${name}">${icon}<span>${name}</span></div>`).join('')}
+function pickContext(a){if(!a)return null;let best=null,dist=2.8;for(const m of markers){if(m.hidden)continue;const d=Math.hypot(a.x-m.x,a.z-m.z);if(d<dist){best=m;dist=d}}return best}
+function contextLabel(m){if(!m)return'';if(m.id==='merchant')return game.coins<3?'Nima · 3 coins for the kit':'Trade 3 coins · expedition kit';if(m.id==='map')return game.flags.sealPlaced?'Read the sun map':'Place sun seal';if(m.id.startsWith('dial'))return `Turn ${['west','center','east'][+m.id[4]]} dial · ${['I','II','III','IV'][game.dials[+m.id[4]]]}`;if(m.id==='swing')return 'Latch whip · swing across';if(m.id==='dig')return game.flags.dug?'The way below is open':'Dig beneath the sun mark';if(m.id==='ark')return 'Take the golden casket';if(m.id==='exit')return stage===3?'Escape into daylight':'Continue expedition';return 'Interact'}
+function interact(a,id){if((net.connected||net.active)&&!net.isHost){queuedGuest.interact=true;return}if(!a||mode!=='playing'||game.won)return;const m=id?markers.find(x=>x.id===id):pickContext(a);if(!m||Math.hypot(a.x-m.x,a.z-m.z)>3)return;id=m.id;
+ if(id==='merchant'){if(game.flags.kit)return;if(game.coins<3){say('Nima','Three coins. A flute, a shovel, a parachute, and absolutely no guarantees.',4);return}game.coins-=3;Object.assign(game.flags,{kit:true,seal:true});game.score+=150;audio.effect('coin');say('Nima','A fine investment. The sun seal opens the old map room. The parachute opens if you are lucky.');m.hidden=true;}
+ if(id==='map'){if(!game.flags.seal){toast('A sun-shaped recess. Something is missing.');return}if(!game.flags.sealPlaced){game.flags.sealPlaced=true;audio.effect('puzzle');say('Mira','The inscription: dawn wakes the west, noon crowns the center, dusk closes the east.',7)}else if(game.dials.every((x,j)=>x===j)){if(!game.flags.map){game.flags.map=true;game.score+=250;audio.effect('puzzle');burst(0,1,0,0xffd36d,35);say('Rafi','Needle Mesa! Of course. The one with the unpleasant drop.')}}else toast('Dawn = I · Noon = II · Dusk = III',4)}
+ if(id.startsWith('dial')){if(!game.flags.sealPlaced){toast('Place the sun seal on the central map first.');return}const j=+id[4];game.dials[j]=(game.dials[j]+1)%4;audio.effect('puzzle');if(world.props.dials?.[j])world.props.dials[j].rotation.y=game.dials[j]*Math.PI/2;if(game.dials.every((x,j)=>x===j))toast('The sunbeams converge. Return to the central map.',4);else toast(`${['West','Center','East'][j]} dial: ${['I · DAWN','II · NOON','III · DUSK','IV · NIGHT'][game.dials[j]]}`,2)}
+ if(id==='swing'){if(a.swing)return;a.swing=1.5;a.swingFrom=a.x;a.swingTo=a.x<0?6:-5;a.swingZ=a.z;audio.effect('swing');game.flags.swung=true;game.score+=game.flags.swingScored?0:120;game.flags.swingScored=true;}
+ if(id==='dig'){if(!game.flags.kit){toast('A shovel would make this less embarrassing.');return}if(!game.flags.dug){game.flags.dug=true;game.score+=160;audio.effect('dig');burst(8,.4,-5,0xd9a75f,28);say('Mira','Hollow beneath us. Ancient masonry. And that familiar feeling of a very bad idea.');}}
+ if(id==='ark'){if(!game.flags.kit||game.flute<=0){toast('The serpents guard the casket. Play the flute first.');return}if(!game.flags.ark){game.flags.ark=true;game.escape=1;game.escapeTime=0;game.score+=500;if(world.props.ark)world.props.ark.visible=false;m.hidden=true;boulder.visible=true;audio.effect('rumble');say('Mira','Got it. Rafi? Why is the floor making that noise?',4);shake=.7;}}
+ if(id==='exit'){if(stage===0&&!game.flags.kit){toast('Visit Nima before leaving. An expedition needs supplies.');return}if(stage===1&&!game.flags.map){toast('Decode the sun map. The desert is a large place to guess.');return}if(stage===2&&!game.flags.dug){toast('The sealed descent needs a little archaeological persuasion.');return}if(stage===3){if(!game.flags.ark){toast('We came for the casket. It is still in there.');return}win();return}if(stage===2){a.parachute=2.5;audio.effect('swing')}const descending=stage===2;loadStage(stage+1);if(descending)for(const p of actors.values()){p.parachute=2.5;p.y=8;p.group.position.y=8;}}
+ updateHUD();}
+function useFlute(a){if(!game.flags.kit){toast('Nima sells a flute in the bazaar.');return}if(game.flute>5)return;game.flute=8;audio.effect('flute');burst(a.x,1,a.z,0x7ce2bf,22);toast('A little music. A lot fewer teeth.',2);}
+function attack(a){if(a.cooldown>0||a.roll>0||a.swing>0)return;a.attack=.32;a.cooldown=.48;audio.effect('whip');const range=balance.whipRange+(settings.assist||touchMode?1.2:0);let hit=false;for(const e of enemies){if(e.hp<=0)continue;const dx=e.x-a.x,dz=e.z-a.z,d=Math.hypot(dx,dz),dot=(dx*Math.sin(a.angle)+dz*Math.cos(a.angle))/Math.max(d,.01);if(d<range&&(dot>-.05||touchMode||settings.assist)){e.hp-=1;e.hit=.22;e.stun=.7;hit=true;burst(e.x,.8,e.z,e.type==='crate'?0xe6ba72:0xffdf9e,9);if(e.hp<=0){e.rig.group.visible=false;if(e.stolenCoins){game.coins+=e.stolenCoins;e.stolenCoins=0;toast('Recovered the stolen coins.',2)}game.score+=e.type==='crate'?20:e.type==='snake'?35:75;if(e.type==='crate'){game.coins++;audio.effect('coin');toast(`${game.coins} / 3 coins · ${game.coins>=3?'Visit Nima, the outfitter':'Crack open the other supply crates'}`,2)}else audio.effect('hit')}else audio.effect('hit');}}if(hit)shake=.15;updateHUD();}
+function damage(a,n=1){if(isAttract||game.flags.god||a.invuln>0||a.roll>0)return;const amount=n*balance.damage*((settings.assist||touchMode) ? .5 : 1);game.health=Math.max(0,game.health-amount);a.invuln=1.5;audio.effect('hit');shake=.35;$('damage').style.opacity='.65';setTimeout(()=>$('damage').style.opacity=0,220);if(game.health<=0){game.deaths++;game.score=Math.max(0,game.score-100);game.health=6;if(stage===3&&game.escape){game.escape=0;game.flags.ark=false;if(world.props.ark)world.props.ark.visible=true;markers.find(m=>m.id==='ark').hidden=false;boulder.visible=false;}for(const p of actors.values())positionActor(p,stage===2?-8:0,8);say('Rafi','You dropped your hat. I brought it back. Try to remain attached to it.',4);}updateHUD();}
+function burst(x,y,z,color,n=10){for(let i=0;i<n;i++){const mesh=new THREE.Mesh(new THREE.OctahedronGeometry(.06+Math.random()*.09),material(color));mesh.position.set(x,y,z);scene.add(mesh);particles.push({mesh,v:new THREE.Vector3((Math.random()-.5)*5,Math.random()*5+1,(Math.random()-.5)*5),life:.6+Math.random()*.5})}}
+function win(){game.won=true;game.score+=300+Math.max(0,600-Math.floor(game.time));if(!isAttract){store('hieroglyph-checkpoint',null);net.finish({won:true,score:game.score,stats:Object.fromEntries(net.players.map(p=>[p.id,{chapters:4,time:Math.floor(game.time),deaths:game.deaths}]))});showWin()}else{attractStep=99;attractT=0;}}
+
+function readPad(index){const p=navigator.getGamepads?.()[index];if(!p)return null;const old=padPrev[index]||[];const buttons=p.buttons.map(b=>!!b.pressed);const edge=i=>buttons[i]&&!old[i];const active=p.axes.some(a=>Math.abs(a)>.2)||buttons.some(Boolean);if(active&&inputActivity('gamepad')){padPrev[index]=buttons;return null;}const dead=v=>Math.abs(v)>.17?v:0;const wasMenu=mode==='title'||!!screen;const input={mx:dead(p.axes[0]||0),mz:dead(p.axes[1]||0),ax:dead(p.axes[2]||0),az:dead(p.axes[3]||0),attack:edge(2),roll:edge(0),interact:edge(3),tool:edge(1)};
+ if(index===0){if(edge(9)&&!buttons[8]){if(screen)back();else showPause()}if(edge(4)&&!screen&&mode==='playing')showJournal();if(mode==='title'||screen){const axis=p.axes[1]||0;if(edge(13)||axis>.6&&!menuAxisPrev)focusMenu(1);if(edge(12)||axis<-.6&&!menuAxisPrev)focusMenu(-1);menuAxisPrev=Math.abs(axis)>.6;if(edge(0))document.querySelector('#overlay:not(.hidden) .btn.focused,#title:not(.hidden) .btn.focused')?.click();if(edge(1))back();if(edge(14)||edge(15)||Math.abs(p.axes[0]||0)>.7){const el=document.querySelector('input.focused');if(el?.type==='range'){el.value=+el.value+(edge(14)||(p.axes[0]||0)<0?-1:1)*Number(el.step||.1);el.dispatchEvent(new Event('input',{bubbles:true}))}}} }
+ padPrev[index]=buttons;return wasMenu?{mx:0,mz:0,ax:0,az:0,attack:false,roll:false,interact:false,tool:false}:input;}
+function readInput(){let mx=(keys.has('KeyD')||keys.has('ArrowRight')?1:0)-(keys.has('KeyA')||keys.has('ArrowLeft')?1:0),mz=(keys.has('KeyS')||keys.has('ArrowDown')?1:0)-(keys.has('KeyW')||keys.has('ArrowUp')?1:0);let input={mx:mx+touch.mx,mz:mz+touch.mz,attack:pressed.has('Attack')||pressed.has('KeyJ'),roll:pressed.has('Space'),interact:pressed.has('KeyE'),tool:pressed.has('KeyQ'),ax:0,az:0};const pad=readPad(0);if(pad&&lastInput==='gamepad')input=pad;const pad2=readPad(1);if(pad2&&mode==='playing'&&!net.connected&&!net.active){if(!actors.has(1))addActor(1);remoteInputs.set(1,{...pad2,received:t})}if(clickWalk){const a=localActor();if(a){const dx=clickWalk.x-a.x,dz=clickWalk.z-a.z,d=Math.hypot(dx,dz);if(d<2.1){interact(a,clickWalk.id);clickWalk=null}else{input.mx=(dx*.83-dz*.55)/d;input.mz=(dx*.55+dz*.83)/d;}}}if(mouseAim&&lastInput==='keyboard'){input.aimX=mouseAim.x;input.aimZ=mouseAim.z}input.touch=touchMode;return input;}
+function applyActor(a,input,dt){a.cooldown=Math.max(0,a.cooldown-dt);a.attack=Math.max(0,a.attack-dt);a.roll=Math.max(0,a.roll-dt);a.invuln=Math.max(0,a.invuln-dt);if(a.swing>0){a.swing=Math.max(0,a.swing-dt);const u=1-a.swing/1.5;positionActor(a,a.swingFrom+(a.swingTo-a.swingFrom)*u,a.swingZ+(1-u)*.1);a.y=Math.sin(u*Math.PI)*5;a.group.position.y=a.y;a.rope.visible=true;a.rope.geometry.setFromPoints([new THREE.Vector3(-2,5.5,1),new THREE.Vector3(a.x,a.y+1.5,a.z)]);a.update(dt,{moving:false});return}
+ a.rope.visible=false;a.parachute=Math.max(0,(a.parachute||0)-dt);a.y=a.parachute>0?8*(a.parachute/2.5):0;a.chute.visible=a.parachute>0;
+ let mx=input.mx||0,mz=input.mz||0,len=Math.hypot(mx,mz);if(len>1){mx/=len;mz/=len}const dx=mx*.83+mz*.55,dz=-mx*.55+mz*.83;a.moving=len>.08;
+ if(Number.isFinite(input.aimX)&&Number.isFinite(input.aimZ))a.angle=Math.atan2(input.aimX-a.x,input.aimZ-a.z);else if((input.ax||input.az)&&Math.hypot(input.ax,input.az)>.2)a.angle=Math.atan2(input.ax*.83+input.az*.55,-input.ax*.55+input.az*.83);else if(mouseAim&&a===localActor()&&lastInput==='keyboard'&&!isAttract)a.angle=Math.atan2(mouseAim.x-a.x,mouseAim.z-a.z);else if(a.moving)a.angle=Math.atan2(dx,dz);
+ if(input.attack)attack(a);if(input.tool)useFlute(a);if(input.interact)interact(a);if(input.roll&&a.roll<=0){a.roll=.45;audio.effect('roll');if(!a.moving){mx=Math.sin(a.angle)*.83-Math.cos(a.angle)*.55;mz=Math.sin(a.angle)*.55+Math.cos(a.angle)*.83;}}
+ let vx=dx,vz=dz;if(a.roll>0&&!a.moving){vx=Math.sin(a.angle);vz=Math.cos(a.angle)}let speed=balance.speed*(a.roll>0?2:1)*((game.flute>0&&input.tool) ? .6 : 1);controller.computeColliderMovement(a.collider,{x:vx*speed*dt,y:-.05,z:vz*speed*dt});const mv=isAttract?{x:vx*speed*dt,z:vz*speed*dt}:controller.computedMovement();const next={x:clamp(a.x+mv.x,-12,12),y:.8,z:clamp(a.z+mv.z,-10.7,11)};a.body.setNextKinematicTranslation(next);a.x=next.x;a.z=next.z;
+ if(stage===2&&a.x>-2&&a.x<3){damage(a,1);positionActor(a,-5,2);toast('The chasm needs a whip anchor. Walk to the brass hook.',3)}
+ a.group.position.set(a.x,a.y||0,a.z);a.group.rotation.y=a.angle;a.group.visible=a.invuln<=0||Math.floor(t*12)%2===0;a.update(dt,{moving:a.moving,attack:a.attack>0,rolling:a.roll>0,flute:game.flute>0});a.whip.group.visible=a.attack>0;a.whip.update(1-a.attack/.32);
+ if(a.moving&&t-lastStepSfx>.28){audio.effect('step');lastStepSfx=t}if(touchMode||input.touch){const e=enemies.find(e=>e.hp>0&&Math.hypot(e.x-a.x,e.z-a.z)<3.6);if(e){a.angle=Math.atan2(e.x-a.x,e.z-a.z);attack(a)}if(stage===3&&game.flute<1)useFlute(a)}
+}
+function updateEnemies(dt){for(const e of enemies){if(e.hp<=0||e.type==='crate')continue;e.hit=Math.max(0,e.hit-dt);e.stun=Math.max(0,e.stun-dt);e.attack=Math.max(0,e.attack-dt);let target=[...actors.values()].sort((a,b)=>Math.hypot(a.x-e.x,a.z-e.z)-Math.hypot(b.x-e.x,b.z-e.z))[0];if(!target)continue;let dx=target.x-e.x,dz=target.z-e.z,d=Math.hypot(dx,dz);let charmed=e.type==='snake'&&game.flute>0;const pursue=d<9&&d>1.1&&!e.stun&&!charmed;let vx=0,vz=0;if(pursue){vx=dx/d;vz=dz/d;e.x+=vx*balance.enemySpeed*dt;e.z+=vz*balance.enemySpeed*dt}if(charmed){e.x+=Math.sin(t*2+e.id)*dt*.2;e.z+=Math.cos(t*2+e.id)*dt*.2}e.rig.group.position.set(e.x,e.hit>0?Math.sin(e.hit*25)*.2:0,e.z);if(pursue)e.rig.group.rotation.y=Math.atan2(dx,dz);e.rig.update(dt,pursue);if(d<1.35&&!charmed&&e.attack<=0&&e.stun<=0){damage(target,e.type==='snake'?1:1);e.attack=1.5}if(!isAttract&&e.type==='thief'&&d<1.5&&game.coins>0&&e.attack<=0){game.coins--;e.stolenCoins=(e.stolenCoins||0)+1;e.attack=3;toast('Light fingers! Whip the thief before he makes off.');}}}
+function updateTraps(dt){if(stage===1){if(!game.flags.map){const phase=(t*balance.trapSpeed)%3.8;if(phase<.12){for(const a of actors.values())if(Math.abs(a.z-4)<.6&&a.roll<=0)damage(a,1)}}}if(stage===3&&game.escape){game.escapeTime+=dt;if(boulder){boulder.position.z=-12+game.escapeTime*balance.trapSpeed*2.8;boulder.rotation.x+=dt*2;boulder.position.x=Math.sin(game.escapeTime*.5)*1.1;for(const a of actors.values())if(Math.hypot(a.x-boulder.position.x,a.z-boulder.position.z)<2)damage(a,2)}if(Math.floor(game.escapeTime*1.5)!==Math.floor((game.escapeTime-dt)*1.5)){audio.effect('snake');for(const a of actors.values())if(Math.abs(a.z-4)<.7&&a.roll<=0)damage(a,.5);burst(-8,1,4,0xe5cf9a,4)}}}
+function updateBeams(){if(!beamGroup)return;while(beamGroup.children.length){const c=beamGroup.children[0];beamGroup.remove(c);c.geometry?.dispose();c.material?.dispose()}if(!game.flags.sealPlaced)return;for(let j=0;j<3;j++){const x=[-6,0,6][j],z=j===1?-5:-2,ok=game.dials[j]===j;const points=[new THREE.Vector3(x,2.2,z),new THREE.Vector3(ok?0:x+Math.sin(game.dials[j]*Math.PI/2)*4,.3,ok?1:z+Math.cos(game.dials[j]*Math.PI/2)*4)];beamGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(points),new THREE.LineBasicMaterial({color:ok?0xffdf72:0x84c5c1,transparent:true,opacity:.8})))}}
+let beamTimer=0;
+function snapshot(){return{stage,dialogue:activeDialogue&&t<dialogueUntil?{...activeDialogue,remaining:dialogueUntil-t}:null,game:JSON.parse(JSON.stringify(game)),players:[...actors.values()].map(a=>({id:a.id,parachute:a.parachute,x:a.x,z:a.z,y:a.group.position.y,angle:a.angle,attack:a.attack,roll:a.roll,moving:a.moving})),enemies:enemies.map(e=>({id:e.id,type:e.type,x:e.x,z:e.z,hp:e.hp,stolenCoins:e.stolenCoins||0})),playing:mode==='playing',screen:game.won?'win':''}}
+function receiveSnapshot(s){if(!gameReady||net.isHost||!s?.game)return;const prior={...game};if(s.playing&&mode!=='playing'){mode='playing';$('title').classList.add('hidden');$('overlay').classList.add('hidden');$('hud').classList.remove('hidden');$('markers').classList.remove('hidden');screen=''}const changed=stage!==s.stage;const incoming=structuredClone(s.game);if(changed)loadStage(s.stage,false);game=incoming;for(const p of s.players){const a=addActor(p.id);if(a.attack<=0&&p.attack>0)audio.effect('whip');if(a.roll<=0&&p.roll>0)audio.effect('roll');positionActor(a,p.x,p.z);a.y=p.y;a.parachute=p.parachute||0;a.chute.visible=a.parachute>0;a.angle=p.angle;a.attack=p.attack;a.roll=p.roll;a.moving=p.moving;a.group.rotation.y=p.angle;a.group.position.y=p.y;}for(const e of enemies){const n=s.enemies.find(n=>n.id===e.id&&n.type===e.type);if(n){if(n.hp<e.hp)audio.effect(e.type==='crate'?'coin':'hit');e.x=n.x;e.z=n.z;e.hp=n.hp;e.rig.group.position.set(e.x,0,e.z);e.rig.group.visible=e.hp>0}}if(prior.flute<game.flute-1)audio.effect('flute');if(!prior.escape&&game.escape)audio.effect('rumble');if(game.health<prior.health)audio.effect('hit');if(s.dialogue&&s.dialogue.id!==seenDialogue){seenDialogue=s.dialogue.id;say(s.dialogue.name,s.dialogue.text,s.dialogue.remaining);}if(changed)banner();if(world.props.ark)world.props.ark.visible=!game.flags.ark;world.props.dials?.forEach((d,j)=>d.rotation.y=game.dials[j]*Math.PI/2);if(boulder){boulder.visible=!!game.escape;boulder.position.z=-12+game.escapeTime*balance.trapSpeed*2.8;boulder.position.x=Math.sin(game.escapeTime*.5)*1.1}if(game.won&&screen!=='win')showWin();updateHUD()}
+const net=createNetwork({onState:receiveSnapshot,onInput:(i,id)=>{if(i&&typeof i.mx==='number'){remoteInputs.set(id,{...i,mx:clamp(Number(i.mx)||0,-1,1),mz:clamp(Number(i.mz)||0,-1,1),received:t});if(!actors.has(id)&&gameReady)addActor(id)}},onPeer:p=>{if(!gameReady)return;if(p.connected){if(net.isHost)addActor(p.id);toast(`${p.name} joined the expedition`,3)}else{removeActor(p.id);remoteInputs.delete(p.id);toast('Your partner left the expedition.',3)}},onStatus:text=>{const e=$('network-status');if(e)e.textContent=text;},onCountdown:ms=>{toast(`Expedition starts in ${Math.ceil(ms/1000)}…`,Math.max(1,ms/1000))},onStart:()=>{closeScreen();mode='playing';audio.pause(false)},onEnd:()=>{keys.clear();remoteInputs.clear();audio.pause(true);if(!game.won){screen='hub-end';panel(`<div class="overline">AI HUB ROUND COMPLETE</div><h2>The expedition is over.</h2><p>Adventure points: ${game.score}. Continue in AI Hub to see the round results.</p>${btn('About the expedition','about')}`)}},onTimeUp:()=>{if(net.isHost)net.finish({won:game.won,score:game.score});}});
+
+function beginAttract(){mouseAim=null;startGame(true);attractT=0;attractStep=0;game.flags.god=true;game.flags.assisted=true;$('dialogue').classList.add('hidden');}
+function stopAttract(){isAttract=false;$('demo-tag').classList.add('hidden');showTitle()}
+function autoInput(dt){attractT+=dt;const a=actors.values().next().value;if(!a)return{};let target=null;let act=false,tool=false,hit=false;
+ if(stage===0){const crate=enemies.find(e=>e.type==='crate'&&e.hp>0);if(crate){target=crate;hit=Math.hypot(a.x-crate.x,a.z-crate.z)<3; a.angle=Math.atan2(crate.x-a.x,crate.z-a.z);}else if(!game.flags.kit){target={x:-6,z:0};act=true;}else{target={x:0,z:-9};act=true;}}
+ if(stage===1){if(!game.flags.sealPlaced){target={x:0,z:1};act=true}else{const j=game.dials.findIndex((d,j)=>d!==j);if(j>=0){target={x:[-6,0,6][j],z:j===1?-5:-2};act=true}else if(!game.flags.map){target={x:0,z:1};act=true}else{target={x:0,z:-10};act=true}}}
+ if(stage===2){if(a.swing>0)return{};if(!game.flags.swung){target={x:-4.5,z:1};act=true}else if(!game.flags.dug){target={x:8,z:-5};act=true}else{target={x:8,z:-9};act=true}}
+ if(stage===3){tool=game.flute<2;target=game.flags.ark?{x:0,z:10}:{x:0,z:-7};act=true;if(game.won&&attractT>8){loadStage(0,false);game.flags={god:true};game.coins=0;game.won=false;attractT=0}}
+ if(!target)return{};const dx=target.x-a.x,dz=target.z-a.z,d=Math.hypot(dx,dz);const input={mx:d>1.8?(dx*.83-dz*.55)/d:0,mz:d>1.8?(dx*.55+dz*.83)/d:0,attack:hit,interact:act&&d<2.2&&Math.floor(t*3)!==Math.floor((t-dt)*3),tool};if(hit)a.angle=Math.atan2(dx,dz);return input;}
+function update(dt,inputOverride){if(!gameReady)return;t+=dt;const input=inputOverride||readInput();if(mode==='title'&&!screen&&!isAttract&&performance.now()-idleSince>10000)beginAttract();const paused=!!screen&&screen!=='lobby';const authority=!net.connected&&!net.active||net.isHost;
+ const simulation=mode==='playing'&&(!paused||net.active||net.connected)&&(!net.active||net.started)&&!net.ended;
+ if(simulation&&game.won&&isAttract){attractT+=dt;if(attractT>5){beginAttract();}}
+ if(simulation&&!game.won){game.time+=dt;game.flute=Math.max(0,game.flute-dt);if(authority){const local=isAttract?autoInput(dt):paused?{}:input;if(!net.server){const a=localActor();if(a)applyActor(a,local,dt)}for(const [id,i] of remoteInputs){const a=actors.get(id);if(a&&a!==localActor()||a&&net.server)applyActor(a,t-i.received<.5?i:{},dt);i.attack=i.interact=i.roll=i.tool=false;}physics.timestep=dt;physics.step();updateEnemies(dt);updateTraps(dt);}else{const send=paused?{}:input;pendingGuest={...pendingGuest,...send,attack:pendingGuest.attack||send.attack||queuedGuest.attack,interact:pendingGuest.interact||send.interact||queuedGuest.interact,roll:pendingGuest.roll||send.roll,tool:pendingGuest.tool||send.tool};queuedGuest={};if(netTimer<=0){net.sendInput(pendingGuest);pendingGuest={}}for(const a of actors.values()){a.update(dt,{moving:a.moving,attack:a.attack>0,rolling:a.roll>0,flute:game.flute>0});a.whip.group.visible=a.attack>0;a.whip.update(1-a.attack/.32)}}}
+ world?.props.setHazards?.({enabled:stage===1&&!game.flags.map||stage===3&&!!game.escape,time:t*balance.trapSpeed,escapeTime:game.escapeTime});world?.update(t,dt);for(let i=particles.length-1;i>=0;i--){const p=particles[i];p.life-=dt;p.v.y-=9*dt;p.mesh.position.addScaledVector(p.v,dt);p.mesh.rotation.x+=dt*3;if(p.life<=0){scene.remove(p.mesh);p.mesh.geometry.dispose();p.mesh.material.dispose();particles.splice(i,1)}}
+ if(stage===3&&world?.props.ark)world.props.ark.rotation.y=Math.sin(t*.5)*.08;
+ if(beamTimer<=0){updateBeams();beamTimer=.2}beamTimer-=dt;
+ audio.update(dt,stage,!!game.escape);if(t>toastUntil)$('toast').classList.add('hidden');if(t>dialogueUntil)$('dialogue').classList.add('hidden');
+ if(netTimer<=0){if(net.isHost)net.sendState(snapshot());updateHUD();netTimer=1/12}netTimer-=dt;
+ updateCamera(dt);updateMarkers();pressed.clear();}
+function updateCamera(dt){if(!camera)return;let target=new THREE.Vector3(0,0,0);let zoom=1;if(mode==='title'){target.set(1.5,0,-2);camera.position.set(25+Math.sin(t*.06)*3,25,29);camera.lookAt(target);camera.zoom=.88;}else{const ps=[...actors.values()];if(ps.length){target.set(ps.reduce((s,a)=>s+a.x,0)/ps.length,0,ps.reduce((s,a)=>s+a.z,0)/ps.length);target.x*=.35;target.z*=.35}const off=new THREE.Vector3(20,28,30);camera.position.lerp(target.clone().add(off),Math.min(1,dt*4));camera.lookAt(target);camera.zoom=innerWidth<650?.75:1.03;}if(shake>0&&settings.shake){camera.position.x+=(Math.random()-.5)*shake;camera.position.y+=(Math.random()-.5)*shake;shake=Math.max(0,shake-dt*1.5)}camera.updateProjectionMatrix();}
+function updateMarkers(){if(mode!=='playing'){for(const m of markers)m.el.style.display='none';return}const a=localActor();contextTarget=pickContext(a);for(const m of markers){if(m.id==='merchant'&&game.flags.kit)m.hidden=true;if(m.id==='ark')m.hidden=!!game.flags.ark;const p=new THREE.Vector3(m.x,m.id.startsWith('dial')?3.6:2.6,m.z).project(camera);m.el.style.left=(p.x*.5+.5)*innerWidth+'px';m.el.style.top=(-p.y*.5+.5)*innerHeight+'px';m.el.style.display=m.hidden||p.z>1?'none':'';m.el.style.opacity=contextTarget===m?'1':'.65';if(m.id.startsWith('dial'))m.el.innerHTML=`<em>${['I','II','III','IV'][game.dials[+m.id[4]]]}</em> ${m.text}`;}
+ const visible=!!contextTarget&&!screen&&!isAttract;$('context').classList.toggle('hidden',!visible);$('touch-action').classList.toggle('hidden',!visible);if(visible){$('context').innerHTML=keycap('interact')+contextLabel(contextTarget);$('touch-action').textContent=contextTarget.id==='swing'?'SWING':contextTarget.id==='exit'?'CONTINUE':'INTERACT'} }
+function resize(){if(!renderer)return;renderer.setSize(innerWidth,innerHeight);const aspect=innerWidth/innerHeight,h=22;camera.left=-h*aspect/2;camera.right=h*aspect/2;camera.top=h/2;camera.bottom=-h/2;camera.updateProjectionMatrix();}window.addEventListener('resize',resize);
+async function boot(){try{await RAPIER.init();createPhysics();scene=new THREE.Scene();scene.background=new THREE.Color(0x87afa9);scene.fog=new THREE.Fog(0x87afa9,55,120);camera=new THREE.OrthographicCamera(-20,20,12,-12,.1,150);renderer=new THREE.WebGPURenderer({antialias:true,alpha:false,forceWebGL:new URLSearchParams(location.search).get('renderer')==='webgl'});renderer.setPixelRatio(Math.min(devicePixelRatio,2));renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.15;await renderer.init();$('viewport').append(renderer.domElement);const hemi=new THREE.HemisphereLight(0xfff5d0,0x587d7a,2.5);scene.add(hemi);const sun=new THREE.DirectionalLight(0xffd79d,3.2);sun.position.set(-15,30,12);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-25,right:25,top:25,bottom:-25,far:85});sun.shadow.bias=-.002;sun.shadow.normalBias=.035;scene.add(sun);const fill=new THREE.DirectionalLight(0x7ad7cf,1);fill.position.set(15,10,-15);scene.add(fill);gameReady=true;addActor(0);loadStage(0,false);resize();await renderer.compileAsync(scene,camera);idleSince=performance.now();$('loading').classList.add('hidden');updateControls();ensureContinue();focusMenu();if(navigator.maxTouchPoints>0&&matchMedia('(pointer:coarse)').matches){touchMode=true;document.body.classList.add('touch')}
+ if(net.active){await net.connectHub();startGame(false);screen='countdown';panel(`<div class="overline">AI HUB EXPEDITION</div><h2>All hats accounted for.</h2><p>Waiting for the expedition signal…</p>`);net.ready();}
+ renderer.setAnimationLoop(now=>{const dt=Math.min(.045,Math.max(.001,(now-(lastTime||now-16.67))/1000));lastTime=now;update(dt);renderer.render(scene,camera)});
+ window.__game={get state(){return{...snapshot(),mode,screen,isAttract,renderer:renderer.backend.isWebGPUBackend?'webgpu':'webgl',physics:'rapier-0.19.3',ready:gameReady,audio:audio.getStats(),network:{active:net.active,host:net.isHost,connected:net.connected,code:net.code,transport:net.transport},balance:{...balance},context:contextTarget?.id}},start:()=>startGame(false),action,interact:()=>interact(localActor()),input:(i,seconds=1)=>{for(let j=0;j<Math.ceil(seconds*60);j++)update(1/60,i)},moveTo:(x,z,seconds=6)=>{for(let j=0;j<seconds*60;j++){const a=localActor(),dx=x-a.x,dz=z-a.z,d=Math.hypot(dx,dz);if(d<.15)break;update(1/60,{mx:(dx*.83-dz*.55)/d,mz:(dx*.55+dz*.83)/d})}return{x:localActor().x,z:localActor().z}},aim:(x,z)=>{mouseAim=null;localActor().angle=Math.atan2(x-localActor().x,z-localActor().z)},advance:s=>{for(let i=0;i<s*60;i++)update(1/60,{})},attract:beginAttract,exitAttract:stopAttract,network:net,audio,testAudioOffline,warp:(i)=>{game.flags={kit:true,seal:true,map:true,assisted:true,god:true};loadStage(i,false)},idle:seconds=>{idleSince=performance.now()-seconds*1000;update(1/60,{})},position:(x,z,id)=>positionActor(id===undefined?localActor():actors.get(id),x,z),restoreCheckpoint:()=>{const s=readStore('hieroglyph-checkpoint',null);if(s){startGame(false);Object.assign(game,{score:s.score,coins:s.coins,flags:s.flags,time:s.time});loadStage(s.stage);return true}return false},get diagnostics(){return{renderCalls:renderer.info.render.calls,triangles:renderer.info.render.triangles,colliders:physics.colliders.len(),rigs:[...actors.values()].map(a=>({id:a.id,mixer:a.mixer instanceof THREE.AnimationMixer,clips:a.mixer?._actions?.length})),enemies:enemies.map(e=>({type:e.type,x:e.x,z:e.z,hp:e.hp})),markers:markers.map(m=>({id:m.id,x:m.x,z:m.z})),rapierBodies:physics.bodies.len()}}};
+ }catch(err){console.error(err);$('load-detail').textContent='The expedition could not load: '+err.message;$('loading').querySelector('.spinner').style.display='none';}}
+boot();
+</script>
+
+<script type="application/json" id="cc-matrix-run">{"schema":2,"tool":"cc-matrix","stampedAt":"2026-11-06T05:56:14.346Z","id":"gpt-6.1-sol-ultra__20261105-222300__x1d6bdf__Raiders-of-the-Lost-Hieroglyph-Raiders-of-the-Lost-Ark","lab":"OpenAI","cli":"Codex CLI","aiHub":{"name":"Raiders of the Lost Hieroglyph","tagline":"One map. One magnificent mistake.","description":"Crack open a desert mystery in a cel-shaded pulp expedition. Trade for tools, decode the sun map, whip across a canyon and charm the vault's snakes before a very large boulder interrupts your research.","type":"Game","genre":"Adventure","source":"Raiders of the Lost Ark (1982)","series":"Indiana Jones","players":"1–2","controls":"WASD/arrows move, mouse aim/click whip, E interact, Space dodge, Q flute, Tab notes, Esc pause; standard gamepad supported; touch drag movement with assisted combat.","tags":["3d","adventure","co-op","puzzle","third-person","exploration"],"model":"GPT-6.1 Sol","effort":"ultra","harness":"Codex","sourceDate":"2026-11-06T05:23:00.942Z","themeColor":"#14323b","session":"1","sessionPlayers":"1-2","sessionMode":"shared-world","sessionGoal":"Find the lost Hieroglyph: trade for tools, decode the sun map, cross the canyon and escape the vault together.","sessionHowto":"Left stick move; right stick aim; Square whip, Cross dodge, Triangle interact, Circle flute; L1 notes. WASD, mouse, E, Space, Q, Tab on keyboard.","sessionMinutes":"8","webgpu":"required","provenance":{"sourceKind":"cc-matrix-run","artifactId":"gpt-6.1-sol-ultra__20261105-222300__x1d6bdf__Raiders-of-the-Lost-Hieroglyph-Raiders-of-the-Lost-Ark","sourceDate":"2026-11-06T05:23:00.942Z"}},"result":{"id":"gpt-6.1-sol-ultra__20261105-222300__x1d6bdf__Raiders-of-the-Lost-Hieroglyph-Raiders-of-the-Lost-Ark","agent":"gpt-6.1-sol","provider":"codex","effort":"ultra","ultracode":false,"source":"RaidersOfTheLostArk1982","genre":"genre-v3","perspective":"pov-engine-v4","gameTitle":"ttl-riff","research":"res-src","package":"pkg-html-v3","techStack":"tech-v6","artDirection":"art-cel-v2","animation":"ani-engine-v2","audio":"aud-code-v3","online":"multi-ai-hub","workspace":"ws-sub-v3","performance":"perf-max-v2","testing":"test-tools-v3","spend":"spend-free","premise":"prem-inspired","scope":"scope-inspired","attractMode":"attr-10s","multiplayer":"mp-hub","tone":"tone-src-v2","uiux":"ui-10ft-v4","done":"done-full","sourceInfo":"info-exit-v3","testingFeedback":"tf-4q","engineFeedback":"ef-6q-v2","promptFeedback":"pf-4q-v2","goal":"on-exit-v2","model":"gpt-6.1-sol","cliVersion":"0.166.0","promptVersion":"2e12c7a2","variantHashes":{"source":"731a1efb","genre":"5917dd6a","perspective":"69673a49","gameTitle":"504804f8","research":"4d1f1ee4","package":"dd8f52ae","techStack":"84a623aa","artDirection":"59b07781","animation":"25672c4c","audio":"0abe1411","online":"7601bd74","workspace":"2dd7c02e","performance":"b911bf18","testing":"42631416","spend":"9511cae8","premise":"cc0f429b","scope":"46b0fba2","attractMode":"0d642414","multiplayer":"b62eb499","tone":"3bfc327e","uiux":"f4edc796","done":"cb3a46b6","sourceInfo":"8fe63a44","testingFeedback":"95f71baf","engineFeedback":"25041b09","promptFeedback":"7ce5dc6e","goal":"7559d614"},"goalSkipped":true,"status":"ok","exitCode":0,"wallMinutes":33.223366666666664,"costUsd":null,"costSource":"none","inputTokens":19034542,"cachedTokens":18692992,"cacheWriteTokens":0,"outputTokens":132174,"reasoningTokens":41723,"turns":1,"toolCalls":116,"tools":{"command_execution":100,"web_search":4,"extension":1,"collab_agent_tool_call":1,"image_view":7,"file_change":3},"toolErrors":7,"models":{"gpt-6.1-sol":{"uncachedInputTokens":341550,"cacheReadTokens":18692992,"cacheWriteTokens":0,"outputTokens":132174,"reasoningTokens":41723}},"isError":false,"sessionLog":"read","apiCalls":196,"subagents":3,"compactions":0,"firstTokenMs":3025,"contextWindow":828400,"helpers":{"agents":3,"inputTokens":10288529,"cachedTokens":10051968,"cacheWriteTokens":0,"outputTokens":60336,"reasoningTokens":14192,"apiCalls":115},"uncachedInputTokens":341550,"totalTokens":19166716,"apiCostUsd":3.8741392,"replyChars":2692,"delivered":true,"kb":146,"loc":1846,"files":33,"todos":0,"gameSha256":"3c6c8496965ab96916b8a4a6a176556cc2487f1a81da0778b30cc4d013d7f3fb","entry":"gpt-6.1-sol-ultra__20261105-222300__x1d6bdf__Raiders-of-the-Lost-Hieroglyph-Raiders-of-the-Lost-Ark/work/Raiders-of-the-Lost-Hieroglyph-Raiders-of-the-Lost-Ark-gpt-6.1-sol-ultra-20261105-222300.html","exitInterview":"ok","startedAt":"2026-11-06T05:23:00.942Z","finishedAt":"2026-11-06T05:56:14.344Z","timeZone":"America/Vancouver","isolated":true},"prompt":{"version":"2e12c7a2","number":7,"savedAt":"2026-11-06T02:02:45.318Z","firstRanAt":"2026-11-05T04:18:53.957Z","template":"SOURCE: {{source}}\n\nGenre: {{genre}}\n\nPerspective: {{perspective}}\n\nGame Title: {{gameTitle}}\n\nResearch: {{research}}\n\nPackage: {{package}}\n\nTech Stack: {{techStack}}\n\nArt Direction: {{artDirection}}\n\nAnimation: {{animation}}\n\nAudio: {{audio}}\n\nOnline: {{online}}\n\nWorking Environment and deliverable:\n{{workspace}}\n\nPerformance: {{performance}}\n\nTesting: {{testing}}\n\nEffort: {{spend}}\n\n## This computer\n{{machine}}\n\n## Goal\n\n{{premise}}\n\nScope\n\n{{scope}}\n\nAttract Mode: {{attractMode}}\n\nMultiplayer: {{multiplayer}}\n\nNarrative tone: {{tone}}\n\n## UI & UX: {{uiux}}\n\n## Done\n{{done}}\n\n## Source Information\n{{sourceInfo}}\n\nTesting Feedback\n\n{{testingFeedback}}\n\nEngine Feedback\n\n{{engineFeedback}}\n\nPrompt Feedback\n\n{{promptFeedback}}","text":"SOURCE: Raiders of the Lost Ark - 1982\n\nGenre: Pick the game genre(s) that best fit the source and would make the best game.\n\nPerspective: Pick the camera perspective(s) that best fit the genre and source and would make the best game.\n\nGame Title: A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).\n\nResearch: Research the source before you start: its mechanics, levels, enemies, look and sound.\n\nPackage: For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-222300].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.\n\nTech Stack: Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.\n\nArt Direction: Use a stylized cel-shaded / ink look for the game.\n\nAnimation: Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.\n\nAudio: All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.\n\nOnline: https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub\n\nWorking Environment and deliverable:\nCreate a subfolder called [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-222300] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-gpt-6.1-sol-ultra-20261105-222300].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.\n\nPerformance: Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.\n\nTesting: Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.\n\nEffort: Spend effort however you see fit.\n\n## This computer\nChecked 2026-11-05 19:08 (America/Vancouver) by node check-environment.mjs.\n\n- **Computer:** IVY-DESK-1747k: Intel(R) Core(TM) i7-14700F, 20 cores, 16 GB RAM, 8 GB swap. Ubuntu 26.04.1 LTS on WSL2 (Linux 6.18.33.2-microsoft-standard-WSL2).\n- **Space:** 757 GB free in the home folder. /tmp: 7.8 GB, in memory (tmpfs), 7.7 GB free when checked.\n- **Display:** none for runs (they run with DISPLAY unset), so a headed browser needs xvfb-run.\n- **Browsers:** Playwright 1.63.0 for Python (from playwright.sync_api import sync_playwright), with Chromium 153.0 (WebGL 2, software-rendered; WebGPU, software-rendered, when started with --enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader), Firefox 155.0 (no WebGL), WebKit 26.6 (WebGL 2) already downloaded. Phone and tablet device profiles are built in.\n  Python's Playwright is in its own environment, not the system Python (python3 can't import it): run scripts that drive a browser with `~/.local/share/pipx/venvs/playwright/bin/python script.py`, or `uv run --with playwright==1.63.0 python script.py`.\n  WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game's state instead.\n  For Node, `npm install playwright@1.63.0` in your folder uses the browsers already downloaded; another version downloads its own.\n- **Tools:** node 24.21.0, npm 12.1.0, python3 3.14.4, pip3 25.1.1, git 2.53.0, gh 2.101.0, curl 8.18.0, wget 1.25.0, jq 1.8.1, ffmpeg 9.0.2, ffprobe 9.0.2, sqlite3 3.46.1, zip 3.0, unzip 6.00, rustc 1.98.1, cargo 1.98.1, go 1.27.1, java 21.0.12, xvfb-run, magick 7.1.2, sox 14.4.2, bun 1.3.14, deno 2.9.7, uv 0.12.18, tsc 5.9.3, wasm-bindgen 0.2.129.\n- **Rust:** rustup's toolchains 1.98.1, stable; the wasm32-unknown-unknown target on 1.98.1, stable.\n- **Not installed:** lighthouse, shot-scraper, esbuild.\n- **Network:** internet works (github.com, registry.npmjs.org).\n\n### What this computer doesn't have\n\nNo script can check these, so they're written by hand. Test with the stand-ins; anything that needs the real thing is checked as far as it can be here, never required.\n\n- **No physical controller.** Emulate one: replace navigator.getGamepads with a stub that returns a pad in the standard mapping (Playwright's add_init_script / addInitScript).\n- **No touch device.** Use Playwright's phone and tablet profiles, which have touch, and tap with page.touchscreen.\n- **Nobody to listen.** Check sound by what Web Audio produces: render it with an OfflineAudioContext, or read levels from an AnalyserNode.\n- **No second player.** Play multiplayer with two browser pages (or contexts) on this computer.\n- **No real iPhone or iPad.** WebKit with an iPhone profile is the closest; it isn't iOS Safari.\n- **No TV.** Judge the 10-foot view from screenshots at 1920×1080.\n\n### Sharing this computer\n\n- Other agents run here at the same time. Keep one or two browsers open at once, and close them when you're done.\n- Keep every file you make inside your own folder, not /tmp or a parent folder: /tmp is shared.\n- The browsers are already downloaded: don't run `playwright install` or `playwright install-deps`.\n- The system Python has no packages. For one (Pillow, numpy …), use uv: `uv run --with pillow python script.py`, adding `--with playwright==1.63.0` when the script drives a browser too (a newer Playwright can't find the browsers here).\n\n## Goal\n\nBuild an original game inspired by the source.\n\nScope\n\nCreate a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.\n\nAttract Mode: After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.\n\nMultiplayer: Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.\n\nNarrative tone: Use a writing style similar to the source’s.\n\n## UI & UX: 10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible\n\n## Done\nNo TODOs, placeholders, or stubbed features. The demo is complete.\n\n## Source Information\nCRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: 2026-11-05 22:23:00\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: Codex CLI (headless); Linux\n- Model: OpenAI, gpt-6.1-sol, reasoning effort ultra\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.\n\nTesting Feedback\n\n- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?\n\nEngine Feedback\n\n- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?\n\nPrompt Feedback\n\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?\n","goal":null,"sections":{"source":{"id":"RaidersOfTheLostArk1982","text":"Raiders of the Lost Ark - 1982","hash":"731a1efb"},"genre":{"id":"genre-v3","text":"Pick the game genre(s) that best fit the source and would make the best game.","hash":"5917dd6a"},"perspective":{"id":"pov-engine-v4","text":"Pick the camera perspective(s) that best fit the genre and source and would make the best game.","hash":"69673a49"},"gameTitle":{"id":"ttl-riff","text":"A playful riff on SOURCE's name. Silently brainstorm 50 titles, then pick one with a real random number generator (e.g., run code).","hash":"504804f8"},"research":{"id":"res-src","text":"Research the source before you start: its mechanics, levels, enemies, look and sound.","hash":"4d1f1ee4"},"package":{"id":"pkg-html-v3","text":"For ease of deployment and sharing provide a single html file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html. Dependencies that can be downloaded do not have to be included in the html file if that is easier.","hash":"dd8f52ae"},"techStack":{"id":"tech-v6","text":"Use Three.js R180, WEBGPU, rapier 0.19.3 for physics, Gamepad API; The rest of the tech stack is yours to choose.","hash":"84a623aa"},"artDirection":{"id":"art-cel-v2","text":"Use a stylized cel-shaded / ink look for the game.","hash":"59b07781"},"animation":{"id":"ani-engine-v2","text":"Use the engine’s native animation system as the base. Make new animations for whatever makes the game feel like the source.","hash":"25672c4c"},"audio":{"id":"aud-code-v3","text":"All music, sound effects and voices are written in code, with no audio files. Voices are Animalese/Simlish-style gibberish. Music is to be set to 10% volume by default.","hash":"0abe1411"},"online":{"id":"multi-ai-hub","text":"https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub","hash":"7601bd74"},"workspace":{"id":"ws-sub-v3","text":"Create a subfolder called [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}] to keep all your dev files in. You can develop separate modules, then bundle into a single file [GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html in root when you’re done. You may use external CDN dependencies. Do not read files outside what you need: other agents work in the folders beside this one. They share this machine’s ports and processes too. Prefer file:// and the engine’s headless tools. If you need a server (the AI Hub harness does), bind 127.0.0.1 on a port the OS picks (`python3 -m http.server 0 --bind 127.0.0.1` prints it) and confirm the page is your game before trusting a result. Stop only processes you started, by their PID: never pkill, killall, fuser -k, or kill whatever holds a port.","hash":"2dd7c02e"},"performance":{"id":"perf-max-v2","text":"Treat the performance budget as unlimited. Add as much detail, enemies, effects, lights, and shadows as the scene needs. Out of scope (handled later): FPS targets, optimization.","hash":"b911bf18"},"testing":{"id":"test-tools-v3","text":"Test as much as you like with headless tools: scripts that play the game and check its state, including a scripted playthrough of the whole game. Keep them behind one command that prints only failures and a one-line count, and rerun it only after changing the code it covers. Use screenshots only for what a script can’t check.","hash":"42631416"},"spend":{"id":"spend-free","text":"Spend effort however you see fit.","hash":"9511cae8"},"premise":{"id":"prem-inspired","text":"Build an original game inspired by the source.","hash":"cc0f429b"},"scope":{"id":"scope-inspired","text":"Create a feature-complete demo. Capture what makes the source distinctive (its world, characters, themes and tone) and turn it into the mechanics, pacing and UX of a great game. The demo must be long enough to show ALL features and gameplay mechanics so a player can clearly understand how the game plays and feels, and what they can and cannot do. Treat the demo as a complete, polished vertical slice. It should contain all the infrastructure, systems, and polish needed so the remainder of the game could later be built out with normal designer tools.\n\nInclude a dev mode, reachable from the pause menu, with the standard tools for testing the game quickly. Balance is key, so expose the most important gameplay variables as live sliders, with a reset to defaults.","hash":"46b0fba2"},"attractMode":{"id":"attr-10s","text":"After 10 seconds without input on the title/menu screen, start a looping AI-played demo or scripted replay (arcade/kiosk style); any input exits it. The AI (or replay) can be simple and may cheat freely (infinite health, ammo, abilities, no clip, etc). Its only job is to show as much of the demo as possible, the attract mode is not meant to balance the game.","hash":"0d642414"},"multiplayer":{"id":"mp-hub","text":"Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.","hash":"b62eb499"},"tone":{"id":"tone-src-v2","text":"Use a writing style similar to the source’s.","hash":"3bfc327e"},"uiux":{"id":"ui-10ft-v4","text":"10-Foot Controller-First Philosophy\nDesign the game around a PS5 DualSense (or any pad the browser reports in its standard mapping) played on a TV at 10 feet. With keyboard and mouse it's the same game on the same screens, not a separate desktop layout, but they should feel native, not like stand-ins for controller buttons. The keyboard uses the keys PC players expect for the genre. The mouse aims, looks, and clicks menu items and things in the world (hover moves the focus) wherever the genre uses it. On-screen prompts follow the input used last: PlayStation glyphs for the controller (with a Settings option to show Xbox glyphs, A B X Y, instead), keys and mouse buttons for keyboard and mouse.\n\nDo not use overly dense, web-style data screens.\n\nTouch-only devices: to keep the screen clear bare minimum or no UI (other than a menu button), invisible thumb sticks, multitouch, automate/assist with everything you need to accommodate the challenges of mobile/touch controls, use contact sensitive pop action and button on screen while possible","hash":"f4edc796"},"done":{"id":"done-full","text":"No TODOs, placeholders, or stubbed features. The demo is complete.","hash":"cb3a46b6"},"sourceInfo":{"id":"info-exit-v3","text":"CRITICAL: Put Source Information, Testing Feedback, Engine Feedback and Prompt Feedback in your chat reply and an in-game About/Credits screen. Write \"unknown\" for anything you can't confirm.\n- Date: {{date}}\n- Source: the work it's based on\n- Plan: the file name of the plan you were given to build from, or none\n- Genre and Perspective: genre and camera perspective used\n- Tech: stack, libraries/engines, with versions if applicable\n- Art Direction: style used\n- Animation: system used\n- Audio: music, sound effects and voice used\n- Online: network features used, or none\n- Testing: testing parameters allowed\n- Research: research done, or none\n- Environment: {{environment}}\n- Model: {{lab}}, {{model}}, reasoning effort {{effort}}\n- Usage: write \"added on import\". You can't see your own cost, so don't estimate it: the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on your About/Credits screen.\n\nExit interview: before you finish, also save these answers as exit-interview.json in this folder's root, beside the game's .html: one JSON object in exactly the shape below, every value filled in (\"unknown\" for anything you can't confirm). Tools read it (the game's run record and the AI Hub catalogue), so write plain text, and check that the file parses as JSON.\n{\n  \"sourceInformation\": {\"date\": \"\", \"source\": \"\", \"plan\": \"\", \"genre\": \"\", \"perspective\": \"\", \"tech\": \"\", \"artDirection\": \"\", \"animation\": \"\", \"audio\": \"\", \"online\": \"\", \"testing\": \"\", \"research\": \"\", \"environment\": \"\", \"model\": \"\", \"usage\": \"added on import\"},\n  \"testingFeedback\": [\"your answer to each Testing Feedback question, in order\"],\n  \"engineFeedback\": [\"your answer to each Engine Feedback question, in order\"],\n  \"promptFeedback\": [\"your answer to each Prompt Feedback question, in order\"],\n  \"aiHub\": {\n    \"name\": \"the game's title, as on its title screen\",\n    \"tagline\": \"a few words to go under the title\",\n    \"description\": \"one or two sentences for the catalogue\",\n    \"type\": \"Game, Tech demo or Tool\",\n    \"genre\": \"one of Action, Adventure, Fighting, Flight, Horror, Kids & Learning, Life Sim, Platformer, Puzzle, Racing, RPG, Shooter, Simulation, Sports, Stealth, Strategy\",\n    \"source\": \"the work it's based on, e.g. Moby-Dick\",\n    \"series\": \"its franchise, e.g. Star Fox, or empty\",\n    \"players\": \"how many can play: 1, 1–2 or 1–4\",\n    \"controls\": \"the controls, in one line\",\n    \"tags\": [\"3 to 6 lowercase tags, e.g. 2d, 3d, arcade, story, co-op, versus, first-person, third-person, top-down, side-scrolling, pixel art, low-poly, retro, sci-fi, fantasy, comedy, vehicles, boss fights, exploration\"]\n  }\n}\nThe catalogue's model, effort, CLI, date and usage come from the run's record after you finish, so they aren't asked here.","hash":"8fe63a44"},"testingFeedback":{"id":"tf-4q","text":"- How many issues did testing catch?\n- How many would be considered critical issues / game breaking?\n- What was the most helpful test you ran?\n- What was the least helpful test you ran?","hash":"95f71baf"},"engineFeedback":{"id":"ef-6q-v2","text":"- What did you like most about the engine?\n- Did you get stuck or guess wrong?\n- What was the most important thing you had to build yourself?\n- What was the hardest part about using the engine?\n- What did you change in the engine, and why? (none if nothing)\n- If you could change one thing about the engine, what would it be?","hash":"25041b09"},"promptFeedback":{"id":"pf-4q-v2","text":"- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?","hash":"7ce5dc6e"},"goal":{"id":"on-exit-v2","text":"the bundled single .html file exists in this folder's root, every feature in TASK.md that can be done on this computer is implemented with no TODOs, placeholders or stubs, exit-interview.json in this folder's root parses as JSON and answers every field, and your final reply contains the Source Information, Testing Feedback, Engine Feedback and Prompt Feedback sections.","hash":"7559d614"}}},"interview":{"file":"exit-interview.json","answers":{"sourceInformation":{"date":"2026-11-05 22:23:00","source":"Raiders of the Lost Ark (Atari 2600, 1982)","plan":"none","genre":"Action adventure with exploration, inventory puzzles and cooperative play","perspective":"Third-person tilted orthographic 3D","tech":"Three.js r180 (0.180.0), WebGPU with engine WebGL2 fallback, Rapier 3D 0.19.3, Web Audio API, Gamepad API, AI Hub Session Protocol v1 / client 1.4.0, PeerJS 1.5.5","artDirection":"Procedural cel-shaded desert dioramas with ink edges, warm sandstone, teal shadows and pulp expedition typography","animation":"Three.js AnimationMixer and AnimationClip: breathing, running, whipping, dodging and flute playing; procedural environmental motion","audio":"Original code-synthesized expedition score, procedural sound effects and Animalese-style gibberish voices; music defaults to 10 percent","online":"1–2 shared-world cooperative play through AI Hub; standalone WebRTC room codes and same-browser BroadcastChannel; local second-controller co-op","testing":"Headless Chromium 153 with software WebGPU; complete scripted expedition at default balance; simulated standard gamepad and touch; direct file URL deployment; two-page co-op; official AI Hub standard, dedicated-server, host-leave and 150 ms latency / 50 ms jitter / 5 percent loss scenarios; offline synthesized audio. Physical controller, real mobile hardware and listening quality unknown.","research":"Atari 1982 instruction manual: rooms, inventory, enemies, whip, flute, shovel, parachute, sun-map and mesa mechanics; Raiders2600 reverse-engineering notes on abstract room rendering and two-channel TIA music/effects; AI Hub integration documentation; official Three.js and Rapier documentation.","environment":"Codex CLI (headless); Linux","model":"OpenAI, gpt-6.1-sol, reasoning effort ultra","usage":"added on import"},"testingFeedback":[{"question":"How many issues did testing catch?","answer":"Testing caught five distinct issues: missing AI Hub metadata, an obscured east dial, overlapping dial labels, an exit lintel obscuring the explorer, and shader-loading time incorrectly counting toward title inactivity. All were corrected; review also corrected gameplay and control defects."},{"question":"How many would be considered critical issues / game breaking?","answer":"One testing issue blocked AI Hub acceptance. Review additionally found two progression blockers: unrecoverable stolen coins and touch controls unable to break supply crates; both were fixed."},{"question":"What was the most helpful test you ran?","answer":"The scripted four-chapter playthrough and official AI Hub harness were most useful for checking progression and network lifecycle behavior."},{"question":"What was the least helpful test you ran?","answer":"Syntax-only checking was least useful because it could not assess progression, input focus or visual visibility."}],"engineFeedback":[{"question":"What did you like most about the engine?","answer":"Three.js made custom modeled dioramas, toon shading and native character animation straightforward."},{"question":"Did you get stuck or guess wrong?","answer":"Collider origin conventions, menu focus and guest snapshot handling needed corrections. Headless WebGPU screenshots were blank; state checks and the engine WebGL fallback supported verification."},{"question":"What was the most important thing you had to build yourself?","answer":"The complete adventure layer: inventory puzzles, interaction, camera, controls, co-op replication and procedural audio."},{"question":"What was the hardest part about using the engine?","answer":"Coordinating asynchronous WebGPU startup, Rapier collision movement and authoritative network state."},{"question":"What did you change in the engine, and why? (none if nothing)","answer":"none"},{"question":"If you could change one thing about the engine, what would it be?","answer":"A smaller first-party controller and physics integration layer would simplify polished game creation."}],"promptFeedback":[{"question":"What did you like most about this prompt?","answer":"The source-first research, TV-friendly controller design and complete expedition scope gave the game a clear identity."},{"question":"What was confusing?","answer":"The source year identifies the Atari game rather than the 1981 film; that distinction needed research."},{"question":"What was the hardest thing to do?","answer":"Integrating a complete four-chapter adventure with standalone and hosted co-op in one HTML file."},{"question":"What would you change in this prompt?","answer":"Specify an approximate target playtime and whether online play should include public matchmaking or private room codes."}],"aiHub":{"name":"Raiders of the Lost Hieroglyph","tagline":"One map. One magnificent mistake.","description":"Crack open a desert mystery in a cel-shaded pulp expedition. Trade for tools, decode the sun map, whip across a canyon and charm the vault's snakes before a very large boulder interrupts your research.","type":"Game","genre":"Adventure","source":"Raiders of the Lost Ark (1982)","series":"Indiana Jones","players":"1–2","controls":"WASD/arrows move, mouse aim/click whip, E interact, Space dodge, Q flute, Tab notes, Esc pause; standard gamepad supported; touch drag movement with assisted combat.","tags":["3d","adventure","co-op","puzzle","third-person","exploration"]}},"reply":"[Play Raiders of the Lost Hieroglyph](./Raiders-of-the-Lost-Hieroglyph-Raiders-of-the-Lost-Ark-gpt-6.1-sol-ultra-20261105-222300.html) · [Exit interview](./exit-interview.json)\n\nComplete four-chapter adventure with co-op, controller/touch controls, attract mode, and developer tools. **135 full-suite checks and 12 targeted co-op checks passed.** CDN dependencies require internet on first load.\n\n**Source Information**\n\n- Date: 2026-11-05 22:23:00. Source: *Raiders of the Lost Ark*, Atari 2600, 1982. Plan: none.\n- Genre/perspective: action adventure and inventory puzzles; tilted orthographic 3D.\n- Tech: Three.js r180, WebGPU with WebGL2 fallback, Rapier 0.19.3, Gamepad/Web Audio APIs, AI Hub protocol v1/client 1.4.0, PeerJS 1.5.5.\n- Art/animation: procedural cel shading and ink edges; native AnimationMixer clips with environmental animation.\n- Audio: synthesized original music, effects, and gibberish voices. Music defaults to 10%.\n- Online: shared-world co-op through AI Hub, standalone WebRTC/BroadcastChannel, and local second-controller play.\n- Testing: complete playthrough, software WebGPU, file loading, emulated controller/touch, offline audio, and impaired-network scenarios. Physical hardware and listening quality: unknown.\n- Research: [original manual](https://www.atariage.com/2600/manuals_old/raiders_of_the_lost_ark.html), [rendering/audio notes](https://github.com/halkuncode/Raiders2600), and official engine/integration documentation.\n- Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort ultra. Usage: added on import.\n\n**Testing Feedback**\n\n1. Testing caught five issues; all corrected. Review corrected additional gameplay/control defects.\n2. One testing issue blocked Hub acceptance; review also found two progression blockers.\n3. Most helpful: full expedition and official Hub harness.\n4. Least helpful: syntax-only checks.\n\n**Engine Feedback**\n\n1. Best: toon materials and native animation.\n2. Corrections involved collider origins, menu focus, and guest snapshots; headless WebGPU screenshots were blank.\n3. Built the adventure systems, controls, co-op replication, and audio.\n4. Hardest: synchronizing physics, animation, and networking.\n5. Engine changes: none.\n6. Desired improvement: integrated controller focus and physics movement.\n\n**Prompt Feedback**\n\n1. Liked the source research and controller-first direction.\n2. The 1982 reference needed interpretation; I used the Atari game.\n3. Hardest: completing the expedition and network lifecycle in one HTML.\n4. Suggested change: specify target playtime and multiplayer matchmaking expectations.\n\nAll information and feedback are also included in-game under About/Credits."}}</script>
+</body></html>

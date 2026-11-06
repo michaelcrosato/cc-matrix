@@ -1,0 +1,51 @@
+{
+	"sourceInformation": {
+		"date": "2026-11-05 19:13:51",
+		"source": "H.E.R.O. (Activision, 1984), designed by John Van Ryzin",
+		"plan": "none",
+		"genre": "Action platformer / cave-rescue adventure",
+		"perspective": "Side-on 2.5D with a scrolling orthographic camera",
+		"tech": "Three.js r180 (0.180.0), WebGPURenderer (WebGPU primary, WebGL2 recovery); Rapier 3D compat 0.19.3; Web Audio; Gamepad API; AI Hub client 1.4.0; esbuild 0.25.12 for packaging",
+		"artDirection": "Original procedural cel-shaded cave dioramas, low-poly models and ink outlines",
+		"animation": "Three.js AnimationMixer, AnimationClip and NumberKeyframeTrack for propeller, limbs, breathing, waving and wings; procedural secondary motion",
+		"audio": "Code-written oscillator music, rotor, lasers, explosions and pickups; synthesized gibberish voices. Music defaults to 10%.",
+		"online": "AI Hub shared-world host-authoritative co-op for 1–4 players; standalone shared-screen co-op for 1–2 players",
+		"testing": "Headless Chromium 153 / Playwright 1.63.0; software WebGPU; complete physical and attract campaign replays; gamepad emulation; multitouch phone profile; audio analyser; GPU recovery; AI Hub 2/4-player harness with 150 ms latency, 50 ms jitter and 5% loss, host leaving and a separate host. Physical hardware and human listening: unknown.",
+		"research": "Original Activision manual, Atarimania screenshot and metadata, Activisions newsletter propeller-sound description; exact original recording fidelity unknown",
+		"environment": "Codex CLI (headless); Linux",
+		"model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+		"usage": "added on import"
+	},
+	"testingFeedback": [
+		"7 distinct issues: a Rapier startup API mismatch, a blinking title pilot, two blocked replay waypoints, a negative-power edge case, overlapping touch guidance, and a headless Vulkan presentation configuration issue. All corrected. Test-script assertion mistakes are excluded.",
+		"1 game-breaking issue: the initial Rapier method mismatch prevented startup. It is fixed.",
+		"The complete campaign traversal with Rapier collisions enabled found two blocked route waypoints. Invulnerability was enabled for that traversal.",
+		"Initial headless WebGPU screenshots with incomplete Chromium Vulkan flags showed a blank canvas and hid the scene."
+	],
+	"engineFeedback": [
+		"Native AnimationMixer clips and MeshToonMaterial work well with procedural models and WebGPU in a self-contained HTML file.",
+		"Yes: I initially used a nonexistent Rapier enableSlide method instead of setSlideEnabled, and had to correct the headless Vulkan presentation flags.",
+		"The complete rescue state machine and host-authoritative co-op synchronization, plus controller-first menus and synthesized audio.",
+		"Verifying WebGPU presentation and resource lifetimes in software-rendered browser sessions, especially multiple copies.",
+		"none; engine libraries are unmodified. Device-loss recovery is application code.",
+		"Clearer built-in WebGPU device-loss diagnostics and a reliable documented headless capture recipe."
+	],
+	"promptFeedback": [
+		"Concrete source fidelity, controller-first UX, attract-mode and multiplayer/testing acceptance criteria.",
+		"Standalone multiplayer transport was unspecified; I chose 1–2 local shared-screen pilots plus 1–4 networked pilots through AI Hub.",
+		"Finishing and testing four distinct descents, every input type, procedural audio and shared-world networking in one file.",
+		"Specify standalone local versus internet multiplayer, and clarify whether automatic WebGL2 fallback is acceptable."
+	],
+	"aiHub": {
+		"name": "H.E.R.O. After Hours",
+		"tagline": "The night shift needs a lift.",
+		"description": "Clock in with a prop-pack, helmet laser and a pocketful of dynamite. Rescue eight night-shift miners through four inked cave descents, alone or with colleagues.",
+		"type": "Game",
+		"genre": "Platformer",
+		"source": "H.E.R.O. (1984)",
+		"series": "H.E.R.O.",
+		"players": "1–4",
+		"controls": "Move: WASD/left stick; fly: Space/Cross; laser: F or mouse/R2 (J in solo); dynamite: E/Square; pause: Esc/Options; local P2: IJKL, N, M.",
+		"tags": ["2.5d", "arcade", "co-op", "retro", "exploration", "low-poly"]
+	}
+}

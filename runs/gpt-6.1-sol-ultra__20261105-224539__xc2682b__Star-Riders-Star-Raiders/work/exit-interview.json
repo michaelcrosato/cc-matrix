@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 22:45:39",
+    "source": "Star Raiders (1982 Atari 2600 and Atari 5200 versions); an original game inspired by their cockpit combat and sector strategy.",
+    "plan": "none",
+    "genre": "Space combat flight simulation, arcade shooter, light real-time strategy",
+    "perspective": "First-person cockpit with forward and aft views; overhead galactic sector chart",
+    "tech": "Three.js r180 (0.180.0), WebGPURenderer with WebGPU and automatic WebGL 2 fallback, Rapier 3D 0.19.3, Gamepad API, Web Audio API, PeerJS 1.5.5, AI Hub Session Protocol v1 client 1.4.0, native browser HTML/CSS/JavaScript",
+    "artDirection": "Original procedural low-poly cel shading, dark ink edges, paper-colored cockpit typography, cyan/orange/mustard space-opera palette",
+    "animation": "Three.js AnimationMixer and AnimationClip keyframe tracks for ship wings and rotating station habitats; procedural flight, weapon, debris and cockpit motion",
+    "audio": "Entirely code-synthesized Web Audio arpeggios, pads, bass, engine hum, combat effects and formant-filtered gibberish radio voices; music defaults to 10 percent; no audio files",
+    "online": "1–4-player Ace Chase ghost competition through AI Hub; standalone six-letter PeerJS/WebRTC wing rooms with synchronized seeds, ghost fighters and score standings",
+    "testing": "Headless Chromium with native software WebGPU; file:// and owned loopback servers; standard-mapped gamepad stubs, touch emulation, offline audio rendering, a scripted full mission using actual projectiles and Rapier queries, two-browser WebRTC, and AI Hub harness scenarios; screenshots for visual layout using WebGL 2 fallback. Physical controllers, real touch hardware and human audio listening: unknown.",
+    "research": "Read the Atari 2600 and Atari 5200 Star Raiders manuals preserved by AtariAge: galactic map, hyperwarp, three enemy classes, forward/aft views, energy drain, shields, subsystem damage, docking, station attacks, rank evaluation and asteroid finale. Consulted official Three.js and Rapier documentation and the AI Hub protocol/client/harness.",
+    "environment": "Codex CLI (headless); Linux Ubuntu 26.04.1 on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Automated runtime testing caught four issues: a negative hyperwarp timer, a negative docking timer, touch-generated mouse events changing the active input, and delayed menu focus racing controller selection. All were fixed. Code review additionally found and fixed mission persistence, collision filtering and control integration defects.",
+    "Two game-breaking timer defects: hyperwarp completion blocked later firing, jumps and docking; docking completion could block further actions. Both now clamp to exactly zero and have regression checks.",
+    "The complete scripted campaign using actual photon projectiles and Rapier ray collisions was the most helpful test; it revealed that play stalled after the first jump and now verifies all six patrol sectors, all enemy classes and the command-ship victory.",
+    "The first headless WebGPU screenshot was least helpful for judging art because Chromium captured a blank GPU canvas while the renderer and game state were running. WebGL 2 fallback screenshots were used for visual inspection."
+  ],
+  "engineFeedback": [
+    "Three.js made procedural spacecraft, cel materials, cockpit cameras and native keyframe animation straightforward, and WebGPURenderer supported the same scene on WebGPU and WebGL 2.",
+    "I initially relied on Rapier's default collision types for kinematic ships and fixed asteroids, and had to enable those contacts explicitly. I also had to account for headless WebGPU screenshot behavior.",
+    "The sector campaign, flight and targeting model, controller-first focus system, synthesized audio, and ghost multiplayer lifecycle were built specifically for this game.",
+    "Coordinating renderer initialization, physics queries, UI input and the multiplayer round clock while keeping a single-file deliverable was the hardest part.",
+    "none; engine libraries were not modified. The AI Hub client is embedded unmodified.",
+    "A documented, reliable WebGPU headless frame-capture path would make visual regression testing easier."
+  ],
+  "promptFeedback": [
+    "The source research requirement and controller-first philosophy gave the game a clear identity, and the full-demo and attract-mode requirements encouraged a complete playable loop.",
+    "The 1982 source label can refer to different Atari ports with different details, so both contemporary manuals informed the adaptation. The online requirement did not specify shared-world versus ghost competition; Ace Chase uses ghost competition.",
+    "Delivering responsive cockpit combat, readable television-scale menus, touch assistance, a strategic campaign and both standalone and Hub multiplayer in one HTML file was the hardest task.",
+    "Specify the intended source platform and whether multiplayer should be cooperative, competitive, ghost-based or shared-world; keep the explicit testing and exit-interview requirements."
+  ],
+  "aiHub": {
+    "name": "Star Riders",
+    "tagline": "The frontier needs a little reckless.",
+    "description": "Take the Kestrel into an ink-and-cel frontier: dogfight patrols, plot energy-hungry hyperjumps, and keep your repair stations alive. Clear the trade lanes and close inside the command ship's shields, alone or in a four-pilot Ace Chase.",
+    "type": "Game",
+    "genre": "Flight",
+    "source": "Star Raiders (1982)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Pad: left stick fly, right stick aim, R2 fire, L2 track, R1 boost, L1 shields, Triangle chart, Square dock, Circle aft, Options pause; keyboard/mouse: WASD, mouse, Space/LMB, E, Shift, Q, M, Enter, R, Esc; touch: invisible twin sticks with assisted fire.",
+    "tags": ["3d", "first-person", "arcade", "sci-fi", "vehicles", "boss fights"]
+  }
+}

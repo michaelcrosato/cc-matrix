@@ -1,0 +1,12 @@
+import {build} from 'esbuild';
+import {readFile,writeFile} from 'node:fs/promises';
+const stem='Super-Breakbeat-Super-Breakout-gpt-6.1-sol-ultra-20261106-011159';
+const result=await build({entryPoints:['main.js'],bundle:true,write:false,format:'iife',target:'es2022',minify:true,legalComments:'none'});
+let html=await readFile('index.html','utf8');
+const session=await readFile('vendor/hub/session.js','utf8');
+html=html.replace('<!-- HUB_SESSION -->','<script>'+session.replaceAll('</script','<\\/script')+'</script>');
+html=html.replace('/* GAME_BUNDLE */',()=>result.outputFiles[0].text.replaceAll('</script','<\\/script'));
+html=html.replaceAll('name="hub:players"','name="hub:session-players"').replaceAll('name="hub:mode"','name="hub:session-mode"').replaceAll('name="hub:goal"','name="hub:session-goal"').replaceAll('name="hub:howto"','name="hub:session-howto"').replaceAll('name="hub:minutes"','name="hub:session-minutes"');
+await writeFile('../'+stem+'.html',html);
+await writeFile('../exit-interview.json',await readFile('exit-data.json','utf8'));
+console.log('Built '+stem+'.html ('+(html.length/1024/1024).toFixed(2)+' MB)');

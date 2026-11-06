@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 19:14:12",
+    "source": "Kaboom! (1981), an arcade bomb-catching game by Activision for the Atari 2600",
+    "plan": "none",
+    "genre": "Arcade action; reflex catching",
+    "perspective": "Fixed orthographic side view of a 3D rooftop (2.5D)",
+    "tech": "Three.js 0.180.0 (r180), WebGPURenderer with WebGL 2 compatibility fallback; Rapier 0.19.3; Gamepad API; Web Audio API; WebRTC; AI Hub session client 1.4.0 / protocol v1; esbuild 0.25.11",
+    "artDirection": "Procedural cel-shaded 3D diorama, inverted ink outlines, warm printed-paper palette and comic typography",
+    "animation": "Three.js AnimationMixer, AnimationClip and native keyframe tracks for character, bird and catch animations; procedural physics and particles",
+    "audio": "Code-only Web Audio music, sound effects and formant-synthesized Animalese-style gibberish voices. Music defaults to 10%",
+    "online": "AI Hub ghost score races for 1–4 players; standalone direct WebRTC score race for 2 players with manual invite/reply codes; local 2-player co-op",
+    "testing": "38/38 automated checks passed, including a full six-shift Rapier playthrough, emulated standard gamepad, touch, Web Audio signal, actual two-page WebRTC pairing/results, WebKit and renderer recovery. AI Hub passed 45 protocol assertions across 2-player, 4-player with 150 ms latency / 50 ms jitter / 5% loss, and host-departure scenarios. Screenshots inspected at 1920×1080 and portrait mobile. Physical-controller feel, real mobile hardware and subjective audio quality: unknown.",
+    "research": "None. Used native model knowledge; downloaded requested libraries and the supplied AI Hub integration contract only",
+    "environment": "Codex CLI (headless); Linux",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "8 distinct game issues were found through scripted tests, visual inspection and test-driven review: accumulating wind, low-contrast HUD text, hidden-overlay CSS precedence, invalid font declarations, renderer resource lifecycle, controller scrolling in credits, overlapping portrait HUD controls and online difficulty changing through settings. All were corrected. Timing/readback problems in the headless test setup were tracked separately.",
+    "3 were potentially game breaking: wind made later shifts impossible, the hidden loading overlay blocked clicks, and renderer lifecycle errors could stop drawing after a restart or backend change. All were corrected.",
+    "The complete six-shift Rapier playthrough. It exposed persistent wind-force accumulation at shift three; the corrected run caught all 184 deliveries and completed every shift.",
+    "Headless WebGPU pixel readback. Software-driver and readback failures made it unreliable visual evidence. Renderer submission state and compatibility-backend screenshots were more useful."
+  ],
+  "engineFeedback": [
+    "Native AnimationMixer tracks, procedural geometry and toon node materials let character motion, water tubs and the illustrated rooftop share one scene. Rapier sensor events made catches precise.",
+    "I first treated persistent Rapier forces as per-step forces, which accumulated wind. I also encountered renderer cache/lifecycle problems while reusing or disposing compiled resources, and unreliable software WebGPU readback. Fresh scene resources and guarded startup/recovery resolved the application issues.",
+    "The catch/combo/douse/wave state machine, controller-first shared UI, touch assistance, procedural sound and both multiplayer lifecycles.",
+    "Coordinating asynchronous GPU initialization and recovery with physics, native animation, input and network round start/end, while keeping the single-file game usable offline.",
+    "None to engine source. Used stock Three.js 0.180.0 and Rapier 0.19.3; recovery and compatibility handling live in the application.",
+    "A documented device-loss recovery API that replaces a renderer without invalidating node materials or leaving pending compilation work."
+  ],
+  "promptFeedback": [
+    "The concrete source, controller-first brief, code-only audio and single-file delivery made the creative target clear.",
+    "The ban on research alongside a required online integration reference needed interpretation. I fetched that contract and dependency code directly as implementation material, without web research.",
+    "Making polished gameplay, all input types, the attract loop, live developer controls, self-contained packaging and two online lifecycles work as one coherent game.",
+    "Clarify the expected standalone online pairing flow and whether TURN relay or matchmaking infrastructure is provided, or manual serverless WebRTC pairing is sufficient."
+  ],
+  "aiHub": {
+    "name": "Ka-Whoosh!",
+    "tagline": "A little panic. A lot of splash.",
+    "description": "A masked rooftop rascal is raining trouble. Slide your stack of water tubs, nail perfect catches and unleash an emergency douse across six escalating shifts, solo, in couch co-op or in an online score race.",
+    "type": "Game",
+    "genre": "Action",
+    "source": "Kaboom! (1981)",
+    "series": "",
+    "players": "1–4",
+    "controls": "Move: left stick / D-pad, A-D / arrows, mouse or drag; douse: Cross / A, Space, click or second touch; pause: Options / Escape. Local P2: arrows and Enter, or second gamepad.",
+    "tags": [
+      "arcade",
+      "3d",
+      "retro",
+      "co-op",
+      "versus",
+      "comedy"
+    ]
+  }
+}

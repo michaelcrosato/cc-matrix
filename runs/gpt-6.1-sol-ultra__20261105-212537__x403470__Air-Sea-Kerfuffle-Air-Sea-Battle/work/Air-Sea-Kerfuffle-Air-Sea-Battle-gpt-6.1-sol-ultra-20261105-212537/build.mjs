@@ -1,0 +1,11 @@
+import {readFileSync,writeFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const dir=path.dirname(fileURLToPath(import.meta.url));
+const slug=path.basename(dir);
+const read=name=>readFileSync(path.join(dir,name),'utf8');
+const session=read('session.js');
+const modules=['audio.js','scene.js','release-feedback.js'].map(n=>read(n).replace(/^export /gm,''));
+const output=read('shell.html').replace('<!--HUB_CLIENT-->','<script>\n'+session+'\n</script>').replace('<!--GAME_CODE-->','<script>\n'+read('network.js')+'\n</script>\n<script type="module">\n'+modules.join('\n')+'\n'+read('game.js')+'\n</script>');
+writeFileSync(path.join(dir,'index.html'),output);writeFileSync(path.join(dir,'..',slug+'.html'),output);
+console.log('Built '+slug+'.html ('+Math.ceil(Buffer.byteLength(output)/1024)+' KiB)');

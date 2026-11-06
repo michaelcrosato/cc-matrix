@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 22:28:51",
+    "source": "Solaris (Atari 2600, 1986), Doug Neubauer / Atari",
+    "plan": "none",
+    "genre": "Arcade space shooter with sector strategy and rescue missions",
+    "perspective": "Third-person chase camera; tactical sector map",
+    "tech": "Three.js r180 WebGPURenderer / TSL (WebGPU preferred, WebGL 2 fallback); Rapier 0.19.3; Web Audio; Gamepad API; PeerJS 1.5.5; AI Hub Session Protocol v1 client 1.4.0; HTML/CSS/JavaScript",
+    "artDirection": "Procedural low-poly cel shading with stepped TSL lighting, ink edges, cream/coral/cyan palette, ringed planets and alien horizons",
+    "animation": "Three.js AnimationMixer, AnimationClip and keyframe tracks for engine pulses, wing flex, rescue beacons and boss aperture; procedural flight motion",
+    "audio": "Original code-generated synthesizer music at 10% by default; procedural sound effects; formant-filtered Animalese/Simlish-style gibberish; no audio files",
+    "online": "1–2 player shared-world co-op; AI Hub host-authoritative sessions including dedicated host; standalone PeerJS WebRTC rooms and same-origin BroadcastChannel",
+    "testing": "One-command headless suite: complete campaign with real Rapier collisions and test invulnerability; keyboard/mouse; emulated standard gamepad; iPhone-profile touch; Web Audio levels; 2-tab co-op and replicated audio; AI Hub standard, host-leave, dedicated server and post-end input; forced graphics-device recovery; file:// launch; WebGL fallback screenshots. Physical controllers and real mobile/WAN devices: unknown.",
+    "research": "Original Atari instruction manual, AtariAge screenshots, MobyGames credits/overview, official Three.js and Rapier documentation, AI Hub protocol and harness. Exact original audio patches unknown.",
+    "environment": "Codex CLI (headless); Linux / Ubuntu 26.04 on WSL2",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort ultra",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and review found 13 confirmed issues, all fixed: planet attachment, mouse projection, guest touch routing, guest lobby transition, duplicate Enter activation, reconnect sequence tracking, target-lock consistency, disconnect recovery, graphics-device recovery, post-round input, guest scanner isolation, co-op audio replication, and controller prompts after slider input. Final automated suite: 122/122 checks passed.",
+    "2 confirmed game-breaking issues: the guest co-op lobby could block flight input after launch, and graphics initialization could stall after native WebGPU device loss. Both are fixed.",
+    "Deliberately forcing graphics-device loss exposed a null WebGL context during recovery. The complete campaign test also verified all six sectors, eleven rescues, the key and door, refuelling, boss phases and victory through real Rapier collisions.",
+    "Static JavaScript syntax checks: useful for packaging, but they could not reveal visual or gameplay problems."
+  ],
+  "engineFeedback": [
+    "Three.js TSL makes stepped cel lighting and procedural geometry straightforward, with AnimationMixer for reusable clips.",
+    "I initially blocked readiness on full shader warm-up. Concurrent headless Chromium WebGPU devices can be lost; removing the warm-up and adding bounded initialization plus graphics recovery made readiness reliable. Visual checks used WebGL 2 captures while live state verified WebGPU.",
+    "The campaign state machine, arcade flight and combat rules, controller-first menus, host-authoritative co-op replication, and graphics-device recovery.",
+    "Reliable asynchronous graphics initialization and headless verification: concurrent software WebGPU devices can disappear, so startup and recovery need explicit handling.",
+    "none; the engine source is unchanged. Recovery, shaders and gameplay are application code.",
+    "A first-class deterministic headless render-and-readback path for WebGPU."
+  ],
+  "promptFeedback": [
+    "The source research, complete vertical-slice scope, procedural audio and controller-first requirements provide a clear creative direction.",
+    "AI Hub integration is specified, but standalone signalling and NAT traversal are not. I chose PeerJS public signalling with direct peer transport. No plan file was supplied; recorded none.",
+    "Making sector strategy, rescue, keyed corridors, combat and co-op feel like one coherent arcade patrol.",
+    "Specify a target demo duration and whether standalone online rooms require a bundled signalling service or may use a public broker."
+  ],
+  "aiHub": {
+    "name": "Solaris Detour",
+    "tagline": "One lost planet. A galaxy of trouble.",
+    "description": "Take the scenic route through an inked galaxy: defend an uplink, rescue stranded cadets, unlock an ion corridor, and find Solaris. Fly solo or bring a wingmate to take down the Sun Eater.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Solaris (1986)",
+    "series": "Star Raiders",
+    "players": "1–2",
+    "controls": "WASD / left stick: fly; mouse / right stick: aim; click, Space / R2: fire; Shift / L2: boost; E / Square: nova pulse; M / Triangle: scanner; Esc / Options: pause. Touch: left drag fly, right drag aim, auto-fire.",
+    "tags": [
+      "3d",
+      "arcade",
+      "sci-fi",
+      "co-op",
+      "third-person",
+      "boss fights"
+    ]
+  }
+}

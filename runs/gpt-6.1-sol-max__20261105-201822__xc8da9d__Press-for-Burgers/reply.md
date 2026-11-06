@@ -1,0 +1,13 @@
+Built **[Press for Burgers](</home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-201822__xc8da9d/work/Press-for-Burgers-Pressure-Cooker-1983-gpt-6.1-sol-max-20261105-201822.html>)** — one self-contained HTML with three shifts, co-op, attract mode, and dev tools.
+
+[Exit interview](</home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-201822__xc8da9d/work/exit-interview.json>) · [Test results](</home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max__20261105-201822__xc8da9d/work/Press-for-Burgers-Pressure-Cooker-1983-gpt-6.1-sol-max-20261105-201822/test-results.json>)
+
+**Source Information:** Inspired by [Pressure Cooker (Activision, 1983)](https://atariage.com/manual_html_page.php?SoftwareID=1222). Date: 2026-11-05 20:18:22. Plan: none. Genre: arcade action/time management. Perspective: fixed oblique overhead 3D. Tech: Three.js r180, WebGPU with WebGL2 fallback, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.5, AI Hub protocol v1/client 1.4.0, esbuild 0.25.12. Procedural cel-shaded/ink art; native AnimationMixer keyframes; synthesized music, effects, and gibberish voices. Music defaults to 10%. Online: 1–4 co-op; local: 1–2. Research: manual, screenshot, sound descriptions, and technical documentation. Testing: headless playthroughs, input emulation, audio, graphics recovery, networking, and 1080p review. Physical controllers, real phones, and cross-network NAT traversal: unknown. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, max reasoning. Usage: added on import.
+
+**Testing Feedback:** **146/146 checks passed.** Testing and review found 13 distinct issues, including three potentially game-breaking issues; all were corrected. The most helpful test was the complete keyboard order sequence. The least helpful was reading render counters after screenshot capture, because those counters reset between frames.
+
+**Engine Feedback:** Three.js offered flexible toon rendering and native animation. Software WebGPU setup and renderer cleanup required investigation. I built the kitchen simulation, input, UI, audio, and networking. The hardest part was combining portable packaging with graphics recovery and synchronized play. Engine changes: none. I would add built-in controller focus navigation.
+
+**Prompt Feedback:** The source reference and controller-first direction gave the game a clear identity. Standalone signaling and filename interpretation were ambiguous. Combining every delivery and multiplayer requirement was hardest. I would specify the preferred signaling service and target session length.
+
+The same information and feedback are included in the game’s About/Credits screen.

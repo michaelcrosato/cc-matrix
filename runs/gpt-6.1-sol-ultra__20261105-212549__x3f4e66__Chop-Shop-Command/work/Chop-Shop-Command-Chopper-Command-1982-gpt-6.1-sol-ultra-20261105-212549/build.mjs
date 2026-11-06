@@ -1,0 +1,18 @@
+import {build} from 'esbuild';
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+const dir=path.dirname(fileURLToPath(import.meta.url));
+const base=path.basename(dir);
+const result=await build({entryPoints:[path.join(dir,'main.js')],bundle:true,format:'esm',target:'es2022',write:false,minify:true,legalComments:'none'});
+const client=fs.readFileSync(path.join(dir,'vendor/session.js'),'utf8');
+const js=result.outputFiles[0].text.replaceAll('</script','<\\/script');
+const template=fs.readFileSync(path.join(dir,'index.template.html'),'utf8');
+const font=fs.readFileSync(path.join(dir,'vendor/BarlowCondensed-Black.ttf')).toString('base64');
+const notices=['Three-LICENSE','Rapier-LICENSE','BarlowCondensed-OFL.txt'].map(file=>file+'\n'+fs.readFileSync(path.join(dir,'vendor',file),'utf8')).join('\n\n');
+const html=template.replace('/* EMBED_FONT */',`@font-face{font-family:'Barlow Condensed';font-style:normal;font-weight:900;font-display:swap;src:url(data:font/ttf;base64,${font}) format('truetype')}`).replace('<!-- HUB_CLIENT -->','<script>'+client+'</script>').replace('/* GAME_SCRIPT */',js).replace('</html>','<!-- THIRD-PARTY LICENSES\n'+notices.replaceAll('-->','-- >')+'\n--></html>');
+fs.writeFileSync(path.join(dir,'index.html'),html);
+fs.writeFileSync(path.join(dir,'..',base+'.html'),html);
+const metadata=JSON.parse(fs.readFileSync(path.join(dir,'metadata.json'),'utf8'));
+fs.writeFileSync(path.join(dir,'..','exit-interview.json'),JSON.stringify(metadata,null,2)+'\n');
+console.log('Built '+base+'.html ('+(html.length/1024/1024).toFixed(2)+' MB)');

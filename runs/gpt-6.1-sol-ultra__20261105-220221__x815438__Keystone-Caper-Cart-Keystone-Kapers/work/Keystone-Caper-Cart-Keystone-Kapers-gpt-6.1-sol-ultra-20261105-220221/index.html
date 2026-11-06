@@ -1,0 +1,3126 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<script>
+/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
+(function (root) {
+  'use strict';
+  if (root.AIHub) return;
+
+  var VERSION = '1.4.0';
+  var HELLO_EVERY_MS = 500;
+  var HELLO_TIMEOUT_MS = 10000;
+  var PROGRESS_EVERY_MS = 1000;
+  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
+  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
+
+  var framed = false;
+  try {
+    framed = root.parent && root.parent !== root;
+  } catch (e) {
+    framed = true;
+  }
+  var search = String(root.location && root.location.search);
+  var flagged = /[?&]aihub=/.test(search);
+  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
+
+  var hub = {
+    version: VERSION,
+    protocol: 1,
+    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
+    active: !!(flagged && framed),
+    me: null,
+    host: null,
+    isHost: false,
+    players: [],
+    mode: null,
+    seed: 0,
+    limitMs: 0,
+    round: 0,
+    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
+    splash: false,
+    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
+    seeded: false,
+  };
+
+  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
+  function memoryStorage() {
+    var data = Object.create(null);
+    var api = {
+      getItem: function (k) {
+        k = String(k);
+        return k in data ? data[k] : null;
+      },
+      setItem: function (k, v) {
+        data[String(k)] = String(v);
+      },
+      removeItem: function (k) {
+        delete data[String(k)];
+      },
+      clear: function () {
+        for (var k in data) delete data[k];
+      },
+      key: function (i) {
+        var keys = Object.keys(data);
+        return i >= 0 && i < keys.length ? keys[i] : null;
+      },
+    };
+    if (typeof Proxy !== 'function') return api;
+    return new Proxy(api, {
+      get: function (t, k) {
+        if (k === 'length') return Object.keys(data).length;
+        if (typeof k === 'symbol' || k in t) return t[k];
+        return k in data ? data[k] : undefined;
+      },
+      set: function (t, k, v) {
+        if (typeof k !== 'symbol') data[k] = String(v);
+        return true;
+      },
+      has: function (t, k) {
+        return k in data || k in t;
+      },
+      deleteProperty: function (t, k) {
+        delete data[k];
+        return true;
+      },
+      ownKeys: function () {
+        return Object.keys(data);
+      },
+      getOwnPropertyDescriptor: function (t, k) {
+        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
+      },
+    });
+  }
+
+  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
+  function generator(a) {
+    return function () {
+      a = (a + 0x6d2b79f5) >>> 0;
+      var t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+  }
+
+  // A fair start: in a session the game gets an empty storage of its own, so
+  // every round starts as a first launch (no saved unlocks, upgrades or runs),
+  // and nothing the round saves touches the player's own saves.
+  if (hub.active) {
+    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
+      try {
+        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
+      } catch (e) {
+        warn('could not give the game a fresh ' + stores[s]);
+      }
+    }
+  }
+
+  // Side by side: before any of the game's own scripts run, Math.random becomes
+  // a generator seeded by the hub, so every copy builds the same start.
+  var realRandom = Math.random;
+  var seededRandom = null;
+  if (hub.active && seedArg) {
+    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
+    hub.seeded = true;
+  }
+
+  // In a session the hub owns fullscreen: a game that asks for it gets the
+  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
+  // hub says when its page goes in and out, so the game's own toggle and its
+  // fullscreenchange listeners work as they always did.
+  var fullscreenOn = false;
+  if (hub.active && root.Element && root.document) {
+    var asks = function (on) {
+      return function () {
+        post('fullscreen', { on: on });
+        return Promise.resolve();
+      };
+    };
+    var proto = root.Element.prototype;
+    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
+    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
+    var shown = function () {
+      return fullscreenOn ? root.document.documentElement || null : null;
+    };
+    try {
+      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
+      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
+    } catch (e) {}
+  }
+
+  /**
+   * No hub after all: play on, with Math.random the page's own again. The
+   * empty storage stays: the game has read it already, and what it writes
+   * must never land on the player's real saves.
+   */
+  function standAlone() {
+    hub.active = false;
+    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
+    hub.seeded = false;
+  }
+
+  var origin = '*';
+  var welcomed = false;
+  var ended = false;
+  var connecting = null;
+  var goAt = null;
+  var sentReady = false;
+  var reported = false;
+  var handlers = {};
+  var pending = {};
+  var tokens = limits.burst;
+  var refilled = now();
+  var probeFn = null;
+  var lastProgress = -Infinity;
+  var nextProgress = null;
+  var progressTimer = null;
+
+  function now() {
+    return root.performance && root.performance.now ? root.performance.now() : Date.now();
+  }
+
+  function warn(text) {
+    if (root.console) root.console.warn('[AIHub] ' + text);
+  }
+
+  function own(o, k) {
+    return Object.prototype.hasOwnProperty.call(o, k);
+  }
+
+  /** This client's own fields, which no welcome may overwrite. */
+  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
+
+  /** A plain JSON copy, or undefined when it is not JSON. */
+  function json(value) {
+    try {
+      var text = JSON.stringify(value);
+      return text === undefined ? undefined : JSON.parse(text);
+    } catch (e) {
+      return undefined;
+    }
+  }
+
+  function post(type, fields) {
+    var msg = { aihub: 1, type: type };
+    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
+    try {
+      root.parent.postMessage(msg, origin);
+    } catch (e) {
+      warn('could not reach the hub: ' + e.message);
+    }
+  }
+
+  function emit(type, args) {
+    var list = handlers[type];
+    if (!list || !list.length || pending[type]) {
+      (pending[type] = pending[type] || []).push(args);
+      return;
+    }
+    for (var i = 0; i < list.length; i++) {
+      try {
+        list[i].apply(null, args);
+      } catch (e) {
+        setTimeout(function () {
+          throw e;
+        });
+      }
+    }
+  }
+
+  function onMessage(event) {
+    if (event.source !== root.parent) return;
+    var m = event.data;
+    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
+    if (m.type === 'welcome') {
+      if (welcomed) return;
+      welcomed = true;
+      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
+      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
+      for (var key in m) {
+        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
+        hub[key] = m[key];
+      }
+      hub.players = (m.players || []).slice();
+      hub.seed = m.seed >>> 0;
+      hub.isHost = m.me === m.host;
+      hub.splash = m.splash === true;
+      if (m.limits) {
+        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
+        tokens = limits.burst;
+      }
+      if (connecting) connecting.resolve(info());
+      return;
+    }
+    if (m.type === 'fullscreen') {
+      fullscreenOn = m.on === true;
+      try {
+        root.document.dispatchEvent(new root.Event('fullscreenchange'));
+      } catch (e) {}
+      return;
+    }
+    if (!welcomed || ended) return;
+    if (m.type === 'start') {
+      goAt = now() + Number(m.in || 0);
+      emit('start', [{ in: Number(m.in || 0) }]);
+    } else if (m.type === 'message') {
+      emit('message', [m.data, m.from]);
+    } else if (m.type === 'leave') {
+      hub.players = hub.players.filter(function (p) {
+        return p.id !== m.id;
+      });
+      emit('leave', [{ id: m.id, reason: m.reason }]);
+    } else if (m.type === 'time-up') {
+      emit('time-up', [{ graceMs: m.graceMs }]);
+    } else if (m.type === 'end') {
+      ended = true;
+      if (progressTimer) clearTimeout(progressTimer);
+      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
+    } else {
+      // An event this client has never heard of: hand it on as it came.
+      var detail = {};
+      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
+      emit(m.type, [detail]);
+    }
+  }
+
+  function info() {
+    var out = {};
+    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
+    out.players = hub.players.slice();
+    return out;
+  }
+
+  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
+  hub.connect = function (opts) {
+    if (connecting) return connecting.promise;
+    var done;
+    var promise = new Promise(function (resolve) {
+      done = resolve;
+    });
+    connecting = { promise: promise, resolve: done };
+    if (!hub.active) {
+      done(null);
+      return promise;
+    }
+    opts = opts || {};
+    root.addEventListener('message', onMessage);
+    var started = now();
+    var hello = function () {
+      if (welcomed) return;
+      if (now() - started > HELLO_TIMEOUT_MS) {
+        standAlone();
+        warn('no hub answered; playing normally');
+        done(null);
+        return;
+      }
+      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
+      setTimeout(hello, HELLO_EVERY_MS);
+    };
+    hello();
+    return promise;
+  };
+
+  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
+  hub.ready = function () {
+    if (!welcomed || sentReady || ended) return;
+    sentReady = true;
+    post('ready', {});
+  };
+
+  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
+  hub.answer = function (what) {
+    if (!welcomed || ended || goAt !== null) return;
+    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
+    post('answer', { answer: what });
+  };
+
+  hub.on = function (type, fn) {
+    (handlers[type] = handlers[type] || []).push(fn);
+    if (pending[type] && !pending[type].flushing) {
+      pending[type].flushing = true;
+      setTimeout(function () {
+        var queued = pending[type];
+        delete pending[type];
+        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
+      });
+    }
+    return function () {
+      var list = handlers[type] || [];
+      var at = list.indexOf(fn);
+      if (at !== -1) list.splice(at, 1);
+    };
+  };
+
+  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
+  hub.send = function (data, opts) {
+    if (!welcomed || ended) return false;
+    opts = opts || {};
+    var text;
+    try {
+      text = JSON.stringify(data);
+    } catch (e) {
+      warn('send: data is not JSON');
+      return false;
+    }
+    if (text === undefined) return false;
+    if (text.length > limits.maxBytes) {
+      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
+      return false;
+    }
+    var t = now();
+    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
+    refilled = t;
+    if (tokens < 1) {
+      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
+      return false;
+    }
+    tokens -= 1;
+    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
+    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
+    post('send', fields);
+    return true;
+  };
+
+  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
+  hub.time = function () {
+    return goAt === null ? -Infinity : now() - goAt;
+  };
+
+  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
+  hub.rng = function (label) {
+    var h = 2166136261;
+    var s = String(label === undefined ? '' : label);
+    for (var i = 0; i < s.length; i++) {
+      h ^= s.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return generator((hub.seed ^ h) >>> 0);
+  };
+
+  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
+  function finite(v) {
+    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
+  }
+
+  /**
+   * The whole outcome as plain JSON, field by field: the hub checks and trims
+   * it, so new optional fields need no new client. A field that is not JSON
+   * (a cycle, a BigInt) is left out, not the whole outcome.
+   */
+  function outcomeOf(outcome) {
+    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
+      warn('the outcome is not a plain object');
+      return null;
+    }
+    var copy = {};
+    for (var key in outcome) {
+      if (!own(outcome, key)) continue;
+      var value = json(outcome[key]);
+      if (value !== undefined) copy[key] = value;
+      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
+    }
+    return copy;
+  }
+
+  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
+  hub.result = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    var given = outcome || {};
+    delete fields.time;
+    delete fields.score;
+    if (finite(given.time)) fields.time = Number(given.time);
+    if (finite(given.score)) fields.score = Number(given.score);
+    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
+    reported = true;
+    if (progressTimer) clearTimeout(progressTimer);
+    post('result', fields);
+  };
+
+  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
+  hub.finish = function (outcome) {
+    if (!welcomed || ended || reported) return;
+    if (!hub.isHost) return warn('finish is for the host only');
+    var fields = outcomeOf(outcome);
+    if (!fields) return;
+    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
+    reported = true;
+    post('finish', fields);
+  };
+
+  function sendProgress() {
+    progressTimer = null;
+    if (!nextProgress || ended || reported) return;
+    lastProgress = now();
+    post('progress', nextProgress);
+    nextProgress = null;
+  }
+
+  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
+  hub.progress = function (p) {
+    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
+    nextProgress = { score: Number(p.score) };
+    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
+    var wait = lastProgress + PROGRESS_EVERY_MS - now();
+    if (wait <= 0) sendProgress();
+    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
+  };
+
+  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
+  hub.probe = function (fn) {
+    probeFn = typeof fn === 'function' ? fn : null;
+  };
+
+  hub.inspect = function () {
+    if (!probeFn) return null;
+    try {
+      return JSON.parse(JSON.stringify(probeFn()));
+    } catch (e) {
+      return { error: String((e && e.message) || e) };
+    }
+  };
+
+  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
+  hub.fail = function (message) {
+    if (!hub.active) return;
+    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
+  };
+
+  root.AIHub = hub;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#123b3b">
+<meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-goal" content="Catch the crook in all three cases. Recover loot, jump carts, duck planes and cut him off with the lift."><meta name="hub:session-howto" content="Move: Left stick / A D. Jump: Cross / Space. Duck: Circle / S. Cuff or lift: Square / E. Up: lift. Options / Esc: pause."><meta name="hub:session-minutes" content="4">
+<title>Keystone Caper Cart</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700;800;900&family=DM+Sans:wght@400;500;600;700&display=swap');
+:root{--ink:#142b2d;--cream:#fff1d1;--gold:#efbd55;--teal:#1b5554;--muted:#a9c5bd;--red:#d95b46;--font:'Barlow Condensed','Arial Narrow',sans-serif}*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#123b3b;color:var(--cream);font-family:'DM Sans',sans-serif;touch-action:none}button,input{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:default}canvas#scene{position:absolute;inset:0;width:100%;height:100%;display:block}#paper{position:absolute;inset:0;pointer-events:none;opacity:.06;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' opacity='.6' filter='url(%23n)'/%3E%3C/svg%3E")}#vignette{position:absolute;inset:0;box-shadow:inset 0 0 100px #082e3566;pointer-events:none}#loading{position:absolute;inset:0;z-index:100;background:#123b3b;display:grid;place-items:center;text-align:center;transition:opacity .5s}#loading h1{font:800 clamp(38px,5vw,76px)/.95 var(--font);letter-spacing:1px;margin:20px}#loading p{color:var(--muted);max-width:700px;padding:20px}.seal{width:74px;height:74px;margin:auto;border:2px solid var(--gold);border-radius:50%;display:grid;place-items:center;font:40px var(--font);color:var(--gold)}.eyebrow{font:700 clamp(14px,1.2vw,20px) var(--font);letter-spacing:.2em;color:var(--gold);text-transform:uppercase}#menu{position:absolute;inset:0;z-index:30;display:flex;align-items:center;justify-content:center;padding:3vh 5vw;background:#062f365e;backdrop-filter:blur(4px)}#menu.title{justify-content:flex-start;background:linear-gradient(90deg,#123b3bfa 0%,#123b3bf5 27%,#123b3b9c 45%,transparent 65%);backdrop-filter:none;padding-left:6vw}.title-card{width:min(470px,39vw);position:relative}.title-card h1{font:900 clamp(48px,6.6vw,110px)/.82 var(--font);letter-spacing:-.025em;margin:25px 0 20px;transform:rotate(-2deg);text-shadow:3px 4px 0 #0a292c}.title-card h1 span{color:var(--gold)}.title-card .dek{font:500 clamp(16px,1.25vw,22px)/1.5 'DM Sans',sans-serif;max-width:360px;color:#c6dbcd;margin:22px 0}.rule{height:1px;background:linear-gradient(90deg,#efbd5577,transparent);margin:22px 0}.actions{display:flex;flex-direction:column;gap:9px}button.big{border:1px solid #b7d5c63a;background:#143f3deb;color:var(--cream);padding:12px 20px;text-align:left;min-height:48px;font:700 clamp(20px,1.8vw,29px) var(--font);letter-spacing:.035em;transition:transform .15s,background .15s;display:flex;align-items:center;justify-content:space-between;gap:20px}button.big.primary{background:var(--gold);color:var(--ink);border-color:var(--gold);box-shadow:4px 4px 0 #092e32}button.big small{font:500 13px 'DM Sans',sans-serif;opacity:.6}button:hover,button:focus-visible,button.focused{outline:2px solid var(--cream);outline-offset:3px;background:#2f6660;transform:translateX(3px)}button.primary:hover,button.primary:focus-visible{background:#ffda7b}.title-foot{display:flex;gap:20px;margin-top:18px}.text-btn{border:0;background:none;color:#afc8bd;padding:5px 0;font:600 16px 'DM Sans',sans-serif}.title-note{margin-top:24px;color:#92b4a7;font:600 13px var(--font);letter-spacing:.15em;text-transform:uppercase}.panel{width:min(680px,92vw);max-height:92vh;overflow:auto;background:#123b3bf5;border:1px solid #b2c8b253;box-shadow:12px 12px 0 #092a3090;padding:32px 40px;border-top:5px solid var(--gold)}.panel.wide{width:min(1040px,94vw)}.panel h2{font:800 clamp(36px,3.2vw,54px)/1 var(--font);margin:10px 0 22px;letter-spacing:.02em}.panel p{font-size:18px;line-height:1.6;color:#c1d2c3}.panel .actions{margin-top:20px}.panel .back{margin-top:22px;width:100%}.row{display:flex;justify-content:space-between;align-items:center;padding:15px 0;gap:25px;border-bottom:1px solid #8eafa32c;font-size:18px}.row label{flex:1}.row output{font:700 23px var(--font);min-width:46px;color:var(--gold);text-align:right}.row input[type=range]{width:42%;accent-color:var(--gold);height:26px}.row input[type=checkbox]{width:24px;height:24px;accent-color:var(--gold)}.row button{padding:8px 14px;background:#2d625a;border:1px solid #a3ba9b88;color:var(--cream)}.how-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}.how-card{padding:20px;border:1px solid #a2b7a63b;background:#204c47}.how-card b{font:700 26px var(--font);color:var(--gold)}.how-card p{font-size:16px;margin:8px 0 0}.key{display:inline-grid;place-items:center;min-width:24px;height:26px;padding:0 6px;border:1px solid currentColor;border-bottom-width:3px;border-radius:5px;font:700 15px var(--font);margin-right:4px;color:#fff0c6}.credits-scroll{height:51vh;overflow:auto;padding-right:15px;touch-action:pan-y}.credit-line{padding:10px 0;border-bottom:1px solid #98b6a12c;display:grid;grid-template-columns:165px 1fr;gap:15px;font-size:18px;line-height:1.5}.credit-line b{color:var(--gold);font-weight:600}.credit-line span{color:#cbd9cc}.credit-line a{color:#e6c675}#hud{position:absolute;top:3vh;left:4vw;right:4vw;display:none;justify-content:space-between;align-items:flex-start;pointer-events:none;z-index:8}.hud-box{background:#123b3bed;border:1px solid #d7d6ac66;box-shadow:4px 4px 0 #0a2e3590;padding:12px 20px;min-width:180px}.hud-box .tiny{font:700 14px var(--font);letter-spacing:.16em;color:#a7c2af}.hud-box strong{font:800 clamp(24px,2.7vw,43px)/1 var(--font);display:block;margin-top:3px}.hud-right{display:flex;gap:14px;align-items:flex-start}.timer{text-align:center;min-width:160px;border-color:var(--gold);position:absolute;left:50%;transform:translateX(-50%)}.timer strong{color:var(--gold);font-size:clamp(34px,3.5vw,54px)}.timer.urgent{border-color:#ff7159}.timer.urgent strong{color:#ff7159}.lives{font-size:18px;color:var(--gold);letter-spacing:5px;margin-top:4px}#pauseButton{pointer-events:auto;width:48px;height:48px;border:1px solid #a2bfb49c;background:#123b3bd9;color:var(--cream);font:24px var(--font)}#footer{position:absolute;bottom:2.5vh;left:4vw;right:4vw;display:none;align-items:flex-end;justify-content:space-between;pointer-events:none;gap:20px;z-index:9}.security{background:#123b3bed;border:1px solid #aec5aa77;padding:10px 15px;width:250px}.security-head{font:700 12px var(--font);letter-spacing:.16em;color:#a6c3b0;display:flex;justify-content:space-between}#map{width:100%;height:68px;display:block;margin-top:5px}.prompts{font:600 clamp(15px,1.3vw,21px) var(--font);letter-spacing:.04em;background:#123b3be6;border:1px solid #acc1a13d;padding:13px 20px;display:flex;gap:22px;align-items:center}.prompts b{color:var(--gold);font-weight:700}#context{position:absolute;left:50%;bottom:15vh;transform:translateX(-50%);font:700 24px var(--font);padding:10px 20px;color:var(--ink);background:var(--gold);box-shadow:4px 4px 0 #133b3bc0;display:none;z-index:12;pointer-events:none}#toast{position:absolute;top:19vh;left:50%;transform:translateX(-50%);width:max-content;max-width:80vw;text-align:center;pointer-events:none;z-index:12;transition:opacity .25s}#toast b{font:800 clamp(30px,3vw,48px) var(--font);display:block;color:var(--cream);text-shadow:2px 3px #123b3b;background:#123b3be8;padding:5px 22px}#toast span{display:block;background:var(--gold);color:var(--ink);padding:6px 20px;font:600 16px 'DM Sans',sans-serif}.marker{position:absolute;z-index:5;pointer-events:none;transform:translate(-50%,-100%);font:800 14px var(--font);padding:3px 8px;letter-spacing:.08em;color:#fff4d4;background:#186b77;border:1px solid #fff1c9b0;box-shadow:2px 2px 0 #112a2b}.marker:after{content:'';position:absolute;top:100%;left:45%;border-left:4px solid transparent;border-right:4px solid transparent;border-top:5px solid #fff1c9}.marker.thief{background:#b74735}.marker.p2{background:#78529c}.marker.p3{background:#2e8555}.marker.p4{background:#b58320}#demo{position:absolute;bottom:4vh;left:50%;transform:translateX(-50%);padding:15px 35px;background:#123b3bf2;border:1px solid var(--gold);text-align:center;z-index:25;display:none;font:700 23px var(--font);letter-spacing:.08em}#demo span{display:block;font:500 14px 'DM Sans',sans-serif;color:#b9c8b6;margin-top:5px}#caseRibbon{position:absolute;top:3vh;left:50%;transform:translateX(-50%);color:var(--gold);font:600 14px var(--font);letter-spacing:.22em;z-index:6;display:block}#status{position:absolute;bottom:1vh;right:2vw;font:600 11px var(--font);letter-spacing:.1em;color:#b6cbb6;opacity:.6;z-index:40;pointer-events:none}#flash{position:absolute;inset:0;background:#fa674e;opacity:0;pointer-events:none;z-index:20}.room-code{font:800 58px var(--font);letter-spacing:.16em;color:var(--gold);margin:20px 0}.code-input{width:100%;background:#0d3031;color:var(--cream);border:1px solid #c1c5a67d;text-align:center;padding:15px;font:700 40px var(--font);letter-spacing:.2em;text-transform:uppercase}.score-banner{font:800 70px var(--font);color:var(--gold)}.stats{display:flex;gap:28px;margin:25px 0;color:#c6d7c6}.stats b{font:700 29px var(--font);display:block;color:var(--cream)}.dev-grid{display:grid;grid-template-columns:1fr 1fr;gap:0 30px}.dev-grid .row{font-size:16px;gap:10px}.dev-grid .row input{width:40%}#devTag{position:absolute;top:0;left:50%;transform:translateX(-50%);background:#df7155;padding:3px 15px;font:700 12px var(--font);letter-spacing:.15em;color:#102e30;display:none;z-index:40}#touchAction{position:absolute;bottom:15vh;right:6vw;width:90px;height:90px;display:none;border-radius:50%;border:3px solid var(--cream);background:#e9b34be3;color:var(--ink);font:800 22px var(--font);z-index:15}#stick{position:absolute;width:82px;height:82px;border:2px solid #fff1cd55;border-radius:50%;display:none;pointer-events:none;background:#123b3b22;z-index:14}#stick:after{content:'';width:28px;height:28px;border-radius:50%;background:#fff1cd77;position:absolute;left:25px;top:25px}a{color:var(--gold)}.fine{font-size:14px!important;color:#9db8a6!important}.row .smalltext{font-size:13px;color:#aac5b3}.panel::-webkit-scrollbar,.credits-scroll::-webkit-scrollbar{width:5px}.panel::-webkit-scrollbar-thumb,.credits-scroll::-webkit-scrollbar-thumb{background:#c6b77a}
+body.touch #footer{display:none!important}body.touch #hud>.hud-box:first-child{display:none}body.touch .hud-right>.hud-box{display:none}body.touch .hud-right{margin-left:auto}body.touch .marker:not(.thief){display:none!important}
+@media(min-width:1700px){.title-card{width:490px}.actions{gap:12px}button.big{padding:15px 24px}.panel{padding:40px 50px}.row{padding:20px 0}.panel p{font-size:21px}.prompts{font-size:23px}.security{width:300px}#map{height:80px}.hud-box{min-width:210px}}
+@media(max-height:700px){.title-card h1{font-size:70px;margin:14px 0}.title-card .dek{margin:15px 0;font-size:16px}.title-card .rule{margin:14px 0}button.big{min-height:38px;padding:7px 15px;font-size:22px}.title-note{margin-top:12px}.title-foot{margin-top:10px}.panel{padding:20px 30px}.panel h2{margin:8px 0 15px;font-size:36px}.row{padding:8px 0}.panel p{font-size:16px}.security{width:210px}.hud-box{padding:8px 14px}.prompts{padding:10px 14px;gap:15px}.how-card{padding:12px}.how-card p{font-size:14px}}
+@media(max-width:700px){#menu.title{padding:4vh 7vw;background:linear-gradient(90deg,#123b3bf8,#123b3bc2 70%,#123b3b55)}.title-card{width:min(360px,85vw)}.title-card h1{font-size:clamp(48px,13vw,76px)}.title-card .dek{font-size:15px;margin:15px 0}.title-card .eyebrow{font-size:12px}.title-note{font-size:11px}.title-foot{gap:16px}.text-btn{font-size:14px}button.big{font-size:22px}.panel{padding:20px 24px}.panel h2{font-size:36px}.how-grid{gap:8px}.how-card{padding:12px}.how-card b{font-size:22px}.how-card p{font-size:14px}.row{font-size:15px;gap:10px}.row input[type=range]{width:35%}.hud-box{min-width:80px;padding:8px 10px}.hud-box .tiny{font-size:10px;letter-spacing:.08em}.hud-box strong{font-size:24px}.timer{min-width:85px}.timer strong{font-size:30px}.hud-right{gap:8px}.lives{font-size:12px;letter-spacing:2px}#pauseButton{width:35px;height:35px;font-size:20px}.security{width:150px;padding:7px 10px}#map{height:45px}.security-head{font-size:9px}.prompts{display:none}.credit-line{grid-template-columns:105px 1fr;font-size:12px;gap:8px}.dev-grid{grid-template-columns:1fr}.stats{gap:15px;font-size:13px}.stats b{font-size:24px}#caseRibbon{font-size:10px}#toast{top:20vh}#toast b{font-size:28px}#toast span{font-size:12px}#context{font-size:18px;bottom:13vh}.marker{font-size:10px;padding:2px 5px}#demo{width:85vw;font-size:20px}#status{font-size:9px}}
+@media(max-height:500px){.title-card h1{font-size:52px}.title-card .dek{font-size:13px;line-height:1.3;margin:12px 0}.title-card .eyebrow{font-size:10px}.title-note{display:none}.title-card{width:310px}.title-foot{margin-top:6px}.title-card .rule{margin:8px 0}.actions{gap:6px}button.big{font-size:18px;padding:5px 12px;min-height:31px}.panel h2{font-size:30px}.panel{max-height:95vh;padding:15px 25px}.hud-box{padding:5px 10px}.security{width:160px}#map{height:40px}.prompts{font-size:14px}.how-card p{font-size:12px}.credits-scroll{height:43vh}.panel p{font-size:14px}}
+</style>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/webgpu":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.webgpu.js","three/tsl":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.tsl.js"}}</script>
+</head><body>
+<canvas id="scene"></canvas><div id="paper"></div><div id="vignette"></div>
+<div id="loading"><div><div class="seal">K</div><div class="eyebrow" style="margin-top:25px">PLEASE MIND THE MERCHANDISE</div><h1>Opening the emporium.</h1><p id="loadStatus">Preparing ink, mischief & a very small police force…</p></div></div>
+<div id="caseRibbon">THE GRAND KEYSTONE EMPORIUM · EST. 1923</div>
+<div id="hud"><div class="hud-box"><div class="tiny" id="caseNumber">CASE 01 / 03</div><strong id="caseName">THE EARLY BIRD</strong><div class="lives" id="lives">◆ ◆ ◆ ◆</div></div><div class="hud-box timer" id="timerBox"><div class="tiny">TIME TO CLOSE</div><strong id="clock">90</strong></div><div class="hud-right"><div class="hud-box"><div class="tiny">RECOVERED · HIGH <span id="best">0</span></div><strong id="score">000000</strong></div><button id="pauseButton" aria-label="Pause">Ⅱ</button></div></div>
+<div id="footer"><div class="security"><div class="security-head"><span>SECURITY MONITOR</span><span style="color:#efbd55">● LIVE</span></div><canvas id="map" width="480" height="140"></canvas></div><div class="prompts" id="prompts"></div></div>
+<div id="markers"></div><div id="toast"></div><div id="context"></div><div id="menu"></div><div id="demo">OFFICER ON AUTOPILOT<span>Press any button to clock in</span></div><div id="flash"></div><div id="status">THREE.JS R180 · WEBGPU · RAPIER 0.19.3</div><div id="devTag">DEVELOPER MODE</div><div id="stick"></div><button id="touchAction">CUFF!</button>
+<script type="module">
+// main.js
+import * as THREE2 from "three/webgpu";
+import RAPIER from "https://cdn.jsdelivr.net/npm/@dimforge/rapier3d-compat@0.19.3/+esm";
+
+// art.js
+import * as THREE from "three/webgpu";
+function createArt() {
+  const palette = { ink: 1518128, navy: 2377555, teal: 2587513, mint: 8500900, cream: 15983549, gold: 15251029, red: 14179142, skin: 15972731, dark: 2438459 };
+  const materials = new Map, moving = [];
+  const band = new THREE.DataTexture(new Uint8Array([80, 80, 80, 255, 172, 172, 172, 255, 255, 255, 255, 255]), 3, 1);
+  band.needsUpdate = true;
+  band.minFilter = band.magFilter = THREE.NearestFilter;
+  band.colorSpace = THREE.NoColorSpace;
+  const ink = new THREE.MeshBasicMaterial({ color: palette.ink, side: THREE.BackSide });
+  function material(color = palette.cream) {
+    const key = String(color);
+    if (!materials.has(key))
+      materials.set(key, new THREE.MeshToonMaterial({ color, gradientMap: band }));
+    return materials.get(key);
+  }
+  function mesh(geometry, color, parent, x = 0, y = 0, z = 0, outline = true) {
+    const m = new THREE.Mesh(geometry, typeof color === "object" ? color : material(color));
+    m.position.set(x, y, z);
+    m.castShadow = true;
+    m.receiveShadow = true;
+    if (outline) {
+      const shell = new THREE.Mesh(geometry, ink);
+      shell.scale.setScalar(1.035);
+      m.add(shell);
+    }
+    if (parent)
+      parent.add(m);
+    return m;
+  }
+  function box(p, x, y, z, w, h, d, c, o = true) {
+    return mesh(new THREE.BoxGeometry(w, h, d), c, p, x, y, z, o);
+  }
+  function ball(p, x, y, z, r, c, s = 16) {
+    return mesh(new THREE.SphereGeometry(r, s, 10), c, p, x, y, z);
+  }
+  function cyl(p, x, y, z, r, h, c, rt = r, segments = 16) {
+    return mesh(new THREE.CylinderGeometry(rt, r, h, segments), c, p, x, y, z);
+  }
+  function text(p, label, x, y, z, w, h, color = "#244753", bg = "transparent", font = "700 56px Georgia") {
+    const c = document.createElement("canvas");
+    c.width = 1024;
+    c.height = 128;
+    const ctx = c.getContext("2d");
+    if (bg !== "transparent") {
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, c.width, c.height);
+    }
+    ctx.font = font;
+    ctx.fillStyle = color;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(label, 512, 67, 990);
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 2;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true, depthWrite: false }));
+    m.position.set(x, y, z);
+    p.add(m);
+    return m;
+  }
+  function rod(p, from, to, r, color) {
+    const a = new THREE.Vector3(...from), b = new THREE.Vector3(...to), d = b.clone().sub(a);
+    const m = cyl(p, ...a.clone().add(b).multiplyScalar(0.5).toArray(), r, d.length(), color);
+    m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), d.normalize());
+    return m;
+  }
+  function character(kind = "cop", color) {
+    const group = new THREE.Group, rig = new THREE.Group;
+    group.add(rig);
+    rig.name = "rig";
+    const crook = kind === "thief" || kind === "crook";
+    const coat = color || (crook ? palette.cream : 4031405), pants = crook ? palette.dark : palette.navy;
+    const torso = box(rig, 0, 1.02, 0, 0.61, 0.65, 0.36, coat);
+    torso.name = "torso";
+    if (crook) {
+      for (let i = 0;i < 4; i++)
+        box(rig, 0, 0.79 + i * 0.14, 0.195, 0.62, 0.065, 0.025, palette.dark, false);
+    } else {
+      box(rig, 0, 0.79, 0.205, 0.62, 0.075, 0.04, palette.ink);
+      for (let i = 0;i < 3; i++)
+        ball(rig, 0.03, 0.88 + i * 0.14, 0.216, 0.025, palette.gold, 8);
+      const badge = cyl(rig, -0.18, 1.18, 0.215, 0.075, 0.025, palette.gold, 0.075, 5);
+      badge.rotation.x = Math.PI / 2;
+    }
+    const head = new THREE.Group;
+    head.name = "head";
+    head.position.set(0, 1.46, 0);
+    rig.add(head);
+    ball(head, 0, 0, 0, 0.27, palette.skin);
+    ball(head, -0.27, -0.02, 0, 0.065, palette.skin, 10);
+    ball(head, 0.27, -0.02, 0, 0.065, palette.skin, 10);
+    ball(head, 0, -0.025, 0.265, 0.075, palette.skin, 10);
+    for (const x of [-0.105, 0.105]) {
+      ball(head, x, 0.045, 0.238, 0.026, palette.ink, 8);
+      const brow = box(head, x, 0.105, 0.242, 0.09, 0.022, 0.025, palette.ink);
+      brow.rotation.z = x > 0 ? -0.12 : 0.12;
+    }
+    for (const x of [-0.07, 0.07]) {
+      const must = ball(head, x, -0.105, 0.244, 0.075, palette.dark, 10);
+      must.scale.set(1, 0.4, 0.4);
+    }
+    if (crook) {
+      cyl(head, 0, 0.22, -0.015, 0.3, 0.12, palette.dark, 0.23);
+      box(head, 0, 0.185, 0.25, 0.37, 0.035, 0.26, palette.dark);
+      box(head, 0, 0.15, -0.04, 0.55, 0.055, 0.47, palette.red);
+    } else {
+      const helmet = ball(head, 0, 0.22, -0.025, 0.3, coat);
+      helmet.scale.set(1, 0.86, 1);
+      cyl(head, 0, 0.16, -0.01, 0.34, 0.07, palette.navy);
+      const crest = cyl(head, 0, 0.275, 0.25, 0.063, 0.025, palette.gold, 0.063, 5);
+      crest.rotation.x = Math.PI / 2;
+      ball(head, 0, 0.48, -0.025, 0.055, palette.gold, 8);
+    }
+    const hips = new THREE.Group;
+    hips.name = "hips";
+    hips.position.y = 0.71;
+    rig.add(hips);
+    const limbs = {};
+    for (const [side, s] of [["L", -1], ["R", 1]]) {
+      const leg = new THREE.Group;
+      leg.name = "leg" + side;
+      leg.position.set(s * 0.175, 0, 0);
+      hips.add(leg);
+      cyl(leg, 0, -0.23, 0, 0.105, 0.48, pants, 0.12);
+      box(leg, 0, -0.58, 0.075, 0.23, 0.15, 0.39, palette.dark);
+      limbs["leg" + side] = leg;
+      const arm = new THREE.Group;
+      arm.name = "arm" + side;
+      arm.position.set(s * 0.39, 1.23, 0);
+      rig.add(arm);
+      cyl(arm, 0, -0.19, 0, 0.095, 0.4, coat, 0.12);
+      ball(arm, 0, -0.44, 0.005, 0.105, palette.skin, 10);
+      limbs["arm" + side] = arm;
+      if (crook)
+        for (let i = 0;i < 2; i++)
+          cyl(arm, 0, -0.08 - i * 0.16, 0.002, 0.1, 0.055, palette.dark, 0.1, 12);
+    }
+    if (!crook) {
+      const baton = cyl(limbs.armR, 0.01, -0.6, 0.04, 0.034, 0.54, palette.dark);
+      baton.rotation.z = -0.25;
+      cyl(limbs.armR, 0.02, -0.79, 0.04, 0.045, 0.065, palette.gold);
+    } else {
+      const sack = ball(rig, -0.3, 0.92, -0.34, 0.3, palette.gold, 12);
+      sack.scale.set(0.85, 1.12, 0.8);
+      cyl(rig, -0.3, 1.21, -0.34, 0.08, 0.15, palette.gold, 0.11, 8);
+    }
+    const mixer = new THREE.AnimationMixer(group), actions = {};
+    function clip(name, duration, tracks) {
+      const c = new THREE.AnimationClip(name, duration, tracks);
+      const a = mixer.clipAction(c);
+      actions[name] = a;
+      return a;
+    }
+    const N = THREE.NumberKeyframeTrack;
+    clip("idle", 1.8, [new N("rig.position[y]", [0, 0.9, 1.8], [0, 0.035, 0]), new N("head.rotation[z]", [0, 0.9, 1.8], [-0.03, 0.035, -0.03])]);
+    clip("run", 0.5, [new N("legL.rotation[x]", [0, 0.125, 0.25, 0.375, 0.5], [-0.7, 0, 0.7, 0, -0.7]), new N("legR.rotation[x]", [0, 0.125, 0.25, 0.375, 0.5], [0.7, 0, -0.7, 0, 0.7]), new N("armL.rotation[x]", [0, 0.125, 0.25, 0.375, 0.5], [0.85, 0, -0.85, 0, 0.85]), new N("armR.rotation[x]", [0, 0.125, 0.25, 0.375, 0.5], [-0.85, 0, 0.85, 0, -0.85]), new N("rig.position[y]", [0, 0.125, 0.25, 0.375, 0.5], [0, 0.075, 0, 0.075, 0]), new N("rig.rotation[z]", [0, 0.25, 0.5], [-0.035, 0.035, -0.035])]);
+    clip("duck", 0.7, [new N("rig.scale[y]", [0, 0.35, 0.7], [0.58, 0.55, 0.58]), new N("rig.scale[x]", [0, 0.35, 0.7], [1.15, 1.18, 1.15]), new N("armL.rotation[x]", [0, 0.35, 0.7], [-0.8, -0.75, -0.8]), new N("armR.rotation[x]", [0, 0.35, 0.7], [-0.8, -0.75, -0.8])]);
+    clip("jump", 0.8, [new N("legL.rotation[x]", [0, 0.4, 0.8], [-0.75, -1, -0.75]), new N("legR.rotation[x]", [0, 0.4, 0.8], [0.45, 0.6, 0.45]), new N("armL.rotation[x]", [0, 0.4, 0.8], [-1.6, -1.9, -1.6]), new N("armR.rotation[x]", [0, 0.4, 0.8], [-1.3, -1.6, -1.3]), new N("rig.rotation[z]", [0, 0.4, 0.8], [-0.09, 0.08, -0.09])]);
+    let current = "";
+    function setAction(name) {
+      if (!actions[name])
+        name = "idle";
+      if (current === name)
+        return;
+      const next = actions[name];
+      next.reset().play();
+      if (current)
+        actions[current].fadeOut(0.1);
+      next.fadeIn(0.1);
+      current = name;
+    }
+    setAction("idle");
+    return { group, mixer, actions, setAction, update(dt) {
+      mixer.update(dt);
+    } };
+  }
+  function hazard(kind = "radio") {
+    const g = new THREE.Group;
+    g.userData.kind = kind;
+    if (kind === "cart") {
+      for (const x of [-0.42, 0.42]) {
+        const w = cyl(g, x, 0.14, 0, 0.13, 0.12, palette.dark);
+        w.rotation.x = Math.PI / 2;
+      }
+      for (const z of [-0.25, 0.25])
+        for (const x of [-0.46, 0.46])
+          rod(g, [x, 0.28, z], [x * 0.85, 0.88, z], 0.025, palette.cream);
+      box(g, 0, 0.36, 0, 1.05, 0.09, 0.59, palette.red);
+      box(g, 0, 0.8, 0, 0.87, 0.06, 0.59, palette.gold);
+      for (let i = 0;i < 5; i++) {
+        const x = -0.42 + i * 0.21;
+        rod(g, [x, 0.38, 0.29], [x * 0.83, 0.82, 0.29], 0.018, palette.cream);
+        rod(g, [x, 0.38, -0.29], [x * 0.83, 0.82, -0.29], 0.018, palette.cream);
+      }
+      rod(g, [0.44, 0.7, 0], [0.74, 1.05, 0], 0.035, palette.dark);
+      rod(g, [0.74, 1.05, -0.3], [0.74, 1.05, 0.3], 0.045, palette.red);
+      ball(g, -0.2, 0.66, 0.02, 0.21, palette.mint);
+      box(g, 0.15, 0.65, 0.02, 0.32, 0.5, 0.3, palette.cream);
+    } else if (kind === "ball") {
+      const b = ball(g, 0, 0.32, 0, 0.32, palette.red, 20);
+      const stripe = mesh(new THREE.TorusGeometry(0.324, 0.025, 6, 32), palette.cream, g, 0, 0.32, 0);
+      stripe.rotation.y = 0.5;
+      const stripe2 = stripe.clone();
+      stripe2.rotation.y += Math.PI / 2;
+      g.add(stripe2);
+      g.userData.spin = b;
+    } else if (kind === "plane") {
+      const body = cyl(g, 0, 0, 0, 0.12, 0.92, palette.red, 0.08);
+      body.rotation.z = Math.PI / 2;
+      box(g, 0, 0.13, 0, 0.55, 0.055, 1.15, palette.gold);
+      box(g, 0, -0.12, 0, 0.55, 0.055, 1.15, palette.gold);
+      for (const z of [-0.45, 0.45])
+        rod(g, [0, -0.1, z], [0, 0.13, z], 0.02, palette.dark);
+      box(g, 0.39, 0.08, 0, 0.25, 0.31, 0.045, palette.red);
+      box(g, 0.39, 0, 0, 0.28, 0.04, 0.5, palette.cream);
+      const prop = box(g, -0.53, 0, 0, 0.04, 0.55, 0.055, palette.dark);
+      g.userData.propeller = prop;
+      moving.push({ kind: "prop", mesh: prop });
+      ball(g, -0.5, 0, 0, 0.08, palette.gold, 10);
+    } else {
+      box(g, 0, 0.43, 0, 0.66, 0.78, 0.36, 9528134);
+      ball(g, 0, 0.74, 0, 0.33, 9528134, 16).scale.set(1, 0.8, 0.6);
+      const face = ball(g, 0, 0.55, 0.205, 0.245, palette.gold, 16);
+      face.scale.set(0.86, 1, 0.1);
+      for (let i = 0;i < 5; i++)
+        box(g, -0.16 + i * 0.08, 0.52, 0.24, 0.023, 0.27, 0.025, palette.dark, false);
+      for (const x of [-0.19, 0.19]) {
+        const dial = cyl(g, x, 0.19, 0.212, 0.045, 0.035, palette.cream, 0.045, 12);
+        dial.rotation.x = Math.PI / 2;
+      }
+      box(g, 0, 0.75, 0.22, 0.2, 0.075, 0.025, palette.cream, false);
+    }
+    return g;
+  }
+  function loot(kind = "bag") {
+    const g = new THREE.Group;
+    if (kind === "case" || kind === "suitcase") {
+      box(g, 0, 0.29, 0, 0.62, 0.48, 0.3, palette.gold);
+      box(g, 0, 0.57, 0, 0.22, 0.11, 0.14, palette.dark);
+      for (const x of [-0.2, 0.2])
+        box(g, x, 0.29, 0.16, 0.065, 0.47, 0.035, palette.cream);
+    } else {
+      const sack = ball(g, 0, 0.29, 0, 0.28, palette.gold, 14);
+      sack.scale.y = 1.15;
+      cyl(g, 0, 0.57, 0, 0.105, 0.15, palette.gold, 0.14, 8);
+      box(g, 0, 0.52, 0.02, 0.24, 0.045, 0.2, palette.red);
+      text(g, "$", 0, 0.31, 0.281, 0.32, 0.36, "#5d482e", "transparent", "700 80px Georgia");
+    }
+    const glint = mesh(new THREE.OctahedronGeometry(0.075), palette.cream, g, 0.3, 0.65, 0.05);
+    moving.push({ kind: "loot", mesh: g, glint });
+    return g;
+  }
+  function store(scene) {
+    const g = new THREE.Group;
+    scene.add(g);
+    const labels = [];
+    const floors = [0, 4.3, 8.6, 12.9];
+    const wallColors = [14859145, 10401955, 13212553];
+    box(g, 0, 6.3, -2.8, 35.5, 14.2, 0.45, palette.navy);
+    for (let f = 0;f < 3; f++) {
+      const y = floors[f];
+      box(g, 0, y + 1.95, -2.5, 34, 3.9, 0.18, wallColors[f], false);
+      box(g, 0, y + 3.1, -2.32, 34, 0.65, 0.13, palette.cream, false);
+      for (let x = -16;x <= 16; x += 4) {
+        box(g, x, y + 1.55, -2.32, 0.16, 2.95, 0.16, palette.cream, false);
+        box(g, x, y + 0.2, -2.2, 0.4, 0.28, 0.28, palette.gold);
+      }
+      for (const x of [-10, -6, 6, 10]) {
+        box(g, x, y + 1.38, -2.19, 2.8, 1.8, 0.12, palette.teal);
+        box(g, x, y + 1.3, -2.06, 2.4, 1.38, 0.08, 13293753, false);
+        for (let i = -1;i <= 1; i++)
+          box(g, x + i * 0.69, y + 1.3, -1.99, 0.035, 1.3, 0.02, palette.gold, false);
+        box(g, x, y + 0.3, -1.6, 2.9, 0.6, 1, palette.navy);
+        box(g, x, y + 0.65, -1.6, 3, 0.13, 1.03, palette.cream);
+        if (f === 0) {
+          for (const s of [-0.75, 0, 0.75]) {
+            cyl(g, x + s, y + 1.03, -1.67, 0.11, 0.55, palette.red, 0.22);
+            cyl(g, x + s, y + 1.35, -1.67, 0.25, 0.08, palette.gold);
+          }
+        } else if (f === 1) {
+          for (const s of [-0.8, 0, 0.8]) {
+            ball(g, x + s, y + 0.96, -1.6, 0.23, [palette.red, palette.gold, palette.mint][Math.round((s + 0.8) / 0.8)]);
+          }
+        } else {
+          for (const s of [-0.75, 0, 0.75]) {
+            box(g, x + s, y + 0.98, -1.6, 0.45, 0.65, 0.32, palette.gold);
+            box(g, x + s, y + 0.98, -1.42, 0.3, 0.45, 0.03, palette.dark, false);
+          }
+        }
+        for (let i = 0;i < 8; i++) {
+          const awn = box(g, x - 1.4 + i * 0.4, y + 2.2, -1.92, 0.4, 0.22, 0.72, i % 2 ? palette.cream : palette.red, false);
+          awn.rotation.x = 0.16;
+        }
+      }
+      for (const x of [-3.5, 3.5]) {
+        rod(g, [x, y + 2.9, -2.1], [x, y + 2.6, -1.35], 0.035, palette.navy);
+        const shade = cyl(g, x, y + 2.55, -1.3, 0.23, 0.23, palette.gold, 0.12);
+        ball(g, x, y + 2.4, -1.3, 0.09, palette.cream, 10);
+      }
+      box(g, 0, y + 3.35, 2.48, 10.7, 0.58, 0.12, palette.cream);
+      for (const x of [-4.9, 4.9])
+        rod(g, [x, y + 3.6, 2.48], [x, y + 4.1, 2.48], 0.018, palette.gold);
+      labels.push(text(g, ["01  •  HABERDASHERY", "02  •  TOYS & TRINKETS", "03  •  HOME & WIRELESS"][f], 0, y + 3.35, 2.555, 10.1, 0.4, "#244753"));
+    }
+    for (let f = 0;f < 4; f++) {
+      const y = floors[f];
+      box(g, 0, y - 0.22, -0.15, 35, 0.44, 5, palette.cream);
+      box(g, 0, y - 0.21, 2.38, 35, 0.38, 0.12, palette.teal);
+      box(g, 0, y - 0.035, 2.47, 35, 0.065, 0.09, palette.gold, false);
+      for (let x = -16.5;x <= 16.5; x += 1) {
+        box(g, x, y - 0.24, 2.46, 0.33, 0.045, 0.04, palette.gold, false);
+      }
+      for (let x = -16.25;x < 17; x += 1.25)
+        for (let z = -1.4;z < 2; z += 1.2) {
+          if ((Math.round((x + 16.25) / 1.25) + Math.round((z + 1.4) / 1.2)) % 2 === 0)
+            box(g, x, y + 0.008, z, 1.22, 0.018, 1.17, 14470568, false);
+        }
+    }
+    for (const x of [-17.2, 17.2]) {
+      box(g, x, 6.6, -0.25, 0.55, 14.5, 5.1, palette.navy);
+      box(g, x, 6.7, 2.38, 0.66, 14.7, 0.13, palette.gold);
+      for (let f = 0;f < 4; f++)
+        box(g, x, floors[f] - 0.15, 2.5, 0.85, 0.5, 0.3, palette.cream);
+    }
+    box(g, 0, 5.95, -1.85, 2.35, 12.35, 0.45, palette.navy);
+    for (let f = 0;f < 3; f++) {
+      box(g, 0, floors[f] + 1.23, -1.51, 2.1, 2.5, 0.12, palette.gold);
+      box(g, 0, floors[f] + 1.2, -1.42, 1.8, 2.25, 0.12, palette.dark);
+      text(g, "LIFT", 0, floors[f] + 2.65, -1.32, 1.55, 0.32, "#244753");
+      for (let n = 0;n < 3; n++)
+        ball(g, -0.21 + n * 0.21, floors[f] + 2.3, -1.22, 0.055, n === f ? palette.gold : palette.teal, 8);
+    }
+    const elevator = new THREE.Group;
+    elevator.position.set(0, 0, -0.9);
+    g.add(elevator);
+    box(elevator, 0, 0.06, 0, 1.8, 0.15, 1.4, palette.gold);
+    box(elevator, 0, 1.15, -0.45, 1.75, 2.25, 0.12, palette.teal);
+    box(elevator, 0, 2.35, 0, 1.9, 0.17, 1.4, palette.gold);
+    box(elevator, -0.9, 1.2, 0, 0.1, 2.4, 1.4, palette.gold);
+    box(elevator, 0.9, 1.2, 0, 0.1, 2.4, 1.4, palette.gold);
+    const doors = [box(elevator, -0.44, 1.2, 0.58, 0.85, 2.25, 0.09, palette.mint), box(elevator, 0.44, 1.2, 0.58, 0.85, 2.25, 0.09, palette.mint)];
+    for (const d of doors) {
+      box(d, 0, 0.1, 0.07, 0.035, 1.4, 0.025, palette.gold, false);
+    }
+    for (let f = 0;f < 3; f++) {
+      const side = f % 2 === 0 ? -1 : 1, y = floors[f];
+      const start = new THREE.Vector3(side * 12.2, y + 0.14, -0.6), end = new THREE.Vector3(side * 16.1, y + 4.2, -0.6);
+      for (let i = 0;i < 18; i++) {
+        const t = i / 18, x = THREE.MathUtils.lerp(start.x, end.x, t), yy = THREE.MathUtils.lerp(start.y, end.y, t);
+        box(g, x, yy, -0.65, 0.31, 0.2, 1.15, palette.dark);
+        box(g, x, yy + 0.11, -0.65, 0.3, 0.035, 1.16, palette.gold, false);
+      }
+      for (const z of [-1.3, 0.05]) {
+        rod(g, [start.x, y + 0.9, z], [end.x, y + 5, z], 0.075, palette.navy);
+        rod(g, [start.x, y + 0.75, z], [end.x, y + 4.85, z], 0.035, palette.gold);
+      }
+      text(g, "↑ UP", side * 14.8, y + 1.15, 0.18, 1.8, 0.5, "#f3e3bd");
+    }
+    for (let i = 0;i < 15; i++) {
+      const x = -30 + i * 4.2, h = 2 + i * 7 % 8 * 0.46;
+      box(g, x, 13 + h * 0.5, -9, 3.2, h, 2, 3365989, false);
+      for (let yy = 14;yy < 13 + h; yy += 0.8)
+        for (const dx of [-0.8, 0, 0.8])
+          box(g, x + dx, yy, -7.98, 0.26, 0.35, 0.025, 11058077, false);
+    }
+    for (const x of [-10, -6, 6, 10]) {
+      box(g, x, 13.2, -1.75, 1.5, 0.6, 0.8, palette.red);
+      for (let i = -1;i <= 1; i++) {
+        const shrub = ball(g, x + i * 0.34, 13.68, -1.75, 0.38, palette.teal, 12);
+        shrub.scale.y = 1.3;
+      }
+    }
+    box(g, 0, 15.05, -2.2, 14, 2.3, 0.45, palette.navy);
+    box(g, 0, 15.05, -1.94, 13.7, 2.02, 0.05, palette.gold);
+    box(g, 0, 15.05, -1.88, 13.5, 1.83, 0.05, palette.teal);
+    text(g, "THE GRAND KEYSTONE", 0, 15.24, -1.81, 12.6, 0.69, "#f3e3bd");
+    text(g, "FINE GOODS  •  QUESTIONABLE SECURITY", 0, 14.67, -1.8, 10.7, 0.28, "#f0c56e");
+    for (const s of [-1, 1]) {
+      box(g, s * 7.5, 14.3, -2.2, 0.5, 3.8, 0.5, palette.gold);
+      ball(g, s * 7.5, 16.25, -2.2, 0.2, palette.gold, 12);
+      for (let i = 0;i < 3; i++)
+        box(g, s * (7.9 + i * 0.25), 15.6 - i * 0.32, -2.2, 0.18, 1.3, 0.3, palette.gold, false);
+    }
+    box(g, 15.1, 14, -1.55, 1.5, 2.2, 0.45, palette.navy);
+    box(g, 15.1, 13.95, -1.28, 1.2, 1.95, 0.07, palette.red);
+    text(g, "EXIT", 15.1, 15.32, -1.25, 1.6, 0.4, "#f3e3bd");
+    ball(g, 15.48, 13.9, -1.2, 0.06, palette.gold, 8);
+    return { group: g, elevator, doors, labels };
+  }
+  function tick(dt, t) {
+    for (const m of moving) {
+      if (m.kind === "prop")
+        m.mesh.rotation.x += dt * 25;
+      else if (m.kind === "loot") {
+        m.glint.rotation.y += dt * 2;
+        m.glint.scale.setScalar(0.85 + Math.sin(t * 4 + m.mesh.id) * 0.18);
+      }
+    }
+  }
+  return { character, hazard, loot, material, store, tick, palette };
+}
+
+// audio.js
+var TAU = Math.PI * 2;
+var clamp01 = (n) => Math.min(1, Math.max(0, Number(n) || 0));
+var midiHz = (n) => 440 * 2 ** ((n - 69) / 12);
+
+class AudioDirector {
+  constructor() {
+    this.context = null;
+    this.musicVolume = 0.1;
+    this.sfxVolume = 0.65;
+    this.muted = false;
+    this.playing = false;
+    this.heat = 0;
+    this.stage = 1;
+    this.nextStepTime = 0;
+    this.step = 0;
+    this.lastVoice = -Infinity;
+    this.events = 0;
+    this.notes = 0;
+    this.activeNodes = 0;
+    this.noiseBuffer = null;
+    this._unlocking = null;
+    this._visibility = () => {
+      if (this.context)
+        this.nextStepTime = this.context.currentTime + 0.06;
+    };
+    if (typeof document !== "undefined")
+      document.addEventListener("visibilitychange", this._visibility);
+  }
+  async unlock() {
+    if (!this.context) {
+      const Context = globalThis.AudioContext || globalThis.webkitAudioContext;
+      if (!Context)
+        return false;
+      this.context = new Context({ latencyHint: "interactive" });
+      this._buildGraph(this.context);
+    }
+    if (this.context.state === "suspended") {
+      if (!this._unlocking)
+        this._unlocking = this.context.resume().catch(() => false).finally(() => {
+          this._unlocking = null;
+        });
+      await this._unlocking;
+    }
+    this.nextStepTime = Math.max(this.nextStepTime, this.context.currentTime + 0.025);
+    return this.context.state === "running";
+  }
+  _buildGraph(ctx) {
+    this.master = ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.7;
+    this.music = ctx.createGain();
+    this.music.gain.value = this.musicVolume;
+    this.effects = ctx.createGain();
+    this.effects.gain.value = this.sfxVolume;
+    this.voices = ctx.createGain();
+    this.voices.gain.value = this.sfxVolume * 0.64;
+    const compressor = ctx.createDynamicsCompressor();
+    compressor.threshold.value = -14;
+    compressor.knee.value = 10;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.16;
+    this.music.connect(this.master);
+    this.effects.connect(this.master);
+    this.voices.connect(this.master);
+    this.master.connect(compressor);
+    compressor.connect(ctx.destination);
+    this.noiseBuffer = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+    const data = this.noiseBuffer.getChannelData(0);
+    let seed = 31875;
+    for (let i = 0;i < data.length; i++) {
+      seed = 1664525 * seed + 1013904223 >>> 0;
+      data[i] = seed / 2147483648 - 1;
+    }
+  }
+  _track(node) {
+    this.activeNodes++;
+    node.onended = () => {
+      this.activeNodes = Math.max(0, this.activeNodes - 1);
+      node.disconnect();
+    };
+  }
+  _tone(freq, time, duration, volume, type = "triangle", target = this.effects, slide = null, detune = 0) {
+    const ctx = this.context;
+    if (!ctx || !target)
+      return;
+    const t = Math.max(time, ctx.currentTime);
+    const osc = ctx.createOscillator();
+    const env = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(Math.max(20, freq), t);
+    if (slide !== null)
+      osc.frequency.exponentialRampToValueAtTime(Math.max(20, slide), t + duration);
+    osc.detune.value = detune;
+    env.gain.setValueAtTime(0, t);
+    env.gain.linearRampToValueAtTime(volume, t + Math.min(0.008, duration / 4));
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(env);
+    env.connect(target);
+    this._track(osc);
+    osc.start(t);
+    osc.stop(t + duration + 0.015);
+    osc.addEventListener("ended", () => env.disconnect());
+  }
+  _noise(time, duration, volume, frequency = 1800, target = this.effects) {
+    const ctx = this.context;
+    if (!ctx || !target)
+      return;
+    const t = Math.max(time, ctx.currentTime);
+    const noise = ctx.createBufferSource();
+    noise.buffer = this.noiseBuffer;
+    const filter = ctx.createBiquadFilter();
+    filter.type = "bandpass";
+    filter.frequency.value = frequency;
+    filter.Q.value = 0.7;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(volume, t);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    noise.connect(filter);
+    filter.connect(env);
+    env.connect(target);
+    this._track(noise);
+    noise.start(t, 0.23);
+    noise.stop(t + duration);
+    noise.addEventListener("ended", () => {
+      filter.disconnect();
+      env.disconnect();
+    });
+  }
+  _piano(note, time, length, volume = 0.3) {
+    const hz = midiHz(note);
+    this._tone(hz, time, length, volume, "triangle", this.music);
+    this._tone(hz * 2, time, length * 0.55, volume * 0.19, "sine", this.music, null, 3);
+    this._tone(hz * 3, time, length * 0.3, volume * 0.065, "sine", this.music);
+    this.notes++;
+  }
+  update(_dt, { playing = false, heat = 0, stage = 1 } = {}) {
+    this.playing = !!playing;
+    this.heat = clamp01(heat);
+    this.stage = Math.max(1, Number(stage) || 1);
+    if (!this.context || this.context.state !== "running")
+      return;
+    const now = this.context.currentTime;
+    if (!playing || this.muted || this.musicVolume <= 0) {
+      this.nextStepTime = now + 0.06;
+      return;
+    }
+    if (this.nextStepTime < now - 0.05)
+      this.nextStepTime = now + 0.025;
+    let scheduled = 0;
+    while (this.nextStepTime < now + 0.15 && scheduled++ < 4) {
+      this._scoreStep(this.step++, this.nextStepTime);
+      const eighth = 60 / (112 + this.heat * 12 + Math.min(this.stage - 1, 3) * 3) / 2;
+      this.nextStepTime += eighth * (this.step % 2 ? 1.16 : 0.84);
+    }
+  }
+  _scoreStep(step, time) {
+    const s = step % 64;
+    const bar = Math.floor(s / 8);
+    const beat = s % 8;
+    const roots = [48, 45, 50, 43, 48, 45, 50, 43];
+    const chords = [[64, 67, 72], [61, 64, 67], [62, 65, 69], [62, 65, 71], [64, 67, 72], [61, 64, 67], [62, 65, 69], [62, 65, 71]];
+    const melody = [76, 79, 81, 79, 76, 75, 74, 72, 73, 76, 79, 78, 76, 73, 72, 69, 74, 77, 81, 79, 77, 76, 74, 72, 71, 74, 77, 79, 83, 81, 79, 77, 76, 79, 84, 83, 81, 79, 76, 72, 73, 76, 81, 79, 78, 76, 73, 69, 74, 77, 81, 84, 83, 81, 77, 74, 71, 74, 79, 77, 76, 74, 72, 79];
+    if (beat % 2 === 0) {
+      if (beat === 0 || beat === 4)
+        this._piano(roots[bar] - (beat === 4 ? 5 : 0), time, 0.28, 0.44);
+      else
+        chords[bar].forEach((n, i) => this._piano(n, time + i * 0.009, 0.19, 0.22));
+    }
+    this._piano(melody[s], time + (beat % 2 ? 0.008 : 0), beat === 7 ? 0.23 : 0.19, 0.34);
+    if (beat === 2 || beat === 6)
+      this._noise(time, 0.055, 0.055, 3500, this.music);
+    if (this.heat > 0.65 && beat % 2 === 0)
+      this._tone(900, time, 0.025, 0.065, "square", this.music, 650);
+  }
+  sfx(name) {
+    if (!this.context || this.context.state !== "running" || this.muted)
+      return;
+    const t = this.context.currentTime + 0.005;
+    this.events++;
+    switch (name) {
+      case "jump":
+        this._tone(175, t, 0.18, 0.25, "triangle", this.effects, 610);
+        this._noise(t, 0.04, 0.07, 900);
+        break;
+      case "duck":
+        this._tone(260, t, 0.11, 0.14, "triangle", this.effects, 80);
+        break;
+      case "coin":
+      case "loot":
+        this._tone(1319, t, 0.09, 0.21, "sine");
+        this._tone(1976, t + 0.065, 0.19, 0.16, "sine");
+        break;
+      case "hit":
+        this._noise(t, 0.16, 0.27, 900);
+        this._tone(185, t, 0.31, 0.32, "sawtooth", this.effects, 45);
+        this._tone(460, t + 0.06, 0.12, 0.13, "square", this.effects, 120);
+        break;
+      case "elevator":
+      case "lift":
+        this._tone(784, t, 0.32, 0.19, "sine");
+        this._tone(1047, t + 0.11, 0.4, 0.14, "sine");
+        break;
+      case "catch":
+        [72, 76, 79, 84].forEach((n, i) => this._tone(midiHz(n), t + i * 0.065, 0.3, 0.2, "triangle"));
+        this._noise(t + 0.02, 0.13, 0.12, 2100);
+        break;
+      case "win":
+        [72, 76, 79, 84, 79, 84, 88].forEach((n, i) => this._tone(midiHz(n), t + i * 0.11, 0.32, 0.22, "triangle"));
+        [48, 60, 64, 67].forEach((n) => this._tone(midiHz(n), t + 0.55, 0.7, 0.15, "triangle"));
+        break;
+      case "lose":
+        [67, 66, 65, 60, 48].forEach((n, i) => this._tone(midiHz(n), t + i * 0.17, 0.32, 0.2, "triangle"));
+        break;
+      case "tick":
+        this._tone(880, t, 0.045, 0.1, "sine");
+        break;
+      case "menu":
+        this._tone(659, t, 0.07, 0.13, "sine");
+        this._tone(988, t + 0.04, 0.08, 0.09, "sine");
+        break;
+      case "dash":
+        this._noise(t, 0.17, 0.13, 1800);
+        this._tone(220, t, 0.12, 0.14, "triangle", this.effects, 660);
+        break;
+      default:
+        this._tone(440, t, 0.08, 0.1, "triangle");
+    }
+  }
+  speak(mood = "cop") {
+    const ctx = this.context;
+    if (!ctx || ctx.state !== "running" || this.muted || ctx.currentTime - this.lastVoice < 0.75)
+      return;
+    this.lastVoice = ctx.currentTime;
+    this.events++;
+    const villain = /thief|crook|lose|taunt/.test(mood);
+    const cheerful = /win|catch|hello/.test(mood);
+    const syllables = cheerful ? 6 : 4;
+    const vowelPairs = [[750, 1150], [350, 2000], [500, 1500], [400, 900], [650, 1700], [300, 2300]];
+    for (let i = 0;i < syllables; i++) {
+      const t = ctx.currentTime + 0.02 + i * 0.105;
+      const d = 0.075 + i % 2 * 0.025;
+      const base = (villain ? 142 : 205) * [1, 1.18, 0.94, 1.28, 1.08, 1.4][i];
+      const osc = ctx.createOscillator();
+      osc.type = "sawtooth";
+      osc.frequency.setValueAtTime(base, t);
+      osc.frequency.linearRampToValueAtTime(base * (i === syllables - 1 ? 0.72 : 1.12), t + d);
+      const env = ctx.createGain();
+      env.gain.setValueAtTime(0.0001, t);
+      env.gain.linearRampToValueAtTime(0.19, t + 0.007);
+      env.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      const a = ctx.createBiquadFilter();
+      const b = ctx.createBiquadFilter();
+      a.type = b.type = "bandpass";
+      const pair = vowelPairs[(i + (villain ? 2 : 0)) % vowelPairs.length];
+      a.frequency.value = pair[0];
+      a.Q.value = 4;
+      b.frequency.value = pair[1];
+      b.Q.value = 5;
+      osc.connect(a);
+      osc.connect(b);
+      a.connect(env);
+      b.connect(env);
+      env.connect(this.voices);
+      this._track(osc);
+      osc.start(t);
+      osc.stop(t + d + 0.01);
+      osc.addEventListener("ended", () => {
+        env.disconnect();
+        a.disconnect();
+        b.disconnect();
+      });
+      this._noise(t - 0.005, 0.018, 0.018, 1800, this.voices);
+    }
+  }
+  setMusic(value) {
+    this.musicVolume = clamp01(value);
+    if (this.music)
+      this.music.gain.setTargetAtTime(this.musicVolume, this.context.currentTime, 0.035);
+  }
+  setSfx(value) {
+    this.sfxVolume = clamp01(value);
+    if (this.effects) {
+      this.effects.gain.setTargetAtTime(this.sfxVolume, this.context.currentTime, 0.035);
+      this.voices.gain.setTargetAtTime(this.sfxVolume * 0.64, this.context.currentTime, 0.035);
+    }
+  }
+  mute(value = true) {
+    this.muted = !!value;
+    if (this.master)
+      this.master.gain.setTargetAtTime(this.muted ? 0 : 0.7, this.context.currentTime, 0.02);
+  }
+  inspect() {
+    return { state: this.context?.state || "locked", musicVolume: this.musicVolume, sfxVolume: this.sfxVolume, muted: this.muted, events: this.events, notes: this.notes, activeNodes: this.activeNodes, scoreStep: this.step, procedural: true };
+  }
+  async dispose() {
+    if (typeof document !== "undefined")
+      document.removeEventListener("visibilitychange", this._visibility);
+    if (this.context && this.context.state !== "closed")
+      await this.context.close();
+    this.activeNodes = 0;
+  }
+  static async renderProbe() {
+    const Offline = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
+    if (!Offline)
+      return { supported: false };
+    const director = new AudioDirector;
+    const ctx = new Offline(1, 44100 * 3, 44100);
+    director.context = ctx;
+    director._buildGraph(ctx);
+    for (let i = 0;i < 8; i++)
+      director._scoreStep(i, 0.03 + i * 0.23);
+    director._tone(175, 0.12, 0.18, 0.25, "triangle", director.effects, 610);
+    director._noise(0.6, 0.16, 0.27, 900);
+    director._tone(1319, 1.2, 0.09, 0.21, "sine");
+    director._tone(1976, 1.265, 0.19, 0.16, "sine");
+    const buffer = await ctx.startRendering();
+    let sum = 0, peak = 0, finite = true;
+    for (const value of buffer.getChannelData(0)) {
+      sum += value * value;
+      peak = Math.max(peak, Math.abs(value));
+      if (!Number.isFinite(value))
+        finite = false;
+    }
+    if (typeof document !== "undefined")
+      document.removeEventListener("visibilitychange", director._visibility);
+    return { supported: true, duration: buffer.duration, sampleRate: buffer.sampleRate, peak, rms: Math.sqrt(sum / buffer.length), finite, musicVolume: director.musicVolume };
+  }
+}
+
+// net.js
+function createNetwork(callbacks = {}) {
+  let role = "offline", status = "Offline", code = "", peer = null, connection = null;
+  let channel = null, roomToken = "", guestToken = "", transport = "", closed = false;
+  const members = new Map;
+  const inputSequences = new Map;
+  const hubSeats = new Map;
+  const pendingInput = { jump: false, action: false, up: false, down: false };
+  let hub = false, server = false, me = 0, players = [], started = false, ending = false;
+  let seq = 0, lastInput = -Infinity, lastState = -Infinity, lastReceived = 0;
+  let generation = 0, joinTimer = null, hubTimer = null, pingTimer = null;
+  let receivedState = -1;
+  const subscriptions = [];
+  const clock = () => performance.now();
+  const safeCall = (name, ...args) => callbacks[name]?.(...args);
+  const announce = (text) => {
+    status = text;
+    safeCall("onStatus", { role, status, code, players, me, server, hub, started, transport });
+  };
+  const random = (n) => {
+    const bytes = crypto.getRandomValues(new Uint8Array(n));
+    return [...bytes].map((b) => "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b % 32]).join("");
+  };
+  function sanitizedInput(input) {
+    return {
+      x: Math.max(-1, Math.min(1, Number(input?.x) || 0)),
+      jump: !!input?.jump,
+      duck: !!input?.duck,
+      up: !!input?.up,
+      down: !!input?.down,
+      action: !!input?.action
+    };
+  }
+  function send(data) {
+    if (closed || ending)
+      return false;
+    if (hub)
+      return AIHub.send(data, role === "guest" ? { to: AIHub.host, reliable: true } : { reliable: true });
+    if (role === "host") {
+      let sent = false;
+      if ([...members.values()].some((m) => m.transport === "local") && channel) {
+        channel.postMessage({ token: roomToken, ...data });
+        sent = true;
+      }
+      for (const member of members.values())
+        if (member.conn?.open) {
+          try {
+            member.conn.send(data);
+            sent = true;
+          } catch {}
+        }
+      return sent;
+    }
+    if (transport === "local" && channel) {
+      channel.postMessage({ token: roomToken, ...data });
+      return true;
+    }
+    if (connection?.open) {
+      try {
+        connection.send(data);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return false;
+  }
+  function receive(data, from) {
+    if (closed || ending || !data || typeof data !== "object")
+      return;
+    lastReceived = clock();
+    if (data.type === "welcome" && role === "guest" && !hub) {
+      me = Number(data.seat);
+      players = data.players || [];
+      announce("Connected · waiting for the host to start");
+      safeCall("onPartner", { players });
+    } else if (data.type === "roster" && !hub && role === "guest") {
+      players = data.players || [];
+      announce(started ? "Co-op chase in progress" : "Partner connected · ready for a co-op chase");
+    } else if (data.type === "input" && role === "host") {
+      const seat = hub ? hubSeats.get(from) : Number(from);
+      if (!Number.isInteger(seat) || !Number.isFinite(Number(data.seq)) || Number(data.seq) <= (inputSequences.get(seat) ?? -1))
+        return;
+      inputSequences.set(seat, Number(data.seq));
+      if (seat >= 0)
+        safeCall("onInput", sanitizedInput(data.input), seat);
+    } else if (data.type === "state" && role === "guest") {
+      if (hub && from !== AIHub.host)
+        return;
+      if (!Number.isFinite(Number(data.seq)) || Number(data.seq) <= receivedState)
+        return;
+      receivedState = Number(data.seq);
+      safeCall("onState", data.state);
+    } else if (data.type === "start" && role === "guest" && !hub) {
+      started = true;
+      announce("Co-op chase in progress");
+      safeCall("onStart", { ...data.info, players, me, isHost: false, server: false });
+    } else if (data.type === "finish" && role === "guest" && !hub) {
+      started = false;
+      safeCall("onFinish", data.result);
+    } else if (data.type === "bye" && !hub) {
+      if (role === "host")
+        removeMember(Number(from), "Partner left the room");
+      else
+        handleDisconnect("Host left the room");
+    } else if (data.type === "ping" && role === "host") {
+      send({ type: "pong" });
+    }
+  }
+  function handleDisconnect(text) {
+    const wasPlaying = started;
+    started = false;
+    guestToken = "";
+    players = role === "host" ? [{ id: 0, name: "Officer 1" }] : [];
+    announce(text);
+    safeCall("onDisconnect", { wasPlaying, role });
+  }
+  function roster() {
+    players = [{ id: 0, name: "Officer 1" }, ...[...members.values()].sort((a, b) => a.seat - b.seat).map((m) => ({ id: m.seat, name: `Officer ${m.seat + 1}` }))];
+    send({ type: "roster", players });
+  }
+  function removeMember(seat, message) {
+    for (const [token, member] of members)
+      if (member.seat === seat) {
+        members.delete(token);
+        member.conn?.close();
+        break;
+      }
+    inputSequences.delete(seat);
+    roster();
+    safeCall("onLeave", { id: seat, seat, reason: "disconnected" });
+    announce(message);
+  }
+  function nextSeat() {
+    return [1, 2, 3].find((seat) => ![...members.values()].some((m) => m.seat === seat));
+  }
+  function openChannel(room, ownGeneration) {
+    if (typeof globalThis.BroadcastChannel !== "function")
+      return;
+    channel = new BroadcastChannel(`keystone-caper-cart-v1-${room}`);
+    channel.onmessage = (event) => {
+      const data = event.data;
+      if (generation !== ownGeneration || !data || data.token === roomToken || data.to && data.to !== roomToken)
+        return;
+      if (role === "host" && data.type === "hello") {
+        let member = members.get(data.token);
+        if (!member) {
+          const seat = nextSeat();
+          if (seat === undefined || started) {
+            channel.postMessage({ type: "busy", token: roomToken, to: data.token });
+            return;
+          }
+          member = { seat, transport: "local", lastSeen: clock() };
+          members.set(data.token, member);
+        }
+        roster();
+        channel.postMessage({ type: "welcome", token: roomToken, to: data.token, seat: member.seat, players });
+        announce("Partner connected · ready for a co-op chase");
+        safeCall("onPartner", { players });
+      } else if (role === "guest" && data.type === "welcome" && data.to === roomToken) {
+        if (transport && transport !== "local")
+          return;
+        clearTimeout(joinTimer);
+        transport = "local";
+        guestToken = data.token;
+        connection?.close();
+        connection = null;
+        peer?.destroy();
+        peer = null;
+        receive(data);
+      } else if (data.type === "busy" && data.to === roomToken) {
+        clearTimeout(joinTimer);
+        announce("Room full or chase in progress · try another room");
+      } else if (role === "host" && members.get(data.token)?.transport === "local") {
+        const member = members.get(data.token);
+        member.lastSeen = clock();
+        receive(data, member.seat);
+      } else if (role === "guest" && transport === "local" && data.token === guestToken)
+        receive(data);
+    };
+  }
+  let peerLibrary;
+  function loadPeer() {
+    if (globalThis.Peer)
+      return Promise.resolve(globalThis.Peer);
+    if (!peerLibrary)
+      peerLibrary = new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/peerjs@1.5.5/dist/peerjs.min.js";
+        script.onload = () => globalThis.Peer ? resolve(globalThis.Peer) : reject(new Error("PeerJS unavailable"));
+        script.onerror = () => reject(new Error("Internet signaling could not load"));
+        document.head.append(script);
+      }).catch((error) => {
+        peerLibrary = null;
+        throw error;
+      });
+    return peerLibrary;
+  }
+  function wireConnection(conn, ownGeneration, hosting) {
+    let memberKey = "";
+    if (!hosting)
+      connection = conn;
+    conn.on("open", () => {
+      if (ownGeneration !== generation || closed)
+        return conn.close();
+      if (!hosting && transport === "local")
+        return conn.close();
+      clearTimeout(joinTimer);
+      if (hosting) {
+        const seat = nextSeat();
+        if (seat === undefined || started) {
+          conn.send({ type: "busy" });
+          setTimeout(() => conn.close(), 100);
+          return;
+        }
+        memberKey = conn.peer;
+        members.set(memberKey, { seat, transport: "rtc", conn, lastSeen: clock() });
+        roster();
+        conn.send({ type: "welcome", seat, players });
+        announce("Partner connected · ready for a co-op chase");
+        safeCall("onPartner", { players });
+      } else {
+        transport = "rtc";
+        announce("Connected · joining the co-op room");
+      }
+    });
+    conn.on("data", (data) => {
+      if (generation !== ownGeneration)
+        return;
+      if (hosting) {
+        const member = members.get(memberKey);
+        if (member) {
+          member.lastSeen = clock();
+          receive(data, member.seat);
+        }
+      } else if (transport === "rtc") {
+        if (data?.type === "busy")
+          announce("Room full or chase in progress · try another room");
+        else
+          receive(data);
+      }
+    });
+    conn.on("close", () => {
+      if (generation !== ownGeneration || closed)
+        return;
+      if (hosting) {
+        const member = members.get(memberKey);
+        if (member)
+          removeMember(member.seat, "Partner disconnected");
+      } else if (transport === "rtc")
+        handleDisconnect("Host disconnected · return to Online to reconnect");
+    });
+    conn.on("error", () => {
+      if (generation === ownGeneration && !closed && transport !== "local")
+        announce("Connection failed · check the room code and try again");
+    });
+  }
+  function heartbeat() {
+    lastReceived = clock();
+    pingTimer = setInterval(() => {
+      if (closed || hub || ending)
+        return;
+      if (role === "guest" && transport) {
+        if (clock() - lastReceived > 12000) {
+          transport = "";
+          handleDisconnect("Host is no longer responding · reconnect from Online");
+        } else
+          send({ type: "ping" });
+      } else if (role === "host") {
+        for (const member of [...members.values()])
+          if (clock() - member.lastSeen > 12000)
+            removeMember(member.seat, "Partner is no longer responding");
+      }
+    }, 1000);
+  }
+  function cleanup() {
+    generation++;
+    closed = true;
+    clearTimeout(joinTimer);
+    clearInterval(hubTimer);
+    clearInterval(pingTimer);
+    subscriptions.splice(0).forEach((off) => off());
+    connection?.close();
+    for (const member of members.values())
+      member.conn?.close();
+    members.clear();
+    inputSequences.clear();
+    hubSeats.clear();
+    peer?.destroy();
+    channel?.close();
+    connection = peer = channel = null;
+    transport = "";
+    guestToken = "";
+    started = false;
+    receivedState = -1;
+    for (const key of Object.keys(pendingInput))
+      pendingInput[key] = false;
+    lastInput = lastState = -Infinity;
+    ending = false;
+  }
+  const api = {
+    get role() {
+      return role;
+    },
+    get status() {
+      return status;
+    },
+    get code() {
+      return code;
+    },
+    get isHost() {
+      return role !== "guest";
+    },
+    get active() {
+      return role !== "offline";
+    },
+    get hub() {
+      return hub;
+    },
+    get server() {
+      return server;
+    },
+    get me() {
+      return me;
+    },
+    get players() {
+      return players;
+    },
+    get started() {
+      return started;
+    },
+    get connected() {
+      return hub || players.length > 1;
+    },
+    async initHub() {
+      if (!globalThis.AIHub?.active)
+        return null;
+      hub = true;
+      closed = false;
+      const info = await AIHub.connect({ mode: "shared-world", seats: [1, 4] });
+      if (!info) {
+        hub = false;
+        return null;
+      }
+      role = info.isHost ? "host" : "guest";
+      server = !!info.server;
+      players = info.players.slice();
+      players.forEach((p, i) => hubSeats.set(p.id, i));
+      me = server ? -1 : players.findIndex((p) => p.id === info.me);
+      transport = "hub";
+      announce("AI Hub · waiting for the shared countdown");
+      subscriptions.push(AIHub.on("message", receive));
+      subscriptions.push(AIHub.on("start", (detail) => {
+        hubTimer = setInterval(() => {
+          if (AIHub.time() < 0)
+            return;
+          clearInterval(hubTimer);
+          if (ending)
+            return;
+          started = true;
+          announce("AI Hub co-op chase in progress");
+          safeCall("onStart", { ...info, ...detail, me, players, isHost: role === "host", server });
+        }, 20);
+      }));
+      subscriptions.push(AIHub.on("time-up", (detail) => {
+        safeCall("onTimeUp", detail);
+      }));
+      subscriptions.push(AIHub.on("leave", (detail) => {
+        const index = hubSeats.get(detail.id);
+        players = AIHub.players.slice();
+        safeCall("onLeave", { ...detail, seat: index });
+        announce("AI Hub · officer left");
+      }));
+      subscriptions.push(AIHub.on("end", (detail) => {
+        ending = true;
+        started = false;
+        clearInterval(hubTimer);
+        safeCall("onEnd", detail.reason);
+        announce(`AI Hub · ${detail.reason}`);
+      }));
+      AIHub.ready();
+      return { ...info, me, players };
+    },
+    async host() {
+      if (hub)
+        return code;
+      cleanup();
+      closed = false;
+      role = "host";
+      me = 0;
+      code = random(6);
+      roomToken = random(18);
+      players = [{ id: 0, name: "Officer 1" }];
+      const ownGeneration = generation;
+      openChannel(code, ownGeneration);
+      heartbeat();
+      announce(`Room ${code} · opening internet connection…`);
+      try {
+        const Peer = await loadPeer();
+        if (generation !== ownGeneration)
+          return code;
+        peer = new Peer(`keystone-caper-cart-${code}`, { debug: 0 });
+        peer.on("open", () => {
+          if (generation === ownGeneration && !members.size)
+            announce(`Room ${code} · share this code with your partner`);
+        });
+        peer.on("connection", (conn) => wireConnection(conn, ownGeneration, true));
+        peer.on("error", (error) => {
+          if (generation !== ownGeneration || transport)
+            return;
+          announce(error.type === "unavailable-id" ? "Room code collision · create a new room" : `Room ${code} · local tabs available; internet signaling unavailable`);
+        });
+      } catch {
+        if (generation === ownGeneration && !transport)
+          announce(`Room ${code} · local tabs available; internet signaling unavailable`);
+      }
+      return code;
+    },
+    async join(value) {
+      if (hub)
+        return false;
+      const room = String(value).trim().toUpperCase();
+      if (!/^[A-HJ-NP-Z2-9]{6}$/.test(room)) {
+        announce("Enter the six-character room code");
+        return false;
+      }
+      cleanup();
+      closed = false;
+      role = "guest";
+      me = 1;
+      code = room;
+      roomToken = random(18);
+      players = [];
+      const ownGeneration = generation;
+      openChannel(room, ownGeneration);
+      heartbeat();
+      announce(`Joining room ${room}…`);
+      channel?.postMessage({ type: "hello", token: roomToken });
+      joinTimer = setTimeout(() => {
+        if (generation === ownGeneration && !transport)
+          announce("Room not found · check the code and keep the host page open");
+      }, 16000);
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      if (transport === "local" || generation !== ownGeneration)
+        return true;
+      try {
+        const Peer = await loadPeer();
+        if (generation !== ownGeneration || transport === "local")
+          return true;
+        peer = new Peer({ debug: 0 });
+        peer.on("open", () => {
+          if (generation !== ownGeneration || transport === "local")
+            return;
+          wireConnection(peer.connect(`keystone-caper-cart-${room}`, { reliable: true, serialization: "json" }), ownGeneration, false);
+        });
+        peer.on("error", (error) => {
+          if (generation === ownGeneration && transport !== "local")
+            announce(error.type === "peer-unavailable" ? "Room not found · check the code and keep the host page open" : "Connection failed · internet signaling unavailable");
+        });
+      } catch {
+        if (generation === ownGeneration && !transport)
+          announce("Internet connection unavailable · local tabs can still connect");
+      }
+      return true;
+    },
+    start(info = {}) {
+      if (role !== "host" || hub || closed)
+        return false;
+      started = true;
+      send({ type: "start", info });
+      announce("Co-op chase in progress");
+      safeCall("onStart", { ...info, players, me, isHost: true, server: false });
+      return true;
+    },
+    sendInput(input) {
+      if (role !== "guest" || !started || ending)
+        return false;
+      for (const key of Object.keys(pendingInput))
+        pendingInput[key] ||= !!input?.[key];
+      if (clock() - lastInput < 70)
+        return false;
+      lastInput = clock();
+      const frame = { ...sanitizedInput(input) };
+      for (const key of Object.keys(pendingInput)) {
+        frame[key] = pendingInput[key];
+        pendingInput[key] = false;
+      }
+      return send({ type: "input", seq: ++seq, input: frame });
+    },
+    sendState(state) {
+      if (role !== "host" || !started || ending || clock() - lastState < 70)
+        return false;
+      lastState = clock();
+      return send({ type: "state", seq: ++seq, state });
+    },
+    finish(score, won) {
+      if (role !== "host" || ending)
+        return;
+      if (hub) {
+        const ids = AIHub.players.map((p) => p.id);
+        AIHub.finish({ standings: [ids], scores: Object.fromEntries(ids.map((id) => [id, Number(score) || 0])), won: !!won });
+      } else {
+        send({ type: "finish", result: { score: Number(score) || 0, won: !!won } });
+      }
+    },
+    leave() {
+      if (hub)
+        return false;
+      send({ type: "bye" });
+      cleanup();
+      role = "offline";
+      code = "";
+      players = [];
+      me = 0;
+      announce("Offline");
+      return true;
+    }
+  };
+  return api;
+}
+
+// core.js
+var DEFAULTS = { speed: 8.4, thiefSpeed: 2.65, jump: 9.5, gravity: 25, roundTime: 90, hitPenalty: 6, hazardSpeed: 1, invincible: false };
+var FLOOR = 4.3;
+var ESC = [-14, 14, -14];
+
+class ChaseGame {
+  constructor(R, emit = () => {}) {
+    this.R = R;
+    this.emit = emit;
+    this.config = { ...DEFAULTS };
+    this.world = null;
+    this.state = "idle";
+    this.players = [];
+    this.hazards = [];
+    this.loot = [];
+    this.events = { jumps: 0, ducks: 0, lifts: 0, escalators: 0, hits: 0, loot: 0, catches: 0 };
+  }
+  start(count = 1, attract = false) {
+    this.count = count;
+    this.attract = attract;
+    this.case = 0;
+    this.score = 0;
+    this.lives = 4;
+    this.elapsed = 0;
+    this.events = { jumps: 0, ducks: 0, lifts: 0, escalators: 0, hits: 0, loot: 0, catches: 0 };
+    this.nextCase();
+  }
+  nextCase() {
+    this.case++;
+    if (this.case > 3) {
+      this.state = "won";
+      this.emit("win");
+      return;
+    }
+    this.resetWorld();
+    this.time = this.config.roundTime;
+    this.state = "playing";
+    this.emit("case", this.case);
+  }
+  resetWorld() {
+    const R = this.R;
+    if (this.world)
+      this.world.free();
+    this.world = new R.World({ x: 0, y: -this.config.gravity, z: 0 });
+    this.world.timestep = 1 / 60;
+    for (let i = 0;i < 4; i++) {
+      this.world.createCollider(R.ColliderDesc.cuboid(18, 0.2, 2).setTranslation(0, i * FLOOR - 0.2, 0).setCollisionGroups(131073));
+    }
+    this.players = [];
+    for (let i = 0;i < this.count; i++) {
+      const body = this.world.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(10 + i * 0.8, 0.76, 1.1).enabledRotations(false, false, false).enabledTranslations(true, true, false).setCcdEnabled(true));
+      const collider = this.world.createCollider(R.ColliderDesc.capsule(0.45, 0.28).setFriction(0).setRestitution(0).setCollisionGroups(65542), body);
+      this.players.push({ x: 10 + i * 0.8, y: 0, floor: 0, body, collider, duck: false, dir: -1, grounded: true, invuln: 1, stun: 0, ride: null, jumpHeld: false, actHeld: false, anim: "idle", cuffs: 0, loot: 0 });
+    }
+    this.thief = { x: this.case === 3 ? 5 : -9, y: this.case === 3 ? 2 * FLOOR : FLOOR, floor: this.case === 3 ? 2 : 1, dir: this.case === 3 ? -1 : 1, ride: null, evade: 0 };
+    this.hazards = [];
+    this.loot = [];
+    this.lift = { y: 0, floor: 0, open: true, phase: 0 };
+    this.stageClock = 0;
+    this.transition = 0;
+    const layouts = [["radio", -6, 0], ["cart", 2, 0], ["ball", 7, 1], ["radio", -5, 1], ["cart", 4, 2], ["ball", -7, 2], ["radio", 5, 3]];
+    if (this.case >= 2)
+      layouts.push(["plane", -9, 0], ["plane", 10, 2], ["cart", -9, 1]);
+    if (this.case >= 3)
+      layouts.push(["plane", 5, 1], ["plane", -4, 3], ["ball", 8, 3], ["cart", -2, 0]);
+    layouts.forEach(([kind, x, f], i) => {
+      const body = this.world.createRigidBody(R.RigidBodyDesc.kinematicPositionBased().setTranslation(x, f * FLOOR + 0.5, 1.1));
+      const desc = kind === "ball" ? R.ColliderDesc.ball(0.39) : R.ColliderDesc.cuboid(kind === "plane" ? 0.65 : kind === "cart" ? 0.55 : 0.37, kind === "plane" ? 0.22 : kind === "radio" ? 0.53 : 0.4, 0.45);
+      const collider = this.world.createCollider(desc.setSensor(true).setCollisionGroups(262145).setActiveCollisionTypes(R.ActiveCollisionTypes.ALL), body);
+      this.hazards.push({ id: i, kind, x, y: f * FLOOR + (kind === "plane" ? 1.43 : kind === "ball" ? 0.4 : kind === "radio" ? 0.53 : 0.42), floor: f, dir: i % 2 ? 1 : -1, body, collider, phase: i * 1.83 });
+    });
+    for (let f = 0;f < 4; f++)
+      for (let j = 0;j < 3; j++)
+        this.loot.push({ id: f * 3 + j, x: -10 + j * 10 + (f % 2 ? 2 : 0), y: f * FLOOR + 0.6, floor: f, taken: false });
+  }
+  teleport(i, x, f) {
+    const p = this.players[i];
+    if (!p)
+      return;
+    p.floor = f;
+    p.ride = null;
+    p.x = x;
+    p.y = f * FLOOR;
+    p.body.setTranslation({ x, y: p.y + 0.76, z: 1.1 }, true);
+    p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+  }
+  ai(i = 0) {
+    const p = this.players[i], t = this.thief;
+    if (!p)
+      return {};
+    let target = t.x, up = false, act = false, duck = false, jump = false;
+    if (p.floor < t.floor) {
+      target = ESC[p.floor];
+    } else if (p.floor > t.floor) {
+      target = 0;
+      up = true;
+    } else
+      act = Math.abs(p.x - t.x) < 2;
+    let x = Math.sign(target - p.x);
+    if (Math.abs(target - p.x) < 0.25)
+      x = 0;
+    for (const h of this.hazards) {
+      if (h.floor !== p.floor)
+        continue;
+      const ahead = (h.x - p.x) * x;
+      if (ahead > 0 && ahead < 3) {
+        if (h.kind === "plane" || h.kind === "ball" && h.y - p.floor * FLOOR > 1.1)
+          duck = true;
+        else
+          jump = true;
+      }
+    }
+    return { x, up, down: duck, jump, act };
+  }
+  step(dt, inputs = []) {
+    if (this.state === "caught") {
+      this.transition -= dt;
+      if (this.transition <= 0)
+        this.nextCase();
+      return;
+    }
+    if (this.state !== "playing")
+      return;
+    dt = Math.min(dt, 1 / 30);
+    this.elapsed += dt;
+    this.stageClock += dt;
+    this.time -= dt;
+    if (this.attract)
+      this.time = Math.max(this.time, 30);
+    if (this.time <= 0) {
+      this.loseLife("clock");
+      return;
+    }
+    this.world.gravity.y = -this.config.gravity;
+    const cyc = [0, 1, 2, 1], lt = this.stageClock % 12, seg = Math.floor(lt / 3), u = lt % 3;
+    this.lift.floor = cyc[seg];
+    this.lift.open = u < 1.5;
+    this.lift.y = this.lift.open ? cyc[seg] * FLOOR : (cyc[seg] + (cyc[(seg + 1) % 4] - cyc[seg]) * (u - 1.5) / 1.5) * FLOOR;
+    const t = this.thief;
+    t.evade = Math.max(0, t.evade - dt);
+    if (t.ride) {
+      t.ride.u += dt / 1.25;
+      const u2 = Math.min(1, t.ride.u);
+      t.x = t.ride.x + (t.ride.tx - t.ride.x) * u2;
+      t.y = t.floor * FLOOR + FLOOR * u2;
+      if (u2 >= 1) {
+        t.floor++;
+        t.y = t.floor * FLOOR;
+        t.dir = t.floor % 2 ? 1 : -1;
+        t.ride = null;
+      }
+    } else {
+      t.x += t.dir * (this.config.thiefSpeed + (this.case - 1) * 0.25) * dt;
+      const exit = t.floor < 3 ? ESC[t.floor] : 15.8;
+      if (t.floor === 3 && t.x > 15.8) {
+        if (this.attract) {
+          t.x = -12;
+        } else {
+          this.loseLife("escape");
+          return;
+        }
+      } else if (t.floor < 3 && Math.abs(t.x - exit) < 0.18) {
+        t.ride = { u: 0, x: t.x, tx: Math.sign(exit) * 15 };
+      }
+    }
+    for (const h of this.hazards) {
+      if (h.kind === "cart" || h.kind === "plane") {
+        h.x += h.dir * (h.kind === "cart" ? 2.6 : 5) * (1 + (this.case - 1) * 0.16) * this.config.hazardSpeed * dt;
+        if (h.x > 16.6)
+          h.x = -16.6;
+        if (h.x < -16.6)
+          h.x = 16.6;
+      }
+      const off = h.kind === "plane" ? 1.43 + Math.sin(this.stageClock * 5 + h.phase) * 0.06 : h.kind === "ball" ? 0.4 + Math.abs(Math.sin(this.stageClock * 2.8 + h.phase)) * (this.case === 3 ? 1.65 : 1.1) : h.kind === "radio" ? 0.53 : 0.42;
+      h.y = h.floor * FLOOR + off;
+      h.body.setNextKinematicTranslation({ x: h.x, y: h.y, z: 1.1 });
+    }
+    this.players.forEach((p, i) => {
+      const input = inputs[i] || {};
+      p.invuln = Math.max(0, p.invuln - dt);
+      p.stun = Math.max(0, p.stun - dt);
+      const x = Math.max(-1, Math.min(1, Number(input.x) || 0));
+      const action = !!input.act && !p.actHeld;
+      p.actHeld = !!input.act;
+      const jump = !!input.jump && !p.jumpHeld;
+      p.jumpHeld = !!input.jump;
+      if (p.ride) {
+        if (p.ride.type === "escalator") {
+          p.ride.u += dt / 1.2;
+          const u2 = Math.min(1, p.ride.u);
+          p.x = p.ride.x + (p.ride.tx - p.ride.x) * u2;
+          p.y = p.floor * FLOOR + FLOOR * u2;
+          if (u2 >= 1) {
+            p.floor++;
+            p.y = p.floor * FLOOR;
+            p.ride = null;
+          }
+        } else {
+          p.x = 0;
+          p.y = this.lift.y;
+          if (this.lift.open && this.lift.floor !== p.ride.from) {
+            p.floor = this.lift.floor;
+            p.x = x < 0 ? -1.6 : 1.6;
+            p.ride = null;
+          }
+        }
+        p.body.setTranslation({ x: p.x, y: p.y + (p.duck ? 0.4 : 0.76), z: 1.1 }, true);
+        p.body.setLinvel({ x: 0, y: 0, z: 0 }, true);
+        p.anim = "idle";
+        return;
+      }
+      const trans = p.body.translation();
+      p.x = trans.x;
+      p.y = trans.y - (p.duck ? 0.4 : 0.76);
+      p.grounded = p.y <= p.floor * FLOOR + 0.08 && p.body.linvel().y < 0.5;
+      const duck = !!input.down && p.grounded;
+      if (duck !== p.duck) {
+        p.duck = duck;
+        p.collider.setShape(new this.R.Capsule(duck ? 0.08 : 0.45, 0.28));
+        p.body.setTranslation({ x: p.x, y: p.y + (duck ? 0.4 : 0.76), z: 1.1 }, true);
+        if (duck) {
+          this.events.ducks++;
+          this.emit("duck");
+        }
+      }
+      const vel = p.body.linvel();
+      p.body.setLinvel({ x: p.stun ? 0 : x * this.config.speed * (p.duck ? 0.5 : 1), y: vel.y, z: 0 }, true);
+      if (Math.abs(x) > 0.1)
+        p.dir = Math.sign(x);
+      if (jump && p.grounded && !p.duck && !p.stun) {
+        p.body.setLinvel({ x: x * this.config.speed, y: this.config.jump, z: 0 }, true);
+        p.grounded = false;
+        this.events.jumps++;
+        this.emit("jump");
+      }
+      p.anim = p.duck ? "duck" : !p.grounded ? "jump" : Math.abs(x) > 0.1 ? "run" : "idle";
+      if (p.floor < 3 && Math.abs(p.x - ESC[p.floor]) < 1.05 && p.grounded && (Math.sign(x) === Math.sign(ESC[p.floor]) || input.up)) {
+        p.ride = { type: "escalator", u: 0, x: p.x, tx: Math.sign(ESC[p.floor]) * 15 };
+        this.events.escalators++;
+        this.emit("escalator");
+      }
+      if (!p.ride && Math.abs(p.x) < 1.35 && p.grounded && (input.up || action) && this.lift.open && this.lift.floor === p.floor && p.floor < 3) {
+        p.ride = { type: "lift", from: p.floor };
+        this.events.lifts++;
+        this.emit("elevator");
+      }
+      if (action && p.floor === t.floor && !t.ride && Math.abs(p.x - t.x) < 2.2 && Math.abs(p.y - t.y) < 1.8) {
+        p.cuffs++;
+        this.capture();
+      }
+      if (p.x < -16.6 || p.x > 16.6) {
+        p.x = Math.max(-16.6, Math.min(16.6, p.x));
+        p.body.setTranslation({ x: p.x, y: p.body.translation().y, z: 1.1 }, true);
+      }
+    });
+    if (this.state !== "playing")
+      return;
+    this.world.timestep = dt;
+    this.world.step();
+    for (const p of this.players) {
+      if (p.ride)
+        continue;
+      const v = p.body.translation();
+      p.x = v.x;
+      p.y = v.y - (p.duck ? 0.4 : 0.76);
+      for (const h of this.hazards) {
+        if (h.floor !== p.floor || p.invuln > 0 || this.config.invincible || this.attract)
+          continue;
+        if (this.world.intersectionPair(p.collider, h.collider)) {
+          p.invuln = 2;
+          p.stun = 0.45;
+          this.events.hits++;
+          this.emit("hit", h.kind);
+          if (h.kind === "plane") {
+            this.lives--;
+            if (this.lives <= 0) {
+              this.state = "lost";
+              this.emit("lose", "planes");
+            }
+          } else
+            this.time = Math.max(0.1, this.time - this.config.hitPenalty);
+        }
+      }
+      for (const l of this.loot)
+        if (!l.taken && l.floor === p.floor && Math.abs(l.x - p.x) < 0.8 && Math.abs(l.y - (p.y + 0.7)) < 1.4) {
+          l.taken = true;
+          p.loot++;
+          this.events.loot++;
+          this.score += 100;
+          this.emit("coin");
+        }
+    }
+  }
+  capture() {
+    if (this.state !== "playing")
+      return;
+    this.events.catches++;
+    this.score += 1000 + Math.ceil(this.time) * 20;
+    this.state = "caught";
+    this.transition = 2.7;
+    this.emit("catch", this.case);
+  }
+  loseLife(reason) {
+    if (this.attract) {
+      this.time = this.config.roundTime;
+      return;
+    }
+    this.lives--;
+    if (this.lives <= 0) {
+      this.state = "lost";
+      this.emit("lose", reason);
+    } else {
+      this.resetWorld();
+      this.time = this.config.roundTime;
+      this.emit("retry", reason);
+    }
+  }
+  snapshot() {
+    return { state: this.state, case: this.case, score: this.score, lives: this.lives, time: this.time, elapsed: this.elapsed, stageClock: this.stageClock, transition: this.transition, count: this.count, lift: { ...this.lift }, thief: { ...this.thief }, players: this.players.map(({ x, y, floor, duck, dir, ride, anim, invuln, cuffs, loot }) => ({ x, y, floor, duck, dir, ride, anim, invuln, cuffs, loot })), hazards: this.hazards.map(({ id, kind, x, y, floor, dir, phase }) => ({ id, kind, x, y, floor, dir, phase })), loot: this.loot.map((l) => ({ ...l })), events: { ...this.events } };
+  }
+}
+
+// metadata.js
+var SOURCE_INFO = { date: "2026-11-05 22:02:21", source: "Keystone Kapers (Activision, 1983), designed by Garry Kitchen", plan: "none", genre: "Arcade action / chase platformer", perspective: "Side-on orthographic 3D cutaway", tech: "Three.js 0.180.0 (R180), WebGPURenderer; Rapier 3D 0.19.3; Gamepad API; Web Audio; PeerJS 1.5.5; AI Hub Session Protocol v1 client 1.4.0", artDirection: "Procedural cel-shaded meshes, ink outlines, Art Deco department store, cream / teal / brass palette", animation: "Three.js AnimationMixer / AnimationClip and keyframe tracks; procedural prop, lift, escalator and particle animation", audio: "Original code-generated ragtime, synthesized Foley and Animalese-style gibberish; music defaults to 10%; no audio files", online: "1–4 player host-authoritative online co-op with PeerJS; same-origin local-tab transport; AI Hub shared-world sessions; 1–2 couch co-op", testing: "Headless Chromium WebGPU, scripted whole-game playthrough, physics and game-state checks, emulated standard gamepad, touch profile, offline audio render, two-page networking and official AI Hub harness; screenshots for visual review", research: "Original Activision manual, 1983 advertising, Atari/Atarimania imagery and source sound descriptions; official Three.js, Rapier and AI Hub documentation", environment: "Codex CLI (headless); Linux", model: "OpenAI, gpt-6.1-sol, reasoning effort ultra", usage: "added on import" };
+var FEEDBACK = {
+  testingFeedback: [
+    "8 confirmed issues caught and fixed across automated tests and visual review.",
+    "2 game-breaking issues: a Rapier startup API mismatch and incorrect seat assignment for three/four-player local-tab rooms.",
+    "The complete three-case playthrough with actual Rapier physics, default tuning, active hazards and the finale lift shortcut.",
+    "Headless WebGPU screenshots were blank on this adapter; state assertions and WebGL fallback captures were more useful."
+  ],
+  engineFeedback: [
+    "Native AnimationMixer clips and WebGPU toon materials made the procedural cast expressive and cohesive.",
+    "I initially used live-body setter names on a Rapier body descriptor. Actual-version tests caught the mismatch. Headless WebGPU image capture also required a WebGL visual fallback.",
+    "The floor-aware chase simulation, cycling lift and escalators, controller menu focus, procedural audio and authoritative co-op snapshots.",
+    "Coordinating fixed-step physics, native animation, menu focus and asynchronous multiplayer state in a single-file release.",
+    "none",
+    "Dependable headless WebGPU screenshot/readback support across software adapters."
+  ],
+  promptFeedback: [
+    "Researching the original and designing for a TV controller gave the game a clear identity and useful constraints.",
+    "The target length of a feature-complete demo and the desired multiplayer player count were unspecified.",
+    "Completing and validating gameplay, every input method, synthesized audio, standalone networking and Hub sessions as one portable HTML.",
+    "Specify a target demo duration and player count while keeping the source-research and vertical-slice requirements."
+  ]
+};
+
+// main.js
+var $ = (id) => document.getElementById(id);
+var clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+var CASES = ["THE EARLY BIRD", "TOY TROUBLE", "THE LAST LAUGH"];
+var MOTTO = ["Sid Slip has the takings. Give him a receipt for trouble.", "Biplanes in the aisles! Duck low and keep your hat.", "Two floors ahead! Take the centre lift, then race for the roof."];
+var renderer;
+var scene;
+var camera;
+var art;
+var store;
+var game;
+var net;
+var view;
+var actors = [];
+var hazardArt = [];
+var lootArt = [];
+var crook;
+var particles = [];
+var stageArt = new Map;
+var mode = "title";
+var screen = "title";
+var returnScreen = "title";
+var lastInput = performance.now();
+var attract = false;
+var loaded = false;
+var ended = false;
+var touchMode = false;
+var lastDevice = "keyboard";
+var glyph = "ps";
+var slow = 1;
+var dev = false;
+var shake = 0;
+var toastUntil = 0;
+var toastText = "";
+var lastCase = 0;
+var lastResult = "";
+var onlineInfo = null;
+var realTime = 0;
+var remoteInputs = {};
+var framePrev = 0;
+var accumulator = 0;
+var best = 0;
+var audio = new AudioDirector;
+var keys = new Set;
+var padPrev = [];
+var touch = { id: null, origin: 0, x: 0, up: false, jump: false, down: false, act: false };
+var pointer = new THREE2.Vector2;
+var settings = { music: 0.1, sfx: 0.65, shake: true, touchAssist: true };
+try {
+  best = Number(localStorage.getItem("kcc-best")) || 0;
+  const saved = JSON.parse(localStorage.getItem("kcc-settings") || "null");
+  if (saved)
+    Object.assign(settings, saved);
+  glyph = localStorage.getItem("kcc-glyph") || "ps";
+} catch {}
+audio.setMusic(settings.music);
+audio.setSfx(settings.sfx);
+var escapeHTML = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function saveSettings() {
+  try {
+    localStorage.setItem("kcc-settings", JSON.stringify(settings));
+    localStorage.setItem("kcc-glyph", glyph);
+  } catch {}
+}
+function btn(text, action, primary = false, small = "") {
+  return `<button class="big ${primary ? "primary" : ""}" data-action="${action}"><span>${text}</span>${small ? `<small>${small}</small>` : '<span aria-hidden="true">›</span>'}</button>`;
+}
+function wrap(eyebrow, title, body, wide = false) {
+  return `<section class="panel ${wide ? "wide" : ""}"><div class="eyebrow">${eyebrow}</div><h2>${title}</h2>${body}</section>`;
+}
+function back(action = "back") {
+  return btn("Back", action, false, lastDevice === "gamepad" ? glyph === "ps" ? "○" : "B" : "Esc");
+}
+function showMenu(which = "title") {
+  screen = which;
+  $("menu").style.display = "flex";
+  $("menu").className = which === "title" ? "title" : "";
+  let html = "";
+  if (which === "title") {
+    html = `<section class="title-card"><div class="eyebrow">A department-store pursuit</div><h1>KEYSTONE<br><span>CAPER CART</span></h1><p class="dek">One crook. Four floors.<br>Absolutely no running in the aisles.</p><div class="rule"></div><div class="actions">${btn("Clock in", "solo", true, "1 PLAYER")}${btn("Couch patrol", "couch", false, "2 PLAYERS")}${btn("Online patrol", "online", false, "1–4 PLAYERS")}${btn("The officer’s handbook", "how")}</div><div class="title-foot"><button class="text-btn" data-action="settings">Settings</button><button class="text-btn" data-action="credits">About & credits</button></div><div class="title-note">Original mischief · Inspired by Keystone Kapers, 1983</div></section>`;
+  }
+  if (which === "pause") {
+    html = wrap("THE CROOK CAN WAIT", "Tea break.", `<div class="actions">${btn("Back on the beat", "resume", true)}${btn("Settings", "settings")}${btn("Developer desk", "dev")}${btn("About & credits", "credits")}${!net?.hub ? btn("End this patrol", "title") : ""}</div>`);
+  }
+  if (which === "how") {
+    html = wrap("OFFICER’S HANDBOOK", "Catch him before closing.", `<div class="how-grid"><div class="how-card"><b>01 · Follow the crook</b><p>Sid Slip is headed for the roof. Close the gap, then <strong>${promptName("act")}</strong> to cuff him. Solve three cases to clear the store.</p></div><div class="how-card"><b>02 · Mind the merchandise</b><p><strong>${promptName("jump")}</strong> over radios, carts and low balls. <strong>${promptName("duck")}</strong> under planes and high balls. Hits cost 6 seconds; planes cost a badge.</p></div><div class="how-card"><b>03 · Take a shortcut</b><p>Run into the striped escalators to ride up. At the centre lift, hold <strong>Up</strong> or press <strong>${promptName("act")}</strong> when the doors open. It exits at its next stop.</p></div><div class="how-card"><b>04 · Pocket the evidence</b><p>Recover golden bags and cases for bonus points. The security monitor tracks every officer, the crook and the lift. Four badges, three cases, one splendid mess.</p></div></div><p class="fine">Move: ${lastDevice === "gamepad" ? "Left stick / D-pad" : "A / D or ← / →"}. Couch player 2: arrows, Right Ctrl jump, ↓ duck, Enter cuff/lift; or a second controller. Touch: drag anywhere on the left to move; tap right to jump. Nearby hazards and cuffs are assisted.</p><div class="actions">${back()}</div>`, true);
+  }
+  if (which === "settings") {
+    html = wrap("PATROL PREFERENCES", "Make yourself at home.", `<div class="row"><label for="music">Music</label><input id="music" data-setting="music" type="range" min="0" max="100" step="1" value="${Math.round(settings.music * 100)}"><output>${Math.round(settings.music * 100)}%</output></div><div class="row"><label for="sfx">Effects & gibberish</label><input id="sfx" data-setting="sfx" type="range" min="0" max="100" step="1" value="${Math.round(settings.sfx * 100)}"><output>${Math.round(settings.sfx * 100)}%</output></div><div class="row"><label>Controller glyphs</label><button data-action="glyph">${glyph === "ps" ? "PlayStation · ✕ ○ □ △" : "Xbox · A B X Y"}</button></div><div class="row"><label for="shakes">Screen shake</label><input id="shakes" data-setting="shake" type="checkbox" ${settings.shake ? "checked" : ""}></div><div class="row"><label for="assist">Touch assist</label><input id="assist" data-setting="touchAssist" type="checkbox" ${settings.touchAssist ? "checked" : ""}></div><div class="actions">${btn("Fullscreen", "fullscreen")}${back()}</div>`);
+  }
+  if (which === "dev") {
+    dev = true;
+    $("devTag").style.display = "block";
+    const specs = [["speed", "Officer speed", 4, 16, 0.1], ["thiefSpeed", "Crook speed", 0.5, 6, 0.1], ["jump", "Jump impulse", 6, 14, 0.1], ["gravity", "Gravity", 12, 40, 0.5], ["roundTime", "Case clock", 20, 180, 5], ["hitPenalty", "Hit penalty", 0, 15, 1], ["hazardSpeed", "Hazard speed", 0.25, 2, 0.05]];
+    html = wrap("DEVELOPER DESK", "A little inside assistance.", `<div class="dev-grid">${specs.map(([k, n, min, max, step]) => `<div class="row"><label for="dev-${k}">${n}</label><input id="dev-${k}" data-dev="${k}" type="range" min="${min}" max="${max}" step="${step}" value="${game.config[k]}"><output>${game.config[k]}</output></div>`).join("")}<div class="row"><label for="god">Invincible</label><input id="god" data-dev="invincible" type="checkbox" ${game.config.invincible ? "checked" : ""}></div><div class="row"><label for="slow">Slow motion</label><input id="slow" data-dev="slow" type="range" min=".2" max="1" step=".1" value="${slow}"><output>${slow}</output></div></div><div class="actions">${btn("Close this case", "skip")}${btn("Refill clock & badges", "refill")}${btn("Reset tuning to defaults", "defaults")}${back("pause")}</div><p class="fine">Sliders apply immediately. Case clock also refills the active timer. Multiplayer tuning is controlled by the host.</p>`, true);
+  }
+  if (which === "online") {
+    html = wrap("CALL FOR BACKUP", "Two hats are better than one.", `<p>Patrol the same store with up to three partners. Share a room code with your patrol.</p><div class="actions">${btn("Create a patrol", "host", true)}${btn("Join a patrol", "join")}${back("title")}</div><p class="fine">Online rooms use PeerJS signaling and direct peer connections. AI Hub sessions connect automatically.</p>`);
+  }
+  if (which === "join") {
+    html = wrap("PATROL DISPATCH", "Your room code, officer.", `<input class="code-input" id="joinCode" aria-label="Six character room code" maxlength="6" autocomplete="off" placeholder="ABC123"><div class="actions">${btn("Join patrol", "connect", true)}${back("online")}</div><p class="fine" id="netStatus">${escapeHTML(onlineInfo?.status || "Ask your host for their six-character code.")}</p>`);
+  }
+  if (which === "room") {
+    html = wrap("PATROL DISPATCH", net.role === "host" ? "Your patrol is assembling." : "Reporting for duty.", `<div class="room-code">${escapeHTML(net.code || "······")}</div><p id="netStatus">${escapeHTML(onlineInfo?.status || "Opening a room…")}</p><p id="roster">${net.players.length || 1} / 4 officers ready</p><div class="actions">${net.role === "host" ? btn("Start the chase", "startOnline", true) : ""}${back("leaveRoom")}</div><p class="fine">${net.role === "host" ? "Share this code. Start when your partners have arrived." : "The host starts the chase for the whole patrol."}</p>`);
+  }
+  if (which === "credits") {
+    const sourceRows = Object.entries(SOURCE_INFO).map(([k, v]) => `<div class="credit-line"><b>${k.replace(/([A-Z])/g, " $1").replace(/^./, (s) => s.toUpperCase())}</b><span>${escapeHTML(v)}</span></div>`).join("");
+    const questions = { testingFeedback: ["Issues caught", "Critical / game breaking", "Most helpful test", "Least helpful test"], engineFeedback: ["Liked most", "Got stuck / guessed wrong", "Built ourselves", "Hardest engine task", "Engine changes", "One engine wish"], promptFeedback: ["Liked most", "Confusing", "Hardest to do", "Suggested change"] };
+    html = wrap("THE GRAND KEYSTONE EMPORIUM", "About & credits", `<div class="credits-scroll"><p>An original slapstick pursuit by a very small department of mischief. Officer Pip versus Sid Slip. Title selected by a real random draw from 50 candidates.</p><div class="eyebrow">Source Information</div>${sourceRows}<p class="fine">Research: ${net?.hub ? "Activision’s original manual; Atarimania source imagery & sound descriptions" : `<a href="https://www.atariage.com/2600/manuals_old/keystone_kapers.html" target="_blank" rel="noreferrer">Activision’s original manual</a>; <a href="https://www.atarimania.com/games/atari-400-800-xl-xe-games-keystone-kapers-2777" target="_blank" rel="noreferrer">Atarimania source imagery & sound descriptions</a>`}. Original source and characters belong to their respective owners.</p>${Object.entries(FEEDBACK).map(([key, values]) => `<p class="eyebrow">${key.replace(/([A-Z])/g, " $1")}</p>${values.map((v, i) => `<div class="credit-line"><b>${questions[key][i]}</b><span>${escapeHTML(v)}</span></div>`).join("")}`).join("")}</div><div class="actions">${back()}</div>`, true);
+  }
+  if (which === "result") {
+    const won = view?.state === "won";
+    html = wrap(won ? "THREE CASES. ONE SPLENDID MESS." : "THE EMPORIUM REGRETS TO INFORM YOU…", won ? "Case closed!" : "He slipped the receipt.", `<p>${won ? "Sid Slip is in the bag. The takings are safe, the manager is delighted, and your tea is quite cold." : "A crook at large, a bruised helmet, and a strongly worded note from the manager. Another patrol?"}</p><div class="score-banner">${String(view?.score || 0).padStart(6, "0")}</div><div class="stats"><div><b>${view?.events?.catches || 0} / 3</b>CASES CLOSED</div><div><b>${view?.events?.loot || 0}</b>LOOT RECOVERED</div><div><b>${Math.round(view?.elapsed || 0)}s</b>ON THE BEAT</div></div><div class="actions">${!net?.hub ? btn("Another patrol", "again", true) : ""}${!net?.hub ? btn("Back to the foyer", "title") : ""}</div>`);
+  }
+  if (which === "hubwait")
+    html = wrap("AI HUB PATROL", "Ready for the whistle.", `<p>Catch the crook. Mind the carts. Your patrol starts on the Hub’s clock.</p>`);
+  $("menu").innerHTML = html;
+  bindMenu();
+  updatePrompts();
+  setTimeout(() => {
+    const first = $("menu").querySelector("button");
+    if (first)
+      first.focus({ preventScroll: true });
+  }, 0);
+}
+function bindMenu() {
+  for (const b of $("menu").querySelectorAll("[data-action]")) {
+    b.onclick = () => dispatch(b.dataset.action);
+    b.onpointerenter = () => {
+      if (lastDevice !== "gamepad")
+        b.focus({ preventScroll: true });
+    };
+    b.onpointermove = (e) => {
+      if (e.pointerType === "mouse" && (e.movementX || e.movementY)) {
+        activity("keyboard");
+        b.focus({ preventScroll: true });
+      }
+    };
+  }
+  for (const r of $("menu").querySelectorAll("input[data-setting]"))
+    r.oninput = () => {
+      settings[r.dataset.setting] = r.type === "checkbox" ? r.checked : Number(r.value) / 100;
+      if (r.nextElementSibling)
+        r.nextElementSibling.textContent = `${r.value}%`;
+      audio.setMusic(settings.music);
+      audio.setSfx(settings.sfx);
+      saveSettings();
+    };
+  for (const r of $("menu").querySelectorAll("input[data-dev]"))
+    r.oninput = () => {
+      const k = r.dataset.dev, v = r.type === "checkbox" ? r.checked : Number(r.value);
+      if (k === "slow")
+        slow = v;
+      else
+        game.config[k] = v;
+      if (k === "roundTime")
+        game.time = v;
+      if (r.nextElementSibling)
+        r.nextElementSibling.textContent = v;
+    };
+}
+function dispatch(action) {
+  activity();
+  audio.unlock();
+  audio.sfx("menu");
+  if (action === "solo" || action === "couch") {
+    net.leave();
+    startGame(action === "couch" ? 2 : 1);
+  } else if (action === "resume")
+    resume();
+  else if (action === "pause") {
+    if (mode === "pause")
+      showMenu("pause");
+    else
+      pause();
+  } else if (action === "title") {
+    if (net.hub)
+      return;
+    net.leave();
+    title();
+  } else if (action === "back") {
+    if (returnScreen === "pause")
+      showMenu("pause");
+    else
+      showMenu("title");
+  } else if (["settings", "credits", "how"].includes(action)) {
+    if (screen === "title" || screen === "pause")
+      returnScreen = screen;
+    showMenu(action);
+  } else if (action === "glyph") {
+    glyph = glyph === "ps" ? "xbox" : "ps";
+    saveSettings();
+    showMenu("settings");
+  } else if (action === "fullscreen") {
+    if (!document.fullscreenElement)
+      document.documentElement.requestFullscreen?.().catch(() => {});
+    else
+      document.exitFullscreen?.();
+  } else if (action === "dev") {
+    if (net.role === "guest") {
+      notify("THE HOST HAS THE KEYS", "Developer tuning is on the host’s desk.", 3);
+      return;
+    }
+    showMenu("dev");
+  } else if (action === "skip") {
+    game.capture();
+    resume();
+  } else if (action === "refill") {
+    game.time = game.config.roundTime;
+    game.lives = 4;
+    notify("BACK IN BUSINESS", "Clock & badges restored.", 2);
+  } else if (action === "defaults") {
+    game.config = { ...DEFAULTS };
+    slow = 1;
+    showMenu("dev");
+  } else if (action === "online")
+    showMenu("online");
+  else if (action === "join")
+    showMenu("join");
+  else if (action === "host") {
+    net.host();
+    showMenu("room");
+  } else if (action === "connect") {
+    const code = $("joinCode").value.trim().toUpperCase();
+    if (code.length === 6) {
+      net.join(code);
+      showMenu("room");
+    } else {
+      $("netStatus").textContent = "Six characters, officer. Check the dispatch slip.";
+    }
+  } else if (action === "leaveRoom") {
+    net.leave();
+    showMenu("online");
+  } else if (action === "startOnline")
+    net.start({ count: net.players.length });
+  else if (action === "again") {
+    if (net.active && net.role === "host")
+      net.start({ count: net.players.length });
+    else if (net.role === "guest") {
+      showMenu("room");
+    } else
+      startGame(game.count || 1);
+  }
+}
+function promptName(which) {
+  if (lastDevice === "gamepad") {
+    const ps = { jump: "✕", duck: "○", act: "□", pause: "Options" }, xb = { jump: "A", duck: "B", act: "X", pause: "Menu" };
+    return (glyph === "ps" ? ps : xb)[which];
+  }
+  return { jump: "Space", duck: "S / ↓", act: "E", pause: "Esc" }[which];
+}
+function updatePrompts() {
+  $("prompts").innerHTML = `<span><b>${lastDevice === "gamepad" ? "L / D-PAD" : "A D / ← →"}</b> Move</span><span><b>${promptName("jump")}</b> Jump</span><span><b>${promptName("duck")}</b> Duck</span><span><b>${promptName("act")}</b> Cuff / lift</span>`;
+}
+function activity(device) {
+  lastInput = performance.now();
+  if (device) {
+    touchMode = device === "touch";
+    document.body.classList.toggle("touch", touchMode);
+  }
+  if (device && device !== lastDevice) {
+    lastDevice = device;
+    updatePrompts();
+  }
+  if (attract) {
+    attract = false;
+    title();
+    return true;
+  }
+  return false;
+}
+function notify(title, sub = "", duration = 3) {
+  toastText = title;
+  $("toast").innerHTML = `<b>${escapeHTML(title)}</b>${sub ? `<span>${escapeHTML(sub)}</span>` : ""}`;
+  toastUntil = realTime + duration;
+  $("toast").style.opacity = "1";
+}
+function startGame(count = 1, demo = false) {
+  ended = false;
+  lastResult = "";
+  lastCase = 0;
+  attract = demo;
+  mode = demo ? "attract" : "play";
+  screen = "";
+  game.start(count, demo);
+  view = game.snapshot();
+  $("menu").style.display = "none";
+  $("hud").style.display = "flex";
+  $("footer").style.display = "flex";
+  $("caseRibbon").style.display = "none";
+  $("demo").style.display = demo ? "block" : "none";
+  syncModels();
+  if (!demo) {
+    audio.unlock();
+    audio.speak("cop");
+    notify("CASE 01 · THE EARLY BIRD", MOTTO[0], 4.5);
+  } else
+    toastUntil = 0;
+}
+function title() {
+  mode = "title";
+  attract = false;
+  ended = false;
+  screen = "title";
+  $("demo").style.display = "none";
+  $("hud").style.display = "none";
+  $("footer").style.display = "none";
+  $("context").style.display = "none";
+  $("touchAction").style.display = "none";
+  $("caseRibbon").style.display = "block";
+  $("toast").style.opacity = 0;
+  game.start(1, true);
+  view = game.snapshot();
+  syncModels();
+  showMenu("title");
+  lastInput = performance.now();
+}
+function pause() {
+  if (mode !== "play" || ended)
+    return;
+  if (net.role === "guest")
+    net.sendInput({ x: 0, jump: false, duck: false, up: false, down: false, action: false });
+  mode = "pause";
+  returnScreen = "pause";
+  showMenu("pause");
+}
+function resume() {
+  mode = "play";
+  screen = "";
+  $("menu").style.display = "none";
+  audio.unlock();
+}
+function gameEvent(name, data) {
+  if (attract)
+    return;
+  audio.sfx(name === "escalator" ? "elevator" : name === "case" ? "menu" : name);
+  if (name === "hit") {
+    if (settings.shake)
+      shake = 0.22;
+    audio.speak("lose");
+    notify(data === "plane" ? "MIND YOUR HELMET!" : "MIND THE MERCHANDISE!", data === "plane" ? "One badge down. Duck under the biplanes." : `−${game.config.hitPenalty} seconds. Jump the low obstacles.`, 1.8);
+  }
+  if (name === "catch") {
+    audio.speak("catch");
+    notify("NABBED!", `Case ${data} closed · time bonus banked`, 2.6);
+    burst(game.thief.x, game.thief.y + 1);
+  }
+  if (name === "case" && data > 1)
+    notify(`CASE 0${data} · ${CASES[data - 1]}`, MOTTO[data - 1], 4.5);
+  if (name === "retry")
+    notify("ANOTHER BADGE, ANOTHER CHANCE", data === "escape" ? "The crook reached the roof. Take the lift to cut him off." : "Time ran out. Find a shortcut through the centre lift.", 4);
+  if (name === "coin")
+    burst(0, 0, true);
+}
+function applyNetworkState(state) {
+  const before = view;
+  view = state;
+  if (!before)
+    return;
+  const events = state.events || {}, old = before.events || {};
+  if (events.hits > old.hits) {
+    audio.sfx("hit");
+    if (settings.shake)
+      shake = 0.22;
+  }
+  if (events.loot > old.loot)
+    audio.sfx("coin");
+  if (events.jumps > old.jumps)
+    audio.sfx("jump");
+  if (events.lifts > old.lifts)
+    audio.sfx("elevator");
+  if (events.catches > old.catches) {
+    audio.sfx("catch");
+    audio.speak("catch");
+    notify("NABBED!", `Case ${Math.min(state.case, 3)} closed · time bonus banked`, 2.6);
+    burst(state.thief.x, state.thief.y + 1);
+  }
+  if (state.case !== before.case && state.case <= 3)
+    notify(`CASE 0${state.case} · ${CASES[state.case - 1]}`, MOTTO[state.case - 1], 4.5);
+}
+function syncModels() {
+  if (!view)
+    return;
+  const count = view.players.length;
+  if (actors.length !== count) {
+    actors.forEach((a) => {
+      scene.remove(a.group);
+    });
+    actors = [];
+    for (let i = 0;i < count; i++) {
+      const a = art.character("cop", [3703212, 9004198, 4953195, 13935685][i]);
+      scene.add(a.group);
+      actors.push(a);
+    }
+  }
+  if (hazardArt.length !== view.hazards.length || lastCase !== view.case) {
+    hazardArt.forEach((a) => scene.remove(a));
+    lootArt.forEach((a) => scene.remove(a));
+    const stageKey = Math.min(view.case, 3);
+    if (!stageArt.has(stageKey))
+      stageArt.set(stageKey, { hazards: view.hazards.map((h) => art.hazard(h.kind)), loot: view.loot.map((l, i) => art.loot(i % 2 ? "case" : "bag")) });
+    const cached = stageArt.get(stageKey);
+    hazardArt = cached.hazards;
+    lootArt = cached.loot;
+    hazardArt.forEach((m) => scene.add(m));
+    lootArt.forEach((m) => scene.add(m));
+    lastCase = view.case;
+  }
+  $("markers").innerHTML = actors.map((_, i) => `<div class="marker p${i + 1}" id="mark${i}">${count === 1 ? "YOU" : "P" + (i + 1)}</div>`).join("") + '<div class="marker thief" id="markThief">SID SLIP</div>';
+}
+function burst(x, y, small = false) {
+  if (small)
+    return;
+  for (let i = 0;i < 35; i++) {
+    const m = new THREE2.Mesh(new THREE2.BoxGeometry(0.12, 0.12, 0.04), new THREE2.MeshBasicMaterial({ color: [15711573, 16773327, 14244678, 8699043][i % 4] }));
+    m.position.set(x, y, 1.6);
+    scene.add(m);
+    particles.push({ m, vx: (Math.random() - 0.5) * 8, vy: 3 + Math.random() * 5, vz: (Math.random() - 0.5) * 2, life: 1.6 + Math.random() });
+  }
+}
+function keyboardInput(second = false) {
+  if (second)
+    return { x: (keys.has("ArrowRight") ? 1 : 0) - (keys.has("ArrowLeft") ? 1 : 0), up: keys.has("ArrowUp"), down: keys.has("ArrowDown"), jump: keys.has("ControlRight") || keys.has("Numpad0"), act: keys.has("Enter") };
+  const couch = game?.count === 2 && !net.active;
+  return { x: (keys.has("KeyD") || !couch && keys.has("ArrowRight") ? 1 : 0) - (keys.has("KeyA") || !couch && keys.has("ArrowLeft") ? 1 : 0), up: keys.has("KeyW") || !couch && keys.has("ArrowUp"), down: keys.has("KeyS") || !couch && keys.has("ArrowDown"), jump: keys.has("Space"), act: keys.has("KeyE") };
+}
+function padInput(p) {
+  return { x: Math.abs(p.axes[0] || 0) > 0.17 ? p.axes[0] : (p.buttons[15]?.pressed ? 1 : 0) - (p.buttons[14]?.pressed ? 1 : 0), up: p.buttons[12]?.pressed || p.axes[1] < -0.5, down: p.buttons[1]?.pressed || p.buttons[13]?.pressed || p.axes[1] > 0.55, jump: !!p.buttons[0]?.pressed, act: !!p.buttons[2]?.pressed };
+}
+function merge(a, b) {
+  return { x: Math.abs(b.x || 0) > Math.abs(a.x || 0) ? b.x : a.x, up: a.up || b.up, down: a.down || b.down, jump: a.jump || b.jump, act: a.act || b.act };
+}
+function pollPads() {
+  let pads = [];
+  try {
+    pads = Array.from(navigator.getGamepads?.() || []).filter(Boolean);
+  } catch {}
+  for (const p of pads) {
+    const current = p.buttons.map((b) => b.pressed), prev = padPrev[p.index] || [];
+    const any = current.some(Boolean) || p.axes.some((x) => Math.abs(x) > 0.25);
+    if (any) {
+      if (activity("gamepad")) {
+        padPrev[p.index] = current;
+        continue;
+      }
+      audio.unlock();
+    }
+    const press = (n) => current[n] && !prev[n];
+    if (mode === "play" && press(9) && !current[8])
+      pause();
+    else if (mode === "pause" || mode === "title" || mode === "result") {
+      if (press(9) && mode === "pause" && !current[8])
+        resume();
+      else if (press(1)) {
+        dispatch(screen === "pause" ? "resume" : screen === "result" ? "title" : "back");
+      } else {
+        const focused = document.activeElement;
+        if ((press(0) || press(2)) && focused?.tagName === "BUTTON")
+          focused.click();
+        if (screen === "credits") {
+          const scroll = $("menu").querySelector(".credits-scroll");
+          if (scroll) {
+            const axis = Math.abs(p.axes[3] || 0) > 0.2 ? p.axes[3] : Math.abs(p.axes[1] || 0) > 0.2 ? p.axes[1] : 0;
+            scroll.scrollTop += axis * 12 + (press(13) ? 100 : 0) - (press(12) ? 100 : 0);
+          }
+        } else if (press(12) || press(13))
+          focusMenu(press(13) ? 1 : -1);
+        if (press(14) || press(15)) {
+          if (focused?.type === "range") {
+            focused.value = Number(focused.value) + (press(15) ? 1 : -1) * Number(focused.step || 1);
+            focused.dispatchEvent(new Event("input"));
+          } else
+            focusMenu(press(15) ? 1 : -1);
+        }
+      }
+    }
+    padPrev[p.index] = current;
+  }
+  return pads;
+}
+function focusMenu(delta) {
+  const all = [...$("menu").querySelectorAll("button,input")].filter((x) => !x.disabled);
+  let i = all.indexOf(document.activeElement);
+  i = (i + delta + all.length) % all.length;
+  all[i]?.focus({ preventScroll: true });
+  all[i]?.scrollIntoView({ block: "nearest" });
+  audio.sfx("menu");
+}
+function getInputs(pads) {
+  const input = [];
+  const localSeat = net.active ? net.me : 0;
+  for (let i = 0;i < game.players.length; i++) {
+    if (net.active && i !== localSeat) {
+      input[i] = remoteInputs[i] || {};
+      continue;
+    }
+    const localIndex = net.active ? 0 : i;
+    input[i] = keyboardInput(localIndex === 1);
+    if (pads[localIndex])
+      input[i] = merge(input[i], padInput(pads[localIndex]));
+    if (localIndex === 0 && touchMode) {
+      input[i] = merge(input[i], touch);
+      if (settings.touchAssist) {
+        input[i] = assistInput(input[i], i);
+      }
+    }
+  }
+  return input;
+}
+function serializeInput(input) {
+  return { ...input, action: input.act, duck: input.down };
+}
+function parseInput(input) {
+  return { ...input, act: input.action || input.act, down: input.duck || input.down };
+}
+function attractInput(i) {
+  const p = game.players[i], t = game.thief, base = game.ai(i);
+  if (game.case === 2 && game.events.lifts === 0) {
+    return { ...base, x: Math.abs(p.x) < 0.2 ? 0 : Math.sign(-p.x), up: true, act: false };
+  }
+  if (game.case === 3) {
+    const target = p.floor < 3 ? [-14, 14, -14][p.floor] : t.floor < 3 ? 0 : t.x;
+    return { ...base, x: Math.abs(target - p.x) < 0.3 ? 0 : Math.sign(target - p.x), up: false, act: t.floor === 3 && Math.abs(p.x - t.x) < 2 };
+  }
+  return base;
+}
+function assistInput(input, seat) {
+  const p = view?.players[seat];
+  if (!p)
+    return input;
+  let jump = false, down = false;
+  for (const h of view.hazards) {
+    if (h.floor !== p.floor)
+      continue;
+    const ahead = (h.x - p.x) * Math.sign(input.x || p.dir);
+    if (ahead > 0 && ahead < 2.8) {
+      if (h.kind === "plane" || h.kind === "ball" && h.y - p.floor * FLOOR > 1.1)
+        down = true;
+      else
+        jump = true;
+    }
+  }
+  return { ...input, jump: input.jump || jump, down: input.down || down, act: input.act || p.floor === view.thief.floor && Math.abs(p.x - view.thief.x) < 1.9 };
+}
+function updateGame(dt, pads) {
+  if (net.hub && !net.started)
+    return;
+  if (mode === "attract") {
+    if (["lost", "won"].includes(game.state)) {
+      startGame(1, true);
+    }
+    game.step(dt, game.players.map((_, i) => attractInput(i)));
+    view = game.snapshot();
+    if (view.players.length !== actors.length || view.hazards.length !== hazardArt.length || view.case !== lastCase)
+      syncModels();
+    return;
+  }
+  if (mode !== "play")
+    return;
+  if (net.role === "guest") {
+    const inp = keyboardInput();
+    let merged = pads[0] ? merge(inp, padInput(pads[0])) : inp;
+    if (touchMode) {
+      merged = merge(merged, touch);
+      if (settings.touchAssist)
+        merged = assistInput(merged, net.me);
+    }
+    net.sendInput(serializeInput(merged));
+    return;
+  }
+  const inputs = getInputs(pads);
+  game.step(dt, inputs);
+  view = game.snapshot();
+  if (net.active) {
+    net.sendState(view);
+  }
+  if (view.players.length !== actors.length || view.hazards.length !== hazardArt.length || view.case !== lastCase)
+    syncModels();
+}
+function updateView(dt) {
+  if (!view)
+    return;
+  const showing = mode !== "title";
+  for (let i = 0;i < actors.length; i++) {
+    const a = actors[i], p = view.players[i];
+    if (!p)
+      continue;
+    const actorZ = p.ride?.type === "escalator" ? 3.05 : 1.1 + i * 0.035;
+    a.group.position.set(p.x, p.y, actorZ);
+    a.group.rotation.y = p.dir < 0 ? -0.65 : 0.65;
+    a.group.visible = p.invuln > 0 && showing ? Math.sin(realTime * 22) > 0.1 : true;
+    a.setAction(p.ride ? "idle" : p.anim);
+    a.update(dt);
+    projectLabel($("mark" + i), p.x, p.y + 2.35, actorZ, showing);
+  }
+  const t = view.thief;
+  crook.group.position.set(t.x, t.y, t.ride ? 3.05 : 1.1);
+  crook.group.rotation.y = t.dir < 0 ? -0.65 : 0.65;
+  crook.setAction(view.state === "caught" ? "idle" : "run");
+  crook.update(dt);
+  projectLabel($("markThief"), t.x, t.y + 2.25, t.ride ? 3.05 : 1.1, showing);
+  view.hazards.forEach((h, i) => {
+    const a = hazardArt[i];
+    if (!a)
+      return;
+    const offset2 = h.kind === "ball" ? 0.32 : h.kind === "plane" ? 0 : h.kind === "radio" ? 0.53 : 0.42;
+    a.position.set(h.x, h.y - offset2, 1.1);
+    a.rotation.y = h.dir < 0 ? 0 : Math.PI;
+    if (h.kind === "ball" && a.userData.spin)
+      a.userData.spin.rotation.z = realTime * 1.4;
+  });
+  view.loot.forEach((l, i) => {
+    const a = lootArt[i];
+    if (a) {
+      a.visible = !l.taken;
+      a.position.set(l.x, l.floor * FLOOR + 0.07 + Math.sin(realTime * 2 + i) * 0.06, 1);
+      a.rotation.y = Math.sin(realTime + i) * 0.2;
+    }
+  });
+  store.elevator.position.y = view.lift.y;
+  store.doors.forEach((d, i) => d.position.x = (i ? 1 : -1) * (view.lift.open ? 1.05 : 0.44));
+  art.tick(dt, realTime);
+  for (let i = particles.length - 1;i >= 0; i--) {
+    const p = particles[i];
+    p.life -= dt;
+    p.vy -= 12 * dt;
+    p.m.position.x += p.vx * dt;
+    p.m.position.y += p.vy * dt;
+    p.m.position.z += p.vz * dt;
+    p.m.rotation.z += dt * 5;
+    if (p.life < 0) {
+      scene.remove(p.m);
+      p.m.geometry.dispose();
+      p.m.material.dispose();
+      particles.splice(i, 1);
+    }
+  }
+  if (mode === "play" || mode === "pause" || mode === "attract") {
+    drawHUD();
+    if (view.state === "won" || view.state === "lost") {
+      if (mode === "attract")
+        return;
+      if (!ended) {
+        ended = true;
+        audio.sfx(view.state === "won" ? "win" : "lose");
+        audio.speak(view.state === "won" ? "win" : "lose");
+        if (view.score > best) {
+          best = view.score;
+          try {
+            localStorage.setItem("kcc-best", best);
+          } catch {}
+        }
+        if (net.role === "host")
+          net.finish(view.score, view.state === "won");
+        mode = "result";
+        showMenu("result");
+      }
+    }
+  }
+  $("toast").style.opacity = realTime < toastUntil ? "1" : "0";
+  shake = Math.max(0, shake - dt);
+  $("flash").style.opacity = shake > 0 ? String(shake * 0.35) : "0";
+  const offset = shake && settings.shake ? Math.sin(realTime * 110) * shake * 0.4 : 0;
+  camera.position.x = offset;
+  camera.lookAt(offset, 7.15, 0);
+}
+var projectV = new THREE2.Vector3;
+function projectLabel(el, x, y, z, visible) {
+  if (!el)
+    return;
+  el.style.display = visible ? "block" : "none";
+  if (!visible)
+    return;
+  projectV.set(x, y, z).project(camera);
+  el.style.left = (projectV.x * 0.5 + 0.5) * innerWidth + "px";
+  el.style.top = (-projectV.y * 0.5 + 0.5) * innerHeight + "px";
+}
+function drawHUD() {
+  $("caseNumber").textContent = `CASE ${String(Math.min(view.case, 3)).padStart(2, "0")} / 03`;
+  $("caseName").textContent = CASES[Math.min(view.case, 3) - 1];
+  $("lives").textContent = "◆ ".repeat(Math.max(0, view.lives));
+  $("clock").textContent = String(Math.ceil(Math.max(0, view.time))).padStart(2, "0");
+  $("timerBox").classList.toggle("urgent", view.time < 20);
+  $("score").textContent = String(view.score).padStart(6, "0");
+  $("best").textContent = best;
+  const ctx = $("map").getContext("2d"), w = 480, h = 140;
+  ctx.clearRect(0, 0, w, h);
+  ctx.lineWidth = 2;
+  for (let f = 0;f < 4; f++) {
+    const y = 117 - f * 31;
+    ctx.strokeStyle = "#79a38b66";
+    ctx.beginPath();
+    ctx.moveTo(20, y);
+    ctx.lineTo(w - 20, y);
+    ctx.stroke();
+    ctx.fillStyle = "#9bbfac";
+    ctx.font = "13px sans-serif";
+    ctx.fillText(f === 3 ? "R" : f + 1, 2, y + 5);
+    if (f < 3) {
+      const x = f % 2 ? 435 : 40;
+      ctx.strokeStyle = "#e5bd62";
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + (f % 2 ? -18 : 18), y - 24);
+      ctx.stroke();
+    }
+  }
+  const xx = (x) => 24 + (x + 17) / 34 * (w - 48), yy = (y) => 116 - y / FLOOR * 31;
+  ctx.fillStyle = "#95c6a8";
+  ctx.fillRect(xx(0) - 7, yy(view.lift.y) - 8, 14, 10);
+  ctx.fillStyle = "#ed7353";
+  ctx.beginPath();
+  ctx.arc(xx(view.thief.x), yy(view.thief.y) - 5, 6, 0, Math.PI * 2);
+  ctx.fill();
+  view.players.forEach((p2, i) => {
+    ctx.fillStyle = ["#60b1d4", "#bd8fe1", "#72c898", "#f7ce65"][i];
+    ctx.beginPath();
+    ctx.arc(xx(p2.x), yy(p2.y) - 5, 5, 0, Math.PI * 2);
+    ctx.fill();
+  });
+  const p = view.players[net.active && net.me >= 0 ? net.me : 0];
+  let context = "";
+  if (p && !p.ride && mode === "play") {
+    if (p.floor === view.thief.floor && Math.abs(p.x - view.thief.x) < 2.4 && Math.abs(p.y - view.thief.y) < 1.8)
+      context = `${promptName("act")} · CUFF THE CROOK!`;
+    else if (Math.abs(p.x) < 1.4 && p.floor < 3) {
+      context = view.lift.open && view.lift.floor === p.floor ? `${promptName("act")} / ↑ · RIDE THE LIFT` : "THE LIFT IS COMING · WATCH THE MONITOR";
+    }
+  }
+  $("context").textContent = context;
+  $("context").style.display = context && !touchMode ? "block" : "none";
+  $("touchAction").style.display = touchMode && context.includes("CUFF") ? "block" : "none";
+}
+function resize() {
+  if (!renderer)
+    return;
+  renderer.setSize(innerWidth, innerHeight);
+  const aspect = innerWidth / innerHeight;
+  let width = 39.5, height = width / aspect;
+  if (height < 22)
+    height = 22, width = height * aspect;
+  if (aspect < 1)
+    width = 39.5, height = width / aspect;
+  camera.left = -width / 2;
+  camera.right = width / 2;
+  camera.top = height / 2;
+  camera.bottom = -height / 2;
+  camera.updateProjectionMatrix();
+}
+function frame(time) {
+  requestAnimationFrame(frame);
+  if (!loaded)
+    return;
+  const dt = Math.min((time - framePrev) / 1000 || 0.016, 0.06);
+  framePrev = time;
+  realTime += dt;
+  const pads = pollPads();
+  if (mode === "title" && screen === "title" && performance.now() - lastInput > 1e4 && !net.active) {
+    startGame(1, true);
+  }
+  accumulator += dt * slow;
+  let steps = 0;
+  while (accumulator >= 1 / 60 && steps < 5) {
+    updateGame(1 / 60, pads);
+    accumulator -= 1 / 60;
+    steps++;
+  }
+  if (steps > 0) {
+    touch.jump = false;
+    touch.act = false;
+  }
+  updateView(dt);
+  audio.update(dt, { playing: (mode === "play" || mode === "attract") && !ended, heat: 1 - (view?.time || 90) / game.config.roundTime, stage: Math.min(view?.case || 1, 3) });
+  renderer.render(scene, camera);
+}
+window.addEventListener("keydown", (e) => {
+  if (activity("keyboard")) {
+    e.preventDefault();
+    return;
+  }
+  if (e.target?.tagName === "INPUT" && (e.target.type === "text" || e.target.type === "range" && ["ArrowLeft", "ArrowRight"].includes(e.code)))
+    return;
+  audio.unlock();
+  keys.add(e.code);
+  if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.code))
+    e.preventDefault();
+  if (e.repeat)
+    return;
+  if (e.code === "Escape" || e.code === "KeyP") {
+    if (mode === "play")
+      pause();
+    else if (mode === "pause" && screen === "pause")
+      resume();
+    else if (["title", "pause", "result"].includes(mode))
+      dispatch(screen === "result" ? "title" : "back");
+  } else if (mode === "title" || mode === "pause" || mode === "result") {
+    if (e.code === "ArrowDown" || e.code === "ArrowUp") {
+      if (screen === "credits") {
+        $("menu").querySelector(".credits-scroll").scrollTop += e.code === "ArrowDown" ? 100 : -100;
+      } else
+        focusMenu(e.code === "ArrowDown" ? 1 : -1);
+    }
+    if ((e.code === "Enter" || e.code === "Space") && document.activeElement?.tagName === "BUTTON") {
+      e.preventDefault();
+      document.activeElement.click();
+    }
+  }
+});
+window.addEventListener("keyup", (e) => keys.delete(e.code));
+window.addEventListener("blur", () => {
+  keys.clear();
+  touch.x = 0;
+  if (mode === "play" && !net.active)
+    pause();
+});
+window.addEventListener("resize", resize);
+window.addEventListener("pointermove", (e) => {
+  if (e.pointerType === "mouse") {
+    activity("keyboard");
+    pointer.x = e.clientX / innerWidth * 2 - 1;
+    pointer.y = -(e.clientY / innerHeight) * 2 + 1;
+  }
+  if (touch.id === e.pointerId) {
+    touch.x = clamp((e.clientX - touch.origin) / 55, -1, 1);
+    touch.up = e.clientY < touch.startY - 55;
+    touch.down = e.clientY > touch.startY + 55;
+  }
+});
+window.addEventListener("pointerdown", (e) => {
+  const wasAttract = activity(e.pointerType === "touch" ? "touch" : "keyboard");
+  audio.unlock();
+  if (wasAttract) {
+    e.preventDefault();
+    return;
+  }
+  if (e.pointerType === "touch") {
+    touchMode = true;
+    if (e.target.closest("button,input,.panel,.title-card"))
+      return;
+    if (mode === "play") {
+      if (e.clientX < innerWidth * 0.55) {
+        touch.id = e.pointerId;
+        touch.origin = e.clientX;
+        touch.startY = e.clientY;
+        $("stick").style.cssText = `display:block;left:${e.clientX - 41}px;top:${e.clientY - 41}px`;
+        e.target.setPointerCapture?.(e.pointerId);
+      } else
+        touch.jump = true;
+    }
+  }
+});
+window.addEventListener("pointerup", (e) => {
+  if (e.pointerId === touch.id) {
+    touch.id = null;
+    touch.x = 0;
+    touch.down = false;
+    touch.up = false;
+    $("stick").style.display = "none";
+  }
+});
+window.addEventListener("pointercancel", () => {
+  touch.id = null;
+  touch.x = 0;
+  touch.down = false;
+  touch.up = false;
+  $("stick").style.display = "none";
+});
+$("pauseButton").onclick = () => {
+  activity();
+  audio.unlock();
+  pause();
+};
+$("touchAction").onpointerdown = (e) => {
+  e.stopPropagation();
+  touch.act = true;
+};
+async function boot() {
+  try {
+    $("loadStatus").textContent = "Polishing the badges · loading WebGPU & physics";
+    await RAPIER.init();
+    game = new ChaseGame(RAPIER, gameEvent);
+    renderer = new THREE2.WebGPURenderer({ canvas: $("scene"), antialias: true, alpha: false });
+    renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+    await renderer.init();
+    renderer.setClearColor(1194811);
+    renderer.toneMapping = THREE2.NeutralToneMapping;
+    renderer.toneMappingExposure = 1;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE2.PCFSoftShadowMap;
+    scene = new THREE2.Scene;
+    scene.background = new THREE2.Color(1194811);
+    camera = new THREE2.OrthographicCamera(-20, 20, 11, -11, 0.1, 150);
+    camera.position.set(0, 19.8, 46);
+    camera.lookAt(0, 7.15, 0);
+    scene.add(new THREE2.AmbientLight(16773072, 0.78));
+    const key = new THREE2.DirectionalLight(16773074, 1.6);
+    key.position.set(-15, 30, 25);
+    key.castShadow = true;
+    key.shadow.mapSize.set(2048, 2048);
+    key.shadow.camera.left = -24;
+    key.shadow.camera.right = 24;
+    key.shadow.camera.top = 24;
+    key.shadow.camera.bottom = -24;
+    key.shadow.bias = -0.001;
+    scene.add(key);
+    scene.add(new THREE2.DirectionalLight(8764872, 0.35));
+    art = createArt();
+    store = art.store(scene);
+    crook = art.character("thief");
+    scene.add(crook.group);
+    net = createNetwork({ onStatus(info) {
+      onlineInfo = info;
+      if (["room", "join"].includes(screen)) {
+        const s = $("netStatus");
+        if (s)
+          s.textContent = info.status;
+        const r = $("roster");
+        if (r)
+          r.textContent = `${info.players.length} / 4 officers ready`;
+        const c = document.querySelector(".room-code");
+        if (c)
+          c.textContent = info.code || "······";
+      }
+    }, onInput(input, seat) {
+      remoteInputs[seat] = parseInput(input);
+    }, onState(state) {
+      if (mode === "title" || mode === "pause" && net.hub) {
+        mode = "play";
+        $("menu").style.display = "none";
+      }
+      applyNetworkState(state);
+      if (view.players.length !== actors.length || view.hazards.length !== hazardArt.length || view.case !== lastCase)
+        syncModels();
+    }, onStart(info) {
+      remoteInputs = {};
+      startGame(info.players?.length || info.count || net.players.length || 1);
+    }, onFinish(result) {
+      if (view) {
+        view.state = result.won ? "won" : "lost";
+        view.score = result.score ?? view.score;
+      }
+    }, onEnd() {
+      ended = true;
+      mode = "hubend";
+      keys.clear();
+      audio.mute(true);
+      $("menu").style.display = "none";
+      $("context").style.display = "none";
+    }, onTimeUp() {
+      if (net.role === "host") {
+        game.state = "lost";
+        view = game.snapshot();
+        net.finish(game.score, false);
+      }
+    }, onDisconnect() {
+      if (mode === "play") {
+        mode = "pause";
+        returnScreen = "pause";
+        notify("DISPATCH LOST THE CONNECTION", "The patrol room has closed.", 5);
+        showMenu("pause");
+      }
+    }, onLeave(info) {
+      remoteInputs[info.seat || info.id] = {};
+    } });
+    resize();
+    title();
+    if (navigator.maxTouchPoints > 0 && matchMedia("(pointer:coarse)").matches) {
+      touchMode = true;
+      document.body.classList.add("touch");
+    }
+    loaded = true;
+    $("loading").style.opacity = "0";
+    setTimeout(() => $("loading").style.display = "none", 550);
+    if (globalThis.AIHub?.active) {
+      mode = "hubwait";
+      showMenu("hubwait");
+      await net.initHub();
+    }
+    window.__game = { get state() {
+      return { ...view, mode, screen, attract, dev, renderer: renderer.backend?.isWebGPUBackend ? "WebGPU" : "WebGL2 fallback", audio: audio.inspect(), network: { role: net.role, players: net.players, me: net.me, hub: net.hub } };
+    }, get game() {
+      return game;
+    }, start: (n = 1) => startGame(n), input: (i, v) => remoteInputs[i] = v, step: (n = 1, inputs = []) => {
+      for (let i = 0;i < n; i++)
+        game.step(1 / 60, inputs);
+      view = game.snapshot();
+      syncModels();
+    }, teleport: (i, x, f) => {
+      game.teleport(i, x, f);
+      view = game.snapshot();
+    }, capture: () => game.capture(), pause, resume, showMenu, net, audio, art, actors: () => actors, probeAudio: () => AudioDirector.renderProbe(), setInputDevice: (d) => {
+      lastDevice = d;
+      updatePrompts();
+    }, version: { three: THREE2.REVISION, rapier: RAPIER.version() } };
+    requestAnimationFrame(frame);
+  } catch (error) {
+    console.error(error);
+    $("loadStatus").textContent = "The doors are stuck: " + error.message + ". Check your connection and use a browser with WebGPU or WebGL 2.";
+    $("loading").querySelector("h1").textContent = "A moment, officer.";
+    if (globalThis.AIHub?.active)
+      AIHub.fail(error.message);
+  }
+}
+boot();
+
+</script></body></html>

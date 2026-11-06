@@ -1,0 +1,10 @@
+import {build} from 'esbuild';
+import {readFile,writeFile} from 'node:fs/promises';
+const basename='Pit-Perfect-Pitfall-gpt-6.1-sol-ultra-20261105-221447';
+const result=await build({entryPoints:['main.js'],bundle:true,format:'esm',write:false,target:'es2022',external:['three','three/webgpu','three/tsl','@dimforge/rapier3d-compat'],minify:false,legalComments:'none'});
+const shell=await readFile('shell.html','utf8');
+const session=await readFile('hub/session.js','utf8');
+const html=shell.replace('<!-- HUB_SESSION -->',`<script>\n${session}\n</script>`).replace('/* GAME_CODE */',()=>result.outputFiles[0].text.replace(/<\/script/gi,'<\\/script'));
+await writeFile(`../${basename}.html`,html);
+const credits=JSON.parse(await readFile('credits.json','utf8'));await writeFile('../exit-interview.json',JSON.stringify(credits,null,2)+'\n');
+console.log(`Built ${basename}.html (${Math.round(Buffer.byteLength(html)/1024)} KiB)`);

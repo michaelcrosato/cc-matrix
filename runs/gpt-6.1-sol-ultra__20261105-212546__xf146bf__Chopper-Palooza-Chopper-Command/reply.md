@@ -1,0 +1,11 @@
+[**Play Chopper Palooza**](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-212546__xf146bf/work/Chopper-Palooza-Chopper-Command-gpt-6.1-sol-ultra-20261105-212546.html) — complete single-file game, about 2.9 MiB. Solo play works offline.
+
+[Exit interview JSON](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-ultra__20261105-212546__xf146bf/work/exit-interview.json) contains all requested answers, also included in-game under About.
+
+**Source Information:** Chopper Command (1982); date 2026-11-05 21:25:46; plan none. Arcade convoy-defense shooter with side-scrolling 2.5D camera. Three.js r180/WebGPU, Rapier 0.19.3, Gamepad API, Web Audio, PeerJS 1.5.4 and AI Hub client 1.4.0. Procedural cel/ink art; native AnimationMixer clips; synthesized music, effects and gibberish voices. Music defaults to 10%. Includes local and online two-player co-op. No game research; only integration references and dependencies retrieved. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, ultra. Usage: added on import.
+
+**Testing Feedback:** **112/112 checks passed**, including full campaigns with and without invincibility, controller/touch input, audio, standalone co-op and lossy AI Hub sessions. Testing caught five issues, one critical; all fixed. The full campaign test helped most. The initial blank WebGPU screenshot helped least; WebGL fallback captures enabled visual review. Physical-controller, real iOS and cross-device NAT behavior remain unknown.
+
+**Engine Feedback:** Native animation and procedural scene building worked well. Headless WebGPU capture required the WebGL fallback. I built the campaign, radar, input navigation and network simulation; synchronization was hardest. Engine modifications: none. A unified input and replay layer would help.
+
+**Prompt Feedback:** The source and controller requirements gave a clear direction. The research restriction alongside mandatory online documentation needed interpretation. The hardest requirement was polished multiplayer in one HTML file. I would clarify campaign length and whether local co-op is mandatory.
