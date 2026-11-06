@@ -457,6 +457,40 @@ test('stages: a plan branches into builds and each build into content passes, ea
   assert.match(csv, /plan:opus-max > build:sol-max > content:sonnet-medium/);
 });
 
+test('stages: a stage that doesn\'t name TASK.md gets none, not even its parent\'s: it has PLAN.md and its own text, and its exit interview still counts', (t) => {
+  const stages = [{ id: 'plan', text: 'Plan TASK.md. FAKE:plan', game: false },
+    { id: 'build', text: 'Build PLAN.md. Source: {{source}}. File: {{package}} Save exit-interview.json beside the game.', goal: 'all STAGE.md asks for is in this folder' },
+    { id: 'content', text: 'Polish the game as TASK.md says.' }];
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }], package: [{ id: 'p', text: 'G-{{model}}-{{effort}}.html' }] }, agents: stageAgents, stages, template: 'SOURCE: {{source}}\nFile: {{package}}\n' });
+  t.after(() => cleanup(sb));
+  const r = runner(sb, ['--stage', 'plan=opus:max', '--stage', 'build=opus:xhigh,sol:max', '--stage', 'content=sonnet:medium']);
+  assert.equal(r.status, 0, r.all);
+  const all = allResults(sb), of = (stage) => all.filter((x) => x.stage === stage);
+  assert.ok(all.every((x) => x.status === 'ok'), r.all);
+  assert.ok(fs.existsSync(path.join(sb.out, of('plan')[0].id, 'work', 'TASK.md')), 'the plan names it, so it gets it');
+  for (const b of of('build')) {
+    const work = path.join(sb.out, b.id, 'work'), text = `Build PLAN.md. Source: Zelda. File: G-${b.model}-${b.effort}.html Save exit-interview.json beside the game.\n`;
+    assert.ok(!fs.existsSync(path.join(work, 'TASK.md')), `${b.id}: no TASK.md, not even the plan's`);
+    assert.ok(fs.existsSync(path.join(work, 'PLAN.md')), b.id);
+    assert.equal(fs.readFileSync(path.join(sb.out, b.id, 'prompt.md'), 'utf8'), text);
+    assert.equal(b.exitInterview, 'ok', b.id);
+    if (b.provider === 'claude') assert.equal(fs.readFileSync(path.join(work, 'STAGE.md'), 'utf8'), text);
+    else assert.equal(callFor(sb, b.id).stdin, text);
+  }
+  // A stage after it that names TASK.md gets its own, filled for its model.
+  const [c] = of('content').filter((x) => all.find((p) => p.id === x.parentId).provider === 'claude');
+  assert.match(fs.readFileSync(path.join(sb.out, c.id, 'work', 'TASK.md'), 'utf8'), /File: G-claude-sonnet-5-5-medium\.html/);
+});
+
+test('stages: a preview leaves out TASK.md when the first run\'s stage doesn\'t name it', (t) => {
+  const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }] }, agents: stageAgents.slice(0, 1), stages: [{ id: 'build', text: 'Build {{source}} from PLAN.md.', goal: 'it is built' }], template: 'SOURCE: {{source}}\n' });
+  t.after(() => cleanup(sb));
+  const dry = JSON.parse(runner(sb, ['--stage', 'build=opus:medium', '--dry-run', '--json']).stdout.trim());
+  assert.equal(dry.error, null);
+  assert.match(dry.sample, /--- STAGE\.md ---\nBuild Zelda from PLAN\.md\./);
+  assert.doesNotMatch(dry.sample, /TASK\.md/);
+});
+
 test('stages: a later stage continues from runs of an earlier batch; a failed parent leaves its runs out; node_modules isn\'t copied', (t) => {
   const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }, { id: 'bad', text: 'FAKE:fail=plan broke' }] }, agents: stageAgents, stages: STAGES,
     template: 'SOURCE: {{source}}\n' });

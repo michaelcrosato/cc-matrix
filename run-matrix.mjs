@@ -268,6 +268,9 @@ function fillText(text, run, when, what, extra = {}) {
 // the step this run continues from: {{parentModel}} {{parentEffort}} {{parentStage}} {{parentAgent}}, and {{chain}},
 // every step so far (empty in the first stage). Worked out once per attempt (runOne resets them).
 const modelOf = (agentId) => cfg.agents.find((a) => a.id === agentId)?.model ?? agentId;
+// A stage's runs get TASK.md only if its text or goal names it. So a build told to work from PLAN.md has PLAN.md and its
+// own instructions, which can carry any of the prompt's sections as placeholders, and no brief to weigh against them.
+const namesBrief = ({ text, goal }) => /\bTASK\.md\b/.test(`${text}\n${goal}`);
 function stageTexts(run) {
   if (run.texts) return run.texts;
   const p = run.parentInfo ?? {}, extra = { parentModel: p.model ?? '', parentEffort: p.effort ?? '', parentStage: p.stage ?? '', parentAgent: p.agent ?? '',
@@ -492,8 +495,9 @@ const isDone = (run) => {
 // branch every run of the stage before (1 plan × 2 builders × 2 content passes = 4 games); a stage without picks
 // contributes the runs it already has, so a later stage can continue from plans made in an earlier batch. A run
 // waits for its parent: it starts once the parent has finished OK, and is left out if the parent fails (see pool).
-// It starts from a copy of the parent's work folder, gets TASK.md (the prompt, filled for this run) and is sent its
-// stage's text, or with a stage goal on a CLI that has /goal, a /goal that points at STAGE.md (see prepareStage).
+// It starts from a copy of the parent's work folder, gets TASK.md (the prompt, filled for this run) if its stage names
+// it (namesBrief), and is sent its stage's text, or with a stage goal on a CLI that has /goal, a /goal that points at
+// STAGE.md (see prepareStage).
 // Each stage's models ("agent:effort"): the config's with --stages (the stage tabs), a --stage replacing a stage's.
 const STAGES = cfg.stages ?? [];
 const stagePicks = new Map();
@@ -729,8 +733,8 @@ if (args.dryRun) {
   try {
     const r0 = queue[0];
     if (r0?.stage) { // a later stage's parent may not exist yet: its text names the model picked for it
-      const brief = buildPrompt(r0), g = goalMessage(r0), t = stageTexts(r0).text;
-      sample = `Message sent:\n${g ?? t}\n\n${g ? `--- STAGE.md ---\n${t}\n` : ''}--- TASK.md ---\n${brief}`;
+      const g = goalMessage(r0), t = stageTexts(r0).text;
+      sample = `Message sent:\n${g ?? t}\n\n${g ? `--- STAGE.md ---\n${t}\n` : ''}${namesBrief(stageTexts(r0)) ? `--- TASK.md ---\n${buildPrompt(r0)}` : ''}`.trimEnd() + '\n';
     } else if (r0) { sample = buildPrompt(r0); const g = goalMessage(r0); if (g) sample = `Message sent:\n${g}\n\n--- TASK.md ---\n${sample}`; }
   } catch (e) { error = e.message; }
   const byStage = {};
@@ -1256,8 +1260,8 @@ function prepare(run, dir, prompt) {
 
 // A stage run's folder: its parent's work folder copied (without node_modules and .git: they can be big, and are
 // made again; nor its exit interview, so the one this run leaves is its own; and its games as their agent left
-// them, without the record stampGame put in, which is about the run before), TASK.md (the prompt, filled for this
-// run, so its file name and Source Information name this model),
+// them, without the record stampGame put in, which is about the run before), TASK.md if its stage names it (the prompt,
+// filled for this run, so its file name and Source Information name this model; otherwise not even the parent's),
 // prompt.md beside work/ (the stage's text, what it's sent) and, with a /goal, that text as STAGE.md and the
 // command as goal.md. Returns the parent's root .html files (name -> hash), so measureOutput can tell the game
 // this run made from the ones it was given.
@@ -1273,8 +1277,9 @@ function prepareStage(run, dir, brief, parent) {
     } catch {}
   }
   fs.mkdirSync(work, { recursive: true });
-  fs.writeFileSync(path.join(work, 'TASK.md'), brief);
-  const { text } = stageTexts(run), goal = goalMessage(run);
+  const texts = stageTexts(run), { text } = texts, goal = goalMessage(run);
+  if (namesBrief(texts)) fs.writeFileSync(path.join(work, 'TASK.md'), brief);
+  else fs.rmSync(path.join(work, 'TASK.md'), { force: true }); // the parent's
   fs.writeFileSync(path.join(dir, 'prompt.md'), text);
   if (goal) { fs.writeFileSync(path.join(work, 'STAGE.md'), text); fs.writeFileSync(path.join(dir, 'goal.md'), goal + '\n'); }
   else fs.rmSync(path.join(work, 'STAGE.md'), { force: true }); // the parent's
@@ -1306,11 +1311,11 @@ function plannerInterview(home) {
   return { plannerInterview: 'ok', plannerAnswers: list.map((x) => ({ question: x.question.trim(), answer: x.answer.trim() })) };
 }
 // exitInterview: whether a run left the exit interview its prompt asks for (exit-interview.json beside the game, one
-// JSON object; see run-record.mjs): ok, invalid or missing. Left out when its prompt (TASK.md for a stage run) doesn't
-// ask for one, and for a plan, which makes no game.
+// JSON object; see run-record.mjs): ok, invalid or missing. Left out when its prompt (for a stage run TASK.md, or its
+// stage's text if it has none) doesn't ask for one, and for a plan, which makes no game.
 function exitInterview(home, stage, expectsGame) {
   const read = (f) => { try { return fs.readFileSync(path.join(home, f), 'utf8'); } catch { return null; } };
-  if (expectsGame === false || !(read(stage ? 'work/TASK.md' : 'prompt.md') ?? '').includes(EXIT_FILE)) return {};
+  if (expectsGame === false || !((stage ? read('work/TASK.md') : null) ?? read('prompt.md') ?? '').includes(EXIT_FILE)) return {};
   const text = read(path.join('work', EXIT_FILE));
   return { exitInterview: text == null ? 'missing' : parseInterview(text).error ? 'invalid' : 'ok' };
 }
@@ -1386,7 +1391,7 @@ function checkGame(home, entry) {
     let out = '';
     const child = spawn(isWin ? 'python' : 'python3', [CHECK_GAME, path.join(outDir, entry), path.join(home, 'game-check.png'), String(secs)],
       { stdio: ['ignore', 'pipe', 'ignore'] });
-    const timer = setTimeout(() => child.kill('SIGKILL'), (secs + 90) * 1000);
+    const timer = setTimeout(() => child.kill('SIGKILL'), (secs + 240) * 1000);
     child.stdout.on('data', (d) => { out += d; });
     child.on('error', () => { clearTimeout(timer); resolve({ skipped: 'Python 3 is not installed' }); });
     child.on('close', () => {
@@ -1969,8 +1974,9 @@ function stampGame(dir, r, combo) {
     for (const t of tries) { let x = null; try { x = t(); } catch {} if (typeof x === 'string' && (!hash || textHash(x) === hash)) { text = x; break; } }
     sections[d] = { id: r[d], text, hash };
   }
-  // The prompt as filled for this run: prompt.md, or for a stage run TASK.md (its prompt.md is the stage's text).
-  const promptMd = read('prompt.md'), text = (r.stage ? read('work/TASK.md') : promptMd) ?? was.text ?? null;
+  // The prompt as filled for this run: prompt.md, or for a stage run TASK.md (its prompt.md is the stage's text), or
+  // that text when its stage gave it no TASK.md.
+  const promptMd = read('prompt.md'), text = (r.stage ? read('work/TASK.md') : promptMd) ?? was.text ?? promptMd ?? null;
   const prompt = { version: r.promptVersion ?? null, number: version?.v ?? was.number ?? null,
     savedAt: version?.at ?? was.savedAt ?? null, firstRanAt: version?.ranAt ?? was.firstRanAt ?? null,
     template: textHash(template ?? '') === r.promptVersion ? template : version?.text ?? was.template ?? null,

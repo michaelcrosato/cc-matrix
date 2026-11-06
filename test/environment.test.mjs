@@ -10,6 +10,12 @@ import { fileURLToPath } from 'node:url';
 
 const SCRIPT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'check-environment.mjs');
 
+test('agents are told the WebGPU flags the game check takes its screenshots with', () => {
+  const list = (file, name) => JSON.parse(fs.readFileSync(path.join(path.dirname(SCRIPT), file), 'utf8').match(new RegExp(`^${name} = (\\[.*\\])$`, 'm'))[1].replace(/'/g, '"'));
+  assert.deepEqual(list('check-environment.mjs', 'WEBGPU'), list('check-game.py', 'WEBGPU_PICTURE'));
+  assert.ok(list('check-game.py', 'WEBGPU_PICTURE').includes('--use-vulkan=swiftshader'), 'without it a WebGPU game\'s picture comes out blank');
+});
+
 test('check-environment.mjs writes this computer\'s file, dated, and keeps what was written by hand', (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'matrix-env-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));

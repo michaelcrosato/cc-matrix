@@ -230,8 +230,8 @@
     ],
     "multiplayer": [
       {
-        "id": "mp-hub",
-        "text": "Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub as well as for the game on its own.",
+        "id": "mp-hub-v2",
+        "text": "Follow https://github.com/michaelcrosato/ai-hub/tree/main/lib/hub for multiplayer integration into ai-hub. Apart from parallel and ghost modes, every multiplayer feature is also part of the game when it's played on its own, whether through single player in ai-hub or as the self-contained html file outside ai-hub. This should take almost no extra code.",
         "olderRuns": true
       }
     ],
@@ -293,16 +293,16 @@
   },
   "stages": [
     {
-      "id": "plan-v2",
+      "id": "plan-v4",
       "models": [
         "claude-opus-5-5:max"
       ],
-      "text": "You are the game director. TASK.md is the CEO's brief. Write PLAN.md: the plan other AI agents will build the game from, without you. Leave the game's title to them: each builder picks its own, as TASK.md says. Leave out TASK.md's file and folder names too, since each builder's TASK.md has its own; write paths relative to the dev folder.\n\nThen review the prompt you were given (TASK.md and these instructions): save planner-exit-interview.json in this folder, a JSON list of {\"question\", \"answer\"}, one for each of these questions:\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt? ",
-      "goal": "PLAN.md covers everything TASK.md asks for.",
+      "text": "You are the game director. TASK.md is the CEO's brief. Write PLAN.md: the plan other AI agents will build the game from, without you. PLAN.md is all they get from this stage, not TASK.md, so put everything they need in it, with its links. They get their own instructions for the game's title, file and folder names, this computer and the exit interview, so leave those to them and write paths relative to the dev folder.\n\nThen review the prompt you were given (TASK.md and these instructions): save planner-exit-interview.json in this folder, a JSON list of {\"question\", \"answer\"}, one for each of these questions:\n- What did you like most about this prompt?\n- What was confusing?\n- What was the hardest thing to do?\n- What would you change in this prompt?",
+      "goal": "PLAN.md covers everything TASK.md asks for, apart from the game's title, file and folder names, this computer and the exit interview.",
       "game": false
     },
     {
-      "id": "build-v2",
+      "id": "build-v3",
       "models": [
         "claude-opus-5-5:xhigh",
         "claude-opus-5-5:medium",
@@ -313,8 +313,8 @@
         "gpt-6.1-sol:max",
         "gpt-6.1-terra:max"
       ],
-      "text": "Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md, which is filled in for you. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted. ",
-      "goal": "Everything in PLAN.md that can be done on this computer is done, and everything TASK.md asks you to hand in is in this folder."
+      "text": "Build the game PLAN.md describes. PLAN.md and these instructions are all you get. Keep your progress in PROGRESS.md, so you can pick up where you were after your context is compacted.\n\nSOURCE: {{source}}\n\nGame Title: {{gameTitle}}\n\nPackage: {{package}}\n\nWorking Environment and deliverable:\n{{workspace}}\n\nTesting: {{testing}}\n\nEffort: {{spend}}\n\n## This computer\n{{machine}}\n\n## Source Information\n{{sourceInfo}}\n\nTesting Feedback\n\n{{testingFeedback}}\n\nEngine Feedback\n\n{{engineFeedback}}\n\nPrompt Feedback\n\n{{promptFeedback}}",
+      "goal": "Everything in PLAN.md that can be done on this computer is done, and everything STAGE.md asks you to hand in is in this folder."
     }
   ],
   "extraArgs": {

@@ -278,7 +278,7 @@ export function rebuild(paths, outDir, { log = () => {} } = {}) {
     writeIf(path.join(dir, 'prompt.md'), p.stageText ?? p.text);
     writeIf(path.join(dir, 'goal.md'), p.goal ? p.goal + '\n' : null);
     writeIf(path.join(dir, 'reply.md'), iv.reply || null);
-    if (p.goal || rec.result?.stage) writeIf(path.join(work, 'TASK.md'), p.text);
+    if ((p.goal || rec.result?.stage) && p.text !== p.stageText) writeIf(path.join(work, 'TASK.md'), p.text);
     if (p.goal && rec.result?.stage) writeIf(path.join(work, 'STAGE.md'), p.stageText);
     if (iv.file) writeIf(path.join(work, iv.file), iv.answers ? JSON.stringify(iv.answers, null, 2) + '\n' : iv.text);
     // The prompt's version, numbered as it was where the run was made unless that number is taken here already.
