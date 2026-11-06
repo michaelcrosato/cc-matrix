@@ -1370,7 +1370,9 @@ test('a run gets a temp folder of its own, deleted once it has finished, and wha
   assert.match(r.leftovers[0], /setInterval/);
 });
 
-const hasPlaywright = spawnSync('python3', ['-c', 'import playwright'], { stdio: 'ignore' }).status === 0;
+const pipxPlaywright = path.join(os.homedir(), '.local/share/pipx/venvs/playwright/bin/python');
+const hasPlaywright = spawnSync(process.env.PLAYWRIGHT_PYTHON || (fs.existsSync(pipxPlaywright) ? pipxPlaywright : 'python3'),
+  ['-c', 'import playwright'], { stdio: 'ignore' }).status === 0;
 test('gameCheck: each game loaded headless once, its errors in result.json (not the record); --check-games fills in older runs',
   { skip: !hasPlaywright && 'Playwright for Python is not installed' }, (t) => {
   const sb = sandbox({ dimensions: { testing: [{ id: 'ok', text: 'variant A' }, { id: 'bad', text: 'FAKE:throwgame' }] },

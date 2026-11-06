@@ -1382,11 +1382,15 @@ function stopLeftovers(dir, since) {
 // in the run's folder. { skipped } when Playwright for Python or its Chromium isn't installed. Kept out of the game's
 // record (see PRIVATE in run-record.mjs): it's about this computer's look at the game, not the run.
 const CHECK_GAME = fileURLToPath(new URL('./check-game.py', import.meta.url));
+// The Python that runs it: PLAYWRIGHT_PYTHON when set, else a pipx install of Playwright's own venv (where the system
+// python3 can't import it), else the system one.
+const PIPX_PLAYWRIGHT = path.join(os.homedir(), '.local', 'share', 'pipx', 'venvs', 'playwright', isWin ? 'Scripts' : 'bin', isWin ? 'python.exe' : 'python');
+const PLAYWRIGHT_PY = process.env.PLAYWRIGHT_PYTHON || (fs.existsSync(PIPX_PLAYWRIGHT) ? PIPX_PLAYWRIGHT : isWin ? 'python' : 'python3');
 function checkGame(home, entry) {
   const secs = +(cfg.gameCheck?.seconds ?? 60) || 60;
   return new Promise((resolve) => {
     let out = '';
-    const child = spawn(isWin ? 'python' : 'python3', [CHECK_GAME, path.join(outDir, entry), path.join(home, 'game-check.png'), String(secs)],
+    const child = spawn(PLAYWRIGHT_PY, [CHECK_GAME, path.join(outDir, entry), path.join(home, 'game-check.png'), String(secs)],
       { stdio: ['ignore', 'pipe', 'ignore'] });
     const timer = setTimeout(() => child.kill('SIGKILL'), (secs + 90) * 1000);
     child.stdout.on('data', (d) => { out += d; });

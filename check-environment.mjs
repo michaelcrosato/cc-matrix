@@ -124,8 +124,26 @@ with sync_playwright() as p:
 shutil.rmtree(home, ignore_errors=True)
 print(json.dumps(out))
 `;
-// Python's Playwright, by version (the browsers it has downloaded are for that version), or null.
-const pyPlaywright = versionOf(run('python3', ['-c', 'import importlib.metadata as m; print(m.version("playwright"))']));
+// Python's Playwright, by version (the browsers it has downloaded are for that version), or null; and the Python that
+// has it (pyBin). The system python3 first, else the one in the `playwright` command's own environment (pipx installs
+// it there, and the system Python can't import it). Only a check that succeeds counts: a failing one prints a traceback
+// whose paths have numbers in them (/usr/lib/python3.14/…), which once passed for Playwright 3.14.
+const playwrightIn = (bin) => {
+  const r = spawnSync(bin, ['-c', 'import importlib.metadata as m; print(m.version("playwright"))'], { encoding: 'utf8', timeout: 8000 });
+  return !r.error && r.status === 0 ? versionOf(r.stdout.trim()) : null;
+};
+const venvPython = () => {
+  const cli = ((process.env.PATH || '').split(path.delimiter).map((d) => d && path.join(d, 'playwright')).find((f) => f && fs.existsSync(f)));
+  if (!cli) return null;
+  let real; try { real = fs.realpathSync(cli); } catch { return null; }
+  const beside = path.join(path.dirname(real), 'python');
+  if (fs.existsSync(beside)) return beside;
+  const shebang = read(real)?.match(/^#!\s*(\S*python[\d.]*)\s*$/m)?.[1];
+  return shebang && fs.existsSync(shebang) ? shebang : null;
+};
+let pyBin = 'python3', pyPlaywright = playwrightIn(pyBin);
+if (!pyPlaywright) { const v = venvPython(); const ver = v && playwrightIn(v); if (ver) { pyBin = v; pyPlaywright = ver; } }
+const ownPython = pyBin !== 'python3';
 function browsers() {
   const py = pyPlaywright;
   const cache = process.env.PLAYWRIGHT_BROWSERS_PATH || path.join(os.homedir(), '.cache', 'ms-playwright');
@@ -135,7 +153,7 @@ function browsers() {
   if (!py && !builds.length) return ['Playwright: not installed.'];
   const names = { chromium: 'Chromium', firefox: 'Firefox', webkit: 'WebKit' };
   let probe = null;
-  if (!args.quick && py) { try { probe = JSON.parse(run('python3', ['-c', PROBE], 120000, true)?.trim().split('\n').pop() || 'null'); } catch {} }
+  if (!args.quick && py) { try { probe = JSON.parse(run(pyBin, ['-c', PROBE], 120000, true)?.trim().split('\n').pop() || 'null'); } catch {} }
   const found = builds.map((b) => b.split('-')[0]);
   const each = Object.keys(names).filter((n) => found.includes(n) || probe?.[n]).map((n) => {
     const x = probe?.[n];
@@ -148,6 +166,7 @@ function browsers() {
   const gpu = probe && Object.values(probe).some((x) => x.webgpu);
   lines.push(`Playwright ${py ? `${py} for Python (from playwright.sync_api import sync_playwright)` : '(no Python package)'}, with ${each.join(', ') || 'no browsers'} already downloaded`
     + `${probe && !gpu ? '; no WebGPU' : ''}. Phone and tablet device profiles are built in.`);
+  if (ownPython) lines.push(`Python's Playwright is in its own environment, not the system Python (python3 can't import it): run scripts that drive a browser with \`${pyBin} script.py\`, or \`uv run --with playwright==${py} python script.py\`.`);
   if (gpu) lines.push('WebGPU only works on a secure page: file:// or http://127.0.0.1. A WebGPU canvas can come out blank in a headless screenshot, so check the game\'s state instead.');
   lines.push(nodeGlobal ? 'Playwright for Node is installed globally.'
     : `For Node, \`npm install playwright${py ? `@${py}` : ''}\` in your folder${py ? ' uses the browsers already downloaded; another version downloads its own' : ''}.`);
@@ -183,7 +202,7 @@ No script can check these, so they're written by hand. Test with the stand-ins; 
 - Other agents run here at the same time. Keep one or two browsers open at once, and close them when you're done.
 - Keep every file you make inside your own folder, not ${os.tmpdir()} or a parent folder: ${os.tmpdir()} is shared.
 - The browsers are already downloaded: don't run \`playwright install\` or \`playwright install-deps\`.
-${onPath('uv') ? `- The system Python has ${pyPlaywright ? 'Playwright and nothing else' : 'no packages'}. For one (Pillow, numpy …), use uv: \`uv run --with pillow python script.py\``
+${onPath('uv') ? `- The system Python has ${pyPlaywright && !ownPython ? 'Playwright and nothing else' : 'no packages'}. For one (Pillow, numpy …), use uv: \`uv run --with pillow python script.py\``
   + `${pyPlaywright ? `, adding \`--with playwright==${pyPlaywright}\` when the script drives a browser too (a newer Playwright can't find the browsers here)` : ''}.\n` : ''}`;
 
 const when = new Date(), pad = (n) => String(n).padStart(2, '0');
