@@ -1,0 +1,89 @@
+{
+  "kind": "texture",
+  "description": "Seeded, periodic texture generators: colour, height, roughness and emissive per texel, with their parameters, size, tile, density and look.",
+  "fields": [
+    {
+      "key": "description",
+      "type": "string",
+      "required": true,
+      "description": "What it draws, in plain sentences."
+    },
+    {
+      "key": "params",
+      "type": "object",
+      "description": "Its parameters as schema fields (engine/core/schema.ts: type, default, description, minimum…), each with a default: what a material's map may set.",
+      "default": {}
+    },
+    {
+      "key": "size",
+      "type": "array",
+      "description": "The size it bakes at, [width, height] in texels: a whole number of tiles.",
+      "default": [
+        64,
+        64
+      ],
+      "items": {
+        "key": "[]",
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 4096
+      }
+    },
+    {
+      "key": "tile",
+      "type": "function",
+      "description": "The smallest size its pattern repeats at, given the parameters: (params) => [width, height].",
+      "default": "function"
+    },
+    {
+      "key": "density",
+      "type": "number",
+      "minimum": 0.001,
+      "unit": "texels/m",
+      "description": "Texels per metre on geometry whose UVs are in metres (WP 2.4's builders): the map repeats every size / density metres.",
+      "default": 16
+    },
+    {
+      "key": "look",
+      "type": "string",
+      "enum": [
+        "pixel",
+        "smooth"
+      ],
+      "description": "How it is magnified: 'pixel' keeps texels crisp (nearest), 'smooth' blends them (linear).",
+      "default": "pixel"
+    },
+    {
+      "key": "create",
+      "type": "function",
+      "required": true,
+      "description": "The generator: ({ params, seed, width, height }) => (x, y, texel) => void, writing texel (x, y): color (sRGB bytes), height, roughness, emissive."
+    }
+  ],
+  "ids": [
+    "texture:asphalt",
+    "texture:brick",
+    "texture:carpet",
+    "texture:checker",
+    "texture:concrete",
+    "texture:crate",
+    "texture:dirt",
+    "texture:flagstone",
+    "texture:glass",
+    "texture:grass",
+    "texture:hallFloor",
+    "texture:metal",
+    "texture:moss",
+    "texture:planks",
+    "texture:plaster",
+    "texture:runes",
+    "texture:shingles",
+    "texture:siding",
+    "texture:staves",
+    "texture:stone",
+    "texture:tiles",
+    "texture:wallpaper",
+    "texture:water",
+    "texture:wood"
+  ]
+}

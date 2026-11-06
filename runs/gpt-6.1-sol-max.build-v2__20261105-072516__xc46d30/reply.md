@@ -1,0 +1,1 @@
+The hub test found that its `aihub` URL flag was reaching the engine’s strict settings parser. That’s fixed. Two simultaneous renderers then hit memory pressure, so I’m limiting Contract Run’s asset registration to its used loadouts while keeping the full story catalogue.

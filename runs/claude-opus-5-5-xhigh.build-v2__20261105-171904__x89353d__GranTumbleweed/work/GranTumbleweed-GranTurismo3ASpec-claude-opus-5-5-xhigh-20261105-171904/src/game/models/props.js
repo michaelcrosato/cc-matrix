@@ -1,0 +1,6 @@
+// Props of the game's own, as ModelDefs. `cd src && node check.mjs --sheets game/models/sheets.js` draws them.
+import { model } from '../../pixel-engine.js';
+export const coneDef = model({ id: 'prop-cone', about: 'A traffic cone for the licence tests', tags: ['track', 'prop'], palette: { cone: 'orange', band: 'white', base: 'night' }, parts: [{ box: [0.5, 0.06, 0.5], at: [0, 0.03, 0], c: 'base' }, { cone: [0.36, 0.86, 0.36], at: [0, 0.49, 0], c: 'cone' }, { cyl: [0.2, 0.1, 0.2], at: [0, 0.46, 0], c: 'band' }], collider: 'none' });
+export const haybaleDef = model({ id: 'prop-haybale', about: 'A round hay bale beside the road', tags: ['track', 'prop', 'farm'], palette: { hay: 'sand', band: 'orange' }, parts: [{ cyl: [1.5, 1.2, 1.5], at: [0, 0.6, 0], c: 'hay' }, { cyl: [1.54, 0.2, 1.54], at: [0, 0.6, 0], c: 'band' }], collider: 'none' });
+export const containerDef = model({ id: 'prop-container', about: 'A stack of two shipping containers on the quay', tags: ['track', 'prop', 'harbour'], palette: { low: 'teal', high: 'red', ribs: 'slate' }, parts: [{ box: [2.5, 2.6, 12], at: [0, 1.3, 0], c: 'low' }, { box: [2.5, 2.6, 12], at: [0, 3.9, 0], c: 'high' }, { box: [2.56, 0.2, 12.06], at: [0, 2.6, 0], c: 'ribs' }], collider: 'none' });
+export const PROP_DEFS = { cone: coneDef, haybale: haybaleDef, container: containerDef };

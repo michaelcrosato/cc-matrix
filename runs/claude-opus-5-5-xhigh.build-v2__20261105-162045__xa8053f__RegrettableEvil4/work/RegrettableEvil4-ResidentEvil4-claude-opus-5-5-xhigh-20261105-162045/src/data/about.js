@@ -1,0 +1,82 @@
+// One source for the About screen and exit-interview.json.
+import { TITLE, TAGLINE } from '../config.js';
+
+export const SOURCE_INFORMATION = {
+  date: '2026-11-05 16:20:45',
+  source: 'Resident Evil 4',
+  plan: 'PLAN.md',
+  genre: 'Third-person action-horror shooter with crowd control, resource management and an escort',
+  perspective: 'Over-the-shoulder third person with a laser sight; letterboxed cinematic cutscenes and QTEs; one on-rails shooting finale',
+  tech: 'Pixel Engine 0.46.0 (riftlight kit: three.js r186 WebGPU, Rapier), JavaScript modules bundled by esbuild 0.28.2 into one HTML file',
+  artDirection: 'The engine\'s native pixel pipeline at 480x270 with the 16-colour palette and toon materials, a soft vignette, puppets on the hero rig, new models for characters, props and weapons, library models for generic props',
+  animation: 'The engine\'s clip system (compileClips, gaitClip, ClipDef data) on one AnimationMixer per character, masked upper and lower layers, new authored clips, SpringChain tails, Squash, ragdolls',
+  audio: 'All code: about 100 synthesised SoundDef effects, 10 original Song compositions on the engine sequencer, Animalese-style gibberish voices per speaker. Music at 10% by default',
+  online: 'AI Hub Session Protocol v1 shared-world co-op (Night Shift, 1-4 players); on its own: BroadcastChannel parties on one computer and WebRTC invite codes between two',
+  testing: 'Headless Node suites, scripted whole-game playthroughs by a bot on several seeds, V8 coverage across Node and the browser, browser tests with Playwright (gamepad stub, phone profile, audio levels, hub harness), screenshots for moods and layouts. No subagents to review',
+  research: 'The plan, the kit docs and the hub README; no other research',
+  environment: 'Claude Code CLI (headless); Linux',
+  model: 'Anthropic, claude-opus-5-5, reasoning effort xhigh',
+  usage: 'added on import',
+};
+
+export const TESTING_FEEDBACK = [
+  'About 120 real defects, by my own count from my notes rather than a tracker. Most came from scripts playing the game; about 15 came from looking at screenshots, including several the scripts had passed, such as Max slowly tipping over while holding aim; about 65 came at the end, from reading the plan against the code, from a coverage run that listed every function no test had reached, and from playing the whole game on hundreds of seeds and reading the runs that went wrong. Many of those last ones were faults in the bot rather than the game.',
+  'About 23. The worst: touching any enemy froze Max completely, so she could not even walk away. It sat in the game until the very end, because the deaths it caused looked like plain difficulty. Also the final boss running at twice her written pace, because she was stepped twice a frame; a cannery door that soft-locked after a checkpoint, checkpoints that leaked later progress, a nave checkpoint that made the flood unbeatable, Esc and Tab opening and closing a screen in one frame, a crypt hiding place that could never be left, a boss hatch that waited for ever once every gun was empty, a boss that could sag facing a wall with its hatch locks out of reach, a Net-Wife whose harmless hits cancelled every reload, a yard gate left open and a causeway with no edge, so Max could walk out of the map, a shut gate that ended chapter 1 for anyone who walked up to it, and the same gate, once open, ending it for anyone who walked past along the wall, a dodge roll that could carry Max through a rack into a walled-off pen, a gap between two props that held her fast, dying after the crypt replaying the whole crypt, three crashes (attract mode, enemies aiming at the Dame, an enemy in mid-swing as Max reached a dry room), and on a phone held upright a cut-off required message and no way back out of Settings.',
+  'The whole-game bot playthrough: Standard difficulty, no cheats, from the first quay to the credits. It prints ammo, money and deaths per area, and reading single runs that went wrong is what found the soft-locks and the boss bugs. Last full measure, on 400 seeds with damage at its plain 1.0, on code that still had one extra help item since removed: every seed reached the credits, the longest stand-still was 45 s against the plan limit of 60, with 0 to 6 deaths, usually 2; 394 stayed inside the plan limit of 3 deaths a chapter and 6 reached 4; all 1200 chapter ends met my own balance rules. The final file itself has only been played by the bot on the four seeds in the test command. The owner ended the build and took the death limit and the balance rules out of the requirements: balance is for human players to judge with the dev sliders. No human has played the game.',
+  'As a target, the count of seeds over the death limit. Reading the runs behind it found real bugs, but once those ran out the count moved between 2 and 6 of 400 by chance, and I spent hours chasing it. Of the checks that ran every time, the one for a browser without WebGPU: it passed the first time and never failed again.',
+];
+export const ENGINE_FEEDBACK = [
+  'The same game runs headless in Node, deterministically, with no browser, and models and clips are plain data. That made a whole-game bot test cheap: about a minute of real time.',
+  'Yes, several times. renderSheet expects hero mesh names, so it failed on my puppets. Ragdoll bodies block the character controller until they are tagged and disabled. loadGame does not finish in manual mode in a page, so tests leave manual mode for transitions. I changed a flag on glowMaterial before reading that it is shared per colour. And the render camera is ctx.camera.camera, not engine.camera. The costly one: CharacterController stops moving altogether, in every direction, once a kinematic body touches it, and takes no filter, so every enemy that touched Max glued her to the spot. I found it very late and wrapped its query to ignore them. A headless run also only repeats at the same step size: stepping 6 frames at a time and 30 at a time played different games on one seed, and I did not find out why.',
+  'The Area layer on top of the engine: text maps into levels, a beat language with checkpoint resume, and crowd AI on one Intent layer that humans, the bot and network players all fill. Everything else stands on it.',
+  'There is no over-the-shoulder rig and no masked upper and lower body animation, and this genre lives on both, so I replaced the rig step and built the channels myself. NavGrid also holds one flow target at a time, so anything chasing a different target has to recompute it.',
+  'none',
+  'Built-in masked animation layers, with a shoulder camera as a stock rig beside the existing ones. And a filter option on CharacterController, or a note in the docs on what a touching kinematic body does to it.',
+];
+export const PROMPT_FEEDBACK = [
+  'The plan was specific and had a voice: a whole world, a script, real numbers and a tone to hit. And the section on this computer said exactly what to use in place of a pad, a phone and a second player.',
+  'TASK.md still asks me to pick the genre and perspective, while PLAN.md had already decided them. I followed the plan. The plan also sets a limit of 3 deaths a chapter for a bot, which measures the bot as much as the game, and it does not say whether that means one run or every run. The completion check read it as every run, which no finite test can show, and I kept tuning against it when I should have said so sooner. The owner settled it by ending the build.',
+  'Balance without a human. Every system worked long before the game was fair, and a bot only tells you what kills a bot. I can show the game can be finished. I can not say how it feels to play. The other hard thing was knowing when to stop: the same measure that found the worst bugs went on asking for more after they were gone.',
+  'Name what to cut first if a run gets long, give balance targets for a kind of player, not only for a script, and say when a balance number is something to report and when it is a condition for being done.',
+];
+
+export const TESTING_QUESTIONS = ['HOW MANY ISSUES DID TESTING CATCH?', 'HOW MANY WERE CRITICAL OR GAME BREAKING?', 'MOST HELPFUL TEST?', 'LEAST HELPFUL TEST?'];
+export const ENGINE_QUESTIONS = ['WHAT DID YOU LIKE MOST ABOUT THE ENGINE?', 'DID YOU GET STUCK OR GUESS WRONG?', 'MOST IMPORTANT THING YOU BUILT YOURSELF?', 'HARDEST PART ABOUT USING THE ENGINE?', 'WHAT DID YOU CHANGE IN THE ENGINE, AND WHY?', 'ONE THING YOU WOULD CHANGE ABOUT THE ENGINE?'];
+export const PROMPT_QUESTIONS = ['WHAT DID YOU LIKE MOST ABOUT THIS PROMPT?', 'WHAT WAS CONFUSING?', 'HARDEST THING TO DO?', 'WHAT WOULD YOU CHANGE IN THIS PROMPT?'];
+
+export const SOURCE_LABELS = [
+  ['DATE', 'date'], ['SOURCE', 'source'], ['PLAN', 'plan'], ['GENRE', 'genre'], ['PERSPECTIVE', 'perspective'], ['TECH', 'tech'],
+  ['ART DIRECTION', 'artDirection'], ['ANIMATION', 'animation'], ['AUDIO', 'audio'], ['ONLINE', 'online'], ['TESTING', 'testing'],
+  ['RESEARCH', 'research'], ['ENVIRONMENT', 'environment'], ['MODEL', 'model'], ['USAGE', 'usage'],
+];
+
+export const CREDITS = [
+  'PIXEL ENGINE 0.46.0 - RIFTLIGHT KIT - MICHAEL CROSATO. SEE THE KIT LICENCE.',
+  'THREE.JS R186 - THE THREE.JS AUTHORS - MIT LICENCE.',
+  'RAPIER PHYSICS - DIMFORGE - APACHE 2.0 LICENCE.',
+  'AI HUB SESSION CLIENT 1.4.0 - AI HUB PROTOCOL V1.',
+  'ALL ART, MUSIC, SOUND AND WRITING MADE FOR THIS GAME, IN CODE, BY CLAUDE.',
+  'USAGE: ADDED ON IMPORT.',
+];
+
+export function exitInterview() {
+  return {
+    sourceInformation: SOURCE_INFORMATION,
+    testingFeedback: TESTING_FEEDBACK,
+    engineFeedback: ENGINE_FEEDBACK,
+    promptFeedback: PROMPT_FEEDBACK,
+    aiHub: {
+      name: 'Regrettable Evil 4',
+      tagline: 'Someone has to read the small print',
+      description: 'An insurance adjuster goes alone to a storm-beaten island to recover a very rude policyholder. Over-the-shoulder precision shooting, crowd panic, a tight sample case and a merchant in a diving helmet; 1-4 player co-op hold-out.',
+      type: 'Game',
+      genre: 'Horror',
+      source: 'Resident Evil 4',
+      series: 'Resident Evil',
+      players: '1–4',
+      controls: 'Pad: left stick move, right stick look, L2 aim, R2 fire, Cross action, Circle run. Keyboard: WASD, mouse look, right mouse aim, left mouse fire, E action, Shift run.',
+      tags: ['3d', 'third-person', 'horror', 'co-op', 'boss fights', 'pixel art'],
+    },
+  };
+}
+export const TITLE_LINE = `${TITLE}: ${TAGLINE}`;

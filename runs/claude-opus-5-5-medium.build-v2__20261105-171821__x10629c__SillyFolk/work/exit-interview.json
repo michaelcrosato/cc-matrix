@@ -1,0 +1,57 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 17:18:21",
+    "source": "Animal Crossing: City Folk",
+    "plan": "PLAN.md",
+    "genre": "Life sim / social sim",
+    "perspective": "Isometric 3/4 orthographic diorama with 90-degree camera turns, dollhouse cutaway indoors",
+    "tech": "Riftlight Pixel Engine 0.46.0 (three.js r186 on WebGPU), plain JavaScript modules bundled with esbuild 0.28.2 into one HTML file; Kenney Furniture Kit 2.0 pack; AI Hub session client 1.4.0",
+    "artDirection": "The engine's native 3D-as-pixel-art (default look, Sweetie 16 palette). New critters, buildings, nature and items written as model data; Kenney furniture recoloured; own bitmap font and icons",
+    "animation": "The engine's clip format: 45 clips on one shared 7-joint rig, compiled with compileClips and cross-faded on THREE.AnimationMixer, plus Squash and code-driven faces",
+    "audio": "All code, no audio files. Song sequencer music at 10% by default (24 hourly arrangements with rain and snow variants, venue, festival and record tunes), SoundDef effects and ambience, Animalese-style gibberish voices from formant syllables",
+    "online": "AI Hub shared-world round, The Bean Bazaar, 1-4 players. On its own: Visit mode over BroadcastChannel and serverless WebRTC invite codes, with a public STUN server for the internet",
+    "testing": "Headless only: node tests/run.mjs prints failures and a count. Node rule checks, a scripted playthrough, replay and input regression on Engine.headless, Playwright browser suite with stub pad, touch profiles and Web Audio analyser, AI Hub harness in all four scenarios, two-page Visit tests including invite codes and the public STUN server, model sheets. Screenshots for what a script cannot check",
+    "research": "Read the engine kit docs and the AI Hub session README. No other research",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 40 real ones: 18 from the suites and rule checks (neighbours unable to path, neighbours walking on the pond, lost sub-frame key taps, a menu input lock that dropped presses on slow frames, bloom cleared before planting, home rooms not wired, touch notice and tap handling, replay start state, attract starting during a Visit, a Reply Slip with no public address, a guest hello never sent when the data channel opened early, model problems), the rest from looking at screenshots.",
+    "4: an invalid wave name put NaN on the audio master and silenced everything; home interiors crashed when first entered; a ground plane hid all the water in the village; a wrong NavGrid origin left most neighbours unable to find a path, so they barely walked.",
+    "The Web Audio analyser on the master bus. It reported NaN and exposed total silence that no logic test and no screenshot could show. The scripted playthrough came a close second: a late check that a neighbour actually walks to a concert exposed the broken pathfinding.",
+    "The sheet warnings on sign lettering: over a hundred \"rods under 0.06 m\" notes about letters that read fine in the game."
+  ],
+  "engineFeedback": [
+    "Engine.headless: the whole game, UI included, runs in Node at thousands of frames a second, so a playthrough of the year takes seconds. Close behind: models as plain data with checkModel naming the exact part at fault.",
+    "Yes. I guessed 'sawtooth' as a wave name when the engine calls it 'saw'; renderSound returned NaN without complaint. Also MODEL_LIBRARY.get throws rather than returning nothing, some of my ids clashed with the library's, and I missed that NavGrid.fromRows centres the grid on the world origin unless given an origin, so paths quietly came back null.",
+    "The UI layer: a bitmap font with lowercase, a screen stack, focus and hit areas, and prompts that follow the last device. After that, the generator-based script runner that all dialogue and set pieces run on.",
+    "Keeping one scene for town, City and thirty interiors: lights, the Mirror, RenderView, looks and music all had to be switched by hand when the player changes place, since loadGame would have split replays.",
+    "none",
+    "Make an unknown wave name a thrown error, or at least a checkable problem, in renderSound and audio.register. One typo silenced the whole game through the master bus."
+  ],
+  "promptFeedback": [
+    "The verified recipes: the correct browser flags, packaging the engine byte-for-byte in one HTML, the pause rule and the warning about noisy surfaces each saved real time.",
+    "TASK.md lists browser flags that PLAN.md says do not work with this engine. The plan flags the correction, so it cost nothing, but one source would be better. How to write SOURCE in the file name (the colon, the spaces) is also left open.",
+    "Breadth. Every system had to ship and work together with the same voice: nine neighbours, eight venues, four festivals, three contests, a full year, two multiplayer modes, and about 850 lines of writing to keep funny.",
+    "Reduce the floor counts for hand-authored content a little, or state which systems could be simplest. Add a one-line note that the engine has no sawtooth by that name, and a sample of the exit interview filled in."
+  ],
+  "aiHub": {
+    "name": "Silly Folk",
+    "tagline": "One bus ride from the Big City. 8,000 beans from a goose.",
+    "description": "A village life sim where you owe a goose 8,000 beans, your neighbours remember everything, and a singing bus runs to a neon City of salons, auctions and forged art. A sixteen-day year of fishing, digging, festivals and regret.",
+    "type": "Game",
+    "genre": "Life Sim",
+    "source": "Animal Crossing: City Folk",
+    "series": "Animal Crossing",
+    "players": "1–4",
+    "controls": "Move: stick or WASD. Talk, pick up: Cross or E. Use tool: Square or Space. Pockets: Triangle or Tab. Pause: Options or Esc. Mouse clicks things and walks.",
+    "tags": [
+      "pixel art",
+      "3d",
+      "comedy",
+      "exploration",
+      "versus"
+    ]
+  }
+}

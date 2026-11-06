@@ -1,0 +1,222 @@
+/**
+ * @file Props in a running scene (PLAN.md WP 4.6 core proposal, ADR-0008 amendment 5; WP 4.5's props as data):
+ * `spawnProp(w, placement)` stands a prop (engine/world/props: its id, its base and its turn about +Y) in a scene: its
+ * body in the scene's physics world (`propBody`: none for a prop without one, such as the brazier's fire) and an
+ * entity with the component `sceneProp` (the prop's id, its body and its pose: its centre and its turn), so the sim
+ * hashes, captures and restores it and the view draws it as the prop (engine/gfx/stageProps.ts, through the instanced
+ * prop meshes). The system `props.readback` (phase `readback`, after the physics step) copies each body's pose into
+ * its component, as `actors.readback` does an actor's feet.
+ *
+ * Its `options` (WP 13.16, `SpawnPropOptions`): its body's type, its light (the component `propLight`, which the view
+ * reads) and components from the start; a prop with `health` holds its hit points (`propHealth`), and nothing else
+ * gains a component, so earlier hashes hold. `propOfBody(w, body)` is the body-to-entity lookup uses and hits read.
+ *
+ * `hitProp(w, id, from, knock?)` hits a prop from `from` (a swing, a blast): it calls the prop's `hit` hook with the
+ * means to knock it, engine/physics/bodies.ts's `knock` on its body with the caller's strength (`speed`, `up`,
+ * `spin`) under the hook's own; the default hook knocks a dynamic prop away and leaves the others. Shared code calls
+ * the hook and never compares ids. `removeProp(w, id)` removes the entity and its body.
+ *
+ * The component's name is `sceneProp`, as names are global and fixtures/scenes/physics-props declares its own `prop`.
+ * Its `x` and `z` are metres, so the stage places it, and draws it as its prop instead of a stand-in.
+ *
+ * Invariants: everything a prop is in the sim is its component and its body; the readback writes only what the body
+ * holds (its centre and turn), so a prop's component equals its body's pose after every step; the system is added
+ * once per world, on the first spawn of a prop with a body. Ids are asked of the entries, never compared.
+ *
+ * @example
+ * import { defineScene } from './scene';
+ * import { physicsOf } from '../physics/binding';
+ * import { addLevelBodies } from './levelBodies';
+ * defineScene('yard', {
+ *   physics: true,
+ *   setup(w) {
+ *     // addLevelBodies(physicsOf(w), level); for (const placement of levelProps(level)) spawnProp(w, placement);
+ *     spawnProp(w, { prop: 'prop:crate', at: [2, 0, 3], yaw: 0.4 });
+ *   },
+ * });
+ * // after a step: w.get(id).sceneProp is { prop: 'prop:crate', body, x: 2, y: 0.375, z: 3, q: [0, 0.198…, 0, 0.980…] }
+ * // hitProp(w, id, [1, 0, 3], { spin: w.rng('knock').range(-0.5, 0.5) }); // knocked east
+ * @see engine/sim/props.test.ts
+ */
+import type { EventMap } from '../core/events';
+import { codeError } from '../core/log';
+import { registry as sharedRegistry, type Registry } from '../core/registry';
+import { knock } from '../physics/bodies';
+import { physicsOf } from '../physics/binding';
+import { propBody, propPose, type PropPlacement } from '../world/props/place';
+import { getProp, type PropKnock } from '../world/props/prop';
+import { defineComponent } from './state';
+import type { World } from './world';
+
+/** The component `sceneProp`'s fields. */
+export const SCENE_PROP_FIELDS = {
+  prop: { type: 'string', default: 'prop:crate', description: 'The prop it is, by id (engine/world/props).' },
+  body: { type: 'integer', default: -1, minimum: -1, description: 'Its body in the physics world; −1: none.' },
+  x: { type: 'number', default: 0, unit: 'm', description: 'Where its centre is, east: its body’s origin.' },
+  y: { type: 'number', default: 0, unit: 'm', description: 'Where its centre is, up.' },
+  z: { type: 'number', default: 0, unit: 'm', description: 'Where its centre is, south.' },
+  q: {
+    type: 'array',
+    items: { type: 'number' },
+    default: [0, 0, 0, 1],
+    description: 'Its turn, a unit quaternion [x, y, z, w].',
+  },
+} as const;
+
+/** The component `sceneProp`: a prop standing in a scene. */
+export interface ScenePropComponent {
+  prop: string;
+  body: number;
+  x: number;
+  y: number;
+  z: number;
+  q: [number, number, number, number];
+}
+
+/** The component `propHealth` (WP 13.16): the hit points a breakable prop has left, spawned only on one with health. */
+export interface PropHealthComponent {
+  hp: number;
+}
+
+/** The component `propLight` (WP 13.16): a switchable prop's state, spawned only on one given a group or off. */
+export interface PropLightComponent {
+  /** Whether it is on: its `lit` parts drawn and its light shining. */
+  on: boolean;
+  /** The light group a switch turns it on and off by (`'room:kitchen'`). */
+  group: string;
+}
+
+/** The components this module reads. */
+export type ScenePropComponents = {
+  sceneProp: ScenePropComponent;
+  propHealth?: PropHealthComponent;
+  propLight?: PropLightComponent;
+};
+
+/** How `spawnProp` stands a prop beyond its placement (WP 13.16): a spawn inside a step or a setup joins the world at its end, so a door's or a switch's own component comes with it here. */ // prettier-ignore
+export interface SpawnPropOptions {
+  /** Its body's type instead of its prop's: a broken door's leaf falls (`'dynamic'`). */
+  as?: 'dynamic' | 'fixed' | 'kinematic';
+  /** Whether it is on at first, and its light group: either makes it switchable (`propLight`). */
+  on?: boolean;
+  group?: string;
+  /** More components its entity holds from the start (a door's `door`, a switch's `switch`). */
+  components?: Readonly<Record<string, object>>;
+  /** Its body knocked away from `from` as it is made (a broken prop's pieces: engine/physics/bodies.ts's `knock`). */
+  knock?: PropKnock & { from: readonly [number, number, number] };
+}
+
+/** Declares the component `sceneProp` on `registry` (once). */
+export function definePropKinds(registry: Registry = sharedRegistry): void {
+  if (registry.kinds().includes('component') && registry.has('component', 'sceneProp')) return;
+  const description = 'A prop standing in a scene (spawnProp): its id, its body and its pose, its centre and turn.';
+  defineComponent('sceneProp', { description, fields: SCENE_PROP_FIELDS }, registry);
+  const hp = { type: 'number', default: 0, minimum: 0, description: 'Hit points left; at 0 it breaks.' } as const;
+  defineComponent('propHealth', { description: "A breakable prop's hit points (WP 13.16).", fields: { hp } }, registry);
+  const fields = {
+    on: { type: 'boolean', default: true, description: 'Whether it is on: its lit parts and its light.' },
+    group: { type: 'string', default: '', description: "Its light group ('room:kitchen')." },
+  } as const;
+  defineComponent('propLight', { description: "A switchable prop's state (WP 13.16).", fields }, registry);
+}
+definePropKinds();
+
+/** Throws `SIM_BAD_ARGUMENT` for `id` when it is no prop. */
+function propOf(w: World, id: number, where: string): ScenePropComponent {
+  const data = (w.get(id) as Partial<ScenePropComponents> | undefined)?.sceneProp;
+  if (!data) throw codeError('SIM_BAD_ARGUMENT', { where, value: String(id), expected: 'a prop’s id (spawnProp)' });
+  return data;
+}
+
+/** The system `props.readback`: every prop with a body takes its body's pose, in id order. */
+function readProps(w: World): void {
+  const physics = physicsOf(w);
+  for (const { sceneProp } of w.query('sceneProp') as unknown as ScenePropComponents[]) {
+    if (sceneProp.body < 0) continue;
+    const { position: p, rotation: r } = physics.readBody(sceneProp.body);
+    [sceneProp.x, sceneProp.y, sceneProp.z] = [p.x, p.y, p.z];
+    sceneProp.q = [r.x, r.y, r.z, r.w];
+  }
+}
+
+/**
+ * Stands a prop in the scene, `spawnProp(w, { prop: 'prop:<id>', at: [x, y, z], yaw })`: its base at `at` (m), turned
+ * `yaw` about +Y (rad). It makes the prop's body (when it has one; the scene needs `physics: true` then) and an entity
+ * with the component `sceneProp`, and returns the entity's id. A missing prop id warns and stands a crate (`getProp`).
+ *
+ * @example
+ * // in a scene's setup, with physics: true and its level's bodies added (addLevelBodies(physicsOf(w), level)):
+ * // const id = spawnProp(w, { prop: 'prop:crate', at: [2, 0, 3], yaw: Math.PI / 2 }); // on the floor at x 2, z 3
+ * // labs/box/scenes/hall-props.ts places the hall's props this way, from levelProps and its own spots.
+ */
+export function spawnProp<C extends object, E extends EventMap>(
+  world: World<C, E>,
+  placement: PropPlacement,
+  options: SpawnPropOptions = {},
+): number {
+  const w = world as unknown as World;
+  const entry = getProp(placement.prop);
+  const prop = entry.id;
+  const spec = propBody({ ...placement, prop }, undefined, options.as);
+  const { position, rotation } = spec ?? propPose({ ...placement, prop });
+  const body = spec ? physicsOf(w).addBody(spec) : -1;
+  if (options.knock && body >= 0) knock(physicsOf(w), body, [...options.knock.from], options.knock);
+  if (spec && !w.systems.has('props.readback')) w.systems.add('props.readback', readProps, { phase: 'readback' });
+  const [x, y, z] = position;
+  const health = entry.health > 0 ? { propHealth: { hp: entry.health } } : {};
+  const switchable = options.on !== undefined || options.group !== undefined;
+  const light = switchable ? { propLight: { on: options.on ?? true, group: options.group ?? '' } } : {};
+  return w.spawn({ ...options.components, sceneProp: { prop, body, x, y, z, q: rotation }, ...health, ...light });
+}
+
+/** The entity whose prop `body` is (a `sceneProp`'s), or −1: the body-to-entity lookup uses and hits read (WP 13.16). */
+export function propOfBody<C extends object, E extends EventMap>(world: World<C, E>, body: number): number {
+  if (body < 0) return -1;
+  const props = (world as unknown as World).query('sceneProp') as unknown as (ScenePropComponents & { id: number })[];
+  return props.find((e) => e.sceneProp.body === body)?.id ?? -1;
+}
+
+/** The entity whose body is `body` (a body id; −1 for none): a prop's (`propOfBody`), else an actor's; −1 for neither. */
+export function entityOfBody<C extends object, E extends EventMap>(world: World<C, E>, body: number): number {
+  const prop = propOfBody(world, body);
+  if (prop >= 0 || body < 0) return prop;
+  const actors = (world as unknown as World).query('actor') as unknown as { id: number; actor: { body: number } }[];
+  return actors.find((e) => e.actor.body === body)?.id ?? -1;
+}
+
+/** Removes a prop: its entity and its body, its component's `body` −1 at once (inside a step the entity stays to its end). Throws `SIM_BAD_ARGUMENT` for an id that is no prop. */ // prettier-ignore
+export function removeProp<C extends object, E extends EventMap>(world: World<C, E>, id: number): void {
+  const w = world as unknown as World;
+  const data = propOf(w, id, 'removeProp(w, id)');
+  if (data.body >= 0) physicsOf(w).removeBody(data.body);
+  data.body = -1; // inside a step its entity stays to the step's end: nothing reads the body it no longer has
+  w.despawn(id);
+}
+
+/**
+ * Hits the prop `id` from `from` (m): calls its `hit` hook, whose `knock(more)` knocks its body away from `from` with
+ * `strength` under `more` (engine/physics/bodies.ts's `knock`: 4.6875 m/s across, 2.5 m/s up, no twist by default).
+ * Draw `spin` from a sim stream (`w.rng('knock').range(-0.5, 0.5)`). Throws `SIM_BAD_ARGUMENT` for an id that is no prop.
+ */
+export function hitProp<C extends object, E extends EventMap>(
+  world: World<C, E>,
+  id: number,
+  from: readonly [number, number, number],
+  strength: PropKnock = {},
+): void {
+  const w = world as unknown as World;
+  const data = propOf(w, id, 'hitProp(w, id, from)');
+  const prop = getProp(data.prop);
+  const at: [number, number, number] = [from[0], from[1], from[2]];
+  prop.hit({
+    prop,
+    body: data.body,
+    from: at,
+    world: w,
+    entity: id,
+    user: -1,
+    knock: (more = {}) => {
+      if (data.body >= 0) knock(physicsOf(w), data.body, at, { ...strength, ...more });
+    },
+  });
+}

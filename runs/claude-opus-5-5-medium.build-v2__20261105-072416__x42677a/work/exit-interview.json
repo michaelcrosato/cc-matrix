@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 07:24:16",
+    "source": "Trauma Center: Second Opinion",
+    "plan": "PLAN.md",
+    "genre": "Surgical action (pointer precision under a clock) framed by a visual-novel medical melodrama, with drop-in co-op",
+    "perspective": "Fixed surgeon's-eye view of the operative field (73 degrees from the horizon, mild perspective, short camera pushes); straight-on paper theatre for story; one 3D wide shot of the OR",
+    "tech": "Rust 1.98.1 on the Pavilion engine (the Shardfall repo at commit 49ef2ba): wgpu/WebGPU renderer, egui 0.36, cpal, gilrs, winit, wasm-bindgen 0.2.129; Barlow Condensed SemiBold font (OFL); AI Hub session client 1.4.0; packed into one HTML file",
+    "artDirection": "The engine's cel bands, ink outlines and bloom. The field is one per-vertex-painted heightfield mesh; instruments and parasites are SDF solids; characters and sets are layered extruded spline cards. All made in code and text",
+    "animation": "The engine's puppets and clips for the OR wide shot; procedural, sim-driven motion for instruments, tissue pulse, strains and paper rigs (blink, breathe, mouth frames, slide-in with overshoot)",
+    "audio": "All in code with no audio files: about 47 synthesized cues, a note sequencer with composed tracks whose tempo follows the heart, and Animalese-style gibberish voices through formant filters. Music defaults to 10%",
+    "online": "AI Hub Session Protocol v1, shared-world, 1-4 seats: one Code Blue round with its own card, host-authoritative snapshots at about 15 Hz. Also 1-4 local surgeons on their own",
+    "testing": "Headless only: Rust tests, the bot on 10 seeds of every case and the campaign, the balance tool, Playwright on the built file over file:// with stubbed pads and touch profiles (a fast UI-only pass, then a full-picture pass with the 3D on), the AI Hub harness, the native window under xvfb with real X11 input, and screenshots for what scripts can't check. No subagents or workflows for review.",
+    "research": "None beyond the research done by the plan (Atlus, Wii launch title, 2006; remake of the DS game Under the Knife); the hub README was read in full",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 18 issues. Rust tests and the bot found a Lacrimosa state-machine fall-through, the Echo targeting its own hazard, a tendril that snapped back every beat, the partner bot winning alone, the bot stuck holding the IV, and the closure locking out every other instrument. Browser tests found lost short key taps, the attract clock slowed by low frame rates, touch coordinates scaled wrongly, and a test-only timing race. Screenshots found bones and hooks drawn offset, field particles leaking onto the story stage, a wall blocking the OR camera, a headless zoom error and a black first frame. The native run under xvfb found the OS cursor showing over attract.",
+    "3: the Lacrimosa bug and the tendril bug each made a case unwinnable, and the closure lock could trap a player with no way to treat the patient.",
+    "The bot playing every case on several seeds, with the balance tool's reason for each loss. It found the unwinnable cases within seconds and showed the difficulty curve.",
+    "The WebKit iPhone load: it only confirms the page's no-WebGPU message on this machine, and it never failed."
+  ],
+  "engineFeedback": [
+    "Everything runs and renders headless from one CLI, and the sim is deterministic: the bot, replays, rewind and captures all worked on the first day with almost no setup.",
+    "Yes, a few times. I assumed a per-game camera and frame path existed (they don't, as the plan warned); egui's zoom and the headless screen rect took a wrong guess; and dropping an unpainted egui frame panics in tests until its textures are cleared.",
+    "The game's own frame path (pav_app product.rs): device input per seat, the shell, the camera, audio, the hub bridge and the test hook. Next to it, the painted field mesh and the shell's focus-list UI.",
+    "Software rendering is too slow for browser tests of the full picture (under 1 fps here), so I added a UI-only test switch. Memory pressure on the shared machine also killed rustc repeatedly, which needed a retry wrapper. App::frame is also large enough that it has to be bypassed rather than extended.",
+    "Added: InputFrame surgeon seats, SimEvent::Cue, RenderFrame.surgery, three mixer buses with resonant formants, per-pad analog input in the game's path, the frame-path branch in App, a Headless shell hook, session client/tags/shim/about block in the packer, and the balance, case_check and surgeon tools. All because the hook alone can't draw or hear a game with its own UI. Shardfall itself is untouched.",
+    "A documented product mode: a Game able to declare its own UI, camera and input path, so a new game doesn't have to branch around the demo's App::frame."
+  ],
+  "promptFeedback": [
+    "The precise finish line: a plan with tested values, an explicit requirements map, and a clear rule about never reading other agents' folders or killing their processes.",
+    "Very little. One judgement call was how to measure the plan's hour with nobody to play it: I paced operations by script so the time is similar at every skill, and estimated reading time for the story.",
+    "Making a pointer-precision game feel right with no one to play it: every instrument's gestures and the balance are checked by a bot, not by hands. The real feel with a DualSense is unverified here.",
+    "Say how to test browser builds when software rendering is under 1 fps, and give an expected memory budget per agent on the shared machine."
+  ],
+  "aiHub": {
+    "name": "Trauma Tempo",
+    "tagline": "Every heart keeps time.",
+    "description": "Race a failing heart with eight instruments while a man-made parasite keeps time inside your patients: a surgical-action melodrama with drop-in co-op.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Trauma Center: Second Opinion",
+    "series": "Trauma Center",
+    "players": "1–4",
+    "controls": "Right stick or mouse aims, R2 or left click operates, left stick or 1–8 picks tools",
+    "tags": [
+      "3d",
+      "story",
+      "co-op",
+      "arcade",
+      "boss fights",
+      "comedy"
+    ]
+  }
+}

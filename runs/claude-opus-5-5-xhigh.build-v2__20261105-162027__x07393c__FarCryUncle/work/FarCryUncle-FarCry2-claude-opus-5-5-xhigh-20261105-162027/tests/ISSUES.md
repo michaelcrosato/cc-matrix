@@ -1,0 +1,51 @@
+# Issues testing caught (one line each; [C] = critical / game breaking)
+- [C] Fever never ticked until feverRunning, so the scripted first attack in M1 could not be cleared by a tablet.
+- [C] Clinic tent, stalls, fort walls, silos, a well and tanks sat on the roads: the first drive stalled against the clinic in M1.
+- Getting into a truck only worked on its left: approaching from the far side showed no prompt.
+- A stalled truck offered CLIMB IN over OPEN THE BONNET, so M1 could not teach the repair.
+- [C] Holding Use at the bonnet froze the player, which cancelled the hold: trucks could never be repaired.
+- M4's convoy left before Dov's alternate plan could be accepted, so the bridge ambush could never work.
+- A rocket that hit the ammo bunker square on did nothing unless the blast centre fell within range: bunkers could survive direct hits.
+- [C] Returning to the title after a fire crashed: FireView.reset walked empty light slots.
+- [C] Checkpoint sandbags sat on road bends: a truck could wedge against P2 and never reach Three Wells.
+- [C] With the land already burned there could be no grass left to light at the Pass: the ending could not finish.
+- [C] AIHub.ready waited for the shader precompile, 20 s and more on software rendering: the hub check failed with more than one copy.
+- Fog from the plan (top -60) washed every surface 55% toward the sky colour; the engine's mist term saturates for y above -top/2.
+- [C] Givers sat inside their army's inner yard: walking up to Vance or Ansa for a contract got you shot.
+- [C] Esc opened the pause menu and closed it in the same frame: a menu saw the key that opened it.
+- Input device stuck on pad for 150 ms after a press because queued presses counted as activity.
+- [C] Squads made by scripts survived a new game and hunted the player at the Cut on day one.
+- Patrols never started in the campaign; roads were empty.
+- [C] A timer that reset the campaign crashed the timer loop mid-walk: the attract reel died between two beats.
+- [C] Chase camera crashed the moment it was used with views on: a variable out of scope that Node tests never reached.
+- [C] A fever collapse during the finale teleported the player away from the Pass and stranded the ending.
+- [C] The two-button prompt's alt action ate every real F and Triangle press, so melee and weapon switching did nothing on a real keyboard or pad.
+- [C] Dying before the first sleep, or between M9 and the Pass, left a chained mission with no giver: the story could not go on after Continue.
+- A guest's syrette and surgery healed only on the guest's screen in Cash Run: the host's next snapshot took it back.
+- [C] The hands and the gear lever were below the frame in the cab: the wheel's torus size is a diameter, so the rim was half the size I had placed the grips and forearms for. Moved to ten and two with forearms that reach their hands, a test that they are in frame.
+- The dash arrow floated away from its dial, and the dial was a plain slab: now a small compass box with the arrow on it.
+- [C] Fort Clement's walls were my own plain boxes, and the plan names the library's stone wall and battlement. Rebuilt in bays; nesting them in one long model made 4,000+ physics boxes, so each bay has one, and the gate is open to the pathfinder.
+- The plan's step types steal, escort and ride were missing, and the M3 tanker was scripted by hand: added, M3's alt route now steals through the data.
+- Far-off sounds were never muffled by land or walls: the fire roar and the nearest engine now ask.
+- The Holster clip existed and never played: the gun now goes over the shoulder at the town limit.
+- The engine's clip checker found 9 of my people clips with feet or knees 5 to 19 cm through the floor (kneeling, sitting, the drag, the burning run). Lifted them, and the static suite now runs analyzeClip and validateClip on every clip I wrote.
+- Most of the stock clips went unplayed, and crouchAim was a field nothing ever set, so nobody crouched: men now kneel to shoot, come in low when hunting, shout on spotting you, sit down and get up; a mate drags himself before he sits; locals wave.
+- Every vehicle shared one cab: each kind now has its own wheel and dash.
+- state().prompts left out every menu footer, so no test could see them: the plan says it lists what is on screen, and now it does, with the glyphs really drawn.
+- [C] The Game Over screen showed no button prompt in any glyph set, the one place you most need one. Found by the new test that walks every screen in PlayStation, Xbox and keyboard glyphs. The black talk and epigraph screens could be skipped but never said so.
+- The cab's forearms stretched like rubber to reach the wheel: now two-bone arms with a real elbow.
+- The landing dip moved the camera; the plan puts it in what you hold. Now a spring on the view group.
+- The flag pole had no flag. Fort Clement and the Granary now fly one on a spring chain that streams downwind.
+- A dismounted crew had no driver role, thorn bushes were not the library's, and no rock lay on the ridge, all as the plan names them.
+- Twenty pad glyphs (shoulders, triggers, sticks, Xbox's face buttons, Options, Create, Menu, View) were text in a box where the plan asks for pixel art: all now 11 px sprites, and the static suite holds every pad action to it.
+- About, Game Over, the ending card and Credits covered the view; the plan lets only the title and pause menus do that. They are overlays now, and the dim has real densities (anything above 0.6 used to be solid).
+- Dev Mode showed up to 11 rows on a page against the plan's six, and my own test exempted it: every tab now pages, the exemption is gone, and every button on every page has been pressed.
+- Regrown land was only ever a colour: no short new growth, and the half density the fire grid recorded was read by nothing, so burnt ground came back full height. Now short green grass, then thin grass, and chunks rebuild when a cell changes.
+- Grass regrowing when you saved stayed unburnable for good after a load: the list that rolls it back to fuel was not restored.
+- M3's wind had been changed from the plan's to suit where I put the tanks. With the plan's wind only 2 of 12 upwind fires reached a tank, because the road and the railway are firebreaks. The plan gives the wind and no tank coordinates, so the plan's wind is back and the tanks moved to where it works.
+- HQ garrisons stayed friendly even if you held the other army's contract: the neutrality only needed to cover a visitor with no contract.
+- The last act was immune to the fever's collapse. Now it drops you where you stand and costs you a fifth of your stones, without taking you off the story.
+- Fog: the plan's top of -60 washes everything to the sky colour, measured at contrast 0.05 against 0.22 with the engine's own documented kind of value. I had also drifted from the plan's amount and near for no good reason: those are back, and only top differs.
+- [C] HQ neutrality was not needed: the plan's notice board lets you take a contract without walking into a fort. Now the plan's rule holds everywhere: no pass, you get shot. You are warned once on the way in, and given time to walk out after reporting.
+- The last act's exemption from the fever's collapse was not needed either: the finale only waits for you to come back, and M9 hands you tablets. The plan's collapse now holds everywhere, waiting only for a scene or a moving train.
+- M6 and M7 had 6 and 5 spoken lines against the plan's 8: my count had been including narration. Both now have 8, and the static suite counts speakers.

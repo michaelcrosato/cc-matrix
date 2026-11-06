@@ -1,0 +1,1 @@
+No change, and I have nothing new to add. I've made no further edits or test runs, and those three points stay unproven as I described them. Clearing them takes someone playing the game or your ruling on how to read the plan.

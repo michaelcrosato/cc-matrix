@@ -1,0 +1,17 @@
+import { boot } from '../tests/lib/boot.mjs';
+import { Bot } from '../tests/lib/bot.mjs';
+const { e, game: g } = await boot(); const b = new Bot(e, g); g.device = 'kbm'; g.flow.newGame();
+b.until(() => g.missions.cur?.step?.text === 'RAISE THE MAP', 4000, 20); b.press('KeyM'); b.until(() => g.missions.cur?.def.id === 'm1', 4000, 20);
+console.log('m1 step', g.missions.cur.i, g.missions.cur.step.do, g.mode, 'dlg', g.dialogueOn);
+b.skipTalk(); console.log('after skip', g.missions.cur.i, g.missions.cur.step.do, g.missions.cur.step.text, g.dialogueOn, g.ui.screen?.id);
+b.until(() => g.body.fever.active, 600, 10); console.log('fever', g.body.fever.active, g.weapons.tablets, g.mode, 'cutscene', g.cutscene, g.noFever);
+b.hold('KeyH', 70); console.log('heal', JSON.stringify(g.body.heal), g.weapons.tablets, g.body.fever.clear, g.body.fever.active); b.step(300); console.log('end', g.weapons.tablets, g.body.fever.active, g.missions.cur?.i, g.missions.cur?.step?.text);
+const S = (l) => console.log(l, 'step', g.missions.cur?.i, g.missions.cur?.step?.do, g.missions.cur?.step?.text, 'mode', g.mode);
+const v = g.mission.veh; b.tp(v.pos.x + 3, v.pos.z + 3); g.vehSys.enter(v); S('entered'); const ok = b.drive(v, -260, 240, 2400); S('drove ' + ok + ' ' + v.pos.toArray().map(x=>x.toFixed(0)));
+g.vehSys.exit(false); b.tp(-250, 230); b.until(() => g.missions.cur.i > 4, 600, 10); S('after goto'); b.skipTalk(); S('after deliver');
+g.vehSys.exit(true); const v1 = g.mission.veh; v1.v.reset([-195, g.world.heightAt(-195, 30) + 1.4, 40], 0); b.tp(-190, 40); b.until(() => v1.dead() || g.missions.cur.step.text === 'REPAIR THE ENGINE', 900, 10); S('stall? ' + v1.dead() + ' hp ' + v1.hp);
+b.skipTalk(200); S('after stall talk');
+const rep = () => g.vehSys.extra(g).find((x) => /REPAIR/.test(x.verb)); const fwd = [Math.sin(v1.yaw), Math.cos(v1.yaw)]; b.tp(v1.pos.x + fwd[0] * 3.5, v1.pos.z + fwd[1] * 3.5); b.step(8); console.log('repair prompt', !!rep(), v1.dead(), v1.wreck);
+b.hold('KeyE', 200); b.step(10); S('repaired ' + !v1.dead()); b.until(() => g.missions.cur.step.text === 'USE A SYRETTE', 300, 10); S('syrette step'); b.hold('KeyQ', 60); b.step(30); S('hp ' + g.body.hp);
+b.until(() => g.missions.cur.step.do === 'report' || g.missions.cur.step.do === 'goto', 300, 10); b.tp(0, 55); b.until(() => g.missions.cur.step.do === 'report', 300, 10); S('report step');
+b.use('clinic'); b.skipTalk(); S('after report; done ' + g.story.done.join(','));

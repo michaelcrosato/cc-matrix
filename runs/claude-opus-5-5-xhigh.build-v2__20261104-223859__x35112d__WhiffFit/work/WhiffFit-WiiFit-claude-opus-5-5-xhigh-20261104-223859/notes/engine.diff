@@ -1,0 +1,2536 @@
+diff --git a/crates/pav_app/src/app.rs b/crates/pav_app/src/app.rs
+index 353a3ab..a678f14 100644
+--- a/crates/pav_app/src/app.rs
++++ b/crates/pav_app/src/app.rs
+@@ -207,6 +207,24 @@ pub struct App {
+     audio_resumed: bool,
+     init_started: bool,
+     pub fatal: Option<String>,
++    /// Whiff Fit: its own UI, input layout and sound buses are on.
++    fit: bool,
++    fit_ui: pav_ui::fit_ui::Output,
++    fit_room: Option<u16>,
++    fit_save_serial: u64,
++    fit_fullscreen: u32,
++    fit_buses: [f32; 3],
++    fit_hold: bool,
++    fit_speed: f32,
++    fit_cam_free: bool,
++    fit_clock: f64,
++    fit_audio_last: f64,
++    fit_audio_at: Instant,
++    fit_cursor_moved: f32,
++    hub: crate::weblink::HubLink,
++    hub_seen: std::collections::BTreeMap<String, pav_core::games::fit::ghost::GFrame>,
++    hub_gone: bool,
++    fit_fast: bool,
+ }
+ 
+ impl App {
+@@ -290,6 +308,23 @@ impl App {
+             init_started: false,
+             fatal: None,
+             settings,
++            fit: false,
++            fit_ui: Default::default(),
++            fit_room: None,
++            fit_save_serial: 0,
++            fit_fullscreen: 0,
++            fit_buses: [-1.0; 3],
++            fit_hold: false,
++            fit_speed: 1.0,
++            fit_cam_free: false,
++            fit_clock: 0.0,
++            fit_audio_last: 0.0,
++            fit_audio_at: Instant::now(),
++            fit_cursor_moved: 0.0,
++            hub: Default::default(),
++            hub_seen: Default::default(),
++            hub_gone: false,
++            fit_fast: false,
+         };
+         if touch_screen {
+             // Phones: touch controls from the start, none of the desktop's diagnostics.
+@@ -305,6 +340,14 @@ impl App {
+     fn on_touch(&mut self, t: &winit::event::Touch, event: &WindowEvent) {
+         #[cfg(target_arch = "wasm32")]
+         self.resume_audio();
++        if self.fit {
++            // No touch controls: a finger is only ever a pointer on the UI.
++            self.input.last_device = Device::Touch;
++            if let (Some(st), Some(g)) = (&mut self.egui_state, &self.gfx) {
++                st.on_window_event(&g.window, event);
++            }
++            return;
++        }
+         let Some(g) = &self.gfx else { return };
+         let ppp = self.egui_ctx.zoom_factor() * g.window.scale_factor() as f32;
+         let pos = egui::pos2(t.location.x as f32 / ppp, t.location.y as f32 / ppp);
+@@ -495,6 +538,17 @@ impl App {
+             self.app_settings.show_stats = false;
+             self.app_settings.show_guide = false;
+         }
++        if sim.play().is_some_and(|g| g.key() == "fit") {
++            let b = crate::weblink::boot();
++            self.fit_fast = b.fast;
++            pav_core::games::fit::install_boot(
++                &mut sim,
++                pav_core::games::fit::Boot { today: b.today, touch_only: b.touch_only },
++                crate::weblink::load_save().as_deref(),
++                &b.about,
++            );
++            pav_ui::fit_ui::install_fonts(&self.egui_ctx);
++        }
+         self.sim_config = sim.config.clone();
+         self.rig.snap(sim.frame().focus);
+         self.hud.entries = room_entries(&sim);
+@@ -776,6 +830,10 @@ impl App {
+ 
+     /// The fixed system layer: never rebinds, works in every room.
+     fn handle_key(&mut self, code: KeyCode) {
++        if self.fit && !matches!(code, KeyCode::F11) {
++            // The engine's own keys are off: dev mode has its own tools.
++            return;
++        }
+         let Some(host) = &self.host else { return };
+         if self.studio_mode == StudioMode::Animation {
+             if let Some(p) = host.frames().1.animation_preview.as_ref() {
+@@ -972,19 +1030,27 @@ impl App {
+ 
+         // Devices.
+         self.input.poll_gamepad();
+-        if self.input.pad.start_pressed {
+-            let open = !self.menu_open;
+-            self.set_menu(open);
++        if !self.fit {
++            if self.input.pad.start_pressed {
++                let open = !self.menu_open;
++                self.set_menu(open);
++            }
++            if self.input.pad.map_pressed {
++                self.game_ui.map = !self.game_ui.map;
++            }
++            self.pad_menus(dt);
+         }
+-        if self.input.pad.map_pressed {
+-            self.game_ui.map = !self.game_ui.map;
++        #[cfg(target_arch = "wasm32")]
++        if self.input.pad.any_activity {
++            self.resume_audio();
+         }
+-        self.pad_menus(dt);
+         let pad = self.input.last_device == Device::Gamepad;
+         self.game_ui.pad = pad;
+         self.game_ui.tree.pad = pad;
+-        self.rig.params.yaw = (self.rig.params.yaw + self.input.pad.rotate * 90.0 * dt + 540.0).rem_euclid(360.0) - 180.0;
+-        self.rig.params.distance = (self.rig.params.distance * (1.0 + self.input.pad.zoom * dt)).clamp(2.0, 120.0);
++        if !self.fit || self.fit_cam_free {
++            self.rig.params.yaw = (self.rig.params.yaw + self.input.pad.rotate * 90.0 * dt + 540.0).rem_euclid(360.0) - 180.0;
++            self.rig.params.distance = (self.rig.params.distance * (1.0 + self.input.pad.zoom * dt)).clamp(2.0, 120.0);
++        }
+ 
+         let host = self.host.as_ref().unwrap();
+         host.pump();
+@@ -1001,6 +1067,17 @@ impl App {
+         host.set_control(|c| c.rewinding = rewinding);
+ 
+         let (prev, curr, curr_at, tick_wall) = host.frames();
++        let fit_frame = curr.hud.fit.clone();
++        let fit_now = fit_frame.is_some();
++        if fit_now != self.fit {
++            self.fit = fit_now;
++            self.input.fit = fit_now;
++            self.input.game = false;
++            self.show_boot = false;
++            self.app_settings.show_stats = false;
++            self.app_settings.show_guide = false;
++            self.input.bindings = if fit_now { crate::input::Bindings::fit() } else { crate::input::Bindings::default() };
++        }
+         let studio_mode = curr.studio_mode();
+         let studio_active = curr.studio_active();
+         self.studio_navigation |= studio_active;
+@@ -1071,7 +1148,9 @@ impl App {
+                     None if curr.game.is_some() => (crate::input::Bindings::game(), Vec::new()),
+                     None => (crate::input::Bindings::default(), Vec::new()),
+                 };
+-                self.input.bindings = b;
++                if !self.fit {
++                    self.input.bindings = b;
++                }
+                 for e in errs {
+                     log::warn!("room keys: {e}");
+                 }
+@@ -1128,6 +1207,71 @@ impl App {
+         } else {
+             self.game_frame = None;
+         }
++        // Whiff Fit's settings, applied to the host.
++        if let Some(f) = &fit_frame {
++            let room = curr.room.as_ref().map(|r| r.id);
++            if room != self.fit_room {
++                if self.fit_room.is_some() {
++                    self.arrival = Some(now);
++                }
++                self.fit_room = room;
++                self.rig.snap(curr.focus);
++            }
++            if let Some(y) = curr.hud.camera_yaw {
++                self.rig.params.yaw = y;
++            }
++            self.fit_cam_free = f.cam_free;
++            self.app_settings.show_stats = f.show_stats;
++            let buses = [f.music, f.sfx, f.voice];
++            if let Some(a) = &self.audio {
++                if buses != self.fit_buses {
++                    self.fit_buses = buses;
++                    a.set_buses(f.music, f.sfx, f.voice);
++                }
++                if f.music_hold != self.fit_hold {
++                    self.fit_hold = f.music_hold;
++                    a.hold_music(f.music_hold);
++                }
++            }
++            if f.time_scale != self.fit_speed {
++                self.fit_speed = f.time_scale;
++                let s = f.time_scale;
++                host.set_control(|c| c.speed = s);
++            }
++            if f.save_serial != self.fit_save_serial {
++                self.fit_save_serial = f.save_serial;
++                if f.save_serial > 1 && !f.save_json.is_empty() {
++                    crate::weblink::store_save(&f.save_json);
++                }
++            }
++            if f.rumble > 0.0 {
++                crate::weblink::rumble(f.rumble);
++            }
++            if f.fullscreen_serial != self.fit_fullscreen {
++                self.fit_fullscreen = f.fullscreen_serial;
++                if let Some(g) = &self.gfx {
++                    crate::platform::toggle_fullscreen(&g.window);
++                }
++            }
++            if let Some(g) = &self.gfx {
++                g.window.set_cursor_visible(self.input.last_device != Device::Gamepad);
++            }
++            if let Some(s) = &curr.hud.status {
++                crate::weblink::publish_status(s);
++            }
++            self.hub = crate::weblink::hub();
++            if self.hub.ended && !self.hub_gone {
++                self.hub_gone = true;
++                if let Some(a) = &self.audio {
++                    a.set_master(0.0);
++                }
++                host.exec(|sim| {
++                    if let Some(g) = sim.state.play.as_mut().and_then(|g| g.get_mut::<pav_core::games::fit::FitGame>()) {
++                        g.hub_ended = true;
++                    }
++                });
++            }
++        }
+         let alpha = if self.app_settings.smoothing && !snap_camera {
+             ((now - curr_at).as_secs_f32() / tick_wall.max(1e-4)).clamp(0.0, 1.0)
+         } else {
+@@ -1152,6 +1296,12 @@ impl App {
+             self.input.mouse_taps.clear();
+         }
+         let (mut held, mut pressed) = self.input.buttons();
++        if self.fit && self.fit_ui.over_item {
++            // The UI took the click.
++            held &= !pav_core::input::buttons::PRIMARY;
++            pressed &= !pav_core::input::buttons::PRIMARY;
++            self.input.mouse_taps.clear();
++        }
+         // Touch: the stick, the buttons and auto-attack.
+         let touch_game = curr.game.as_deref().filter(|_| game_input).map(|g| (g, feet, facing));
+         let rig = &self.rig;
+@@ -1173,7 +1323,7 @@ impl App {
+         }
+         let room_id = self.hud.current.as_ref().map(|r| r.id);
+         let left = self.input.mouse.contains(&MouseButton::Left) && !over_ui;
+-        if left_tap && !self.editor.on && game_input {
++        if left_tap && !self.editor.on && game_input && !(self.fit && self.fit_ui.over_item) {
+             pressed |= pav_core::input::buttons::PRIMARY;
+         }
+         if !studio_active && self.editor.update(host, &self.rig, self.input.cursor, size, left, left_tap, room_id) {
+@@ -1181,6 +1331,8 @@ impl App {
+             pressed &= !pav_core::input::buttons::PRIMARY;
+         }
+         let aim = match self.input.last_device {
++            Device::Gamepad if self.fit => None,
++            Device::Touch if self.fit => None,
+             Device::KeyboardMouse => self.rig.ground_point(self.input.cursor, size, feet.y),
+             Device::Gamepad => {
+                 let r = self.input.pad.right;
+@@ -1205,6 +1357,44 @@ impl App {
+                 i.held = held;
+                 i.pressed |= pressed;
+                 i.aim = aim;
++                if let Some(f) = &fit_frame {
++                    let shape = crate::input::LeanShape {
++                        deadzone: f.input[0],
++                        curve: f.input[1],
++                        key_rate: f.input[2],
++                        key_return: f.input[3],
++                        mouse_span: f.input[4],
++                        arrows_step: f.arrows_step,
++                        cursor_leans: f.cursor_leans,
++                        fast: f.lean_fast,
++                    };
++                    i.lean = self.input.fit_lean(dt, size, &shape);
++                    if self.hub.go {
++                        i.held |= pav_core::input::buttons::HUB_GO;
++                    }
++                    let any = pressed != 0 || self.input.pad.any_activity || self.fit_cursor_moved > 6.0 || self.input.any_press;
++                    self.input.any_press = false;
++                    if any {
++                        self.fit_cursor_moved = 0.0;
++                    }
++                    i.any |= any;
++                    i.song_pos = None;
++                    if let Some(a) = &self.audio {
++                        // The music's clock, phase-locked: it moves in lumps, a buffer at a time.
++                        let pos = a.song_seconds();
++                        if pos != self.fit_audio_last {
++                            self.fit_audio_last = pos;
++                            self.fit_audio_at = now;
++                        }
++                        if !f.music_hold {
++                            self.fit_clock += dt as f64;
++                        }
++                        self.fit_clock += (pos - self.fit_clock) * 0.05;
++                        if (now - self.fit_audio_at).as_secs_f32() < 0.5 && pos > 0.0 {
++                            i.song_pos = Some((self.fit_clock - f.rhythm_offset as f64) as f32);
++                        }
++                    }
++                }
+                 if let Some(t) = self.latency.pending.take() {
+                     host.shared.input_stamp.lock().unwrap().get_or_insert(t);
+                 }
+@@ -1238,6 +1428,20 @@ impl App {
+         let mut view = self.view.clone();
+         self.look_ui.apply(&mut view);
+         self.prefs.quality.trim(self.touch_screen, &mut view);
++        if self.fit_fast {
++            view.light.shadows = false;
++            view.water_ripples = false;
++            view.bloom = 0.0;
++        }
++        // Other players' ghosts, where they're in the same area as you.
++        let mut hub_labels = Vec::new();
++        let (prev, curr) = if self.fit && !self.hub.ghosts.is_empty() {
++            let (a, b, labels) = crate::weblink::with_ghosts(&prev, &curr, &self.hub, &mut self.hub_seen, dt);
++            hub_labels = labels;
++            (std::sync::Arc::new(a), std::sync::Arc::new(b))
++        } else {
++            (prev, curr)
++        };
+         let mut scene = self.builder.build(&prev, &curr, alpha, &self.rig, w as f32 / h.max(1) as f32, &view, focus);
+         // Arriving somewhere new: the screen opens with the chosen transition, on the player.
+         if let Some(t0) = self.arrival {
+@@ -1406,11 +1610,23 @@ impl App {
+         let guide = &mut self.guide;
+         let mut guide_out = Vec::new();
+         let mut game_cmds = Vec::new();
++        let fit_input = pav_ui::fit_ui::Input {
++            device: if self.input.last_device == Device::Touch { Device::Gamepad } else { self.input.last_device },
++            mouse: self.input.mouse_recent,
++        };
++        let mut fit_out = None;
+         let out = self.egui_ctx.run_ui(raw, |ui| {
+             let ctx = ui.ctx().clone();
+             if let Some(c) = &info.crash {
+                 ui::crash_banner(ui, c);
+             }
++            if let Some(f) = &fit_frame {
++                fit_out = Some(pav_ui::fit_ui::draw(&ctx, f, fit_input, view_proj, &hub_labels));
++                if show_stats {
++                    ui::stats_panel(&ctx, &info, ctx.content_rect(), false);
++                }
++                return;
++            }
+             panel_actions = panel.ui(ui, &mut root, &mut ctl, &stats);
+             let free = ui.available_rect_before_wrap();
+             ui::boot_panel(&ctx, &mut show_boot);
+@@ -1545,6 +1761,19 @@ impl App {
+                 );
+             }
+         });
++        if let Some(o) = fit_out {
++            if let Some(e) = o.event {
++                let mut i = host_input(&self.host);
++                if !matches!(i.ui, Some(pav_core::input::UiEvent::Click(_))) {
++                    i.ui = Some(e);
++                }
++                set_host_input(&self.host, i);
++            }
++            if let Some(f) = &fit_frame {
++                crate::weblink::publish_ui(f, &o, self.input.last_device, self.input.mouse_recent);
++            }
++            self.fit_ui = o;
++        }
+         if prefs != self.prefs {
+             self.prefs = prefs;
+             crate::save::save_prefs(&self.prefs);
+@@ -2158,6 +2387,16 @@ impl ApplicationHandler for App {
+                     el.exit();
+                 }
+             }
++            WindowEvent::KeyboardInput { event, .. } if self.fit => {
++                #[cfg(target_arch = "wasm32")]
++                self.resume_audio();
++                if let PhysicalKey::Code(code) = event.physical_key {
++                    if event.state == ElementState::Pressed && !event.repeat {
++                        self.handle_key(code);
++                    }
++                    self.input.key(code, event.state);
++                }
++            }
+             WindowEvent::KeyboardInput { event, .. } => {
+                 #[cfg(target_arch = "wasm32")]
+                 self.resume_audio();
+@@ -2189,6 +2428,7 @@ impl ApplicationHandler for App {
+                     }
+                 }
+             }
++            WindowEvent::MouseWheel { .. } if self.fit && !self.fit_cam_free => {}
+             WindowEvent::MouseWheel { delta, .. } if !consumed => {
+                 let lines = match delta {
+                     MouseScrollDelta::LineDelta(_, y) => y,
+@@ -2208,7 +2448,13 @@ impl ApplicationHandler for App {
+                 } else {
+                     MouseButton::Right
+                 };
+-                if button == turn {
++                if self.fit {
++                    // The right button is a game button too; on the island it also drags the view.
++                    if button == MouseButton::Right {
++                        self.mouse.right_down = state == ElementState::Pressed && self.fit_cam_free;
++                    }
++                    self.input.mouse_button(button, state);
++                } else if button == turn {
+                     self.mouse.right_down = state == ElementState::Pressed && !consumed;
+                 } else if !consumed || state == ElementState::Released {
+                     self.input.mouse_button(button, state);
+@@ -2219,11 +2465,15 @@ impl ApplicationHandler for App {
+                 if self.mouse.right_down {
+                     let d = p - self.mouse.pos;
+                     self.rig.params.yaw = (self.rig.params.yaw - d.x * 0.3 + 540.0).rem_euclid(360.0) - 180.0;
+-                    self.rig.params.tilt = (self.rig.params.tilt + d.y * 0.2).clamp(0.0, 90.0);
++                    if !self.fit {
++                        self.rig.params.tilt = (self.rig.params.tilt + d.y * 0.2).clamp(0.0, 90.0);
++                    }
+                 }
+                 if (p - self.mouse.pos).length() > 2.0 {
+                     self.input.last_device = Device::KeyboardMouse;
++                    self.input.mouse_recent = true;
+                 }
++                self.fit_cursor_moved += (p - self.mouse.pos).length();
+                 self.mouse.pos = p;
+                 self.input.cursor = p;
+             }
+@@ -2264,3 +2514,13 @@ fn room_entries(sim: &Sim) -> Vec<RoomEntry> {
+     v.sort_by(|a, b| (&a.wing, &a.name).cmp(&(&b.wing, &b.name)));
+     v
+ }
++
++fn host_input(host: &Option<SimHost>) -> InputFrame {
++    host.as_ref().map(|h| *h.shared.input.lock().unwrap()).unwrap_or_default()
++}
++
++fn set_host_input(host: &Option<SimHost>, i: InputFrame) {
++    if let Some(h) = host {
++        *h.shared.input.lock().unwrap() = i;
++    }
++}
+diff --git a/crates/pav_app/src/input.rs b/crates/pav_app/src/input.rs
+index def1130..05201fe 100644
+--- a/crates/pav_app/src/input.rs
++++ b/crates/pav_app/src/input.rs
+@@ -121,6 +121,32 @@ impl Bindings {
+         }
+     }
+ 
++    /// Whiff Fit: keys PC players expect. Moves and leans are read apart from these.
++    pub fn fit() -> Self {
++        use KeyCode::*;
++        Self {
++            up: vec![KeyW, ArrowUp],
++            down: vec![KeyS, ArrowDown],
++            left: vec![KeyA, ArrowLeft],
++            right: vec![KeyD, ArrowRight],
++            buttons: vec![
++                (buttons::CONFIRM, vec![Space, Enter]),
++                (buttons::PAUSE | buttons::BACK, vec![Escape]),
++                (buttons::TAB_L | buttons::STEP_L, vec![KeyQ]),
++                (buttons::TAB_R | buttons::STEP_R, vec![KeyE]),
++                (buttons::STEP_L, vec![ArrowLeft]),
++                (buttons::STEP_R, vec![ArrowRight]),
++                (buttons::WAVE, vec![KeyF]),
++                (buttons::SCHEDULE, vec![Tab]),
++                (buttons::SPRINT, vec![ShiftLeft, ShiftRight]),
++                (buttons::MENU_UP, vec![KeyW, ArrowUp]),
++                (buttons::MENU_DOWN, vec![KeyS, ArrowDown]),
++                (buttons::MENU_LEFT, vec![KeyA, ArrowLeft]),
++                (buttons::MENU_RIGHT, vec![KeyD, ArrowRight]),
++            ],
++        }
++    }
++
+     /// Defaults with a room's `[keys]` overrides applied. Returns problems found.
+     pub fn with_overrides(map: &std::collections::BTreeMap<String, Vec<String>>) -> (Self, Vec<String>) {
+         let mut b = Self::default();
+@@ -259,6 +285,10 @@ pub struct Pad {
+     pub y_held: bool,
+     pub back_held: bool,
+     pub any_activity: bool,
++    /// The stick before the deadzone, for the lean's own shaping.
++    pub raw_left: Vec2,
++    /// Options, unless Create is held (that pair belongs to the AI Hub).
++    pub pause_pressed: bool,
+ }
+ 
+ pub struct Input {
+@@ -278,6 +308,38 @@ pub struct Input {
+     pub bindings: Bindings,
+     /// Game mode: the right mouse button is a skill and the gamepad uses the game layout.
+     pub game: bool,
++    /// Whiff Fit's layout.
++    pub fit: bool,
++    /// Keyboard and mouse: the mouse moved or clicked last.
++    pub mouse_recent: bool,
++    /// A key or mouse button went down since this was last cleared (any at all, bound or not).
++    pub any_press: bool,
++    key_lean: Vec2,
++    lean_from: LeanFrom,
++    last_stick: Vec2,
++    last_cursor: Vec2,
++}
++
++/// The device that moved last wins the lean.
++#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
++enum LeanFrom {
++    #[default]
++    Stick,
++    Keys,
++    Mouse,
++}
++
++/// What the game says about shaping the lean this frame.
++#[derive(Clone, Copy, Debug)]
++pub struct LeanShape {
++    pub deadzone: f32,
++    pub curve: f32,
++    pub key_rate: f32,
++    pub key_return: f32,
++    pub mouse_span: f32,
++    pub arrows_step: bool,
++    pub cursor_leans: bool,
++    pub fast: bool,
+ }
+ 
+ /// A pad's raw state for one frame.
+@@ -405,13 +467,66 @@ impl Input {
+             mouse_taps: HashSet::new(),
+             bindings: Bindings::default(),
+             game: false,
++            fit: false,
++            mouse_recent: false,
++            any_press: false,
++            key_lean: Vec2::ZERO,
++            lean_from: LeanFrom::Stick,
++            last_stick: Vec2::ZERO,
++            last_cursor: Vec2::ZERO,
++        }
++    }
++
++    /// The lean this frame, shaped per device: stick, keys or cursor, whichever moved last.
++    pub fn fit_lean(&mut self, dt: f32, size: Vec2, s: &LeanShape) -> Vec2 {
++        let raw = self.pad.raw_left;
++        let l = raw.length();
++        let stick = if l < s.deadzone { Vec2::ZERO } else { raw / l * ((l - s.deadzone) / (1.0 - s.deadzone)).min(1.0).powf(s.curve) };
++        if (raw - self.last_stick).length() > 0.02 && l > s.deadzone {
++            self.lean_from = LeanFrom::Stick;
++        }
++        self.last_stick = raw;
++        let k = |codes: &[KeyCode]| codes.iter().any(|c| self.keys.contains(c)) as i32 as f32;
++        use KeyCode::*;
++        let (left, right) = if s.arrows_step { (k(&[KeyA]), k(&[KeyD])) } else { (k(&[KeyA, ArrowLeft]), k(&[KeyD, ArrowRight])) };
++        let dir = Vec2::new(right - left, k(&[KeyW, ArrowUp]) - k(&[KeyS, ArrowDown]));
++        // Keys move the target at a rate and it returns when they're released: tapping gives
++        // small nudges, so keys feel native, not bang-bang. Shift is the fine lean.
++        let fine = if self.keys.contains(&ShiftLeft) || self.keys.contains(&ShiftRight) { 0.5 } else { 1.0 };
++        let rate = if s.fast { 9.0 } else { s.key_rate * fine };
++        if dir != Vec2::ZERO {
++            self.lean_from = LeanFrom::Keys;
++            self.key_lean = (self.key_lean + dir.normalize() * rate * dt).clamp_length_max(1.0);
++        }
++        let back = if s.fast { 3.0 } else { s.key_return } * dt;
++        if dir.x == 0.0 {
++            self.key_lean.x -= self.key_lean.x.clamp(-back, back);
++        }
++        if dir.y == 0.0 {
++            self.key_lean.y -= self.key_lean.y.clamp(-back, back);
++        }
++        if (self.cursor - self.last_cursor).length() > 1.5 && s.cursor_leans {
++            self.lean_from = LeanFrom::Mouse;
++        }
++        self.last_cursor = self.cursor;
++        match self.lean_from {
++            LeanFrom::Stick => stick,
++            LeanFrom::Keys => self.key_lean,
++            LeanFrom::Mouse if s.cursor_leans => {
++                let span = (s.mouse_span * size.y).max(1.0);
++                let o = (self.cursor - size * 0.5) / span;
++                Vec2::new(o.x, -o.y).clamp_length_max(1.0)
++            }
++            LeanFrom::Mouse => Vec2::ZERO,
+         }
+     }
+ 
+     pub fn key(&mut self, code: KeyCode, state: ElementState) {
+         self.last_device = Device::KeyboardMouse;
++        self.mouse_recent = false;
+         match state {
+             ElementState::Pressed => {
++                self.any_press = true;
+                 self.keys.insert(code);
+                 self.key_taps.insert(code);
+             }
+@@ -424,8 +539,10 @@ impl Input {
+     pub fn mouse_button(&mut self, b: MouseButton, state: ElementState) {
+         self.last_device = Device::KeyboardMouse;
+         self.mouse_active = true;
++        self.mouse_recent = true;
+         match state {
+             ElementState::Pressed => {
++                self.any_press = true;
+                 self.mouse.insert(b);
+                 self.mouse_taps.insert(b);
+             }
+@@ -504,8 +621,22 @@ impl Input {
+             let is = |b: Button| st.held.contains(&b);
+             pad.left = deadzone(st.left, 0.18);
+             pad.right = deadzone(st.right, 0.25);
++            pad.raw_left = st.left;
+             let mut held = 0;
+-            let layout: &[(Button, u32)] = if self.game {
++            let layout: &[(Button, u32)] = if self.fit {
++                &[
++                    (Button::South, buttons::CONFIRM),
++                    (Button::East, buttons::BACK),
++                    (Button::West, buttons::WAVE),
++                    (Button::North, buttons::SCHEDULE),
++                    (Button::LeftTrigger, buttons::TAB_L | buttons::STEP_L),
++                    (Button::RightTrigger, buttons::TAB_R | buttons::STEP_R),
++                    (Button::DPadUp, buttons::MENU_UP),
++                    (Button::DPadDown, buttons::MENU_DOWN),
++                    (Button::DPadLeft, buttons::MENU_LEFT),
++                    (Button::DPadRight, buttons::MENU_RIGHT),
++                ]
++            } else if self.game {
+                 &[
+                     (Button::West, buttons::PRIMARY),
+                     (Button::North, buttons::SECONDARY),
+@@ -530,16 +661,55 @@ impl Input {
+                     held |= action;
+                 }
+             }
+-            if st.rt2 {
+-                held |= if self.game { buttons::SKILL6 } else { buttons::USE };
+-            }
+-            if st.lt2 {
+-                held |= buttons::FOCUS;
++            if self.fit {
++                if st.rt2 {
++                    held |= buttons::STEP_R | buttons::SPRINT;
++                }
++                if st.lt2 {
++                    held |= buttons::STEP_L;
++                }
++                // The stick moves the menu focus too.
++                let l = pad.left;
++                for (on, bit) in [
++                    (l.y > 0.6, buttons::MENU_UP),
++                    (l.y < -0.6, buttons::MENU_DOWN),
++                    (l.x < -0.6, buttons::MENU_LEFT),
++                    (l.x > 0.6, buttons::MENU_RIGHT),
++                ] {
++                    if on {
++                        held |= bit;
++                    }
++                }
++                if pad.start_pressed && !is(Button::Select) {
++                    pad.pause_pressed = true;
++                }
++                if is(Button::Start) && !is(Button::Select) {
++                    held |= buttons::PAUSE;
++                }
++            } else {
++                if st.rt2 {
++                    held |= if self.game { buttons::SKILL6 } else { buttons::USE };
++                }
++                if st.lt2 {
++                    held |= buttons::FOCUS;
++                }
+             }
+             pad.held = held;
+-            pad.rotate = if self.game { 0.0 } else { (is(Button::RightTrigger) as i32 - is(Button::LeftTrigger) as i32) as f32 };
++            pad.rotate = if self.fit {
++                pad.right.x
++            } else if self.game {
++                0.0
++            } else {
++                (is(Button::RightTrigger) as i32 - is(Button::LeftTrigger) as i32) as f32
++            };
+             // In the game the D-pad is potion / use / map / panels, not zoom.
+-            pad.zoom = if self.game { 0.0 } else { (is(Button::DPadDown) as i32 - is(Button::DPadUp) as i32) as f32 };
++            pad.zoom = if self.fit {
++                -pad.right.y
++            } else if self.game {
++                0.0
++            } else {
++                (is(Button::DPadDown) as i32 - is(Button::DPadUp) as i32) as f32
++            };
+             pad.a_held = is(Button::South);
+             pad.x_held = is(Button::West);
+             pad.y_held = is(Button::North);
+@@ -574,7 +744,7 @@ impl Input {
+         if self.mouse.contains(&MouseButton::Left) {
+             b |= buttons::PRIMARY;
+         }
+-        if self.game && self.mouse.contains(&MouseButton::Right) {
++        if (self.game || self.fit) && self.mouse.contains(&MouseButton::Right) {
+             b |= buttons::SECONDARY;
+         }
+         b
+@@ -592,7 +762,7 @@ impl Input {
+         if self.mouse_taps.contains(&MouseButton::Left) {
+             pressed |= buttons::PRIMARY;
+         }
+-        if self.game && self.mouse_taps.contains(&MouseButton::Right) {
++        if (self.game || self.fit) && self.mouse_taps.contains(&MouseButton::Right) {
+             pressed |= buttons::SECONDARY;
+         }
+         self.key_taps.clear();
+@@ -608,7 +778,7 @@ impl Input {
+     }
+ 
+     pub fn rewind_held(&self) -> bool {
+-        self.keys.contains(&KeyCode::Backspace) || self.pad.back_held
++        !self.fit && (self.keys.contains(&KeyCode::Backspace) || self.pad.back_held)
+     }
+ }
+ 
+diff --git a/crates/pav_app/src/main.rs b/crates/pav_app/src/main.rs
+index 0a4869b..c8cc1a0 100644
+--- a/crates/pav_app/src/main.rs
++++ b/crates/pav_app/src/main.rs
+@@ -26,6 +26,7 @@ mod settings;
+ mod simhost;
+ mod ui;
+ mod uiinput;
++mod weblink;
+ 
+ use pav_ui::{arpg_items, arpg_ui, touch};
+ 
+diff --git a/crates/pav_app/src/settings.rs b/crates/pav_app/src/settings.rs
+index 83a7b3e..2bfd0cb 100644
+--- a/crates/pav_app/src/settings.rs
++++ b/crates/pav_app/src/settings.rs
+@@ -80,6 +80,14 @@ impl Settings {
+             s.creature_studio = p.get("creature_studio").is_some_and(|v| v != "false");
+             s.creature_name = p.get("creature").unwrap_or_default();
+         }
++        // The page's boot block (an AI Hub session names its own scene and seed).
++        let boot = crate::weblink::boot();
++        if let Some(scene) = boot.scene {
++            s.scene = scene;
++        }
++        if let Some(seed) = boot.seed {
++            s.seed = seed;
++        }
+         if (s.animation_studio || s.asset_studio || s.creature_studio) && s.scene.is_empty() {
+             s.scene = "empty".into();
+         }
+diff --git a/crates/pav_app/src/simhost.rs b/crates/pav_app/src/simhost.rs
+index ae79a31..281eae5 100644
+--- a/crates/pav_app/src/simhost.rs
++++ b/crates/pav_app/src/simhost.rs
+@@ -272,6 +272,8 @@ impl Clock {
+                 let mut i = sh.input.lock().unwrap();
+                 let mut frame = *i;
+                 i.pressed = 0;
++                i.ui = None;
++                i.any = false;
+                 frame.cmd = sh.cmds.lock().unwrap().pop_front();
+                 frame
+             };
+diff --git a/crates/pav_audio/src/lib.rs b/crates/pav_audio/src/lib.rs
+index 00f9213..480a801 100644
+--- a/crates/pav_audio/src/lib.rs
++++ b/crates/pav_audio/src/lib.rs
+@@ -2,11 +2,21 @@
+ //! and a filter. The mixer runs in the audio callback (cpal) or offline (to .wav). The game
+ //! runs fine without a sound device.
+ 
++use std::sync::Arc;
++use std::sync::atomic::{AtomicU64, Ordering};
+ use std::sync::mpsc::{Receiver, Sender, channel};
+ 
+ use glam::Vec3;
+ use pav_core::SimEvent;
+ 
++pub mod music;
++pub mod voice;
++
++/// Where a voice is mixed.
++pub const BUS_SFX: usize = 0;
++pub const BUS_VOICE: usize = 1;
++pub const BUS_MUSIC: usize = 2;
++
+ #[derive(Clone, Copy, Debug, PartialEq)]
+ pub enum Wave {
+     Sine,
+@@ -35,6 +45,11 @@ pub struct Patch {
+     pub cutoff_end: f32,
+     /// Square-wave duty cycle.
+     pub duty: f32,
++    /// Two parallel band-pass filters (Hz, a vowel's formants); 0 = none.
++    pub formant: [f32; 2],
++    /// A slow wobble of the low-pass cutoff: rate (Hz) and depth (0..1 of the cutoff).
++    pub lfo_rate: f32,
++    pub lfo_depth: f32,
+ }
+ 
+ impl Patch {
+@@ -53,6 +68,9 @@ impl Patch {
+             cutoff: 12000.0,
+             cutoff_end: 12000.0,
+             duty: 0.5,
++            formant: [0.0, 0.0],
++            lfo_rate: 0.0,
++            lfo_depth: 0.0,
+         }
+     }
+     pub fn length(&self) -> f32 {
+@@ -69,6 +87,10 @@ struct Voice {
+     noise: u32,
+     gain_l: f32,
+     gain_r: f32,
++    bus: usize,
++    // Two state-variable band-pass filters.
++    f_low: [f32; 2],
++    f_band: [f32; 2],
+ }
+ 
+ impl Voice {
+@@ -123,10 +145,24 @@ impl Voice {
+                 (self.noise as f32 / u32::MAX as f32) * 2.0 - 1.0
+             }
+         };
+-        let cutoff = p.cutoff * (p.cutoff_end / p.cutoff.max(1.0)).powf((self.t / p.length().max(1e-3)).min(1.0));
++        let mut cutoff = p.cutoff * (p.cutoff_end / p.cutoff.max(1.0)).powf((self.t / p.length().max(1e-3)).min(1.0));
++        if p.lfo_rate > 0.0 {
++            cutoff *= 1.0 + p.lfo_depth * (self.t * p.lfo_rate * std::f32::consts::TAU).sin();
++        }
+         let a = 1.0 - (-std::f32::consts::TAU * cutoff * dt).exp();
+         self.lp += (raw - self.lp) * a;
+-        let s = self.lp * self.env() * p.volume;
++        let mut out = self.lp;
++        if p.formant[0] > 0.0 {
++            out = 0.0;
++            for i in 0..2 {
++                let f = 2.0 * (std::f32::consts::PI * (p.formant[i] * dt).min(0.2)).sin();
++                self.f_low[i] += f * self.f_band[i];
++                let high = self.lp - self.f_low[i] - 0.28 * self.f_band[i];
++                self.f_band[i] += f * high;
++                out += self.f_band[i] * if i == 0 { 0.5 } else { 0.32 };
++            }
++        }
++        let s = out * self.env() * p.volume;
+         self.t += dt;
+         s
+     }
+@@ -138,17 +174,64 @@ pub struct Mixer {
+     pub sample_rate: f32,
+     pub master: f32,
+     seed: u32,
++    /// Gain per bus, applied to each voice as it mixes.
++    pub bus: [f32; 3],
++    seq: Option<music::Sequencer>,
++    /// 1 while a song plays; falls to 0 as it fades out.
++    fade: f32,
++    fading: bool,
++    /// The sequencer stands still (the game is paused).
++    pub hold: bool,
++    /// Samples into the song, for the rhythm clock.
++    pub song_pos: Arc<AtomicU64>,
++    notes: Vec<(Patch, f32)>,
+ }
+ 
+-const MAX_VOICES: usize = 64;
++const MAX_VOICES: usize = 128;
++/// Seconds a song takes to fade to silence.
++const FADE_SECONDS: f32 = 5.0;
+ 
+ impl Mixer {
+     pub fn new(sample_rate: f32) -> Self {
+-        Self { voices: Vec::new(), sample_rate, master: 0.8, seed: 0x9e37_79b9 }
++        Self {
++            voices: Vec::new(),
++            sample_rate,
++            master: 0.8,
++            seed: 0x9e37_79b9,
++            bus: [1.0, 1.0, 0.1],
++            seq: None,
++            fade: 1.0,
++            fading: false,
++            hold: false,
++            song_pos: Arc::new(AtomicU64::new(0)),
++            notes: Vec::new(),
++        }
++    }
++
++    /// Starts song `n` from its beginning; 0 fades the music to silence.
++    pub fn set_song(&mut self, n: u8) {
++        if n == 0 {
++            self.fading = true;
++            return;
++        }
++        if let Some(song) = music::song(n) {
++            self.seq = Some(music::Sequencer::new(song, n, self.sample_rate));
++            self.fading = false;
++            self.fade = 1.0;
++            self.song_pos.store(0, Ordering::Relaxed);
++        }
++    }
++
++    pub fn song(&self) -> u8 {
++        self.seq.as_ref().map(|s| s.song_id).unwrap_or(0)
+     }
+ 
+     /// pan -1 (left) .. 1 (right); delay in seconds.
+     pub fn play(&mut self, p: Patch, pan: f32, gain: f32, delay: f32) {
++        self.play_on(BUS_SFX, p, pan, gain, delay);
++    }
++
++    pub fn play_on(&mut self, bus: usize, p: Patch, pan: f32, gain: f32, delay: f32) {
+         if self.voices.len() >= MAX_VOICES {
+             // Drop the oldest.
+             self.voices.remove(0);
+@@ -165,16 +248,39 @@ impl Mixer {
+             noise: self.seed | 1,
+             gain_l: a.cos() * gain,
+             gain_r: a.sin() * gain,
++            bus,
++            f_low: [0.0; 2],
++            f_band: [0.0; 2],
+         });
+     }
+ 
+     /// Renders into an interleaved stereo buffer (overwrites).
+     pub fn render(&mut self, out: &mut [f32]) {
+         let dt = 1.0 / self.sample_rate;
++        let mut retire = false;
+         for frame in out.chunks_mut(2) {
++            if !self.hold {
++                if let Some(seq) = &mut self.seq {
++                    seq.advance(&mut self.notes);
++                    self.song_pos.store(seq.samples, Ordering::Relaxed);
++                }
++                if !self.notes.is_empty() {
++                    let notes = std::mem::take(&mut self.notes);
++                    for (p, g) in &notes {
++                        self.play_on(BUS_MUSIC, *p, 0.0, *g, 0.0);
++                    }
++                    self.notes = notes;
++                    self.notes.clear();
++                }
++            }
++            if self.fading {
++                self.fade = (self.fade - dt / FADE_SECONDS).max(0.0);
++                retire |= self.fade <= 0.0;
++            }
+             let (mut l, mut r) = (0.0, 0.0);
++            let bus = [self.bus[0], self.bus[1], self.bus[2] * self.fade];
+             for v in &mut self.voices {
+-                let s = v.next(dt);
++                let s = v.next(dt) * bus[v.bus];
+                 l += s * v.gain_l;
+                 r += s * v.gain_r;
+             }
+@@ -186,6 +292,10 @@ impl Mixer {
+             }
+         }
+         self.voices.retain(|v| !v.done());
++        if retire {
++            self.seq = None;
++            self.voices.retain(|v| v.bus != BUS_MUSIC);
++        }
+     }
+ 
+     pub fn active(&self) -> usize {
+@@ -459,6 +569,14 @@ pub fn sounds_for(ev: &SimEvent) -> Vec<(Patch, f32)> {
+         SimEvent::Damage { .. } => {
+             vec![(Patch { decay: 0.03, volume: 0.08, cutoff: 3500.0, cutoff_end: 1200.0, ..Patch::new(Noise, 1.0) }, 0.0)]
+         }
++        SimEvent::Sfx { id, gain, pitch } => {
++            let mut v = sfx_bank(*id, *pitch);
++            for (p, _) in &mut v {
++                p.volume *= *gain;
++            }
++            v
++        }
++        SimEvent::Syllable { speaker, vowel, pitch } => voice::syllable(*speaker, *vowel, *pitch),
+         SimEvent::Destroyed { size, .. } => {
+             let v = size.clamp(0.4, 2.0);
+             vec![
+@@ -480,6 +598,108 @@ pub fn sounds_for(ev: &SimEvent) -> Vec<(Patch, f32)> {
+     }
+ }
+ 
++/// The game's sound bank (ids in `pav_core::games::fit::world::sound`). `pitch` scales pitched
++/// sounds and the tone of noises.
++pub fn sfx_bank(id: u16, pitch: f32) -> Vec<(Patch, f32)> {
++    use pav_core::games::fit::world::sound as s;
++    use Wave::*;
++    let k = pitch.max(0.05);
++    let note = |w: Wave, f: f32, decay: f32, vol: f32| Patch { decay, volume: vol, ..Patch::new(w, f * k) };
++    let noise = |decay: f32, vol: f32, c0: f32, c1: f32| Patch { decay, volume: vol, cutoff: c0 * k, cutoff_end: c1 * k, ..Patch::new(Noise, 1.0) };
++    match id {
++        s::UI_MOVE => vec![(Patch { freq_end: 980.0 * k, glide: 0.03, ..note(Triangle, 720.0, 0.05, 0.14) }, 0.0)],
++        s::UI_CONFIRM => vec![(note(Triangle, 660.0, 0.08, 0.16), 0.0), (note(Triangle, 990.0, 0.12, 0.15), 0.06)],
++        s::UI_BACK => vec![(Patch { freq_end: 330.0 * k, glide: 0.08, ..note(Triangle, 560.0, 0.1, 0.14) }, 0.0)],
++        s::STAMP => vec![
++            (Patch { freq_end: 50.0, glide: 0.09, ..note(Sine, 170.0, 0.2, 0.7) }, 0.0),
++            (noise(0.06, 0.42, 3200.0, 500.0), 0.0),
++        ],
++        s::CLAM => vec![
++            (Patch { freq_end: 80.0 * k, glide: 0.2, formant: [420.0, 900.0], ..note(Saw, 150.0, 0.22, 0.6) }, 0.0),
++            (Patch { freq_end: 180.0 * k, glide: 0.12, formant: [340.0, 700.0], ..note(Saw, 95.0, 0.18, 0.5) }, 0.2),
++        ],
++        s::AGE_TICK => vec![(note(Square, 880.0, 0.022, 0.09), 0.0)],
++        s::STEP => vec![(noise(0.05, 0.16, 1800.0, 500.0), 0.0), (Patch { freq_end: 70.0, glide: 0.05, ..note(Sine, 130.0, 0.06, 0.18) }, 0.0)],
++        s::PIP_SQUEAK => vec![(Patch { freq_end: 1300.0 * k, glide: 0.1, formant: [900.0, 2300.0], ..note(Saw, 620.0, 0.14, 0.6) }, 0.0)],
++        s::CREAK => vec![(Patch { freq_end: 210.0 * k, glide: 0.3, duty: 0.2, cutoff: 1400.0, ..note(Square, 150.0, 0.32, 0.14) }, 0.0)],
++        s::SPLASH_S => vec![(Patch { attack: 0.01, ..noise(0.24, 0.3, 3400.0, 500.0) }, 0.0)],
++        s::SPLASH_B => vec![
++            (Patch { attack: 0.01, sustain: 0.3, hold: 0.25, release: 0.5, ..noise(0.3, 0.8, 5200.0, 300.0) }, 0.0),
++            (Patch { freq_end: 40.0, glide: 0.35, ..note(Sine, 120.0, 0.45, 0.7) }, 0.0),
++        ],
++        s::GULL => vec![
++            (Patch { freq_end: 900.0 * k, glide: 0.1, formant: [900.0, 2600.0], ..note(Saw, 1300.0, 0.12, 0.42) }, 0.0),
++            (Patch { freq_end: 800.0 * k, glide: 0.1, formant: [900.0, 2600.0], ..note(Saw, 1200.0, 0.1, 0.34) }, 0.16),
++        ],
++        s::CROWD => vec![(Patch { attack: 0.5, sustain: 0.6, hold: 1.0, release: 0.9, lfo_rate: 2.0, lfo_depth: 0.4, ..noise(0.3, 0.2, 700.0, 500.0) }, 0.0)],
++        s::CLAP => (0..5)
++            .map(|i| (noise(0.05, 0.14, 4200.0, 1800.0), i as f32 * 0.025 + (i % 2) as f32 * 0.01))
++            .collect(),
++        s::GONG => vec![
++            (Patch { lfo_rate: 5.0, lfo_depth: 0.3, ..note(Sine, 180.0, 1.6, 0.34) }, 0.0),
++            (note(Sine, 271.0, 1.2, 0.2), 0.0),
++            (note(Sine, 433.0, 0.8, 0.12), 0.0),
++        ],
++        s::BELL => vec![(note(Sine, 620.0, 0.9, 0.3), 0.0), (note(Sine, 1240.0, 0.5, 0.12), 0.0)],
++        s::WHOOSH => vec![(Patch { attack: 0.05, ..noise(0.3, 0.26, 700.0, 4800.0) }, 0.0)],
++        s::SHELL_ROLL => vec![(noise(0.08, 0.2, 2300.0, 900.0), 0.0)],
++        s::SHELL_PLOP => vec![(Patch { freq_end: 880.0 * k, glide: 0.08, ..note(Sine, 300.0, 0.11, 0.5) }, 0.0), (noise(0.08, 0.12, 2500.0, 800.0), 0.02)],
++        s::GLASS_PLOP => vec![
++            (note(Sine, 1760.0, 0.05, 0.22), 0.0),
++            (Patch { freq_end: 720.0 * k, glide: 0.1, ..note(Sine, 240.0, 0.14, 0.5) }, 0.3),
++            (noise(0.1, 0.16, 2600.0, 700.0), 0.3),
++        ],
++        s::CONFETTI => vec![
++            (noise(0.04, 0.5, 6000.0, 2000.0), 0.0),
++            (note(Triangle, 1320.0, 0.2, 0.14), 0.05),
++            (note(Triangle, 1760.0, 0.2, 0.14), 0.11),
++            (note(Triangle, 2093.0, 0.3, 0.14), 0.17),
++        ],
++        s::GUST => vec![(Patch { attack: 0.25, lfo_rate: 3.0, lfo_depth: 0.6, ..noise(0.8, 0.26, 1200.0, 500.0) }, 0.0)],
++        s::WAVE => vec![(Patch { attack: 0.3, sustain: 0.4, hold: 0.2, release: 0.8, ..noise(0.4, 0.42, 2200.0, 400.0) }, 0.0)],
++        s::SEA => vec![(Patch { attack: 1.6, sustain: 0.7, hold: 1.0, release: 2.6, lfo_rate: 0.3, lfo_depth: 0.5, ..noise(0.6, 0.12, 1100.0, 700.0) }, 0.0)],
++        s::TONE => vec![(Patch { attack: 0.03, release: 0.05, ..note(Sine, 440.0, 0.1, 0.4) }, 0.0)],
++        s::CHIME => vec![(note(Sine, 784.0, 1.3, 0.3), 0.0), (note(Sine, 1568.0, 0.8, 0.12), 0.01)],
++        s::TICK => vec![(note(Square, 1400.0, 0.02, 0.14), 0.0)],
++        s::STAR => vec![(note(Triangle, 1046.0, 0.13, 0.22), 0.0), (note(Triangle, 1568.0, 0.24, 0.2), 0.08)],
++        s::FANFARE => vec![
++            (note(Triangle, 523.0, 0.14, 0.26), 0.0),
++            (note(Triangle, 659.0, 0.14, 0.26), 0.11),
++            (note(Triangle, 784.0, 0.14, 0.26), 0.22),
++            (note(Triangle, 1046.0, 0.5, 0.3), 0.33),
++            (Patch { cutoff: 2000.0, ..note(Saw, 523.0, 0.5, 0.12) }, 0.33),
++        ],
++        s::SAD => vec![
++            (Patch { cutoff: 1400.0, ..note(Square, 392.0, 0.2, 0.15) }, 0.0),
++            (Patch { cutoff: 1400.0, ..note(Square, 370.0, 0.2, 0.15) }, 0.2),
++            (Patch { cutoff: 1400.0, freq_end: 300.0, glide: 0.5, ..note(Square, 349.0, 0.6, 0.15) }, 0.4),
++        ],
++        s::REVEAL => vec![
++            (Patch { freq_end: 880.0 * k, glide: 1.8, attack: 0.2, ..note(Triangle, 220.0, 2.0, 0.14) }, 0.0),
++            (Patch { freq_end: 1320.0 * k, glide: 1.8, attack: 0.2, ..note(Triangle, 330.0, 2.0, 0.1) }, 0.0),
++        ],
++        s::GROAN => (0..6)
++            .map(|i| {
++                let f = [150.0, 180.0, 210.0, 130.0, 240.0, 165.0][i];
++                let p = Patch { freq_end: f * 0.7 * k, glide: 0.8, attack: 0.08, formant: [520.0, 1000.0], ..note(Saw, f, 0.9, 0.2) };
++                (p, i as f32 * 0.04)
++            })
++            .collect(),
++        s::CATCH => vec![(Patch { freq_end: 1200.0 * k, glide: 0.07, ..note(Triangle, 500.0, 0.12, 0.3) }, 0.0)],
++        s::HIT_GOOD => vec![(note(Triangle, 880.0, 0.07, 0.22), 0.0)],
++        s::HIT_PERFECT => vec![(note(Triangle, 1318.0, 0.09, 0.26), 0.0), (note(Sine, 2637.0, 0.1, 0.1), 0.0)],
++        s::MISS => vec![(Patch { freq_end: 150.0 * k, glide: 0.12, duty: 0.3, cutoff: 1200.0, ..note(Square, 240.0, 0.13, 0.12) }, 0.0)],
++        s::COUNT => vec![(note(Square, 660.0, 0.1, 0.14), 0.0)],
++        s::GO => vec![(note(Square, 1320.0, 0.26, 0.16), 0.0)],
++        s::BOARD => vec![(Patch { freq_end: 340.0 * k, glide: 0.12, ..note(Sine, 120.0, 0.17, 0.42) }, 0.0)],
++        s::STITCH => vec![(Patch { freq_end: 320.0, glide: 0.1, ..note(Saw, 640.0, 0.14, 0.2) }, 0.0)],
++        s::RIBBON => vec![(note(Triangle, 1175.0, 0.1, 0.2), 0.0), (note(Triangle, 1760.0, 0.16, 0.18), 0.05)],
++        s::BUMP => vec![(Patch { freq_end: 60.0, glide: 0.08, ..note(Sine, 140.0, 0.12, 0.5) }, 0.0), (noise(0.06, 0.2, 1400.0, 300.0), 0.0)],
++        s::HEARTBEAT => vec![(Patch { freq_end: 40.0, glide: 0.06, ..note(Sine, 80.0, 0.1, 0.5) }, 0.0), (Patch { freq_end: 40.0, glide: 0.06, ..note(Sine, 70.0, 0.1, 0.4) }, 0.2)],
++        _ => Vec::new(),
++    }
++}
++
+ /// Position of an event (None = not spatial).
+ pub fn event_pos(ev: &SimEvent) -> Option<Vec3> {
+     match ev {
+@@ -578,8 +798,11 @@ pub fn write_wav(path: &std::path::Path, samples: &[f32], sample_rate: u32) -> s
+ }
+ 
+ enum Cmd {
+-    Play(Patch, f32, f32, f32),
++    Play(usize, Patch, f32, f32, f32),
+     Master(f32),
++    Buses([f32; 3]),
++    Song(u8),
++    Hold(bool),
+ }
+ 
+ /// Live output through the default sound device.
+@@ -588,6 +811,7 @@ pub struct AudioOut {
+     tx: Sender<Cmd>,
+     pub sample_rate: u32,
+     pub device: String,
++    song_pos: Arc<AtomicU64>,
+ }
+ 
+ impl AudioOut {
+@@ -602,17 +826,45 @@ impl AudioOut {
+         let rate = config.sample_rate as u32;
+         let channels = config.channels as usize;
+         let (tx, rx) = channel::<Cmd>();
++        let song_pos = Arc::new(AtomicU64::new(0));
++        // A smaller buffer than the web backend's default: snappier effects.
++        #[cfg(target_arch = "wasm32")]
++        let config = cpal::StreamConfig { buffer_size: cpal::BufferSize::Fixed(1024), ..config };
+         let stream = match format {
+-            cpal::SampleFormat::F32 => build::<f32>(&device, config, rx, channels)?,
+-            cpal::SampleFormat::I16 => build::<i16>(&device, config, rx, channels)?,
+-            cpal::SampleFormat::U16 => build::<u16>(&device, config, rx, channels)?,
++            cpal::SampleFormat::F32 => build::<f32>(&device, config, rx, channels, song_pos.clone())?,
++            cpal::SampleFormat::I16 => build::<i16>(&device, config, rx, channels, song_pos.clone())?,
++            cpal::SampleFormat::U16 => build::<u16>(&device, config, rx, channels, song_pos.clone())?,
+             other => anyhow::bail!("unsupported sample format {other:?}"),
+         };
+         stream.play()?;
+-        Ok(Self { _stream: stream, tx, sample_rate: rate, device: name })
++        Ok(Self { _stream: stream, tx, sample_rate: rate, device: name, song_pos })
++    }
++
++    /// Music, effects and voice levels (0..1).
++    pub fn set_buses(&self, music: f32, sfx: f32, voice: f32) {
++        let mut b = [0.0; 3];
++        b[BUS_MUSIC] = music;
++        b[BUS_SFX] = sfx;
++        b[BUS_VOICE] = voice;
++        let _ = self.tx.send(Cmd::Buses(b));
++    }
++
++    /// Holds or releases the sequencer (and so the rhythm clock).
++    pub fn hold_music(&self, on: bool) {
++        let _ = self.tx.send(Cmd::Hold(on));
++    }
++
++    /// Seconds into the song, as far as the sound device has rendered.
++    pub fn song_seconds(&self) -> f64 {
++        self.song_pos.load(Ordering::Relaxed) as f64 / self.sample_rate.max(1) as f64
+     }
+ 
+     pub fn play_event(&self, ev: &SimEvent, l: &Listener, sfx: f32) {
++        if let SimEvent::Music { song } = ev {
++            let _ = self.tx.send(Cmd::Song(*song));
++            return;
++        }
++        let bus = if matches!(ev, SimEvent::Syllable { .. }) { BUS_VOICE } else { BUS_SFX };
+         let (pan, gain) = match event_pos(ev) {
+             Some(p) => {
+                 let d = p - l.pos;
+@@ -621,7 +873,7 @@ impl AudioOut {
+             None => (0.0, 1.0),
+         };
+         for (patch, delay) in sounds_for(ev) {
+-            let _ = self.tx.send(Cmd::Play(patch, pan, gain * sfx, delay));
++            let _ = self.tx.send(Cmd::Play(bus, patch, pan, gain * sfx, delay));
+         }
+     }
+ 
+@@ -637,20 +889,30 @@ impl AudioOut {
+     }
+ }
+ 
+-fn build<T>(device: &cpal::Device, config: cpal::StreamConfig, rx: Receiver<Cmd>, channels: usize) -> anyhow::Result<cpal::Stream>
++fn build<T>(
++    device: &cpal::Device,
++    config: cpal::StreamConfig,
++    rx: Receiver<Cmd>,
++    channels: usize,
++    song_pos: Arc<AtomicU64>,
++) -> anyhow::Result<cpal::Stream>
+ where
+     T: cpal::SizedSample + cpal::FromSample<f32>,
+ {
+     use cpal::traits::DeviceTrait;
+     let mut mixer = Mixer::new(config.sample_rate as f32);
++    mixer.song_pos = song_pos;
+     let mut buf: Vec<f32> = Vec::new();
+     let stream = device.build_output_stream::<T, _, _>(
+         config,
+         move |data: &mut [T], _| {
+             while let Ok(c) = rx.try_recv() {
+                 match c {
+-                    Cmd::Play(p, pan, gain, delay) => mixer.play(p, pan, gain, delay),
++                    Cmd::Play(bus, p, pan, gain, delay) => mixer.play_on(bus, p, pan, gain, delay),
+                     Cmd::Master(v) => mixer.master = v,
++                    Cmd::Buses(b) => mixer.bus = b,
++                    Cmd::Song(n) => mixer.set_song(n),
++                    Cmd::Hold(h) => mixer.hold = h,
+                 }
+             }
+             let frames = data.len() / channels.max(1);
+@@ -668,10 +930,107 @@ where
+     Ok(stream)
+ }
+ 
++/// Renders `seconds` of song `n` at a music level, offline (tests).
++pub fn render_song(n: u8, seconds: f32, rate: f32, music: f32) -> Vec<f32> {
++    let mut m = Mixer::new(rate);
++    m.bus = [1.0, 1.0, music];
++    m.master = 1.0;
++    m.set_song(n);
++    let mut out = vec![0.0; (seconds * rate) as usize * 2];
++    for chunk in out.chunks_mut(512) {
++        m.render(chunk);
++    }
++    out
++}
++
++/// Root-mean-square of a buffer.
++pub fn rms(v: &[f32]) -> f32 {
++    (v.iter().map(|x| x * x).sum::<f32>() / v.len().max(1) as f32).sqrt()
++}
++
+ #[cfg(test)]
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn music_at_ten_percent_is_a_tenth_of_full_scale() {
++        for n in 1..=music::SONG_COUNT {
++            let full = rms(&render_song(n, 8.0, 22050.0, 1.0));
++            let low = rms(&render_song(n, 8.0, 22050.0, 0.1));
++            assert!(full > 0.01, "song {n} is silent: {full}");
++            let ratio = low / full;
++            assert!((0.085..0.125).contains(&ratio), "song {n}: at 10% it's {ratio} of full ({full})");
++        }
++    }
++
++    #[test]
++    fn every_sound_in_the_bank_makes_noise() {
++        use pav_core::games::fit::world::sound;
++        for id in 0..sound::TOTAL {
++            let ev = SimEvent::Sfx { id, gain: 1.0, pitch: 1.0 };
++            let out = render_events(&[(0.0, ev)], 3.0, 22050.0, &Listener::default());
++            let peak = out.iter().fold(0.0f32, |m, s| m.max(s.abs()));
++            assert!(peak > 0.005, "sound {id} is silent");
++        }
++    }
++
++    #[test]
++    fn speakers_differ() {
++        let render = |speaker| {
++            let ev = SimEvent::Syllable { speaker, vowel: 0, pitch: 1.0 };
++            render_events(&[(0.0, ev)], 0.3, 22050.0, &Listener::default())
++        };
++        let mut sounds = Vec::new();
++        for s in 0..8 {
++            let out = render(s);
++            assert!(rms(&out) > 0.001, "speaker {s} is silent");
++            // Crossings per second: a rough pitch.
++            let zc = out.chunks(2).map(|c| c[0]).collect::<Vec<_>>().windows(2).filter(|w| w[0] * w[1] < 0.0).count();
++            sounds.push(zc);
++        }
++        for a in 0..8 {
++            for b in a + 1..8 {
++                assert_ne!(render(a as u8), render(b as u8), "speakers {a} and {b} sound the same");
++            }
++        }
++        // Kettle is far lower than Pip.
++        assert!(sounds[2] < sounds[0], "Kettle {} Pip {}", sounds[2], sounds[0]);
++    }
++
++    #[test]
++    fn every_song_makes_noise() {
++        for n in 1..=music::SONG_COUNT {
++            let mut m = Mixer::new(22050.0);
++            m.bus = [1.0, 1.0, 1.0];
++            m.set_song(n);
++            let mut b = vec![0.0; 22050 * 8];
++            m.render(&mut b);
++            assert!(rms(&b) > 0.002, "song {n} is silent: {}", rms(&b));
++        }
++    }
++
++    #[test]
++    fn a_song_fades_to_silence_and_holds_still() {
++        let mut m = Mixer::new(22050.0);
++        m.bus = [1.0, 1.0, 1.0];
++        m.set_song(6);
++        let mut b = vec![0.0; 22050 * 2];
++        m.render(&mut b);
++        assert!(rms(&b) > 0.01);
++        let at = m.song_pos.load(Ordering::Relaxed);
++        assert!(at > 20000);
++        m.hold = true;
++        m.render(&mut b);
++        assert_eq!(m.song_pos.load(Ordering::Relaxed), at);
++        m.hold = false;
++        m.set_song(0);
++        for _ in 0..7 {
++            m.render(&mut b);
++        }
++        assert!(rms(&b) < 1e-3, "faded: {}", rms(&b));
++        assert_eq!(m.song(), 0);
++    }
++
+     #[test]
+     fn explosion_is_loud_then_silent() {
+         let ev = SimEvent::Explosion { pos: Vec3::ZERO, radius: 1.35 };
+diff --git a/crates/pav_core/src/course.rs b/crates/pav_core/src/course.rs
+index a01ed70..6e00ae2 100644
+--- a/crates/pav_core/src/course.rs
++++ b/crates/pav_core/src/course.rs
+@@ -426,6 +426,7 @@ impl Sim {
+                     }
+                 }
+                 ZoneKind::Kill => respawn = true,
++                ZoneKind::Water if self.state.world.only_current => {} // A game that places its figures splashes for itself.
+                 ZoneKind::Water => events.push(SimEvent::Splash { pos: feet }),
+                 ZoneKind::Pad => {
+                     if !z.params.is_empty() {
+diff --git a/crates/pav_core/src/frame.rs b/crates/pav_core/src/frame.rs
+index aa0e579..996d257 100644
+--- a/crates/pav_core/src/frame.rs
++++ b/crates/pav_core/src/frame.rs
+@@ -208,6 +208,35 @@ pub enum SimEvent {
+     Travel {
+         place: u32,
+     },
++    /// A numbered sound from the game's bank (`pav_audio::sfx_bank`).
++    Sfx {
++        id: u16,
++        gain: f32,
++        pitch: f32,
++    },
++    /// One gibberish syllable of a talking character.
++    Syllable {
++        speaker: u8,
++        vowel: u8,
++        pitch: f32,
++    },
++    /// Change the song (0 fades to silence).
++    Music {
++        song: u8,
++    },
++    /// A splash scaled by `size` (1 = a big dive): water dents and bursts.
++    BigSplash {
++        pos: Vec3,
++        size: f32,
++    },
++    /// A small silent dent in the water (a wake).
++    Wake {
++        pos: Vec3,
++    },
++    /// A burst of paper for a good result.
++    Confetti {
++        pos: Vec3,
++    },
+ }
+ 
+ /// The room the player is in, for the HUD (info card, control guide, camera defaults).
+@@ -253,6 +282,12 @@ pub struct HudFrame {
+     pub pad_note: Option<(String, String, u64)>,
+     /// A `games` game's HUD lines (`Game::hud`).
+     pub lines: Vec<String>,
++    /// The game's status as JSON for the page (`window.__gameStatus`).
++    pub status: Option<String>,
++    /// Whiff Fit's whole UI: a list of things to draw (`pav_ui::fit_ui`).
++    pub fit: Option<std::sync::Arc<crate::games::fit::ui_model::UiFrame>>,
++    /// The game drives the camera's yaw this tick (a chase camera on a curving path).
++    pub camera_yaw: Option<f32>,
+ }
+ 
+ /// Physics counters for the stats overlay.
+diff --git a/crates/pav_core/src/games/mod.rs b/crates/pav_core/src/games/mod.rs
+index a567858..6662bf7 100644
+--- a/crates/pav_core/src/games/mod.rs
++++ b/crates/pav_core/src/games/mod.rs
+@@ -19,11 +19,14 @@ use crate::frame::SimEvent;
+ use crate::input::InputFrame;
+ use crate::sim::Sim;
+ 
++pub mod fit;
+ pub mod starter;
+ 
+ /// Every game the engine knows. `load scene=<key>` (or `<key>/<rest>`) builds it.
+-pub static GAMES: &[Entry] =
+-    &[entry::<starter::Starter>("Starter: collect every shard while slimes chase you (the template to copy).", starter::build)];
++pub static GAMES: &[Entry] = &[
++    entry::<starter::Starter>("Starter: collect every shard while slimes chase you (the template to copy).", starter::build),
++    entry::<fit::FitGame>("Whiff Fit: a five-day balance-and-wellness comedy at a resort staffed by talking gym equipment.", fit::build),
++];
+ 
+ /// Still playing, won or lost.
+ #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+@@ -80,6 +83,32 @@ pub trait Game: Clone + Serialize + DeserializeOwned + Send + Sync + 'static {
+     fn bot(&self, _sim: &Sim) -> InputFrame {
+         InputFrame::default()
+     }
++
++    /// While true, a tick runs only `pre`, the tick count and events: menus keep working while
++    /// the world stands still.
++    fn frozen(&self) -> bool {
++        false
++    }
++
++    /// The game's status for the page, as JSON text (`window.__gameStatus`).
++    fn page_status(&self, _sim: &Sim) -> Option<String> {
++        None
++    }
++
++    /// The game's own UI, drawn by `pav_ui::fit_ui`.
++    fn ui_frame(&self, _sim: &Sim) -> Option<std::sync::Arc<fit::ui_model::UiFrame>> {
++        None
++    }
++
++    /// The camera's yaw when the game drives it per tick.
++    fn camera_yaw(&self, _sim: &Sim) -> Option<f32> {
++        None
++    }
++
++    /// Extra figures to draw that are not entities (ghost lanes).
++    fn extra_objects(&self, _sim: &Sim) -> Vec<crate::frame::RenderObject> {
++        Vec::new()
++    }
+ }
+ 
+ /// One line of [`GAMES`]: made with [`entry`].
+@@ -157,6 +186,26 @@ impl GameBox {
+     pub fn bot(&self, sim: &Sim) -> InputFrame {
+         self.0.bot(sim)
+     }
++
++    pub fn frozen(&self) -> bool {
++        self.0.frozen()
++    }
++
++    pub fn page_status(&self, sim: &Sim) -> Option<String> {
++        self.0.page_status(sim)
++    }
++
++    pub fn ui_frame(&self, sim: &Sim) -> Option<std::sync::Arc<fit::ui_model::UiFrame>> {
++        self.0.ui_frame(sim)
++    }
++
++    pub fn camera_yaw(&self, sim: &Sim) -> Option<f32> {
++        self.0.camera_yaw(sim)
++    }
++
++    pub fn extra_objects(&self, sim: &Sim) -> Vec<crate::frame::RenderObject> {
++        self.0.extra_objects(sim)
++    }
+ }
+ 
+ impl Clone for GameBox {
+@@ -200,6 +249,11 @@ trait DynGame: Send + Sync {
+     fn status(&self, sim: &Sim) -> serde_json::Value;
+     fn outcome(&self) -> Outcome;
+     fn bot(&self, sim: &Sim) -> InputFrame;
++    fn frozen(&self) -> bool;
++    fn page_status(&self, sim: &Sim) -> Option<String>;
++    fn ui_frame(&self, sim: &Sim) -> Option<std::sync::Arc<fit::ui_model::UiFrame>>;
++    fn camera_yaw(&self, sim: &Sim) -> Option<f32>;
++    fn extra_objects(&self, sim: &Sim) -> Vec<crate::frame::RenderObject>;
+     fn as_any(&self) -> &dyn Any;
+     fn as_any_mut(&mut self) -> &mut dyn Any;
+ }
+@@ -232,6 +286,21 @@ impl<G: Game> DynGame for G {
+     fn bot(&self, sim: &Sim) -> InputFrame {
+         Game::bot(self, sim)
+     }
++    fn frozen(&self) -> bool {
++        Game::frozen(self)
++    }
++    fn page_status(&self, sim: &Sim) -> Option<String> {
++        Game::page_status(self, sim)
++    }
++    fn ui_frame(&self, sim: &Sim) -> Option<std::sync::Arc<fit::ui_model::UiFrame>> {
++        Game::ui_frame(self, sim)
++    }
++    fn camera_yaw(&self, sim: &Sim) -> Option<f32> {
++        Game::camera_yaw(self, sim)
++    }
++    fn extra_objects(&self, sim: &Sim) -> Vec<crate::frame::RenderObject> {
++        Game::extra_objects(self, sim)
++    }
+     fn as_any(&self) -> &dyn Any {
+         self
+     }
+diff --git a/crates/pav_core/src/input.rs b/crates/pav_core/src/input.rs
+index cfd4389..50d8ba9 100644
+--- a/crates/pav_core/src/input.rs
++++ b/crates/pav_core/src/input.rs
+@@ -21,6 +21,22 @@ pub mod buttons {
+     pub const SKILL6: u32 = 1 << 12;
+     pub const DODGE: u32 = 1 << 13;
+     pub const POTION: u32 = 1 << 14;
++    /// Whiff Fit: menu and action buttons, each a device-independent meaning.
++    pub const CONFIRM: u32 = 1 << 15;
++    pub const BACK: u32 = 1 << 16;
++    pub const MENU_UP: u32 = 1 << 17;
++    pub const MENU_DOWN: u32 = 1 << 18;
++    pub const MENU_LEFT: u32 = 1 << 19;
++    pub const MENU_RIGHT: u32 = 1 << 20;
++    pub const TAB_L: u32 = 1 << 21;
++    pub const TAB_R: u32 = 1 << 22;
++    pub const PAUSE: u32 = 1 << 23;
++    pub const SCHEDULE: u32 = 1 << 24;
++    pub const WAVE: u32 = 1 << 25;
++    pub const STEP_L: u32 = 1 << 26;
++    pub const STEP_R: u32 = 1 << 27;
++    /// The AI Hub's round has started (the page's `__hub.go`).
++    pub const HUB_GO: u32 = 1 << 28;
+ 
+     pub const NAMES: &[(&str, u32)] = &[
+         ("jump", JUMP),
+@@ -38,6 +54,20 @@ pub mod buttons {
+         ("skill6", SKILL6),
+         ("dodge", DODGE),
+         ("potion", POTION),
++        ("confirm", CONFIRM),
++        ("back", BACK),
++        ("menu_up", MENU_UP),
++        ("menu_down", MENU_DOWN),
++        ("menu_left", MENU_LEFT),
++        ("menu_right", MENU_RIGHT),
++        ("tab_l", TAB_L),
++        ("tab_r", TAB_R),
++        ("pause", PAUSE),
++        ("schedule", SCHEDULE),
++        ("wave", WAVE),
++        ("step_l", STEP_L),
++        ("step_r", STEP_R),
++        ("hub_go", HUB_GO),
+     ];
+ 
+     pub fn from_name(n: &str) -> Option<u32> {
+@@ -45,6 +75,15 @@ pub mod buttons {
+     }
+ }
+ 
++/// What the pointer did to an item of a game's UI this frame (`pav_ui` hit-tests its rects).
++#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
++pub enum UiEvent {
++    Hover(u16),
++    Click(u16),
++    /// A slider dragged to this fraction (0..1).
++    Slider(u16, f32),
++}
++
+ #[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+ pub struct InputFrame {
+     /// Desired movement on the ground plane: x = world +X, y = world +Z. Length <= 1.
+@@ -64,6 +103,18 @@ pub struct InputFrame {
+     /// A menu action this tick (Shardfall: equip, sell, travel...), queued one per tick.
+     #[serde(default, skip_serializing_if = "Option::is_none")]
+     pub cmd: Option<crate::arpg::GameCmd>,
++    /// Screen-space lean (x right, y up, unit disc), already shaped per device by the host.
++    #[serde(default)]
++    pub lean: Vec2,
++    /// Any real input this tick: a key, a button, a stick past 0.3, a click or a mouse move.
++    #[serde(default)]
++    pub any: bool,
++    /// What the pointer did to the game's UI.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub ui: Option<UiEvent>,
++    /// The music's position (seconds, latency corrected) when sound is running.
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub song_pos: Option<f32>,
+ }
+ 
+ impl InputFrame {
+diff --git a/crates/pav_core/src/parts.rs b/crates/pav_core/src/parts.rs
+index d10cac2..666ef8a 100644
+--- a/crates/pav_core/src/parts.rs
++++ b/crates/pav_core/src/parts.rs
+@@ -23,11 +23,13 @@ crate::choice_enum! {
+         Eyes => "eyes",
+         Orbs => "orbs",
+         Wings => "wings",
++        /// A carrying handle arching over the head (a kettlebell's).
++        Handle => "handle",
+     }
+ }
+ 
+ impl AttachKind {
+-    pub const ALL: [AttachKind; 10] = [
++    pub const ALL: [AttachKind; 11] = [
+         AttachKind::Horns,
+         AttachKind::Antlers,
+         AttachKind::Spikes,
+@@ -38,6 +40,7 @@ impl AttachKind {
+         AttachKind::Eyes,
+         AttachKind::Orbs,
+         AttachKind::Wings,
++        AttachKind::Handle,
+     ];
+ }
+ 
+@@ -104,6 +107,23 @@ pub fn attach(parts: &[Attach], accent: Color, a: &Anchors, time: f32, push: &mu
+         let s = p.size.max(0.1);
+         let g = p.glow;
+         match p.kind {
++            AttachKind::Handle => {
++                // An arch of short capsules over the top of the body.
++                let top = a.center + u * hr * 0.75;
++                let span = hr * 0.62 * s;
++                let rise = hr * 0.95 * s;
++                let thick = hr * 0.12 * s.sqrt();
++                let mut last = None;
++                for i in 0..=10 {
++                    let t = i as f32 / 10.0;
++                    let ang = std::f32::consts::PI * t;
++                    let at = top + r * (-span * ang.cos()) + u * (rise * ang.sin());
++                    if let Some(prev) = last {
++                        push(prev, at, thick, thick, c, g);
++                    }
++                    last = Some(at);
++                }
++            }
+             AttachKind::Horns => {
+                 for sd in [-1.0f32, 1.0] {
+                     let base = a.head + u * hr * 0.6 + r * sd * hr * 0.55;
+diff --git a/crates/pav_core/src/puppet.rs b/crates/pav_core/src/puppet.rs
+index 6da9ca0..8e890ec 100644
+--- a/crates/pav_core/src/puppet.rs
++++ b/crates/pav_core/src/puppet.rs
+@@ -565,6 +565,12 @@ pub struct PuppetState {
+     /// A dodge was under way last tick (a captured dodge starts once per dodge).
+     #[serde(default)]
+     pub dodged: bool,
++    /// The whole figure tilts about the feet, sideways (toward its `right`) and forward
++    /// (radians): a game's balance lean.
++    #[serde(default)]
++    pub tilt_side: f32,
++    #[serde(default)]
++    pub tilt_fwd: f32,
+ }
+ 
+ /// What the character is doing this tick (input to the animator).
+@@ -844,6 +850,8 @@ impl PuppetState {
+             clip2_w: if o.clip2 == self.clip2 { l(self.clip2_w, o.clip2_w) } else { o.clip2_w },
+             clip2_flags: o.clip2_flags,
+             dodged: o.dodged,
++            tilt_side: l(self.tilt_side, o.tilt_side),
++            tilt_fwd: l(self.tilt_fwd, o.tilt_fwd),
+         }
+     }
+ }
+@@ -950,7 +958,9 @@ pub fn body_motion(def: &PuppetDef, st: &PuppetState) -> (Quat, Vec3) {
+     // The sink comes after either (a body that lies where it fell, the hero's, stays at half).
+     let topple = (down > 0.0).then(|| Quat::from_axis_angle(right, -1.45 * smooth(0.0, 0.45, down) * (1.0 - st.clip_w)));
+     let sink = Vec3::Y * (-1.2 * k * smooth(0.55, 1.0, down));
+-    (topple.unwrap_or(Quat::IDENTITY) * spin.unwrap_or(Quat::IDENTITY), shift + sink)
++    let tilt = Quat::from_axis_angle(Vec3::Y.cross(right).normalize_or(Vec3::Z), st.tilt_side)
++        * Quat::from_axis_angle(Vec3::Y.cross(fwd).normalize_or(Vec3::X), st.tilt_fwd);
++    (tilt * topple.unwrap_or(Quat::IDENTITY) * spin.unwrap_or(Quat::IDENTITY), shift + sink)
+ }
+ 
+ /// Camera-aware cheats applied to the finished parts: lean toward the camera, and the cutout
+diff --git a/crates/pav_core/src/sim.rs b/crates/pav_core/src/sim.rs
+index 1726b87..92c42b3 100644
+--- a/crates/pav_core/src/sim.rs
++++ b/crates/pav_core/src/sim.rs
+@@ -528,15 +528,25 @@ impl Sim {
+         // Behaviours set this tick's velocities of moving objects; characters then move
+         // (rapier's controller carries them with kinematic platforms) and the physics step
+         // advances everything together.
+-        self.run_behaviors(dt);
+-
+-        // Getting in and out of vehicles.
+-        self.vehicle_interact(input);
++        let frozen = self.play().is_some_and(|g| g.frozen());
++        if !frozen {
++            self.run_behaviors(dt);
++            // Getting in and out of vehicles.
++            self.vehicle_interact(input);
++        }
+ 
+         // The game decides what the hero and its monsters do this tick.
+         let mut events = Vec::new();
+         let mut game_inputs = self.game_pre(input, dt, &mut events);
+         game_inputs.extend(self.play_pre(input, dt, &mut events));
++        if frozen {
++            // A paused game: its menus ran in `pre`; the world stands still.
++            self.state.tick += 1;
++            if !self.replaying {
++                self.events.extend(events);
++            }
++            return;
++        }
+ 
+         // Characters.
+         let ids: Vec<EntityId> = self.state.entities.iter().filter(|e| e.character.is_some()).map(|e| e.id).collect();
+@@ -984,7 +994,21 @@ impl Sim {
+             boss: self.boss_bar(),
+             pad_note: c.pad_note.clone(),
+             lines: self.play_hud(),
++            status: self.play().and_then(|g| g.page_status(self)),
++            fit: self.play().and_then(|g| g.ui_frame(self)),
++            camera_yaw: self.play().and_then(|g| g.camera_yaw(self)),
++        };
++        let extra = self.play().map(|g| g.extra_objects(self)).unwrap_or_default();
++        // A game whose rooms are sets only ever shows the one it's in.
++        let (only, here) = (self.state.world.only_current, self.state.world.current_room);
++        let shown = |r: &Option<crate::statics::RegionKey>| match r {
++            Some(crate::statics::RegionKey::Room(i)) if only => Some(*i) == here,
++            _ => true,
+         };
++        let mut statics = self.state.statics.clone();
++        if only {
++            statics.chunks.retain(|k, _| shown(&Some(*k)));
++        }
+         RenderFrame {
+             tick: self.state.tick,
+             time: self.time(),
+@@ -994,6 +1018,7 @@ impl Sim {
+                 .state
+                 .entities
+                 .iter()
++                .filter(|e| shown(&e.region))
+                 .filter_map(|e| {
+                     let puppet = e.character.as_ref().filter(|c| c.riding.is_none()).map(|c| PuppetFrame {
+                         state: c.anim,
+@@ -1051,8 +1076,9 @@ impl Sim {
+                         scenery,
+                     })
+                 })
++                .chain(extra)
+                 .collect(),
+-            statics: self.state.statics.clone(),
++            statics,
+             focus: self.state.focus,
+             focus_is_player: self.state.player.is_some(),
+             player: self.state.player,
+diff --git a/crates/pav_core/src/world.rs b/crates/pav_core/src/world.rs
+index 5dbe47a..9fd6d2f 100644
+--- a/crates/pav_core/src/world.rs
++++ b/crates/pav_core/src/world.rs
+@@ -114,6 +114,9 @@ pub struct World {
+     pub props_spawned: BTreeSet<(i32, i32)>,
+     /// Problems from loading room files.
+     pub errors: Vec<String>,
++    /// Frames show only the current room's objects and blocks (a game whose rooms are sets).
++    #[serde(default)]
++    pub only_current: bool,
+ }
+ 
+ impl World {
+diff --git a/crates/pav_tools/src/session.rs b/crates/pav_tools/src/session.rs
+index 1577136..a2125fe 100644
+--- a/crates/pav_tools/src/session.rs
++++ b/crates/pav_tools/src/session.rs
+@@ -257,6 +257,9 @@ impl Session {
+                 self.room_cam = Some((r.id, saved));
+             }
+         }
++        if let Some(y) = self.sim.play().and_then(|g| g.camera_yaw(&self.sim)) {
++            self.camera.params.yaw = y;
++        }
+         self.sync_view();
+     }
+ 
+@@ -265,6 +268,8 @@ impl Session {
+         self.camera.params = params;
+         self.room_cam = None;
+         self.cue_base = None;
++        // A cue that was already up applies again on top of the new base.
++        self.cue_serial = u64::MAX;
+         self.sync_camera();
+     }
+ 
+@@ -432,5 +437,5 @@ impl Session {
+ 
+ /// A game's UI is on screen: Shardfall's, or a `pav_core::games` game's HUD lines.
+ pub fn has_ui(frame: &RenderFrame) -> bool {
+-    frame.game.is_some() || !frame.hud.lines.is_empty()
++    frame.game.is_some() || !frame.hud.lines.is_empty() || frame.hud.fit.is_some()
+ }
+diff --git a/crates/pav_tools/src/tools.rs b/crates/pav_tools/src/tools.rs
+index 10c2c00..eb31720 100644
+--- a/crates/pav_tools/src/tools.rs
++++ b/crates/pav_tools/src/tools.rs
+@@ -1361,6 +1361,7 @@ fn t_input(s: &mut Session, a: &Args) -> Result<Output> {
+     let held = buttons_arg(a, "hold")?;
+     let press = buttons_arg(a, "press")?;
+     let aim = vec_arg(a, "aim")?.filter(|v| v.len() == 3).map(|v| glam::Vec3::new(v[0], v[1], v[2]));
++    let lean = vec_arg(a, "lean")?.unwrap_or_default();
+     let n = get_u64(a, "ticks", 1)?.max(1);
+     for i in 0..n {
+         let f = pav_core::InputFrame {
+@@ -1369,7 +1370,9 @@ fn t_input(s: &mut Session, a: &Args) -> Result<Output> {
+             aim,
+             held: held | if i == 0 { press } else { 0 },
+             pressed: if i == 0 { press } else { 0 },
+-            cmd: None,
++            lean: glam::Vec2::new(lean.first().copied().unwrap_or(0.0), lean.get(1).copied().unwrap_or(0.0)),
++            any: press != 0,
++            ..Default::default()
+         };
+         s.sim.step(&f);
+         s.sync_camera();
+diff --git a/crates/pav_ui/src/headless.rs b/crates/pav_ui/src/headless.rs
+index c5ab281..3875ac0 100644
+--- a/crates/pav_ui/src/headless.rs
++++ b/crates/pav_ui/src/headless.rs
+@@ -124,6 +124,9 @@ impl Headless {
+         input: Input,
+     ) -> Drawn {
+         let ctx = egui::Context::default();
++        if hud_lines.fit.is_some() {
++            crate::fit_ui::install_fonts(&ctx);
++        }
+         let touch = self.device == Device::Touch;
+         crate::touch_style(&ctx, touch);
+         ctx.all_styles_mut(|s| {
+@@ -176,6 +179,10 @@ impl Headless {
+                     }
+                 }
+                 crate::game_lines(&ctx, hud_lines);
++                if let Some(f) = &hud_lines.fit {
++                    let input = crate::fit_ui::Input { device: self.device, mouse: false };
++                    crate::fit_ui::draw(&ctx, f, input, vp, &[]);
++                }
+                 if touch && game.is_some() {
+                     let map_hidden = self.touch.swipes.is_gone(egui::Id::new("minimap"), 0);
+                     let points = game.and_then(|g| g.inv.as_ref()).map(|i| i.points).unwrap_or(0);
+diff --git a/crates/pav_ui/src/lib.rs b/crates/pav_ui/src/lib.rs
+index 76d0efd..5c52001 100644
+--- a/crates/pav_ui/src/lib.rs
++++ b/crates/pav_ui/src/lib.rs
+@@ -6,6 +6,8 @@
+ pub mod arpg_items;
+ pub mod arpg_tree;
+ pub mod arpg_ui;
++pub mod fit_ui;
++pub mod glyphs;
+ pub mod headless;
+ pub mod touch;
+ 
+diff --git a/crates/pav_view/src/build.rs b/crates/pav_view/src/build.rs
+index e6e18d1..f36dc54 100644
+--- a/crates/pav_view/src/build.rs
++++ b/crates/pav_view/src/build.rs
+@@ -728,6 +728,14 @@ impl ViewBuilder {
+             if let SimEvent::Splash { pos } = e {
+                 self.water_dents.push((*pos, 0.7, 0.12));
+             }
++            if let SimEvent::BigSplash { pos, size } = e {
++                let s = size.max(0.1);
++                self.water_dents.push((*pos, 0.9 + 1.6 * s, 0.14 + 0.2 * s));
++                self.shocks.push((*pos, 2.0 + 4.0 * s, self.last_time.unwrap_or(0.0)));
++            }
++            if let SimEvent::Wake { pos } = e {
++                self.water_dents.push((*pos, 0.35, 0.035));
++            }
+             if let SimEvent::Destroyed { pos, size } = e {
+                 self.shocks.push((*pos, size.max(0.5) * 5.0, self.last_time.unwrap_or(0.0)));
+             }
+diff --git a/crates/pav_view/src/fx.rs b/crates/pav_view/src/fx.rs
+index 3d669fb..c271f3d 100644
+--- a/crates/pav_view/src/fx.rs
++++ b/crates/pav_view/src/fx.rs
+@@ -298,6 +298,42 @@ pub fn event_bursts(e: &pav_core::frame::SimEvent, out: &mut Vec<ParticleBurst>)
+         b
+     };
+     match e {
++        E::Confetti { pos } => {
++            let cols = [
++                (Vec3::new(1.0, 0.47, 0.43), Vec3::new(1.0, 0.82, 0.4)),
++                (Vec3::new(0.27, 0.75, 0.78), Vec3::new(0.47, 0.86, 0.67)),
++                (Vec3::new(1.0, 0.82, 0.4), Vec3::new(0.77, 0.69, 0.91)),
++            ];
++            for (a, b) in cols {
++                out.push(with("confetti", *pos, 70, &|p| {
++                    p.area = Vec3::new(0.6, 0.2, 0.6);
++                    p.color0 = a.extend(1.0);
++                    p.color1 = b.extend(0.9);
++                }));
++            }
++        }
++        E::BigSplash { pos, size } => {
++            let s = size.max(0.1);
++            let foam = Vec3::new(0.9, 0.97, 1.0);
++            out.push(with("bubbles", *pos + Vec3::Y * 0.2, (60.0 + 200.0 * s) as u32, &|b| {
++                b.area = Vec3::new(0.3 + 0.5 * s, 0.1, 0.3 + 0.5 * s);
++                b.spread = 2.0 + 4.0 * s;
++                b.vel = Vec3::Y * (4.0 + 8.0 * s);
++                b.size = (0.1 + 0.14 * s, 0.03);
++                b.life = (0.6, 1.2 + 0.8 * s);
++                b.gravity = -9.0;
++                b.floor = Some(pos.y - 0.1);
++                b.color0 = foam.extend(1.0);
++                b.color1 = foam.extend(0.0);
++            }));
++            out.push(with("sparks", *pos + Vec3::Y * 0.1, (30.0 + 80.0 * s) as u32, &|b| {
++                b.spread = 3.0 + 3.0 * s;
++                b.vel = Vec3::Y * (2.0 + 3.0 * s);
++                b.life = (0.3, 0.8);
++                b.color0 = foam.extend(1.0);
++                b.color1 = foam.extend(0.0);
++            }));
++        }
+         E::Explosion { pos, radius } => {
+             let r = *radius;
+             out.push(with("sparks", *pos, 70, &|b| {
+diff --git a/web/index.html b/web/index.html
+index b9a5a4e..9bf1f58 100644
+--- a/web/index.html
++++ b/web/index.html
+@@ -2,44 +2,576 @@
+ <html lang="en">
+ <head>
+ <meta charset="utf-8">
++<script>/*! aihub-session 1.4.0 — AI Hub Session Protocol v1 client. Paste it into your game unmodified. */
++(function (root) {
++  'use strict';
++  if (root.AIHub) return;
++
++  var VERSION = '1.4.0';
++  var HELLO_EVERY_MS = 500;
++  var HELLO_TIMEOUT_MS = 10000;
++  var PROGRESS_EVERY_MS = 1000;
++  /** The hub's welcome may change these; a newer hub never needs a newer copy of this file for it. */
++  var limits = { maxBytes: 16384, ratePerS: 20, burst: 40 };
++
++  var framed = false;
++  try {
++    framed = root.parent && root.parent !== root;
++  } catch (e) {
++    framed = true;
++  }
++  var search = String(root.location && root.location.search);
++  var flagged = /[?&]aihub=/.test(search);
++  var seedArg = /[?&]aihub-seed=(\d+)/.exec(search);
++
++  var hub = {
++    version: VERSION,
++    protocol: 1,
++    /** True when the hub launched this page for a session (?aihub=1 inside a frame). */
++    active: !!(flagged && framed),
++    me: null,
++    host: null,
++    isHost: false,
++    players: [],
++    mode: null,
++    seed: 0,
++    limitMs: 0,
++    round: 0,
++    /** True when the hub shows the round's splash and collects every player's ready: call ready() once loaded, with no prompt. */
++    splash: false,
++    /** True when the hub seeded Math.random for this round (side by side): every copy draws the same numbers. */
++    seeded: false,
++  };
++
++  /** A storage that lives and dies with the page: the Storage methods, and items as properties too. */
++  function memoryStorage() {
++    var data = Object.create(null);
++    var api = {
++      getItem: function (k) {
++        k = String(k);
++        return k in data ? data[k] : null;
++      },
++      setItem: function (k, v) {
++        data[String(k)] = String(v);
++      },
++      removeItem: function (k) {
++        delete data[String(k)];
++      },
++      clear: function () {
++        for (var k in data) delete data[k];
++      },
++      key: function (i) {
++        var keys = Object.keys(data);
++        return i >= 0 && i < keys.length ? keys[i] : null;
++      },
++    };
++    if (typeof Proxy !== 'function') return api;
++    return new Proxy(api, {
++      get: function (t, k) {
++        if (k === 'length') return Object.keys(data).length;
++        if (typeof k === 'symbol' || k in t) return t[k];
++        return k in data ? data[k] : undefined;
++      },
++      set: function (t, k, v) {
++        if (typeof k !== 'symbol') data[k] = String(v);
++        return true;
++      },
++      has: function (t, k) {
++        return k in data || k in t;
++      },
++      deleteProperty: function (t, k) {
++        delete data[k];
++        return true;
++      },
++      ownKeys: function () {
++        return Object.keys(data);
++      },
++      getOwnPropertyDescriptor: function (t, k) {
++        return k in data ? { value: data[k], writable: true, enumerable: true, configurable: true } : undefined;
++      },
++    });
++  }
++
++  /** mulberry32: numbers in [0, 1), the same sequence everywhere for the same 32-bit start. */
++  function generator(a) {
++    return function () {
++      a = (a + 0x6d2b79f5) >>> 0;
++      var t = a;
++      t = Math.imul(t ^ (t >>> 15), t | 1);
++      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
++      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
++    };
++  }
++
++  // A fair start: in a session the game gets an empty storage of its own, so
++  // every round starts as a first launch (no saved unlocks, upgrades or runs),
++  // and nothing the round saves touches the player's own saves.
++  if (hub.active) {
++    for (var s = 0, stores = ['localStorage', 'sessionStorage']; s < stores.length; s++) {
++      try {
++        Object.defineProperty(root, stores[s], { configurable: true, value: memoryStorage() });
++      } catch (e) {
++        warn('could not give the game a fresh ' + stores[s]);
++      }
++    }
++  }
++
++  // Side by side: before any of the game's own scripts run, Math.random becomes
++  // a generator seeded by the hub, so every copy builds the same start.
++  var realRandom = Math.random;
++  var seededRandom = null;
++  if (hub.active && seedArg) {
++    Math.random = seededRandom = generator(Number(seedArg[1]) >>> 0);
++    hub.seeded = true;
++  }
++
++  // In a session the hub owns fullscreen: a game that asks for it gets the
++  // hub's whole page, so the scoreboard and the hub's cards stay on top. The
++  // hub says when its page goes in and out, so the game's own toggle and its
++  // fullscreenchange listeners work as they always did.
++  var fullscreenOn = false;
++  if (hub.active && root.Element && root.document) {
++    var asks = function (on) {
++      return function () {
++        post('fullscreen', { on: on });
++        return Promise.resolve();
++      };
++    };
++    var proto = root.Element.prototype;
++    proto.requestFullscreen = proto.webkitRequestFullscreen = asks(true);
++    root.document.exitFullscreen = root.document.webkitExitFullscreen = asks(false);
++    var shown = function () {
++      return fullscreenOn ? root.document.documentElement || null : null;
++    };
++    try {
++      Object.defineProperty(root.document, 'fullscreenElement', { configurable: true, get: shown });
++      Object.defineProperty(root.document, 'webkitFullscreenElement', { configurable: true, get: shown });
++    } catch (e) {}
++  }
++
++  /**
++   * No hub after all: play on, with Math.random the page's own again. The
++   * empty storage stays: the game has read it already, and what it writes
++   * must never land on the player's real saves.
++   */
++  function standAlone() {
++    hub.active = false;
++    if (seededRandom && Math.random === seededRandom) Math.random = realRandom;
++    hub.seeded = false;
++  }
++
++  var origin = '*';
++  var welcomed = false;
++  var ended = false;
++  var connecting = null;
++  var goAt = null;
++  var sentReady = false;
++  var reported = false;
++  var handlers = {};
++  var pending = {};
++  var tokens = limits.burst;
++  var refilled = now();
++  var probeFn = null;
++  var lastProgress = -Infinity;
++  var nextProgress = null;
++  var progressTimer = null;
++
++  function now() {
++    return root.performance && root.performance.now ? root.performance.now() : Date.now();
++  }
++
++  function warn(text) {
++    if (root.console) root.console.warn('[AIHub] ' + text);
++  }
++
++  function own(o, k) {
++    return Object.prototype.hasOwnProperty.call(o, k);
++  }
++
++  /** This client's own fields, which no welcome may overwrite. */
++  var KEEP = { aihub: 1, type: 1, version: 1, protocol: 1, active: 1, seeded: 1 };
++
++  /** A plain JSON copy, or undefined when it is not JSON. */
++  function json(value) {
++    try {
++      var text = JSON.stringify(value);
++      return text === undefined ? undefined : JSON.parse(text);
++    } catch (e) {
++      return undefined;
++    }
++  }
++
++  function post(type, fields) {
++    var msg = { aihub: 1, type: type };
++    for (var key in fields) if (own(fields, key)) msg[key] = fields[key];
++    try {
++      root.parent.postMessage(msg, origin);
++    } catch (e) {
++      warn('could not reach the hub: ' + e.message);
++    }
++  }
++
++  function emit(type, args) {
++    var list = handlers[type];
++    if (!list || !list.length || pending[type]) {
++      (pending[type] = pending[type] || []).push(args);
++      return;
++    }
++    for (var i = 0; i < list.length; i++) {
++      try {
++        list[i].apply(null, args);
++      } catch (e) {
++        setTimeout(function () {
++          throw e;
++        });
++      }
++    }
++  }
++
++  function onMessage(event) {
++    if (event.source !== root.parent) return;
++    var m = event.data;
++    if (!m || m.aihub !== 1 || typeof m.type !== 'string') return;
++    if (m.type === 'welcome') {
++      if (welcomed) return;
++      welcomed = true;
++      origin = event.origin && event.origin !== 'null' ? event.origin : '*';
++      // Every field the hub sends is kept, so a newer hub can add one without a newer client.
++      for (var key in m) {
++        if (!own(m, key) || KEEP[key] || typeof hub[key] === 'function') continue;
++        hub[key] = m[key];
++      }
++      hub.players = (m.players || []).slice();
++      hub.seed = m.seed >>> 0;
++      hub.isHost = m.me === m.host;
++      hub.splash = m.splash === true;
++      if (m.limits) {
++        for (var l in limits) if (own(limits, l) && Number(m.limits[l]) > 0) limits[l] = Number(m.limits[l]);
++        tokens = limits.burst;
++      }
++      if (connecting) connecting.resolve(info());
++      return;
++    }
++    if (m.type === 'fullscreen') {
++      fullscreenOn = m.on === true;
++      try {
++        root.document.dispatchEvent(new root.Event('fullscreenchange'));
++      } catch (e) {}
++      return;
++    }
++    if (!welcomed || ended) return;
++    if (m.type === 'start') {
++      goAt = now() + Number(m.in || 0);
++      emit('start', [{ in: Number(m.in || 0) }]);
++    } else if (m.type === 'message') {
++      emit('message', [m.data, m.from]);
++    } else if (m.type === 'leave') {
++      hub.players = hub.players.filter(function (p) {
++        return p.id !== m.id;
++      });
++      emit('leave', [{ id: m.id, reason: m.reason }]);
++    } else if (m.type === 'time-up') {
++      emit('time-up', [{ graceMs: m.graceMs }]);
++    } else if (m.type === 'end') {
++      ended = true;
++      if (progressTimer) clearTimeout(progressTimer);
++      emit('end', [{ reason: m.reason, standings: m.standings || null }]);
++    } else {
++      // An event this client has never heard of: hand it on as it came.
++      var detail = {};
++      for (var k in m) if (own(m, k) && k !== 'aihub' && k !== 'type') detail[k] = m[k];
++      emit(m.type, [detail]);
++    }
++  }
++
++  function info() {
++    var out = {};
++    for (var key in hub) if (own(hub, key) && typeof hub[key] !== 'function' && !KEEP[key]) out[key] = hub[key];
++    out.players = hub.players.slice();
++    return out;
++  }
++
++  /** Join the session. Resolves with the round's info, or null when there is no hub: play normally. */
++  hub.connect = function (opts) {
++    if (connecting) return connecting.promise;
++    var done;
++    var promise = new Promise(function (resolve) {
++      done = resolve;
++    });
++    connecting = { promise: promise, resolve: done };
++    if (!hub.active) {
++      done(null);
++      return promise;
++    }
++    opts = opts || {};
++    root.addEventListener('message', onMessage);
++    var started = now();
++    var hello = function () {
++      if (welcomed) return;
++      if (now() - started > HELLO_TIMEOUT_MS) {
++        standAlone();
++        warn('no hub answered; playing normally');
++        done(null);
++        return;
++      }
++      post('hello', { v: 1, client: VERSION, mode: opts.mode || null, seats: opts.seats || null, card: opts.card === true });
++      setTimeout(hello, HELLO_EVERY_MS);
++    };
++    hello();
++    return promise;
++  };
++
++  /** Everything is loaded: at once when info.splash, otherwise from the player's ready gesture. */
++  hub.ready = function () {
++    if (!welcomed || sentReady || ended) return;
++    sentReady = true;
++    post('ready', {});
++  };
++
++  /** On the game's own card (connect({ card: true })): this player is 'ready', or asks for 'more' time (again takes it back). */
++  hub.answer = function (what) {
++    if (!welcomed || ended || goAt !== null) return;
++    if (what !== 'ready' && what !== 'more') return warn('answer is ready or more');
++    post('answer', { answer: what });
++  };
++
++  hub.on = function (type, fn) {
++    (handlers[type] = handlers[type] || []).push(fn);
++    if (pending[type] && !pending[type].flushing) {
++      pending[type].flushing = true;
++      setTimeout(function () {
++        var queued = pending[type];
++        delete pending[type];
++        for (var i = 0; i < queued.length; i++) emit(type, queued[i]);
++      });
++    }
++    return function () {
++      var list = handlers[type] || [];
++      var at = list.indexOf(fn);
++      if (at !== -1) list.splice(at, 1);
++    };
++  };
++
++  /** Send JSON data to every other player, or to one with {to: id}. {reliable: false} may drop or reorder. */
++  hub.send = function (data, opts) {
++    if (!welcomed || ended) return false;
++    opts = opts || {};
++    var text;
++    try {
++      text = JSON.stringify(data);
++    } catch (e) {
++      warn('send: data is not JSON');
++      return false;
++    }
++    if (text === undefined) return false;
++    if (text.length > limits.maxBytes) {
++      warn('send: message over ' + limits.maxBytes + ' bytes dropped');
++      return false;
++    }
++    var t = now();
++    tokens = Math.min(limits.burst, tokens + ((t - refilled) / 1000) * limits.ratePerS);
++    refilled = t;
++    if (tokens < 1) {
++      warn('send: over ' + limits.ratePerS + ' messages a second, dropped');
++      return false;
++    }
++    tokens -= 1;
++    var fields = { data: JSON.parse(text), reliable: opts.reliable !== false };
++    if (opts.to !== undefined && opts.to !== null) fields.to = opts.to;
++    post('send', fields);
++    return true;
++  };
++
++  /** Milliseconds since the synchronized start: negative during the countdown, -Infinity before start. */
++  hub.time = function () {
++    return goAt === null ? -Infinity : now() - goAt;
++  };
++
++  /** A seeded random number generator (0 ≤ n < 1), the same sequence on every device for the same label. */
++  hub.rng = function (label) {
++    var h = 2166136261;
++    var s = String(label === undefined ? '' : label);
++    for (var i = 0; i < s.length; i++) {
++      h ^= s.charCodeAt(i);
++      h = Math.imul(h, 16777619);
++    }
++    return generator((hub.seed ^ h) >>> 0);
++  };
++
++  /** A number the hub can rank: finite, given as a number or as text. Not null, '' or true, which JSON or Number would make 0. */
++  function finite(v) {
++    return (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '')) && isFinite(v);
++  }
++
++  /**
++   * The whole outcome as plain JSON, field by field: the hub checks and trims
++   * it, so new optional fields need no new client. A field that is not JSON
++   * (a cycle, a BigInt) is left out, not the whole outcome.
++   */
++  function outcomeOf(outcome) {
++    if (!outcome || typeof outcome !== 'object' || Array.isArray(outcome)) {
++      warn('the outcome is not a plain object');
++      return null;
++    }
++    var copy = {};
++    for (var key in outcome) {
++      if (!own(outcome, key)) continue;
++      var value = json(outcome[key]);
++      if (value !== undefined) copy[key] = value;
++      else if (outcome[key] !== undefined) warn('the outcome\'s ' + key + ' is not JSON: left out');
++    }
++    return copy;
++  }
++
++  /** Race and side by side: report your own outcome once, {time: ms} (lower wins) or {score: n} (higher wins), with optional stats and awards. */
++  hub.result = function (outcome) {
++    if (!welcomed || ended || reported) return;
++    var fields = outcomeOf(outcome);
++    if (!fields) return;
++    var given = outcome || {};
++    delete fields.time;
++    delete fields.score;
++    if (finite(given.time)) fields.time = Number(given.time);
++    if (finite(given.score)) fields.score = Number(given.score);
++    if (!own(fields, 'time') && !own(fields, 'score')) return warn('result needs a finite time or score');
++    reported = true;
++    if (progressTimer) clearTimeout(progressTimer);
++    post('result', fields);
++  };
++
++  /** Versus and co-op: the host reports the standings once, best first, ties grouped: [[2], [0, 3], [1]]. */
++  hub.finish = function (outcome) {
++    if (!welcomed || ended || reported) return;
++    if (!hub.isHost) return warn('finish is for the host only');
++    var fields = outcomeOf(outcome);
++    if (!fields) return;
++    if (!Array.isArray(fields.standings)) return warn('finish needs standings');
++    reported = true;
++    post('finish', fields);
++  };
++
++  function sendProgress() {
++    progressTimer = null;
++    if (!nextProgress || ended || reported) return;
++    lastProgress = now();
++    post('progress', nextProgress);
++    nextProgress = null;
++  }
++
++  /** Your standing during play, for the hub's scoreboard: {score, label}. Call it as often as you like; the hub hears it about once a second. */
++  hub.progress = function (p) {
++    if (!welcomed || ended || reported || !p || !finite(p.score)) return;
++    nextProgress = { score: Number(p.score) };
++    if (p.label != null) nextProgress.label = String(p.label).slice(0, 24);
++    var wait = lastProgress + PROGRESS_EVERY_MS - now();
++    if (wait <= 0) sendProgress();
++    else if (!progressTimer) progressTimer = setTimeout(sendProgress, wait);
++  };
++
++  /** For the harness, in or out of a session: fn() → { scene, menu, world, input }, read with inspect(). */
++  hub.probe = function (fn) {
++    probeFn = typeof fn === 'function' ? fn : null;
++  };
++
++  hub.inspect = function () {
++    if (!probeFn) return null;
++    try {
++      return JSON.parse(JSON.stringify(probeFn()));
++    } catch (e) {
++      return { error: String((e && e.message) || e) };
++    }
++  };
++
++  /** The game cannot run here (no WebGL, failed load): the hub skips it. */
++  hub.fail = function (message) {
++    if (!hub.active) return;
++    post('error', { message: String(message || 'error').slice(0, 500), fatal: true });
++  };
++
++  root.AIHub = hub;
++})(typeof window !== 'undefined' ? window : globalThis);
++</script>
++<meta name="hub:session" content="1">
++<meta name="hub:session-players" content="1-4">
++<meta name="hub:session-mode" content="ghost">
++<meta name="hub:session-minutes" content="3">
++<meta name="hub:session-goal" content="Highest total across three balance events wins">
++<meta name="hub:session-howto" content="Lean: stick, WASD or mouse. Act: Cross, Space or click">
++<meta name="hub:webgpu" content="required">
++<script id="about-data" type="application/json">{"sourceInformation": {"date": "2026-11-04 22:38:59", "source": "Wii Fit", "plan": "PLAN.md", "genre": "Sports mini-game anthology with a light life-sim frame (daily ritual, unlocks, wardrobe)", "perspective": "Third person, a camera per activity: 3/4 follow on the island, mirror-style front view for exercises, chase for the lap, paddle and tray, high 3/4 for the raft, side view for the dives", "tech": "Rust 1.98.1 compiled to WebAssembly with WebGPU; Pavilion engine (Shardfall repository, commit 49ef2ba, changed for this game): rapier3d 0.36 physics, wgpu renderer, egui 0.36 painter UI, cpal audio, gilrs gamepads; wasm-bindgen 0.2.129; one self-contained HTML file with no external dependencies; AI Hub session client 1.4.0.", "artDirection": "The engine's cel-shaded rounded primitives with thin ink outlines, taken high-key and pastel: 37 hand-written props, nine sets, a painted UI in Fredoka and Nunito", "animation": "The engine's procedural puppet with motion clips: 25 hand-keyed clips (FIT set) plus library clips from Mesh2Motion, CMU, 100STYLE and Quaternius; poses scrubbed by gameplay; whole-figure lean about the feet", "audio": "All in code with no audio files: six sequenced songs (bossa, pads, waltz, funk-pop, mallets, march), 43 synthesized sound effects and stingers, Animalese-style gibberish voices from formant-filtered blips with a timbre per speaker. Music at 10% by default", "online": "AI Hub session (ghost mode, 1 to 4 players): the Inter-Resort Medley with other players as seat-coloured ghosts in neighbouring lanes. Solo: Play Together passes one pad among 2 to 4 guests, and Yesterday You ghosts of your own best runs", "testing": "Headless only: Rust tests with a bot that plays New Stay to the credits, each event on five seeds, balance tables with a human-like player; Playwright in Chromium with a stub pad, keys, mouse, phone and tablet profiles and WebKit iPhone; the AI Hub harness at 2 to 4 players on a bad network and with the host leaving; captures for composition; the native window under xvfb, driven by a scripted pad through the menus and one full event. No physical controller, touch device, TV or second person; nobody listened to the sound", "research": "None beyond the plan's own short web search on Wii Fit; I read the engine's docs and source and the AI Hub protocol", "environment": "Claude Code CLI (headless); Linux", "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh", "usage": "added on import"}, "testingFeedback": ["34 issues, counted in notes/feedback.md as I went. The last eight came from rereading the plan line by line after I had called the game done: no test had caught them.", "4: the page ran under 2 ticks a second from per-tile water zones; figures fell through decks and posts with no colliders; the player was left behind after the Morning Check so the island showed empty sky; the attract bot kept closing Settings on touch-only devices.", "The bot playing New Stay to the credits on three seeds, with the balance table beside it: bot, human-ish, shaky and idle scores per event. It showed six events giving 1000 to anyone.", "Native capture timings on a machine shared with other agents (load 39 on 32 cores): they said nothing about rendering cost."], "engineFeedback": ["Everything runs headless and the same sim plays in tests, tools and the browser. A bot playing the whole game in seconds changed how I worked. Room files plus hand-written JSON props made nine sets cheap.", "Yes. A water zone per tile looked harmless but cost almost the whole frame, through merge_zones and a wave grid per rectangle. Room cameras override cues set in the same frame, so I dropped them. pav load dropped a scene's first cue. Props with no solid parts silently have no collider, which sank my figures. I also guessed the AiDef form and several prop schema rules.", "The UI as data built in the sim (a node list at virtual 1080p drawn by egui), with menus as data, so pad, keys, mouse, tests and the bot share one path. Next, the Balance Core and the sequencer with its song clock.", "Multiple sets in one sim. The engine assumes one room or a streaming world, so the sets, the camera per state, culling the other sets and event-placed figures all needed care. pav_app's frame function is long, and game modes thread through it as flags.", "input.rs (lean, any, ui, song_pos, new buttons); frame.rs (status, fit UI, camera yaw, new events); games/mod.rs (frozen, page status, ui frame, camera yaw, extra objects); sim.rs (frozen ticks, show only the current room); puppet.rs (whole-figure tilt); parts.rs (Handle); pav_audio (buses, formants, LFO, sequencer, song clock); pav_view (BigSplash, Wake, Confetti); pav_app (fit input layout, lean shaping, weblink, hub ghosts); pav_tools (t_input lean, cue fix on load); world.rs (only_current); course.rs (no engine splash when a game places its figures).", "A first-class set or stage concept: several rooms on one sim, only the current one simulated at full cost and drawn, each with its own camera and view, switched with one call. Most of my integration work was reinventing that."], "promptFeedback": ["The plan was specific where it mattered, with verified recipes for the hard seams: the hub block, the controller stub, the sound patch and the build times. It let me spend my effort on the game rather than on finding out how.", "Little. The brief says the plan's section numbers map to its items, and the plan says the brief wins on names, so the two read together well. Whether arrow keys should both walk and step needed a decision.", "Judging feel with no hands: tuning how a lean, a squat or a splash feels from bots, numbers and contact sheets. I wrote a human-like player to stand in, but nobody has held the pad or heard the sound.", "Allow a final pass by a person or an instruction to report feel as untested. I would also add that a shared machine may run far slower than the plan's measured ticks per second, so browser tests should have a fast mode from the start."], "aiHub": {"name": "Whiff Fit", "tagline": "A balance comedy at Tippy Cay", "description": "Five days at a resort staffed by talking gym equipment. Lean, breathe, squat, dive and stand very still until your Balance Age lets you leave.", "type": "Game", "genre": "Sports", "source": "Wii Fit", "series": "Wii Fit", "players": "1–4", "controls": "Left stick, WASD or mouse leans and walks; Cross, Space or click is the action; L1/R1, Q/E or the mouse buttons are your feet.", "tags": ["3d", "third-person", "comedy", "sports", "versus", "low-poly"]}, "credits": "Whiff Fit. An original game built on the Pavilion engine (Shardfall). Characters, script, music, sound, props and sets written for this game, in code and data.\nFonts: Fredoka and Nunito, SIL Open Font License 1.1 (via @expo-google-fonts).\nMotion: FIT clips hand-keyed for this game (CC0). CMU Graphics Lab Motion Capture Database (mocap.cs.cmu.edu), Mesh2Motion (CC0), 100STYLE (CC BY 4.0), Quaternius (CC0).\nProps: hand-written for this game; the rowboat, lamp posts and market stall come from the engine's own library.\nMultiplayer: the AI Hub session client, protocol 1."}</script>
++<script>
++(() => {
++  const boot = window.__gameBoot = { scene: null, seed: null, today: Math.floor(Date.now() / 86400000),
++                                     about: document.getElementById('about-data')?.textContent ?? '',
++                                     touchOnly: matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches,
++                                     fast: /[?&]fast=1/.test(location.search) };
++  // Eyes Closed rumbles the pad, when the pad can.
++  window.__rumble = (v) => {
++    const pad = navigator.getGamepads && Array.from(navigator.getGamepads()).find((p) => p && p.vibrationActuator);
++    if (pad) pad.vibrationActuator.playEffect('dual-rumble', { duration: 80, weakMagnitude: v, strongMagnitude: v * 0.5 }).catch(() => {});
++  };
++  if (!window.AIHub || !AIHub.active) return;
++  const hub = window.__hub = { go: false, ended: false, players: [], me: 0, ghosts: {} };
++  boot.scene = 'fit/medley';
++  boot.seed = Number((/[?&]aihub-seed=(\d+)/.exec(location.search) || [])[1] || 1);
++  AIHub.connect({ mode: 'ghost', seats: [1, 4] }).then((info) => {
++    if (!info) { location.replace(location.pathname); return; }   // no hub after all
++    if (!navigator.gpu) { AIHub.fail('This game needs WebGPU'); return; }
++    hub.me = info.me; hub.players = info.players;
++    // Before the first status arrives, report a zero: the hub must always hear a number.
++    const status = () => { try { return JSON.parse(window.__gameStatus || 'null')?.hub ?? null; } catch { return null; } };
++    // Ready at the first status. A slow GPU can spend a long time compiling pipelines with the game
++    // already loaded: rather than sit out the round, it says ready and joins at its first frame.
++    const t0 = performance.now();
++    const waitReady = () => ((window.__gameStatus || (performance.now() - t0 > 12000 && document.querySelector('canvas'))) ? AIHub.ready() : setTimeout(waitReady, 50));
++    waitReady();
++    let reported = false;
++    const report = () => { if (reported) return; reported = true; const s = status(); AIHub.result({ score: s?.score ?? 0, stats: s?.stats ?? {} }); };
++    setInterval(() => {
++      if (AIHub.time() < 0 || hub.ended) return;
++      hub.go = true;
++      const s = status();
++      AIHub.progress({ score: s?.score ?? 0, label: s?.label ?? 'Warming up' });
++      if (!reported) AIHub.send(s?.ghost ?? { area: -1 }, { reliable: false });
++      if (s?.done) report();
++    }, 100);
++    AIHub.on('message', (data, from) => { hub.ghosts[from] = data; });
++    AIHub.on('leave', ({ id }) => { delete hub.ghosts[id]; });
++    AIHub.on('time-up', report);
++    AIHub.on('end', () => { hub.ended = true; });
++  });
++})();
++</script>
+ <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+-<title>Shardfall</title>
+-<meta name="description" content="Play Shardfall, a procedural hack-and-slash adventure with an interactive tech demo pavilion.">
+-<meta name="theme-color" content="#15171c">
++<title>Whiff Fit — A balance comedy at Tippy Cay</title>
++<meta name="description" content="Five days at a resort staffed by talking gym equipment. Lean, breathe, squat, dive and stand very still until your Balance Age lets you leave.">
++<meta name="theme-color" content="#46bec8">
+ <meta name="mobile-web-app-capable" content="yes">
+ <meta name="apple-mobile-web-app-capable" content="yes">
+-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+ <link rel="manifest" href="manifest.webmanifest">
+-<link rel="icon" href="data:,">
++<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='30' fill='%2346bec8'/%3E%3Cellipse cx='32' cy='38' rx='20' ry='14' fill='%238fd3ff'/%3E%3Ccircle cx='25' cy='36' r='3' fill='%23263e54'/%3E%3Ccircle cx='39' cy='36' r='3' fill='%23263e54'/%3E%3C/svg%3E">
+ <style>
+   /* The page is the game: no scrolling, zooming, text selection, callouts or tap flashes. */
+-  html, body { margin: 0; height: 100%; overflow: hidden; background: #15171c; overscroll-behavior: none;
++  html, body { margin: 0; height: 100%; overflow: hidden; background: #d6eef6; overscroll-behavior: none;
+                touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+                -webkit-tap-highlight-color: transparent; }
+-  /* winit appends the game canvas to <body>; it fills the page and the game follows its size.
+-     dvh: the height that is visible while a phone's browser bars come and go. */
++  /* winit appends the game canvas to <body>; it fills the page and the game follows its size. */
+   canvas { display: block; width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+            outline: none; touch-action: none; }
+   #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+-         font: 18px system-ui, sans-serif; color: #c9ccd4; text-align: center; padding: 24px; pointer-events: none; }
+-  /* Phones held upright: a hint to turn sideways that fades by itself. */
+-  #turn { display: none; position: fixed; left: 50%; top: 12px; transform: translateX(-50%); padding: 8px 14px;
+-          border-radius: 18px; background: rgba(0, 0, 0, 0.6); color: #ffd690; font: 14px system-ui, sans-serif;
+-          pointer-events: none; animation: fade 1s 5s forwards; }
+-  @media (orientation: portrait) and (pointer: coarse) { #turn { display: block; } }
+-  @keyframes fade { to { opacity: 0; } }
++         font: 700 22px system-ui, sans-serif; color: #263e54; text-align: center; padding: 24px; pointer-events: none; }
+ </style>
+ </head>
+ <body>
+-<div id="msg" role="status" aria-live="polite">Loading Shardfall…</div>
+-<div id="turn">Turn your phone sideways for the best view</div>
++<div id="msg" role="status" aria-live="polite">Loading Whiff Fit…</div>
+ <script type="module">
+-  // Start in a demo room with ?room=NAME, or the pavilion with ?scene=world.
+   // Messages name the game by the page title (a single-file build may retitle it).
+-  const name = document.title;
++  const name = 'Whiff Fit';
+   const msg = document.getElementById('msg');
+   if (!navigator.gpu) {
+-    msg.replaceChildren(`${name} needs WebGPU.`, document.createElement('br'),
++    const touch = matchMedia('(pointer: coarse)').matches && !matchMedia('(any-pointer: fine)').matches;
++    msg.replaceChildren(...(touch ? ['Controller or keyboard required', document.createElement('br')] : []),
++      `${name} needs WebGPU.`, document.createElement('br'),
+       'Use a recent Chrome, Edge or Safari (iOS 26 or later) with hardware acceleration enabled.');
+   } else {
+     // The game hides this message once its canvas exists, and takes keyboard focus.
+@@ -47,18 +579,6 @@
+       const c = document.querySelector('canvas');
+       if (c) { c.setAttribute('aria-label', `${name} game`); msg.remove(); c.focus(); obs.disconnect(); }
+     }).observe(document.body, { childList: true });
+-    // Phones and tablets: the first tap goes full screen and turns sideways, where the browser
+-    // allows it (Android; an iPhone keeps its bars, or plays full screen from the home screen).
+-    if (matchMedia('(pointer: coarse)').matches) {
+-      addEventListener('pointerup', () => {
+-        const el = document.documentElement;
+-        if (!document.fullscreenElement && el.requestFullscreen) {
+-          el.requestFullscreen({ navigationUI: 'hide' })
+-            .then(() => screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'))
+-            .catch(() => {});
+-        }
+-      }, { once: true, capture: true });
+-    }
+     try {
+       // The game is shardfall.js and its .wasm beside this page. A single-file build
+       // (scripts/pack_single_html.py) carries both inside the page and sets window.loadGame.

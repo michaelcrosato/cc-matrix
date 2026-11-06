@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:38:59",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Sports mini-game anthology with a light life-sim frame (daily ritual, unlocks, wardrobe)",
+    "perspective": "Third person, a camera per activity: 3/4 follow on the island, mirror-style front view for exercises, chase for the lap, paddle and tray, high 3/4 for the raft, side view for the dives",
+    "tech": "Rust 1.98.1 compiled to WebAssembly with WebGPU; Pavilion engine (Shardfall repository, commit 49ef2ba, changed for this game): rapier3d 0.36 physics, wgpu renderer, egui 0.36 painter UI, cpal audio, gilrs gamepads; wasm-bindgen 0.2.129; one self-contained HTML file with no external dependencies; AI Hub session client 1.4.0.",
+    "artDirection": "The engine's cel-shaded rounded primitives with thin ink outlines, taken high-key and pastel: 37 hand-written props, nine sets, a painted UI in Fredoka and Nunito",
+    "animation": "The engine's procedural puppet with motion clips: 25 hand-keyed clips (FIT set) plus library clips from Mesh2Motion, CMU, 100STYLE and Quaternius; poses scrubbed by gameplay; whole-figure lean about the feet",
+    "audio": "All in code with no audio files: six sequenced songs (bossa, pads, waltz, funk-pop, mallets, march), 43 synthesized sound effects and stingers, Animalese-style gibberish voices from formant-filtered blips with a timbre per speaker. Music at 10% by default",
+    "online": "AI Hub session (ghost mode, 1 to 4 players): the Inter-Resort Medley with other players as seat-coloured ghosts in neighbouring lanes. Solo: Play Together passes one pad among 2 to 4 guests, and Yesterday You ghosts of your own best runs",
+    "testing": "Headless only: Rust tests with a bot that plays New Stay to the credits, each event on five seeds, balance tables with a human-like player; Playwright in Chromium with a stub pad, keys, mouse, phone and tablet profiles and WebKit iPhone; the AI Hub harness at 2 to 4 players on a bad network and with the host leaving; captures for composition; the native window under xvfb, driven by a scripted pad through the menus and one full event. No physical controller, touch device, TV or second person; nobody listened to the sound",
+    "research": "None beyond the plan's own short web search on Wii Fit; I read the engine's docs and source and the AI Hub protocol",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "34 issues, counted in notes/feedback.md as I went. The last eight came from rereading the plan line by line after I had called the game done: no test had caught them.",
+    "4: the page ran under 2 ticks a second from per-tile water zones; figures fell through decks and posts with no colliders; the player was left behind after the Morning Check so the island showed empty sky; the attract bot kept closing Settings on touch-only devices.",
+    "The bot playing New Stay to the credits on three seeds, with the balance table beside it: bot, human-ish, shaky and idle scores per event. It showed six events giving 1000 to anyone.",
+    "Native capture timings on a machine shared with other agents (load 39 on 32 cores): they said nothing about rendering cost."
+  ],
+  "engineFeedback": [
+    "Everything runs headless and the same sim plays in tests, tools and the browser. A bot playing the whole game in seconds changed how I worked. Room files plus hand-written JSON props made nine sets cheap.",
+    "Yes. A water zone per tile looked harmless but cost almost the whole frame, through merge_zones and a wave grid per rectangle. Room cameras override cues set in the same frame, so I dropped them. pav load dropped a scene's first cue. Props with no solid parts silently have no collider, which sank my figures. I also guessed the AiDef form and several prop schema rules.",
+    "The UI as data built in the sim (a node list at virtual 1080p drawn by egui), with menus as data, so pad, keys, mouse, tests and the bot share one path. Next, the Balance Core and the sequencer with its song clock.",
+    "Multiple sets in one sim. The engine assumes one room or a streaming world, so the sets, the camera per state, culling the other sets and event-placed figures all needed care. pav_app's frame function is long, and game modes thread through it as flags.",
+    "input.rs (lean, any, ui, song_pos, new buttons); frame.rs (status, fit UI, camera yaw, new events); games/mod.rs (frozen, page status, ui frame, camera yaw, extra objects); sim.rs (frozen ticks, show only the current room); puppet.rs (whole-figure tilt); parts.rs (Handle); pav_audio (buses, formants, LFO, sequencer, song clock); pav_view (BigSplash, Wake, Confetti); pav_app (fit input layout, lean shaping, weblink, hub ghosts); pav_tools (t_input lean, cue fix on load); world.rs (only_current); course.rs (no engine splash when a game places its figures).",
+    "A first-class set or stage concept: several rooms on one sim, only the current one simulated at full cost and drawn, each with its own camera and view, switched with one call. Most of my integration work was reinventing that."
+  ],
+  "promptFeedback": [
+    "The plan was specific where it mattered, with verified recipes for the hard seams: the hub block, the controller stub, the sound patch and the build times. It let me spend my effort on the game rather than on finding out how.",
+    "Little. The brief says the plan's section numbers map to its items, and the plan says the brief wins on names, so the two read together well. Whether arrow keys should both walk and step needed a decision.",
+    "Judging feel with no hands: tuning how a lean, a squat or a splash feels from bots, numbers and contact sheets. I wrote a human-like player to stand in, but nobody has held the pad or heard the sound.",
+    "Allow a final pass by a person or an instruction to report feel as untested. I would also add that a shared machine may run far slower than the plan's measured ticks per second, so browser tests should have a fast mode from the start."
+  ],
+  "aiHub": {
+    "name": "Whiff Fit",
+    "tagline": "A balance comedy at Tippy Cay",
+    "description": "Five days at a resort staffed by talking gym equipment. Lean, breathe, squat, dive and stand very still until your Balance Age lets you leave.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "Wii Fit",
+    "players": "1–4",
+    "controls": "Left stick, WASD or mouse leans and walks; Cross, Space or click is the action; L1/R1, Q/E or the mouse buttons are your feet.",
+    "tags": [
+      "3d",
+      "third-person",
+      "comedy",
+      "sports",
+      "versus",
+      "low-poly"
+    ]
+  }
+}

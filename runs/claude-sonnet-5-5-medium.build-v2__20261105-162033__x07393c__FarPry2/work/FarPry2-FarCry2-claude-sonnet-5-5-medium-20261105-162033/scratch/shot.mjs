@@ -1,0 +1,18 @@
+import { chromium } from 'playwright';
+import { GAME_HTML, CHROME_FLAGS } from '../tests/lib/serve.mjs';
+process.env.PLAYWRIGHT_HOST_PLATFORM_OVERRIDE ||= 'ubuntu24.04-x64';
+const out = process.argv[2] || 'scratch/shot.png'; const js = process.argv[3] || '';
+const b = await chromium.launch({ args: CHROME_FLAGS });
+const p = await b.newPage({ viewport: { width: 1920, height: 1080 } });
+const errs = []; p.on('pageerror', (e) => errs.push('PAGE ' + e)); p.on('console', (m) => { if (['error', 'warning'].includes(m.type())) errs.push(m.type() + ' ' + m.text().slice(0, 200)); });
+await p.goto('file://' + GAME_HTML);
+const e = await p.evaluate(() => window.__PIXEL_READY__.then((x) => !!x)).catch((x) => 'ERR ' + x);
+console.log('ready', e);
+if (js) await p.evaluate(js);
+await p.evaluate(() => { window.__PIXEL_ENGINE__.manual = false; });
+await p.waitForTimeout(12000);
+await p.screenshot({ path: out });
+console.log('OVR', JSON.stringify(await p.evaluate(() => window.__GAME__.camState.override)), JSON.stringify(await p.evaluate(() => window.__GAME__.state().dialogue)));
+console.log(JSON.stringify(await p.evaluate(() => { const e = window.__PIXEL_ENGINE__; const s = e.state(); return { backend: s.backend, errors: e.errors, gpu: s.gpuErrors, status: s.status, fps: s.fps }; })));
+console.log('errors', errs.slice(0, 8));
+await b.close();

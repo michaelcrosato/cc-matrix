@@ -1,0 +1,10 @@
+import { Engine, HERO_RIG, HERO_MODEL, HERO_CLIPS } from '../pixel-engine.js';
+import { readFile } from 'node:fs/promises';
+let model;
+const game = { name: 't', async setup(ctx) { model = (await ctx.loadModel(HERO_MODEL)).scene; }, cameraTarget: () => ({ x: 0, y: 0, z: 0, set() { return this; } }) };
+const assets = async (p) => new Uint8Array(await readFile(new URL('../' + p, import.meta.url))).buffer;
+await Engine.headless(game, { assets });
+console.log(HERO_CLIPS.map((c) => c.name).join(' '));
+console.log(HERO_RIG.joints.join(' '));
+const names = []; model.traverse((o) => names.push(o.name + (o.isMesh ? '*' : ''))); console.log(names.join(' '));
+process.exit(0);

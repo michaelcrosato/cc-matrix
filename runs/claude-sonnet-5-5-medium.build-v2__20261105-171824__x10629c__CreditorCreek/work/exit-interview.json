@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 17:18:24",
+    "source": "Animal Crossing: City Folk",
+    "plan": "PLAN.md",
+    "genre": "Life sim / social sim (AI Hub genre: Life Sim)",
+    "perspective": "Isometric 3/4 orthographic diorama camera (engine iso preset, yaw 45, pitch 35) with 90-degree camera turns; same camera indoors as a dollhouse cutaway",
+    "tech": "Riftlight Pixel Engine 0.46.0 (three.js r186 WebGPU, Rapier idle), esbuild 0.28 bundle, AI Hub session client 1.4.0",
+    "artDirection": "The engine's native 3D-as-pixel-art in the 16-colour palette; own critter generator (27 species, each built as a ModelDef with pivot joints), tree and building ModelDefs, per-tier houses and store, parametric fish, bug, tool and skeleton models, eight pixel paintings, and quiet ground textures",
+    "animation": "Engine clip format (ClipDef, 30 fps) compiled with compileClips onto a 7-joint rig, played with THREE.AnimationMixer; 44 clips",
+    "audio": "All code: engine Song sequencer music (hourly tunes, venues, festivals), SoundDef effects, Animalese-style formant voices. Music defaults to 10%",
+    "online": "AI Hub Session Protocol v1 shared-world round (\"The Bean Bazaar\") with its own card, passing the hub harness; Visit between two windows on one computer (BroadcastChannel) or two computers (WebRTC with Gate Pass and Reply Slip invite codes)",
+    "testing": "Headless scripts only: simulation, a scripted whole-game playthrough on Engine.headless, Chromium on file:// with software WebGPU (boot, input, attract, audio, phone and tablet profiles), a WebKit failure-message check, the AI Hub harness (4 scenarios), a two-page Visit test covering BroadcastChannel and WebRTC codes, and the sheets check from the kit; no subagents",
+    "research": "Read the plan, the engine guide and the AI Hub README; no web research beyond them",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 18 real ones, the later ones from screenshots and the extra suites: an Almanac crash on an action name that did not exist, About text overflowing its panel, prompts from screens underneath leaking onto the top screen, dark-shadowed and sky-blue interiors, and earlier: boot order crash (rooms registered after the systems that read them), the player never drawn (no actor sync), tool button dead forever (a lock timer left at -0.016), saplings that never grew, attract mode deadlocked by a dialogue that opted out of auto-advance, pause menu reopening in the same frame it closed, Continue also pressing the bus stop, rain and snow showing in sunshine, voice syllables clipping at 1.0, digging refused on plaza tiles, a Pimm visit blocking the pause test, and a few test-harness mistakes of my own. Final state: 426 checks across simulation, playthrough, browser, hub, Visit and sheets suites, 0 failures.",
+    "Five: the boot-order crash, the invisible player, the dead tool button, the attract-mode deadlock and the pause-menu reopen loop. The rest were wrong-feeling rather than game-stopping.",
+    "The scripted playthrough in Node on Engine.headless. It drives the real game objects and real input through New Arrival, Day One errands, tools, shop, museum, home, every City venue, cheese, Vesper, all four festivals, three contests, Rocco leaving, bed, seasons, absence, Pimm and the Long Night ending, in about a minute, and printed exactly which step broke.",
+    "The WebKit no-WebGPU check and the sim-suite counts of dialogue lines: both pass trivially and never failed for a reason that mattered. The sheets check passes but covers 36 ModelDefs: bell, notice board, bench, stall, cheese wheel, the village house, four tree kinds, a parametric fish and boot, nine bug shapes, six tools, two fossil skeletons, a lantern, balloon, snowman, a small fossil, the room shell and the City shopfront. Every critter (27 species, checked one by one by screenshot) is also a generated ModelDef with pivot groups for its seven joints, built at runtime and not sheeted."
+  ],
+  "engineFeedback": [
+    "That everything shares one look. Toon bands, pixel outlines and a 16-colour palette make code-built boxes and spheres read as intentional art, and the same game runs in Node headless, so a whole playthrough is testable without a GPU.",
+    "Yes: ctx.random.fork() returns an object, not a function; NavGrid origin is the corner of cell (0,0); manual engine.step() loops starve promises unless you yield between steps; Precipitation needs intensity set to 0 as well as visible=false; and the Euler signs on a custom rig (negative X swings a limb forward) took a few renders to confirm.",
+    "The whole interface layer: a proportional bitmap font, panels, focus and pointer hit-testing, glyph prompts that follow the last device, dialogue with a typewriter and voice, screens for pockets, map, almanac, keyboard and dev mode, all on the 480x270 HUD. After that, the critter generator and the data-driven rooms.",
+    "Mapping the pointer (normalised device coordinates) onto HUD pixels under the fixed-aspect letterbox, and drawing a lot of mixed-case text cheaply with hud.sprite instead of hud.text, which only has capitals.",
+    "None. pixel-engine.js is byte-identical to the kit, and a test asserts its text appears unchanged in the page.",
+    "An awaitable step helper (engine.stepAsync(n)) that yields between frames so scripted games with async scenes can be tested without hand-written microtask flushes, plus a callable form of ctx.random."
+  ],
+  "promptFeedback": [
+    "The verified recipes. The browser-flags correction (the engine needs --use-angle=swiftshader), the pause rule and the music-volume arithmetic each saved real debugging time, and the pillars gave every cut a reason.",
+    "How to square \"feature-complete, nothing left half-built\" with a plan that is far larger than one session: the cut rules say what never to cut but not how large each system should be. Also whether the deliverable name keeps the spaces of the title and source (I removed them).",
+    "Choosing scope. Eight venues, four festivals, three contests, a shared-world round, attract mode, dev mode and a year of dialogue each deserve a week; finding a version of each that is real, hands-on and small was the hard part.",
+    "Give each section a size budget and a ranked minimal slice, say which cross-checks matter most (hub harness, 10% music, attract timing), and state explicitly how much of Visit is expected (I built both transports: two windows over BroadcastChannel and WebRTC invite codes)."
+  ],
+  "aiHub": {
+    "name": "Creditor Creek",
+    "tagline": "A village, a goose, a very large bill",
+    "description": "Step off the last bus and owe a goose 8,000 beans: catch, dig, sell, befriend eight odd neighbours through a 16-day year, and ride the bus to a neon City of salons, auctions and a magpie. Also a five-minute shared-world fair for up to four.",
+    "type": "Game",
+    "genre": "Life Sim",
+    "source": "Animal Crossing: City Folk",
+    "series": "Animal Crossing",
+    "players": "1–4",
+    "controls": "Move: stick or WASD. Talk and open: Cross or E. Tool: Square or Space. Pockets: Triangle or Tab. Run: hold Circle or Shift. Pause: Options or Esc.",
+    "tags": [
+      "pixel art",
+      "3d",
+      "comedy",
+      "exploration",
+      "versus",
+      "story"
+    ]
+  }
+}

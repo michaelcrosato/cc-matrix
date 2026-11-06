@@ -1,0 +1,47 @@
+# The deliverable boots from file:// with no errors; the kit's own check passes on the dev page.
+import sys, pathlib, subprocess
+sys.path.insert(0, str(pathlib.Path(__file__).parent))
+from _common import *
+
+s = Suite()
+with sync_playwright() as pw:
+    b = launch(pw)
+    page, errs = open_game(b, '?g_noattract=1')
+    step(page, 60)
+    st = page.evaluate('async () => { const e = await window.__PIXEL_READY__; return { errors: e.errors, gpu: e.state().gpuErrors, backend: e.state().backend, name: e.game.name, music: e.audio.volume.music, status: e.state().status, version: e.state().version }; }')
+    s.ok(st['name'] == 'title', f"boots to the title ({st['name']})")
+    s.ok(st['backend'].lower() == 'webgpu', f"on WebGPU ({st['backend']})")
+    s.ok(st['errors'] == [], f"no engine errors: {st['errors']}")
+    s.ok(st['gpu'] == [], f"no GPU errors: {st['gpu']}")
+    s.ok(errs == [], f'no console errors: {errs[:3]}')
+    s.ok(st['music'] == 0.1, f"music at 10% on a first run ({st['music']})")
+    s.ok(st['version'] == '0.46.0', 'engine 0.46.0')
+    title = page.evaluate('document.title')
+    s.ok('Regrettable' in title, f'page title {title}')
+    # The hub tags are in the head; session.js is the first script.
+    head = page.evaluate("document.head.innerHTML")
+    s.ok('hub:session-mode' in head and 'shared-world' in head, 'hub tags present')
+    first = page.evaluate("document.head.querySelector('script').textContent.slice(0, 40)")
+    s.ok('aihub-session' in first, f'session.js first in head: {first}')
+    # New Claim from the menu with the keyboard, then the arrival plays.
+    page.keyboard.press('Enter')
+    step(page, 3)
+    top = page.evaluate('window.__APP__.top?.name')
+    s.ok(top == 'difficulty', f'NEW CLAIM opens the difficulty ({top})')
+    page.keyboard.press('Enter')
+    page.evaluate('async () => { const e = await window.__PIXEL_READY__; e.manual = false; }')
+    page.wait_for_function('() => window.__GAME__?.name === "area:quay" && window.__GAME__.cut', timeout=90000)
+    st = page.evaluate('async () => { const e = await window.__PIXEL_READY__; return { n: e.game.name, cut: !!e.game.cut, errors: e.errors }; }')
+    s.ok(st['n'] == 'area:quay', 'New Claim loads the quay')
+    s.ok(st['cut'], 'the arrival cutscene plays')
+    s.ok(st['errors'] == [], f"no errors: {st['errors']}")
+    page.close()
+    # Reserved URL flags are left to the engine; no warnings from ours.
+    page, errs = open_game(b, '?g_area=cannery&g_nosave=1&g_dame=1&g_flags=dameFreed')
+    step(page, 30)
+    s.ok(errs == [], f'cannery from a flag: no console errors {errs[:2]}')
+    page.close()
+    b.close()
+r = subprocess.run(['node', 'check.mjs', 'index.html?g_noattract=1', '--out', '.scratch/check'], cwd=ROOT, capture_output=True, text=True, timeout=280)
+s.ok(r.returncode == 0, f'check.mjs on the dev page exits 0: {r.stdout[-400:]} {r.stderr[-200:]}')
+s.done()

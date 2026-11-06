@@ -1,0 +1,10 @@
+import { makeStub, run, tuning } from './headless.mjs';
+import { FruitHat } from '../src/events/fruitHat.js';
+import { SKILLS } from '../src/input/bot.js';
+const game = await makeStub();
+const trial = (name, mod) => { const out = []; for (let seed = 1; seed <= 3; seed++) { const saved = { ...SKILLS.sharp }; const ev = new FruitHat(game, { tier: 0, seed, lanes: [{ kind: 'bot', skill: 'sharp', bankAt: 7 }] }); mod && mod(ev); run(ev, 66); const l = ev.lanes[0]; out.push(`${l.score.toFixed(1)}/${l.falls}f/c${l.stats.caught}`); ev.dispose(); } console.log(name, out.join('  ')); };
+trial('base');
+tuning.fruitMass = 0.001; trial('lightfruit'); tuning.fruitMass = 0.015;
+trial('gain1.4', (ev) => { SKILLS.sharp.loadGain = 1.4; }); SKILLS.sharp.loadGain = 0.7;
+trial('gain.7 delay.1', (ev) => { SKILLS.sharp.delay = 0.1; }); SKILLS.sharp.delay = 0.16;
+trial('noswayfix', (ev) => { ev.lanes[0].bal.sway = 0; ev.lanes[0].bal.tremor = 0; });

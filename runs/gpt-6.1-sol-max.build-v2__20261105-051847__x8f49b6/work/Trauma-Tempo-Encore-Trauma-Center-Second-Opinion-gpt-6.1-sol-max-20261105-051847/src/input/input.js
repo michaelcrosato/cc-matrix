@@ -1,0 +1,30 @@
+import {clamp} from '../sim/math.js';
+export class Input{
+ constructor({onAction,onActivity,getMode,aim,settings}){this.onAction=onAction;this.onActivity=onActivity;this.getMode=getMode;this.aim=aim;this.settings=settings;this.keys=new Set();this.mouse={x:0,y:0,down:false,right:false,moved:false};this.tool=3;this.prompt='keyboard';this.padStates=new Map();this.seenPads=false;this.lastPad=0;this.selected=new Map();this.override=null;
+ const activity=(kind)=>{this.prompt=kind;document.documentElement.dataset.promptSet=kind;return this.onActivity(kind);};this.activity=activity;
+ addEventListener('keydown',e=>{const key=e.key.toLowerCase();this.keys.add(key);if([' ','arrowup','arrowdown','arrowleft','arrowright','tab','backspace'].includes(key))e.preventDefault();if(activity('keyboard'))return;if(e.repeat)return;if(this.getMode()==='title'){onAction('any');return;}if(/^[1-8]$/.test(key)){this.tool=Number(key)-1;this.onAction('tool',this.tool);}
+ const m=this.getMode();if(m==='operation'){if(key==='escape')onAction('pause');else if(key==='q')onAction('site',-1);else if(key==='e')onAction('site',1);else if(key==='h')onAction('hint');return;}
+ if(key==='escape'||key==='backspace')onAction('back');else if(key==='enter'||key===' ')onAction('confirm','keyboard');else if(key==='arrowup'||key==='w')onAction('nav',-1);else if(key==='arrowdown'||key==='s')onAction('nav',1);else if(key==='arrowleft'||key==='a')onAction('horizontal',-1);else if(key==='arrowright'||key==='d')onAction('horizontal',1);else if(key==='q')onAction('page',-1);else if(key==='e')onAction('page',1);else if(key==='tab')onAction('skip');else if(key==='m')onAction('more');});
+ addEventListener('keyup',e=>this.keys.delete(e.key.toLowerCase()));
+ addEventListener('pointermove',e=>{const d=Math.hypot(e.clientX-this.mouse.x,e.clientY-this.mouse.y);this.mouse.x=e.clientX;this.mouse.y=e.clientY;if(d>4&&e.pointerType!=='touch'){this.mouse.moved=true;activity('mouse');}});
+ addEventListener('pointerdown',e=>{activity(e.pointerType==='touch'?'touch':'mouse');if(e.target.closest('button,input,select,.modal,.menu-panel,.dialogue-box,.chart'))return;this.mouse.down=e.button===0;this.mouse.right=e.button===2;if(this.getMode()!=='operation'){if(e.button===2)onAction('back');else onAction('confirm','mouse');}else e.preventDefault();});
+ addEventListener('pointerup',e=>{if(e.button===0)this.mouse.down=false;if(e.button===2)this.mouse.right=false;});addEventListener('contextmenu',e=>e.preventDefault());
+ addEventListener('wheel',e=>{activity('mouse');if(this.getMode()==='operation'){this.tool=(this.tool+(e.deltaY>0?1:7))%8;onAction('tool',this.tool);e.preventDefault();}},{passive:false});
+ addEventListener('blur',()=>{this.keys.clear();this.mouse.down=false;this.mouse.right=false;});
+ }
+ poll(){const pads=Array.from(navigator.getGamepads?.()||[]).filter(p=>p?.connected&&p.mapping==='standard');const present=new Set(pads.map(p=>p.index));for(const [id,old] of this.padStates)if(!present.has(id)&&old.connected){old.connected=false;if(this.getMode()==='operation')this.onAction('disconnect',id);}
+ for(const p of pads){this.seenPads=true;const old=this.padStates.get(p.index)||{buttons:[],nav:0,connected:true},b=p.buttons.map(x=>x.value||+x.pressed);const pressed=(i)=>b[i]>.5&&!(old.buttons[i]>.5);const swap=this.settings().swapSticks;
+ const lx=p.axes[swap?2:0]||0,ly=p.axes[swap?3:1]||0;if(Math.hypot(lx,ly)>.6&&this.getMode()==='operation'){const angle=(Math.atan2(ly,lx)+Math.PI/2+Math.PI*2)%(Math.PI*2);this.selected.set(p.index,Math.round(angle/(Math.PI/4))%8);}
+ let consumed=false;if(b.some(x=>x>.15)||p.axes.some(x=>Math.abs(x)>.18)){this.lastPad=p.index;consumed=this.activity('pad');}if(consumed){this.padStates.set(p.index,{...old,buttons:b,axes:[...p.axes],connected:true});continue;}
+ const mode=this.getMode();if(mode==='title'&&b.some((v,i)=>v>.5&&!(old.buttons[i]>.5))){this.onAction('any');this.padStates.set(p.index,{...old,buttons:b,axes:[...p.axes],connected:true});continue;}if(mode==='operation'){if(pressed(9)&&b[8]<.5)this.onAction('pause');if(pressed(4))this.onAction('site',-1,p.index);if(pressed(5))this.onAction('site',1,p.index);if(pressed(13))this.onAction('hint');}
+ else{if(pressed(0))this.onAction('confirm',p.index);if(pressed(1)||pressed(9)&&b[8]<.5)this.onAction('back');if(pressed(3))this.onAction(mode==='session-card'?'more':'skip');if(pressed(4))this.onAction('page',-1);if(pressed(5))this.onAction('page',1);
+ const nav=b[13]>.5||ly>.6?1:b[12]>.5||ly<-.6?-1:0;if(nav&&(!old.nav||performance.now()-old.navAt>330)){this.onAction('nav',nav);old.navAt=performance.now();}old.nav=nav;if(pressed(14))this.onAction('horizontal',-1);if(pressed(15))this.onAction('horizontal',1);}
+ this.padStates.set(p.index,{...old,buttons:b,axes:[...p.axes],connected:true});}
+ return pads;
+ }
+ frame(seat){if(this.override&&seat.id===0)return{...this.override};const device=seat.device;const usePad=device?.startsWith('pad')||!device&&this.prompt==='pad';const idx=device?.startsWith('pad')?Number(device.slice(3)):this.lastPad;const pad=usePad?Array.from(navigator.getGamepads?.()||[]).find(p=>p?.index===idx):null;
+ if(pad){const b=pad.buttons.map(v=>v.value||+v.pressed),a=pad.axes,swap=this.settings().swapSticks;return{ax:a[swap?0:2]||0,ay:-(a[swap?1:3]||0),tool:this.selected.get(idx)??seat.tool,use:Math.max(b[7]||0,b[0]||0),steady:b[6]>.2,charge:b[6]>.4&&b[7]>.4?1:0,alt:b[1]>.5,syringe:b[2]>.5||b[14]>.5,special:b[3]>.5||b[12]>.5,recenter:b[10]>.5,swap:b[15]>.5,site:seat.site};}
+ const k=this.keys,f={tool:this.tool,use:this.mouse.down||k.has('j')||k.has('enter')?1:0,alt:this.mouse.right||k.has('k'),steady:k.has('shift'),syringe:k.has('f'),special:k.has(' '),recenter:k.has('c'),swap:k.has('r'),charge:(this.mouse.down&&this.mouse.right)||(k.has('j')&&k.has('k'))?1:0,site:seat.site};
+ if(this.prompt==='mouse'&&this.mouse.moved){Object.assign(f,this.aim(this.mouse.x,this.mouse.y));}else{f.ax=(k.has('d')||k.has('arrowright')?1:0)-(k.has('a')||k.has('arrowleft')?1:0);f.ay=(k.has('w')||k.has('arrowup')?1:0)-(k.has('s')||k.has('arrowdown')?1:0);}return f;
+ }
+}

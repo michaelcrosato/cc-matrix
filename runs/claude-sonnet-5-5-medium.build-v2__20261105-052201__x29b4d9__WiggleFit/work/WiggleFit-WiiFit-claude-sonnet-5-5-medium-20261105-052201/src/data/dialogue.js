@@ -1,0 +1,108 @@
+// Lines by speaker and situation. Placeholders: {name} {age} {days}
+export const LINES = {
+  trudy: {
+    arrive: ['Oh! A person. Please step on. Not on me. On the island.', "Please step on. Not on me. I'm a level, not a bath mat.", 'Welcome to the Level Best Retreat. Mind the slope. There is only slope.', 'You must be {name}. I have you down in pencil.', "Hello. I'm Trudy. I'm in charge of alignment. Nobody else applied."],
+    lean: ['Lean left. Your other left. No, that was correct. I was testing you.', 'Now lean right. The island will notice. The oranges certainly will.', 'Forward, please. Gently. I can feel that, by the way.', 'Do you see? You move, and the world moves. That is the whole programme.', 'The oranges are rolling. They do that. Nobody is upset.'],
+    morning1: ['Good morning, {name}. It is the first morning. Nothing has gone wrong yet.', 'Welcome back. I was not counting. It has been {days} days.', "Oh! You came back. I wasn't counting. It's been one day, four hours and some minutes.", 'Day {n}. The lighthouse is still leaning. So am I. We have that in common.', "Good morning. I've sharpened a pencil for you. It is the only one."],
+    morningLate: ["It's been {days} days. The island tilted a bit. I'm not saying those things are connected. They are connected.", 'You were away. The oranges were fine. I was fine. Everybody was fine.', 'Look who it is. Sit down. No, stand. No. Sit. I have lost my place.', "I didn't ask where you were. I only noticed. I notice things. It's a condition."],
+    q: [
+      { q: 'Do you trust your knees?', yes: 'They speak highly of you too.', no: 'They know.' },
+      { q: 'Do you ever stand on one leg without knowing why?', yes: 'I thought so.', no: "That's what someone on one leg would say." },
+      { q: 'Have you been leaning on things? Be honest. I can tell.', yes: 'Thank you. The wall has also been honest.', no: 'The wall says otherwise.' },
+      { q: 'Did you stretch this morning?', yes: 'In which direction? Never mind. Lovely.', no: 'We will do it together. Quietly. Nobody has to know.' },
+      { q: 'Do you like standing?', yes: 'That is a great start.', no: 'It will grow on you. Like moss.' },
+    ],
+    qSide: { q: 'When you walk into a room, which way do you lean first?', a: 'Left', b: 'Right', ra: "Interesting. I'm writing that down.", rb: "Interesting. I'm writing that down. In a different colour." },
+    checkin: ["Three short tests. I'll be marking you in pencil, so be brave.", 'On the mat, please. Round mat, round feelings.', "This is the Check-In. It isn't a test. It's three tests."],
+    tStand: ['Stand still. Just stand. It is harder than it looks and exactly as hard as it looks.', 'Keep the dot in the middle. Think of nothing. Nothing is difficult.'],
+    tLean: ['Match the lean. The bar will tell you how you are doing. I will tell you how you feel about it.', 'Lean to where the marker is. I believe in you at roughly seventy percent.'],
+    tStep: ['Step with the beat. Left, right. Like walking, but with feedback.', 'Alternate feet, please. Like a duck that has read a book.'],
+    tQuick: ['When a quarter lights, lean to it. Fast. Not rude. Fast.', 'Quick lean. Think of it as a very polite lurch.'],
+    tOne: ['One foot, please. Keep the right trigger down and the left up. I will wait.', 'One-foot hold. This is where we discover who has been honest about their knees.'],
+    ageIn: ['The drum roll is not my idea. I am told it is traditional.', 'Please hold very still. I have to calculate. I am a level. I am bad at sums.'],
+    age: ['Your Wobble Age is {age}. Some of my favourite people are {age}. Mostly the ones sitting down.', 'Your Wobble Age is {age}. That is a number. We will make it a smaller number.', "Your Wobble Age is {age}. That's down from {prev}! If this continues, you will eventually be born.", 'Wobble Age {age}. I would frame it, but I have no hands.'],
+    ageOld: ['That is a lot of years for a person with that much hair. I mean age. I mean nothing.', "It's a very distinguished number. Distinguished is a word for old with a pension."],
+    ageYoung: ['That is a spectacular number. I have gone slightly sideways.', "Is that right? I'll check the pencil. No. That is right. Well."],
+    noAge: ["I didn't ask how old you are. I asked your knees.", 'Your real age is none of my business. Your knees are my business.'],
+    plan: ["Today's plan. Pick a card. Or walk. Walking is free.", 'Three things on the list. In any order. I have no preference. (Left to right.)', 'Everything on this list is optional, apart from the parts that are not.'],
+    goodRes: ['That was nearly level! I got a little emotional. My bubble went sideways.', 'Pleasant. I wrote pleasant. I underlined it twice.', 'Very good. I will say so in front of the oranges.', 'You are improving. I have not been told to say that. I say it of my own free will.'],
+    okRes: ["That was a performance. I've seen worse. I've seen less.", 'You attended. That is most of it. The rest is optional.', "A fine effort. I can see you trying. I can't see it working, but I can see the trying."],
+    badRes: ["It's quite all right. Falling is just standing, taken a long way.", 'You were there. That is the main thing. The floor was also there. They met.', 'You fell very consistently. Consistency is important.'],
+    fall: ["Let's call that a floor exercise.", 'You fell very consistently. Consistency is important.', 'That was a floor exercise. It will go in the Journal.', 'Ouch. I mean: how interesting.', 'Down and up. That is two out of two postures.', 'Clack. Very wooden. I approve.', 'The floor says hello.', 'Do not worry. You bounced like a toy. That is the idea.', 'I did not see that. I saw all of that.', 'Another floor exercise. You are very good at them.'],
+    marbles: ['Marbles! In the jar. Hear them? That is progress, and it is also marbles.', 'The jar is filling. The island creaks a little. That is the sound of improvement. Or the pier.', 'Every marble is a tiny straightening. The jar is a very patient machine.', 'One marble for the Check-In. Not a reward. A receipt.'],
+    creak: ['Listen. The island came up a notch.', 'Did you feel that? A notch. A small, proud notch.', 'The lighthouse is straighter. Not straight. Straighter. Let us not get ahead of ourselves.', 'I feel almost steady. It is unsettling.'],
+    idle: ['I am not looking at you. I am looking at where you are.', 'There is a bench. I do not recommend it. It leans.', 'Please do not pick up the oranges. They have been through a lot.', 'I counted the planks. Forty. Then I lost count. Then I was upset.', 'If you stand just there, the slope feels personal.', 'I have a very sensitive bubble. It notices when you notice me.', 'The gull is watching. I am pretending I did not see that.', 'The sea stays level. It is the only thing that does. Show-off.', 'I am fine. It is a fine day. Everything is exactly as crooked as it should be.', 'Do you hear the creak? The island is thinking.'],
+    ask: ['You can ask me about the plan, the weather or my feelings. I recommend the plan.', 'I am a level. I can tell you which way is down. It is always the same way. Mostly.', 'Press me again and I will tell you something I am not allowed to say.'],
+    bed: ['Bed, then. Sleep on your left. No, your right. The island is listening.', 'Goodnight, {name}. I will keep the bubble warm.', 'Rest well. Dream flat. I will be here. Not counting.'],
+    bedSkip: ['You are going to bed without doing the plan? Bold. I am not angry. I am a level.', 'There is still a class left. I only mention it. I have no feelings about it.'],
+    day2: ['The second day is harder. This is not a rumour. This is the schedule.'],
+    day3: ['Today there are trays. And plates. And a beam. It is a full day for a small island.'],
+    day4: ['A little damp today. That is the pier. It is also the weather.'],
+    day5: ['Today is Level Day. I have not slept. I do not sleep. I have however been very awake.'],
+    ending: ['Oh. So that\'s what the middle looks like.', "It's quite flat, isn't it? ...Same time tomorrow?", 'I have been crooked for as long as I have been installed. I thought it was how I was made.', 'Oh. Oh my. My bubble. Look at my bubble.'],
+    maint: ['Maintenance day. It means we keep what we have. Like a garden. Or a very small boat.', 'Good morning. Nothing is wrong. We are only tending.', 'A level island still needs checking. Daily. Gently. I have notes.'],
+    free: ['Free Play. Nobody is marking. I am marking a little. Lightly.', 'Pick whatever you like. I will watch from a polite distance.'],
+    group: ['Group Class! Four mats. One level. Please take turns being the problem.', 'Everyone lines up. Nobody pushes. The raft is a separate matter.'],
+    gary: ['Gary is on your head. He is part of it now.', 'That gull has a grudge. Not against you. Against everything.'],
+    bubble: ['My bubble slid. It does that when I am feeling something.', 'That was nearly level. I got a little emotional.'],
+    pause: ['Taking a rest? Wise. The island rests when you do. It is a very loyal island.', 'Paused. The oranges are holding very still. Some of them.'],
+    guestIntro: ['Meet Gentle Margaret, Retired Kevin and the Sandras. They are all very good at standing.', 'The Sandras agree on everything. It is the only thing they have ever disagreed on.'],
+    unlock: ['A new thing! I found it in the jar. It was already there. It simply wasn’t yours.', 'Something opened. I was not there when it happened. I was right here.'],
+    tiers: ['A harder version opened. I did not ask for this. I only reported it.', 'Tier two is Honest. Tier three is Unreasonable. I am not allowed to use that word out loud.'],
+    breath: ['Breathe with the ring. In while it grows. Out while it shrinks. It is a ring. It does not mind.', 'Breath is worth a great deal. It is also free. This is a rare combination.'],
+  },
+  stillwater: {
+    intro: ['Breathe in. Breathe out. Not like that, but thank you for trying.', 'Welcome. Stand. Do nothing, gently.', 'A heron does not hurry. A heron is also late.'],
+    pose: ['This pose is called {pose}. Feel your weight. Feel it apologise.', 'Now, {pose}. Hold it as you hold a thought. Lightly.', 'Slowly. Into {pose}. The ring will go where you ask it.', '{pose}. Do not look at the ring. Be the ring.'],
+    good: ['Very still. I almost did not see you.', 'That was calm. I noticed. I notice everything. It is all right.', 'Good. You held it. It held you back.'],
+    shake: ['If you are shaking, that is only your body leaving.', 'The wobble is a visitor. Offer it tea.', 'The tremor is yours. Be kind to it.'],
+    fall: ['You got off the mat. I saw. It is all right. I see everything. It is all right.', 'The floor is also a posture.', 'You went down. You will come up. It is all the same breath.'],
+    flail: ['That was not a pose. It was a weather event.', 'The arms are not necessary. But I understand.'],
+    breathHint: ['In while the ring grows. Out while it shrinks. The ring knows.', 'Breathe with the ring. It is slower than you. Be patient.'],
+    end: ['It is finished. Nothing happened. That was the point.', 'A heron can stand like this for hours. A heron has also never been asked why.', 'You may move. I will pretend not to notice.'],
+    res: ['Exemplary is a word. It is not a feeling. Enjoy it anyway.', 'Pleasant. That is my highest mark for most people.', 'Adequate. The pond is also adequate. It is a good pond.'],
+    still: ['Be a lily pad. Float. Fret about nothing.', 'A frog is coming. Do not look. Frogs know.', 'Calm fills like a cup. Do not shake the cup.'],
+    cairn: ['I will lower the stones. Keep the slab level. Be a table.', 'A stack is a promise. Keep it.', 'Do not catch the stones. Be the place they land.'],
+    sneeze: ['Ah... do not sneeze. Or sneeze. The pond has seen it all.'],
+    hold: ['One last hold. The ring will shrink. So will your doubts.', 'The island listens to you now. Be gentle with it.'],
+    idle: ['I have been standing here since the sun was smaller.', 'The tide comes in. The tide goes out. I take no position.', 'Do you hear it? That is the sound of nobody asking anything.', 'A good posture is only a good argument with gravity.'],
+    praise: ['Mild praise is the best kind. It keeps.', 'Well done. That is all. I do not add to it.'],
+  },
+  bolster: {
+    intro: ["YOU'RE DOING IT. I don't know what it is, but you're doing it.", 'WELCOME! I FORGOT MY WHISTLE. WELCOME ANYWAY.', "READY? I'M READY. I'M ALWAYS READY. I'M A WALRUS."],
+    count: ['THREE! TWO! ONE! ...ONE AGAIN!', 'ON MY WHISTLE! I HAVE NO WHISTLE! ON MY FEELING!', 'LET US GO! GO LET US!'],
+    good: ['YES! THAT IS FORM! YOUR FORM IS A FORM! THAT IS WHAT FORM IS!', 'I believe in you as much as I believe in lunch.', 'LOOK AT YOU! I AM LOOKING AT YOU! IT IS GREAT!'],
+    last: ["That's the last one! ...THIS one's the last one. I've lied to you and I'd do it again.", 'LAST ONE! ...I MEAN THE NEXT ONE! NO, THAT ONE!'],
+    fall: ['THE FLOOR WINS THAT ONE! WE REMATCH!', 'DOWN IS JUST UP, FACING THE WRONG WAY!', 'THAT IS FINE! I FALL DOWN ALL THE TIME! I AM A WALRUS! WE ARE LOW TO BEGIN WITH!', 'BONUS FALL! NO POINTS BUT I LOVE IT!'],
+    rep: ['SQUEEZE! SQUEEZE THE TRIGGERS! THEY ARE TRIGGERS FOR A REASON!', 'DOWN! HOLD! UP! I KNOW THREE WORDS!', 'FEEL THE BURN! WHAT BURN? I SAY IT TO EVERYONE!'],
+    step: ['STEP! STEP! STEP! I CANNOT COUNT BUT I CAN FEEL THE BEAT!', 'LEFT! RIGHT! BOTH! THE CLASS IS BEHIND YOU! LITERALLY!', 'COMBO! COMBO! I MADE THAT WORD UP AND I STAND BY IT!'],
+    tug: ['HEAVE! HEAVE! HEAVE! THE SANDRAS ARE HEAVING!', 'LEAN BACK! NOT THAT BACK! THERE! THAT BACK!'],
+    plank: ['PLANK! A PLANK IS A STRAIGHT PERSON! LIKE A PLANK!', 'THE GULLS ARE FRIENDS! FRIENDS ON YOUR HEAD!'],
+    end: ['AND DONE! I AM EMOTIONAL! I HAVE A BIG FACE FOR IT!', 'WHISTLE! ...I FORGOT. WHISTLE ANYWAY! FWEEEE!', "THAT'S IT! THAT'S THE CLASS! GO FORTH AND BE UPRIGHT!"],
+    res: ['EXEMPLARY! I SPELLED IT WRONG IN MY HEAD AND IT STILL WORKED!', 'PLEASANT! A PLEASANT TO YOU AND A PLEASANT TO YOUR FAMILY!', 'ADEQUATE! ADEQUATE IS A WORD I LOVE!', 'ATTENDED! YOU CAME! THAT IS THE BIGGEST LIFT!'],
+    idle: ['I HAVE NEVER BLOWN MY WHISTLE. I KEEP IT FOR SOMETHING.', 'DO YOU WANT TO HEAR A STORY? IT IS ABOUT A LOG. IT IS A SHORT STORY.', 'THE SAND IS MY OFFICE! I HAVE AN OPEN DOOR POLICY! THERE IS NO DOOR!', 'I AM VERY STRONG AND ALSO VERY NERVOUS. IT IS FINE.'],
+    bonus: ['BONUS REPS! DOUBLE! I AM MAKING IT UP BUT IT COUNTS!', 'EXTRA! BECAUSE I LOVE YOU AND I CAN'],
+    gull: ['GARY! GET OFF THE PERSON!', 'THE GULL IS A GUEST! BE POLITE TO THE GULL!'],
+    raft: ['IT IS A RAFT! IT IS FINE! IT IS A LITTLE FINE!', 'PUSH! GENTLY! NO, NOT GENTLY!'],
+  },
+  guests: {
+    margaret: ['Oh, I do like a good lean.', 'The pier makes me feel young. Or the other thing.', 'I fell on purpose. That was a tactic.', "That's the style, dear.", 'I once held a pose for an hour. It was a long couch.', 'Hello, {name}. Nice hat.', 'Everything leans a little. That is what keeps it interesting.', 'I have a theory about stairs. It is a short theory.'],
+    kevin: ['Pace yourself. That is my only advice. It is also my only skill.', 'I run ahead so you can catch up. It is a kindness.', 'I am retired from nothing in particular.', 'Good form. I say that to everyone. But to you also.', 'I was fast once. It was a Thursday.', 'The road goes in a circle. I find that restful.', 'Wind at my back. Ground at my feet. What else is there?', 'Do not look at the sea. It looks back.'],
+    sandra: ['We agree.', 'We agree with that.', 'Sandra says yes. And I say yes.', 'We were just saying that. Both of us.', 'It is a lovely day. We are in agreement.', 'We both think you are doing very well.', 'That is what I was about to say.', 'We would like to be on the same side. Always.'],
+    paul: ['I am fine. I am fine. Oh. I am on the floor.', 'The ground has come up to meet me.', 'Is the island moving or am I? I will assume the island.', 'Do not mind me. I fall as a hobby.', 'I fell in my sleep once. Back when I slept.', 'Whoops. I mean: whoop. I have it under control.', 'Is it the left that is down? Or the right?', 'This is going great. For someone.'],
+    gerald: ['I am ninety-two and I lean beautifully.', 'Back in my day, we stood. That is all. We just stood.', 'Do you know how I got this flexible? Lying. Lots of lying.', 'Young people. You are all so upright.', 'My knees have been consulted and they said no.', 'I could do that. But I would rather watch.', 'Ninety-two. That is the age. It is not a number I picked. It picked me.', 'I have seen sixty-one island tilts and this is the best.'],
+    generic: ['Good luck!', 'Go on, then.', 'Oof-ah.', 'Wobba-la!', 'Nee nee!', 'That was a good one.', 'We believe in you.', 'Mind the oranges.'],
+  },
+};
+import { MORE } from './dialogue2.js';
+for (const who in MORE) for (const k in MORE[who]) { LINES[who][k] = (LINES[who][k] || []).concat(MORE[who][k]); }
+const used = {};
+// pick a line without repeating until the situation is used up
+export function pickLine(who, key, r, vars = {}) {
+  const arr = LINES[who] && LINES[who][key]; if (!arr || !arr.length) return '';
+  const id = who + '.' + key; let pool = used[id]; if (!pool || !pool.length) pool = used[id] = arr.map((_, i) => i);
+  const k = Math.floor(r() * pool.length); const idx = pool.splice(k, 1)[0]; let s = arr[idx]; if (typeof s !== 'string') return s;
+  for (const k2 in vars) s = s.split('{' + k2 + '}').join(vars[k2]); return s;
+}
+export function countLines(who) { let n = 0; const o = LINES[who]; for (const k in o) n += Array.isArray(o[k]) ? o[k].length : 1; return n; }
+export function resetLineMemory() { for (const k in used) delete used[k]; }

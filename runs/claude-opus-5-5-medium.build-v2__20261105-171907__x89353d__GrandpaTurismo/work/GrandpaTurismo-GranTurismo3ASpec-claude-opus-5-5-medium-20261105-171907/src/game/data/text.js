@@ -1,0 +1,56 @@
+// The rest of the writing: sincere, exact, formally polite, a touch translated. Funny only by being deadpan.
+export const TIPS = ['BRAKE IN A STRAIGHT LINE. A TYRE HAS ONLY SO MUCH GRIP TO SHARE.', 'SLOW IN, FAST OUT. THIS HAS BEEN TRUE FOR SOME TIME.', 'A WASHED CAR IS NOT FASTER. IT IS SIMPLY POLITE.', 'THE RACING LINE IS THE LONGEST WAY ROUND THE SHORTEST CORNER.', 'CHANGE THE OIL. THE ENGINE WILL NOT THANK YOU, BUT IT WILL CONTINUE.'];
+export const PLACES = [
+  { id: 'licence', name: 'LICENCE CENTRE', blurb: 'EVERY DRIVER BEGINS WITH A CLIPBOARD.', pos: [-20, 0, -11], model: 'control-tower', scale: 0.5, look: [-20, 5, -11] },
+  { id: 'events', name: 'EVENT HALL', blurb: 'THE ROAD BETWEEN YOU AND THE GRAND PRIX.', pos: [-2, 0, -14], model: 'grandstand', scale: 0.28, look: [-2, 2, -14] },
+  { id: 'dealer', name: 'DEALER ROW', blurb: 'THREE SHOWROOMS AND A USED LOT. BRING MONEY.', pos: [18, 0, -13], model: 'showroom', scale: 0.9, look: [18, 1.5, -13] },
+  { id: 'tuning', name: 'TUNING STREET', blurb: 'WHAT YOU BUY HERE YOU WILL FEEL.', pos: [23, 0, -2], model: 'garage-tall', scale: 0.8, look: [23, 2, -2] },
+  { id: 'service', name: 'SERVICE BAY', blurb: 'OIL AND SOAP.', pos: [22, 0, 9], model: 'garage-tall', scale: 0.6, look: [22, 1.5, 9] },
+  { id: 'home', name: 'HOME GARAGE', blurb: 'EVERYTHING YOU HAVE EARNED.', pos: [8, 0, 13], model: 'home-house', scale: 0.8, look: [8, 2, 13] },
+  { id: 'museum', name: 'MUSEUM', blurb: 'CARS YOU HAVE MET.', pos: [-8, 0, 13], model: 'museum', scale: 0.8, look: [-8, 2, 13] },
+  { id: 'theatre', name: 'THEATRE', blurb: 'WATCH IT AGAIN, MORE SLOWLY.', pos: [-22, 0, 8], model: 'marquee', scale: 0.7, look: [-22, 2, 8] },
+  { id: 'arcade', name: 'ARCADE GATE', blurb: 'NO LICENCE REQUIRED. NO MONEY EITHER.', pos: [-25, 0, -3], model: 'arch', scale: 0.9, look: [-25, 2.5, -3] },
+];
+export const LINES = {
+  aiMeet: 'Welcome to the Peninsula. A licence is not difficult to obtain. It is only difficult to deserve.',
+  aiFail: 'The box has not moved. Please try again.',
+  aiFail2: 'That was not correct. The road is where it was.',
+  aiBronze: 'Thank you. That will do, for now.',
+  aiSilver: 'Thank you. That was nearly correct.',
+  aiGold: 'Thank you. That was correct.',
+  aiLine: 'Three attempts. Would you like a painted line on the road? I will not write it down.',
+  aiLicence: 'Your licence is ready. Please do not laminate it.',
+  fennHello: 'Good day. Please look as long as you like. I shall tell you the kerb weight when you are ready.',
+  fennBuy: 'She is yours. Please take the long way home.',
+  fennPoor: 'The price is the price. I am very sorry. I am also not sorry.',
+  bennoHello: 'Sit. Do not touch that.',
+  bennoOil: 'Your oil is tired. It has seen things. Two hundred and fifty credits.',
+  bennoOilDone: 'There. She is a little happier. It will not last.',
+  bennoWash: 'It is simply polite.',
+  bennoWing: 'You now have more downforce. You also have more drag. There is no third thing.',
+  bennoEngine: 'More power. Listen. No, listen.',
+  bennoBrakes: 'You will stop later now. You will also stop.',
+  bennoTyres: 'Four handprints of rubber. Do not ask me for a fifth.',
+  bennoWeight: 'I took some things out. You will not miss them. You did not know their names.',
+  bennoGeneric: 'Done. You will feel it. If you do not feel it, drive faster.',
+  dellLap: 'Lap record at Kestrel Park. One minute, fifty-one. The windmill did not turn to look.',
+  dellWin: 'A win. The crowd is standing. Some of them were already standing.',
+  dellPodium: 'A podium. A respectable day. The car will be washed.',
+  dellOther: 'Classified. Everyone went home with the same number of wheels.',
+  dellSeries: 'The series is decided. There will be a small ceremony and a large cup.',
+  ending: 'You may keep driving. Most people do.',
+};
+export const HANDBOOK = [
+  { title: 'WHAT YOU CAN AND CANNOT DO', lines: ['CARS CANNOT BE DAMAGED OR TURNED OVER. THIS IS BY DESIGN.', 'A WALL OR ANOTHER CAR COSTS YOU TIME, NOT MONEY.', 'YOU CANNOT LEAVE THE CIRCUIT PAST THE BARRIERS.', 'THERE IS NO COCKPIT VIEW. THERE IS A BONNET VIEW.'] },
+  { title: 'CONTROLS', controls: true, lines: [] },
+  { title: 'ASSISTS', lines: ['ABS STOPS THE WHEELS LOCKING. TRACTION TRIMS THE POWER.', 'STABILITY TURNS THE CAR BACK WHEN IT SLIDES.', 'AUTOMATIC GEARS MAY BE TURNED OFF. THE LINE MAY BE PAINTED.', 'EACH CAN BE CHANGED ONE BY ONE FROM THE PAUSE MENU.'] },
+  { title: 'TYRES AND WEAR', lines: ['FOUR SQUARES SHOW THE TYRES. GREEN, THEN SAND, THEN RED.', 'WORN TYRES HOLD LESS. SLIDING WEARS THEM QUICKLY.', 'SLICKS GRIP MOST AND WEAR FASTEST. DIRT TYRES ARE FOR DIRT.', 'A SHORT RACE SPARES THE TYRES. A LONG ONE DOES NOT.'] },
+  { title: 'PIT STOPS', lines: ['ON THE PIT STRAIGHT, KEEP RIGHT AND CROSS THE SAND LINE.', 'THE CAR THEN DRIVES ITSELF AT 60 KM/H TO THE CREW.', 'TYRES TAKE FOUR SECONDS. FUEL TAKES A TENTH PER PERCENT.', 'BACK OR X SKIPS THE TYRES. THE HARBOUR 200 NEEDS ONE STOP.'] },
+  { title: 'TUNING IN PLAIN WORDS', lines: ['POWER WINS STRAIGHTS. LESS WEIGHT WINS EVERYTHING.', 'SOME PARTS ADD A SETTING ON THE SETUP TAB.', 'EVENTS LIMIT POWER OR WEIGHT. CHECK BEFORE YOU BUY.', 'OIL TIRES AFTER 200 KM. BENNO WILL MENTION IT.'] },
+  { title: 'RALLY', lines: ['ONE RIVAL, THREE SECONDS AHEAD. THE CLOCK DECIDES.', 'STABILITY IS HALVED ON DIRT. THE CAR WILL MOVE AROUND.', 'THE HANDBRAKE TURNS THE CAR IN A HAIRPIN.', 'THE CRESTS WILL LIFT YOU. LAND STRAIGHT. WIN TWO LEGS.'] },
+  { title: 'MEDALS AND LICENCES', lines: ['A TEST PASSES AT BRONZE. A LICENCE TAKES ALL FOUR TESTS.', 'THE TIMES COME FROM A DEMONSTRATION BY THE EXAMINER.', 'ALL GOLD EARNS A PRIZE. MS. ARAI WILL NOT MENTION IT.', 'A STOPPED CAR CAN BE RECOVERED, EXCEPT IN A TEST.'] },
+];
+export const CONTROLS_TEXT = {
+  pad: ['STEER: LEFT STICK', 'GO: R2    BRAKE, REVERSE: L2', 'HANDBRAKE: SQUARE    SHIFT: R1, L1', 'CAMERA: TRIANGLE    RECOVER: HOLD TRIANGLE', 'LOOK BACK: CIRCLE    LOOK AROUND: RIGHT STICK'],
+  kb: ['STEER: A D OR ARROWS', 'GO: W    BRAKE, REVERSE: S', 'HANDBRAKE: SPACE    SHIFT: E, Q', 'CAMERA: C    RECOVER: HOLD R', 'LOOK BACK: B    LOOK AROUND: RIGHT DRAG'],
+};

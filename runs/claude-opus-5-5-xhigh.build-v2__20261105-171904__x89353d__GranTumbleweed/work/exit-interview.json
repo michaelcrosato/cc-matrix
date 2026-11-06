@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 17:19:04",
+    "source": "Gran Turismo 3: A-Spec",
+    "plan": "PLAN.md",
+    "genre": "Racing simulation with a career, licences, tuning and car collecting",
+    "perspective": "Third-person chase camera (near and far), a bonnet view, television cameras in replays; a three-quarter diorama camera in menus",
+    "tech": "Pixel Engine 0.46.0 (riftlight kit), three.js r186 and Rapier 0.20 bundled in it, plain JavaScript modules, esbuild 0.28.2, AI Hub session client 1.4.0; Playwright 1.63.0 for tests only",
+    "artDirection": "The engine's native 480x270 pixel art: low-poly toon shapes in the 16-colour Sweetie 16 palette with pixel outlines; 14 cars, 6 circuits, buildings and sets built from data and code",
+    "animation": "The engine's rig and clips (HERO_RIG, ClipDef, compileClips) with 10 new clips: PitJack, PitWheelGun, PitFuel, MarshalFlag, ExaminerClipboard, DealerPresent, MechanicWipe, PodiumCheer, PodiumBow, CrowdCheer; procedural body roll, pit stops, dyno, car wash, Timeline ceremonies",
+    "audio": "All in code, no audio files. A per-car engine synth on Web Audio, tyres, wind, rain, kerbs; 8 original songs and a fanfare as Song data, music at 10% by default; Animalese-style gibberish voices for 4 speakers with subtitles",
+    "online": "AI Hub session protocol 1 in ghost mode (1 to 4 players, seat-coloured ghost cars through the hub only), and Couch Duel: two players, split screen, on one TV with no network",
+    "testing": "Headless and scripted tests allowed; one command printing failures and a count. Ran node tools/test.mjs: sim, data, career, audit (evidence for every line of the plan), headless, behave (the plan's behaviours done and measured), layout (every screen at 360, 480 and 640 wide), play (whole career by bot), browser (Chromium; WebKit and Firefox only to confirm the no-WebGPU message), hands (real mouse, wheel, pad and a hub round watched from inside), audio and hub (harness 2 players, 4 players with latency, host leaving, plus the session menu). Screenshots at 1920x1080 for what scripts cannot judge. No subagents",
+    "research": "No web research. Read the plan, the kit's GUIDE, ASSETS and parts of API, and the hub README",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "61 by my count: 13 from the scripted suites and the career bot, 3 from page errors in the browser, 13 from looking at screenshots, 17 from three line-by-line reads of the plan that the tests had missed, and 15 from a last pass of behaviour and layout suites, written because much of my audit only proved that code existed. No human has driven it, so handling feel is untested beyond scripted drivers: that is a real gap, not a pass.",
+    "9: AI crash at the first race, menus left over the race, pause closing on the press that opened it, a crash on the hub card, boot broken by one of my own patches, the Red Clay and Featherweight fields that blocked the career, tyres destroyed on the Saltline banking in the Grand Prix, Options in a hub round opening the pausing menu, which the harness did not catch, and attract mode starting 10 s into any screen opened over the title or Map, which threw a reader back to the Map and could cut into a prize ceremony.",
+    "The whole-career bot. It played real screens through to the ending, and its log exposed accidental pit entries, unbeatable fields and the banking problem, none of which a unit test would have shown. Close behind it: the last behaviour suite, which ran what the audit had only seen in code. With 1652 checks already passing, it found the attract bug and a replay director cutting nearly every frame.",
+    "The audio centroid check was the least helpful: its one failure was a mistake in the test's own frequency analysis, and the engine synth was right from the start."
+  ],
+  "engineFeedback": [
+    "Engine.headless: the same game code, in Node, without a GPU. It let a bot play the whole career in about three minutes, and the HUD, particles and tweens all just worked there.",
+    "Yes. I assumed a box's width runs along its heading, so long buildings came out sideways until I saw a screenshot. I passed the wrong arguments to analyzeClip by guessing its signature. Screen transitions never resolve while the engine is in manual step mode, which hung one of my scripts. Engine.headless runs its own camera rig unless it is given the game's preset, so my first camera checks read the wrong camera.",
+    "The driving: the car model came with the plan, and on it I built the race rules, career, replay director, track mesh and dressing, and the engine synth. For the engine's own part, the menu system with focus, prompts and glyphs was the largest thing I had to build.",
+    "Getting a large world built from one GeoBatch to look right with shadows: acne on walls at grazing angles, and the choice of which surfaces may receive them. Also the HUD's colour argument: a CSS string fails only at paint time, outside the game's hooks, so engine.errors stays empty.",
+    "none",
+    "Have hud.rect and hud.sprite reject bad input (an unknown colour name, an undefined sprite row) at the call, with a message, instead of throwing later in the paint step where the stack says nothing about the game."
+  ],
+  "promptFeedback": [
+    "The plan's section on engine facts and its tested Appendix A. Knowing what was already proven let the risk go where it belonged, and the sim matched every regression number on the first run.",
+    "The brief's title rule against the plan's rule on the source's name took a moment to reconcile. Also 'Online' as a bare URL, though the plan explains it. And the plan's roll sign in recipe C3 reads as if the body leans into a corner; I used the outward lean, which is what the sim's load transfer implies.",
+    "Judging feel with no human and no real pad. Balance can be measured with a bot; whether the car is nice to steer cannot. The next hardest was making a full career finishable with sensible money without cheating.",
+    "I would ask for a short human play-test note to be handed on, since the brief makes it impossible here, and I would state outright that a bot's skill 1.0 is stronger than most people, because the plan's AI pace ranges were too high for it even so."
+  ],
+  "aiHub": {
+    "name": "GRAN TUMBLEWEED",
+    "tagline": "The Peninsula Driving Catalogue",
+    "description": "A calm, reverent, slightly obsessive racing life in chunky pixels. Earn your licences, buy a tired hatchback, change its oil, and drive it toward the Halcyon Grand Prix.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "Gran Turismo 3: A-Spec",
+    "series": "Gran Turismo",
+    "players": "1–4",
+    "controls": "Stick or WASD to steer, R2 or W to go, L2 or S to brake",
+    "tags": [
+      "3d",
+      "pixel art",
+      "vehicles",
+      "retro",
+      "third-person",
+      "versus"
+    ]
+  }
+}

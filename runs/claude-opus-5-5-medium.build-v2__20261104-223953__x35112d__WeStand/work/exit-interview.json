@@ -1,0 +1,58 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-04 22:39:53",
+  "source": "Wii Fit",
+  "plan": "PLAN.md",
+  "genre": "Sports mini-game anthology with a light life-sim frame (daily ritual, unlocks, wardrobe)",
+  "perspective": "Third person, a camera per activity: 3/4 follow on the island, mirror view for exercises, chase for the lap, paddle and pier, high 3/4 for the raft, side view for the dives",
+  "tech": "Pavilion engine from Shardfall (commit 49ef2ba, changed for this game), Rust 1.98.1, WebAssembly and WebGPU (wgpu), egui 0.36 for the UI, rapier3d 0.36, cpal for audio; packed to one HTML file; AI Hub client session.js from lib/hub",
+  "artDirection": "The engine's cel-shaded rounded primitives and big-headed toy figures, taken high-key and pastel; 36 new hand-written props, nine sets, a set of painter-drawn UI and glyphs; Fredoka and Nunito fonts",
+  "animation": "The engine's procedural puppet with motion clips on top; 23 new hand-keyed clips (poses, squat, tuck, flop and more), plus library clips (Mesh2Motion, CMU, Quaternius); whole-body tilt added to the puppet; clips scrubbed by gameplay",
+  "audio": "All in code, no audio files: a sample-accurate sequencer with six original songs, 38 synthesized sounds and stingers, and Animalese-style formant gibberish with nine voices. Music defaults to 10%",
+  "online": "AI Hub session, mode ghost, 1 to 4 players (the Inter-Resort Medley); on its own, Play Together hot-seat and Yesterday You ghosts",
+  "testing": "Headless scripts behind tests/run.sh: cargo tests that play the whole game by bot, Playwright browser checks on file:// (keyboard, mouse, stubbed pad, phone and tablet profiles, WebKit fallback, audio buffers), the hub harness at 2 to 4 players with bad network and host leaving, and screenshots for composition. No subagents or review workflows",
+  "research": "None beyond the plan, which already reflected a short web search; read the engine's docs and the hub's README",
+  "environment": "Claude Code CLI (headless); Linux",
+  "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+  "usage": "added on import"
+ },
+ "testingFeedback": [
+  "About 20 real issues, plus several balance numbers tuned against the score table. They were: 13 props failing to load, the bot under 2 stars in Paddle Slalom, stray steps scoring in Step Party, every set drawing at once, three input faults at low frame rates (short taps, repeated taps, first hover), a lost touch click, wrong rect units on high-density screens, the path hidden under the lawn, the gazebo's columns blocking the view, the raft dipping into the water, menu text overlaps found in screenshots, and Dev Mode single step doing nothing from the pause menu, found by reading the plan against the code, plus coach lines overflowing their plate, overlapping tide pools, a wrong plural and a hidden arm in one pose, found in the plan's 1080p and motion sheets.",
+  "One: the touch click, which made Settings unreachable on touch-only devices. Nothing else stopped the game, and the full bot playthrough passed the first time it ran. I cannot say how it feels to a person, because nobody played it.",
+  "The browser keyboard stay, from New Stay through the Morning Check, save, reload and Continue: it found an input fault the small checks had missed. The score table of bot, idle and careless input for each event was the most useful for balance.",
+  "Waiting on the first browser timing assertions with fixed sleeps. Under software rendering they failed for reasons of frame rate, not the game, until I rewrote them to poll."
+ ],
+ "engineFeedback": [
+  "That everything runs headless: a whole game played by bot in cargo test, and pav capture and pav repl for looking at any frame. Rooms as data, and props as readable JSON, were quick to write.",
+  "Yes. I guessed prop categories and a sway key in prop files and the failures only logged, leaving magenta markers, so a test had to find them. I also underestimated the CPU cost of water, which simulates up to 160 by 160 cells per zone every frame, and had to read the view code to find it. Camera cues have a base-camera rule that did not suit a game with many sets, so I went around them.",
+  "A complete UI layer: a list of drawn items written by the sim, drawn by egui, with focus, sliders, glyphs and pointer reports. Then the sequencer and voices in the synth.",
+  "Many sets on one sim. It works, but nothing culls by set, water is per zone and costly, and the room, camera and view changes each have their own rules to learn. App.rs is also a long frame function with the demo's chrome woven through it.",
+  "Added input fields and buttons, a frozen hook, an extras hook (status, UI frame, camera, focus, extra figures, stage box), a game-driven camera, whole-body tilt with a pivot, a Handle attachment, BigSplash, Wake and Burst effects, Sfx, Syllable and Music events, audio buses with a sequencer, formant voices and a sample clock, a smaller water grid (160 to 64 cells), more tick catch-up (8 to 30 ticks a frame), and a fit layout and fonts in the app and UI.",
+  "A built-in menu and HUD item layer usable from a game's own code, with pad, keyboard and pointer focus already solved. Every controller-first game on this engine needs it."
+ ],
+ "promptFeedback": [
+  "The plan's verified facts: the page script that passed the harness, the Rust and JS link, the traps with software rendering and fonts. They saved real time, and the numbered build order kept a large job in order.",
+  "A little: the plan names music at 10% as linear gain and the Options plus Create rule, which were clear; what was less clear was how much fidelity a hub ghost needs. The score formulas for Breath Bloom and Tempo Squats gave idle play a star, against the plan's own rule, so I changed them and noted it.",
+  "Judging feel with no player. Every event passes numeric checks, but whether a ring streak feels good or Tray Trek is fair to a person can only be estimated from numbers and frames.",
+  "Add one line saying how the browser tests should treat software rendering once a game has a large scene, since the 60 ticks a second measured for a small scene does not hold. I would also ask for a short human-style input model in the tests, so difficulty can be estimated without a person."
+ ],
+ "aiHub": {
+  "name": "We Stand",
+  "tagline": "A wellness resort you did not enter",
+  "description": "A balance-and-wellness comedy on a resort staffed by talking gym equipment. Lean, breathe and stand through eleven events and five days; checkout requires a Balance Age of 40 or better.",
+  "type": "Game",
+  "genre": "Sports",
+  "source": "Wii Fit",
+  "series": "Wii Fit",
+  "players": "1–4",
+  "controls": "Lean with the left stick, WASD or mouse; Cross, Space or click to act; L1/R1, Q/E or mouse buttons to step",
+  "tags": [
+   "3d",
+   "third-person",
+   "comedy",
+   "sports",
+   "versus",
+   "low-poly"
+  ]
+ }
+}

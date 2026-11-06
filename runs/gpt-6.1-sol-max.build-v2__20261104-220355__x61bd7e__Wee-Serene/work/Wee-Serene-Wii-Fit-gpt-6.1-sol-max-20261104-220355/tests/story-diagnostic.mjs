@@ -1,0 +1,9 @@
+import {load} from './load.mjs';
+const {G,game,logs}=load({main:true});const original=G.animateContestant;G.animateContestant=()=>{};game.o.draw=false;
+const step=t=>game.advance(t,{draw:false});const tap=a=>{game.input.tap(a);step(.15);};const scene=()=>game.sceneName;const log=msg=>console.log(msg,scene(),G.sessionPhase,G.member.day,G.member.sessions);
+function dialogues(target,max=80){for(let i=0;i<max&&scene()!==target;i++){tap('confirm');}if(scene()!==target)throw new Error('dialogues wanted '+target+' got '+scene());}
+step(.2);tap('confirm');tap('confirm');for(let i=0;i<3;i++)tap('down');tap('confirm');log('arrive');dialogues('instructor');tap('confirm');dialogues('bungalow');log('home');G.dev.bot='expert';tap('confirm');log('bodycheck');dialogues('bodycheck',1);for(let i=0;i<800&&scene()==='bodycheck';i++){tap('confirm');}log('guided card');
+function play(id){if(scene()!=='card'){G.startSession(id,1,G.member.day===5?'festival':'story');step(.1);}tap('confirm');for(let i=0;i<1000&&scene()!=='results';i++)step(.15);if(scene()!=='results')throw new Error('no result '+id+' '+scene()+' '+JSON.stringify(game.errors));step(.25);tap('confirm');step(.1);}
+play('stork');log('stork done');play('squat');play('tray');log('day1done');
+for(const [day,acts]of [[2,['flow','pushup','hoop']],[3,['candle','lunge','jog']],[4,['step','slalom','laundry']]]){tap('confirm');log('newday');tap('confirm');for(let i=0;i<500&&scene()==='bodycheck';i++)tap('confirm');if(scene()==='tareDay'){tap('confirm');dialogues('island');}for(const id of acts)play(id);log('daydone '+day);}
+tap('confirm');tap('confirm');for(let i=0;i<500&&scene()==='bodycheck';i++)tap('confirm');log('games');tap('confirm');for(let i=0;i<4;i++){play(['stork','step','slalom','candle'][i]);log('festival');}dialogues('credits');console.log('end',G.member.spineAge,G.member.ended,Object.keys(G.member.best),game.errors,logs.slice(-10));game.dispose();

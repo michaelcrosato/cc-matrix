@@ -1,0 +1,39 @@
+// Eight original pieces as Song data, written by a tiny composer: chords per bar, then bass / comp / lead / drum templates. Plan section 10 (Music).
+const NOTES = { C: 0, Db: 1, D: 2, Eb: 3, E: 4, F: 5, Gb: 6, G: 7, Ab: 8, A: 9, Bb: 10, B: 11 }, NAME = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
+const Q = { maj7: [0, 4, 7, 11], m7: [0, 3, 7, 10], dom7: [0, 4, 7, 10], dom9: [0, 4, 7, 10, 14], m9: [0, 3, 7, 10, 14], maj: [0, 4, 7, 12], min: [0, 3, 7, 12], m7b5: [0, 3, 6, 10], sus: [0, 5, 7, 10], six: [0, 4, 7, 9] };
+const nn = (root, semi, oct) => { const v = NOTES[root] + semi + oct * 12, o = Math.floor(v / 12); return NAME[((v % 12) + 12) % 12] + o; };
+function pat(chord, tpl, oct, offset = 0) { // tpl: space-separated tokens; digits index chord tones (0-4), '+' adds an octave, '.' rest, '-' hold
+  const [root, q] = chord, tones = Q[q]; return tpl.split(' ').map((tk) => { if (tk === '.' || tk === '-') return tk; let up = 0; if (tk.endsWith('+')) { up = 12; tk = tk.slice(0, -1); } if (tk === 'a') return nn(root, tones[3] - 1 + offset, oct); const i = +tk; return nn(root, tones[i % tones.length] + up + (i >= tones.length ? 12 : 0) + offset, oct); }).join(' '); }
+function compose(o) {
+  const patterns = {}, order = []; const trackNames = Object.keys(o.templates);
+  o.chords.forEach((ch, bi) => { const key = 'b' + bi; patterns[key] = {}; for (const tn of trackNames) { const T = o.templates[tn]; if (T.drum) patterns[key][tn] = T.drum.split(' ').map((c) => (c === 'x' ? T.note : c === 'y' ? T.note2 ?? T.note : '.')).join(' '); else { const variants = Array.isArray(T.tpl) ? T.tpl : [T.tpl]; patterns[key][tn] = pat(ch, variants[bi % variants.length], T.oct, T.offset ?? 0); } } order.push(key); });
+  return { bpm: o.bpm, stepsPerBeat: 4, tracks: o.tracks, patterns, order };
+}
+const hat16 = '. . x . . . x . . . x . . . x .', kick = 'x . . . . . . x . . x . . . . .', snare = '. . . . x . . . . . . . x . . .';
+export const SONGS = {
+  lounge: compose({ bpm: 92, chords: [['Eb', 'm7'], ['Ab', 'dom7'], ['Db', 'maj7'], ['B', 'm7'], ['Eb', 'm7'], ['Ab', 'dom7'], ['Db', 'maj7'], ['Gb', 'dom7']],
+    tracks: { lead: { wave: 'sine', decay: 0.5, volume: 0.22, vibrato: { depth: 0.12, rate: 5 } }, comp: { wave: 'triangle', decay: 0.35, volume: 0.12 }, bass: { wave: 'sine', decay: 0.4, volume: 0.3 }, hat: { wave: 'noise', decay: 0.04, volume: 0.05 }, kick: { wave: 'sine', decay: 0.08, volume: 0.3, crush: 0 } },
+    templates: { lead: { oct: 5, tpl: ['2 . . 3 . 1 . . 0 . . . 2 . 3 .', '. . 3 . 2 . 0 . . . 1 . 2 . . .', '0 . 1 . 2 . . 3 . . 2 . 1 . 0 .', '3 . . 2 . . 1 . 0 . . . . . . .'] }, comp: { oct: 4, tpl: '0 . . 1 . . 2 . . . 3 . . . . .' }, bass: { oct: 2, tpl: '0 . . . . . 2 . 1 . . . a . . .' }, hat: { drum: hat16, note: 'C8' }, kick: { drum: kick, note: 'C3' } } }),
+  catalogue: compose({ bpm: 76, chords: [['F', 'maj7'], ['E', 'm7'], ['D', 'm7'], ['G', 'dom7']],
+    tracks: { lead: { wave: 'sine', decay: 0.9, volume: 0.2, vibrato: { depth: 0.35, rate: 6 } }, pad: { wave: 'triangle', decay: 1.2, volume: 0.1 }, bass: { wave: 'sine', decay: 0.8, volume: 0.25 } },
+    templates: { lead: { oct: 5, tpl: ['0 . . . . . 2 . . . 3 . . . . .', '. . . . 3 . . . 2 . . . 1 . . .', '1 . . . . . 0 . . . . . . . . .', '2 . . . 3 . . . 4 . . . 3 . 2 .'] }, pad: { oct: 4, tpl: '0 - - - 1 - - - 2 - - - 3 - - -' }, bass: { oct: 2, tpl: '0 - - - - - - - 2 - - - - - - -' } } }),
+  socket: compose({ bpm: 108, chords: [['A', 'm7'], ['A', 'm7'], ['D', 'dom9'], ['D', 'dom9']],
+    tracks: { lead: { wave: 'square', duty: 0.25, decay: 0.12, volume: 0.1 }, comp: { wave: 'square', duty: 0.125, decay: 0.08, volume: 0.08 }, bass: { wave: 'triangle', decay: 0.18, volume: 0.28 }, hat: { wave: 'noise', decay: 0.03, volume: 0.05 }, snare: { wave: 'noise', decay: 0.1, volume: 0.1 } },
+    templates: { lead: { oct: 5, tpl: ['0 . 2 . 3 2 . 0 . . 2 . 3 . 4 .', '4 . 3 . 2 . 0 . . 2 . 0 . . . .'] }, comp: { oct: 4, tpl: '. 0 . 1 . . 2 . . 0 . 1 . . 2 .' }, bass: { oct: 2, tpl: '0 . 0 . . 2 . 0 . . 0 . 3 . 2 .' }, hat: { drum: hat16, note: 'C8' }, snare: { drum: snare, note: 'C6' } } }),
+  examination: compose({ bpm: 120, chords: [['C', 'maj'], ['C', 'maj'], ['F', 'maj'], ['G', 'sus']],
+    tracks: { lead: { wave: 'triangle', decay: 0.2, volume: 0.16 }, bass: { wave: 'square', duty: 0.5, decay: 0.1, volume: 0.1 }, tick: { wave: 'noise', decay: 0.02, volume: 0.05 } },
+    templates: { lead: { oct: 5, tpl: ['0 . . . 1 . . . 2 . . . . . . .', '2 . . . 1 . . . 0 . . . . . . .'] }, bass: { oct: 3, tpl: '0 . 0 . 0 . 0 . 0 . 0 . 0 . 0 .' }, tick: { drum: 'x . x . x . x . x . x . x . x .', note: 'C8' } } }),
+  apex: compose({ bpm: 156, chords: [['E', 'min'], ['C', 'maj'], ['G', 'maj'], ['D', 'maj']],
+    tracks: { lead: { wave: 'square', duty: 0.25, decay: 0.15, volume: 0.1 }, arp: { wave: 'square', duty: 0.125, decay: 0.06, volume: 0.06 }, bass: { wave: 'triangle', decay: 0.15, volume: 0.3 }, hat: { wave: 'noise', decay: 0.03, volume: 0.06 }, snare: { wave: 'noise', decay: 0.09, volume: 0.1 }, kick: { wave: 'sine', decay: 0.08, volume: 0.3 } },
+    templates: { lead: { oct: 5, tpl: ['0 . . 2 . 1 . 0 3 . . 2 . . 1 .', '2 . . 3 . 2 . 0 . . 3 . 2 1 0 .', '0 . 1 . 2 . . 3 2 . 1 . 0 . . .', '3 . 2 . 1 . 0 . 1 . 2 . 3 . . .'] }, arp: { oct: 4, tpl: '0 1 2 1 0 1 2 1 0 1 2 1 0 1 2 1' }, bass: { oct: 2, tpl: '0 . 0 0 . 0 0 . 0 . 0 0 . 0 2 .' }, hat: { drum: 'x . x . x . x . x . x . x . x .', note: 'C8' }, snare: { drum: snare, note: 'C6' }, kick: { drum: 'x . . . . . x . x . . . . . . .', note: 'C3' } } }),
+  city: compose({ bpm: 118, chords: [['Bb', 'maj7'], ['D', 'm7'], ['G', 'm7'], ['Eb', 'maj7']],
+    tracks: { lead: { wave: 'triangle', decay: 0.3, volume: 0.16, vibrato: { depth: 0.2, rate: 5 } }, comp: { wave: 'square', duty: 0.25, decay: 0.1, volume: 0.06 }, bass: { wave: 'sawtooth', decay: 0.2, volume: 0.15 }, hat: { wave: 'noise', decay: 0.03, volume: 0.05 }, snare: { wave: 'noise', decay: 0.1, volume: 0.09 }, kick: { wave: 'sine', decay: 0.08, volume: 0.3 } },
+    templates: { lead: { oct: 5, tpl: ['3 . . 2 . 0 . . . . 2 . 3 . 2 .', '2 . . 0 . 1 . . 3 . . . 2 . 0 .', '0 . 1 . 3 . 2 . . . 1 . 0 . . .', '3 . . . 2 . . 0 . . 1 . 2 . 3 .'] }, comp: { oct: 4, tpl: '. 0 . 2 . 0 . 3 . 0 . 2 . 0 . 3' }, bass: { oct: 2, tpl: '0 . . 0 . . 0 . . 0 . . a . 0 .' }, hat: { drum: hat16, note: 'C8' }, snare: { drum: snare, note: 'C6' }, kick: { drum: 'x . . . . . . . x . x . . . . .', note: 'C3' } } }),
+  redclay: compose({ bpm: 132, chords: [['G', 'maj'], ['F', 'maj'], ['C', 'maj'], ['G', 'maj']],
+    tracks: { lead: { wave: 'sawtooth', decay: 0.1, volume: 0.07 }, gallop: { wave: 'square', duty: 0.125, decay: 0.06, volume: 0.08 }, bass: { wave: 'triangle', decay: 0.12, volume: 0.28 }, snare: { wave: 'noise', decay: 0.07, volume: 0.1 } },
+    templates: { lead: { oct: 5, tpl: ['2 . 1 . 0 . . . 1 . 2 . 3 . . .', '3 . 2 . 1 . . . 2 . 1 . 0 . . .'] }, gallop: { oct: 4, tpl: '0 . 1 0 . 1 0 . 1 0 . 1 0 . 1 0' }, bass: { oct: 2, tpl: '0 . . 0 . . 0 . 2 . . 0 . . 2 .' }, snare: { drum: '. . x . . . x . . . x . . . x x', note: 'C6' } } }),
+  longdrive: compose({ bpm: 84, chords: [['D', 'maj7'], ['Gb', 'dom7'], ['B', 'm7'], ['G', 'maj7']],
+    tracks: { lead: { wave: 'sine', decay: 0.7, volume: 0.18 }, arp: { wave: 'triangle', decay: 0.4, volume: 0.1 }, bass: { wave: 'sine', decay: 0.7, volume: 0.25 } },
+    templates: { lead: { oct: 5, tpl: ['0 . . . 2 . . . 3 . . . 2 . . .', '3 . . . 1 . . . 0 . . . . . . .', '2 . . . 3 . . . 4 . . . 3 . . .', '1 . . . 0 . . . 2 . . . . . . .'] }, arp: { oct: 4, tpl: '0 1 2 3 2 1 0 1 2 3 2 1 0 1 2 3' }, bass: { oct: 2, tpl: '0 - - - - - - - 2 - - - - - - -' } } }),
+};
+export const SONG_FOR = { title: 'lounge', map: 'lounge', dealer: 'catalogue', museum: 'catalogue', tuning: 'socket', service: 'socket', licence: 'examination', apex: 'apex', city: 'city', redclay: 'redclay', replay: 'longdrive', credits: 'longdrive' };

@@ -1,0 +1,584 @@
+/* Wee Tare: pebble-shaped rounded panels in warm off-white with soft shadows. Everything sized in vh for a TV at ten feet. */
+:root {
+  --ink: #3a4a55;
+  --paper: #fbf8f1;
+  --coral: #ff8a70;
+  --mint: #bfead6;
+  --sky: #bfe9ff;
+}
+#wt {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  font-family: ui-rounded, 'SF Pro Rounded', 'Segoe UI Rounded', system-ui, sans-serif;
+  color: var(--ink);
+  font-size: 3.2vh;
+  line-height: 1.25;
+  user-select: none;
+}
+#wt * {
+  box-sizing: border-box;
+}
+.wt-layer {
+  position: absolute;
+  inset: 5vh 5vw;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.wt-panel {
+  background: var(--paper);
+  border-radius: 4.5vh;
+  box-shadow: 0 1.2vh 4vh rgb(30 50 60 / 28%);
+  padding: 3.4vh 4.4vh;
+  pointer-events: auto;
+  max-width: 78vw;
+}
+.wt-title {
+  font-size: 11vh;
+  font-weight: 800;
+  color: #fff;
+  text-shadow:
+    0 0.6vh 0 var(--coral),
+    0 1.2vh 3vh rgb(30 50 60 / 45%);
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+.wt-tag {
+  font-size: 3.4vh;
+  color: #fff;
+  text-shadow: 0 0.3vh 1vh rgb(30 50 60 / 60%);
+  text-align: center;
+  margin-bottom: 3vh;
+}
+.wt-h {
+  font-size: 5vh;
+  font-weight: 800;
+  margin: 0 0 1.6vh;
+  text-align: center;
+}
+.wt-body {
+  font-size: 3vh;
+  text-align: center;
+}
+.wt-menu {
+  display: flex;
+  flex-direction: column;
+  gap: 1vh;
+  min-width: 40vw;
+}
+.wt-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 3vh;
+  padding: 1.1vh 3vh;
+  border-radius: 3vh;
+  font-size: 3.4vh;
+  font-weight: 600;
+  cursor: pointer;
+  border: 0.5vh solid transparent;
+  transition: transform 0.08s;
+}
+.wt-row[data-focus='1'] {
+  background: var(--coral);
+  color: #fff;
+  border-color: #fff;
+  box-shadow: 0 0 0 0.5vh var(--coral);
+  transform: scale(1.04);
+}
+.wt-row[data-off='1'] {
+  opacity: 0.45;
+}
+.wt-value {
+  font-weight: 800;
+}
+.wt-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.6vh;
+  min-width: 66vw;
+}
+.wt-card {
+  background: #fff;
+  border-radius: 3vh;
+  padding: 1.6vh 2vh;
+  min-height: 15vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  cursor: pointer;
+  border: 0.5vh solid transparent;
+  font-size: 3vh;
+  font-weight: 700;
+}
+.wt-card small {
+  font-size: 2.7vh;
+  font-weight: 600;
+}
+.wt-card[data-focus='1'] {
+  border-color: var(--coral);
+  box-shadow: 0 0 0 0.5vh var(--coral);
+  transform: scale(1.03);
+}
+.wt-card[data-off='1'] {
+  opacity: 0.5;
+}
+.wt-prompt {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7vh;
+  font-size: 3.2vh;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.wt-prompts {
+  display: flex;
+  gap: 3vh;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+.wt-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 5vh;
+  transform: translateX(-50%);
+  background: rgb(251 248 241 / 92%);
+  border-radius: 3vh;
+  padding: 0.9vh 2.6vh;
+  box-shadow: 0 0.6vh 2vh rgb(30 50 60 / 25%);
+}
+.wt-g {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.4vh;
+  height: 4.4vh;
+  border-radius: 1.1vh;
+  background: var(--ink);
+  color: #fff;
+  font-size: 2.8vh;
+  font-weight: 800;
+  padding: 0 0.9vh;
+}
+.wt-g.round {
+  border-radius: 50%;
+}
+.wt-g svg {
+  width: 3.2vh;
+  height: 3.2vh;
+}
+#wt [data-for] {
+  display: none;
+}
+#wt[data-device='pad'] [data-for~='pad'],
+#wt[data-device='keys'] [data-for~='keys'],
+#wt[data-device='mouse'] [data-for~='mouse'] {
+  display: inline-flex;
+}
+#wt [data-glyph='xbox'] {
+  display: none !important;
+}
+#wt[data-pad='xbox'] [data-glyph='ps'] {
+  display: none !important;
+}
+#wt[data-pad='xbox'] [data-glyph='xbox'] {
+  display: inline-flex !important;
+}
+.wt-speech {
+  position: absolute;
+  left: 50%;
+  top: 21vh;
+  transform: translateX(-50%);
+  max-width: 66vw;
+  background: var(--paper);
+  border-radius: 3.6vh;
+  padding: 1.6vh 3.2vh;
+  box-shadow: 0 1vh 3vh rgb(30 50 60 / 28%);
+  font-size: 3.2vh;
+  text-align: center;
+}
+.wt-speech b {
+  display: block;
+  font-size: 2.7vh;
+  color: var(--coral);
+  font-weight: 800;
+}
+.wt-top {
+  position: absolute;
+  top: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgb(251 248 241 / 92%);
+  border-radius: 3vh;
+  padding: 0.8vh 3vh;
+  font-size: 3.2vh;
+  font-weight: 800;
+  text-align: center;
+  white-space: nowrap;
+}
+.wt-disc {
+  position: absolute;
+  left: 50%;
+  bottom: 8vh;
+  width: 30vh;
+  height: 30vh;
+  margin-left: -15vh;
+}
+.wt-disc svg {
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.wt-foot {
+  position: absolute;
+  bottom: 9vh;
+  width: 6vh;
+  height: 16vh;
+  border-radius: 3vh;
+  background: rgb(251 248 241 / 90%);
+  overflow: hidden;
+}
+.wt-foot i {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: var(--coral);
+}
+.wt-foot span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 1vh;
+  text-align: center;
+  font-size: 2.7vh;
+  font-weight: 800;
+}
+.wt-gauge {
+  position: absolute;
+  right: 8vw;
+  top: 16vh;
+  bottom: 16vh;
+  width: 9vh;
+  border-radius: 4.5vh;
+  background: rgb(251 248 241 / 92%);
+  overflow: hidden;
+}
+.wt-gauge .band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 24%;
+  background: var(--mint);
+}
+.wt-gauge .mark {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 1.2vh;
+  background: var(--coral);
+}
+.wt-lane {
+  position: absolute;
+  left: 50%;
+  bottom: 8vh;
+  width: 54vw;
+  height: 15vh;
+  margin-left: -27vw;
+  background: rgb(251 248 241 / 90%);
+  border-radius: 4vh;
+  overflow: hidden;
+}
+.wt-lane .line {
+  position: absolute;
+  left: 14%;
+  top: 0;
+  bottom: 0;
+  width: 1vh;
+  background: var(--ink);
+}
+.wt-note {
+  position: absolute;
+  width: 6vh;
+  height: 6vh;
+  margin: -3vh;
+  border-radius: 50%;
+  background: var(--coral);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.8vh;
+  font-weight: 800;
+}
+.wt-note[data-k='R'] {
+  background: #6aa8e8;
+}
+.wt-note[data-k='B'] {
+  background: #3a4a55;
+}
+.wt-cards {
+  position: absolute;
+  left: 50%;
+  top: 20vh;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2vh;
+}
+.wt-cards div {
+  background: #fff;
+  width: 14vh;
+  height: 18vh;
+  border-radius: 2vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9vh;
+  font-weight: 800;
+  box-shadow: 0 1vh 3vh rgb(30 50 60 / 30%);
+}
+.wt-lure {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.wt-big {
+  font-size: 10vh;
+  font-weight: 800;
+  color: #fff;
+  text-shadow:
+    0 0.5vh 0 var(--coral),
+    0 1vh 3vh rgb(30 50 60 / 50%);
+}
+.wt-rank {
+  font-size: 12vh;
+  font-weight: 800;
+  text-align: center;
+  color: var(--coral);
+}
+.wt-score {
+  font-size: 6vh;
+  font-weight: 800;
+  text-align: center;
+}
+.wt-pebbles {
+  display: flex;
+  justify-content: center;
+  gap: 1vh;
+  height: 7vh;
+  align-items: flex-end;
+}
+.wt-pebbles i {
+  width: 5vh;
+  height: 2.8vh;
+  border-radius: 50%;
+  background: #b8c6cc;
+  animation: wtfall 0.5s ease-in both;
+}
+@keyframes wtfall {
+  from {
+    transform: translateY(-14vh);
+    opacity: 0;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+.wt-dial {
+  width: 42vh;
+  height: 42vh;
+  border-radius: 50%;
+  background: #fff8d8;
+  border: 2vh solid #f7fafc;
+  box-shadow: 0 1vh 3vh rgb(30 50 60 / 28%);
+  position: relative;
+}
+.wt-dial i {
+  position: absolute;
+  left: 50%;
+  bottom: 50%;
+  width: 1vh;
+  height: 17vh;
+  margin-left: -0.5vh;
+  background: #ff5a4a;
+  transform-origin: bottom center;
+  border-radius: 1vh;
+}
+.wt-dial b {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 18%;
+  text-align: center;
+  font-size: 8vh;
+  font-weight: 800;
+}
+.wt-graph {
+  width: 50vh;
+  height: 16vh;
+}
+.wt-fade {
+  position: absolute;
+  inset: 0;
+  background: #fbf8f1;
+  opacity: 0;
+  transition: opacity 0.35s;
+}
+.wt-fade[data-on='1'] {
+  opacity: 1;
+}
+.wt-banner {
+  position: absolute;
+  top: 5vh;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+.wt-demo {
+  font-size: 4vh;
+  font-weight: 800;
+  background: var(--coral);
+  color: #fff;
+  border-radius: 2vh;
+  padding: 0.4vh 2vh;
+  display: inline-block;
+  animation: wtblink 1.6s infinite;
+}
+@keyframes wtblink {
+  50% {
+    opacity: 0.6;
+  }
+}
+.wt-about {
+  max-height: 62vh;
+  overflow: hidden;
+  font-size: 2.7vh;
+  text-align: left;
+  min-width: 66vw;
+}
+.wt-about p {
+  margin: 0 0 0.8vh;
+  font-size: 2.7vh;
+}
+.wt-about b {
+  color: var(--coral);
+}
+.wt-dev {
+  position: absolute;
+  left: 3vw;
+  top: 3vh;
+  bottom: 3vh;
+  width: 62vw;
+  background: rgb(251 248 241 / 97%);
+  border-radius: 3vh;
+  padding: 1.4vh 2vh;
+  pointer-events: auto;
+  display: flex;
+  flex-direction: column;
+  font-size: 2.7vh;
+}
+.wt-dev .tabs {
+  display: flex;
+  gap: 1vh;
+  margin-bottom: 1vh;
+}
+.wt-dev .tab {
+  padding: 0.4vh 1.6vh;
+  border-radius: 2vh;
+  background: #e8e6df;
+  font-weight: 800;
+  cursor: pointer;
+}
+.wt-dev .tab[data-on='1'] {
+  background: var(--coral);
+  color: #fff;
+}
+.wt-dev .rows {
+  flex: 1;
+  overflow: hidden;
+}
+.wt-dev .drow {
+  display: grid;
+  grid-template-columns: 1fr 22vw 8vw;
+  gap: 1vh;
+  align-items: center;
+  padding: 0.25vh 1vh;
+  border-radius: 1.4vh;
+  cursor: pointer;
+}
+.wt-dev .drow[data-focus='1'] {
+  background: var(--coral);
+  color: #fff;
+}
+.wt-dev input[type='range'] {
+  width: 100%;
+}
+.wt-overlay {
+  position: absolute;
+  right: 2vw;
+  top: 3vh;
+  width: 30vw;
+  background: rgb(58 74 85 / 88%);
+  color: #fff;
+  font-size: 2.7vh;
+  border-radius: 2vh;
+  padding: 1vh 1.4vh;
+  white-space: pre-line;
+  pointer-events: none;
+}
+.wt-seats {
+  display: flex;
+  gap: 2vh;
+  justify-content: center;
+  margin: 2vh 0;
+}
+.wt-seat {
+  width: 20vh;
+  height: 22vh;
+  border-radius: 3vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 3vh;
+  text-align: center;
+  padding: 1vh;
+}
+.wt-card-hub {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.4vh;
+  pointer-events: auto;
+}
+.wt-label {
+  font-size: 2.8vh;
+  font-weight: 800;
+  color: #fff;
+  text-shadow: 0 0.2vh 0.8vh rgb(0 0 0 / 70%);
+}
+.wt-near {
+  position: absolute;
+  left: 50%;
+  bottom: 14vh;
+  transform: translateX(-50%);
+  background: rgb(251 248 241 / 94%);
+  border-radius: 3vh;
+  padding: 0.8vh 2.4vh;
+  font-size: 3.2vh;
+  font-weight: 700;
+  display: flex;
+  gap: 1.2vh;
+  align-items: center;
+}
+.wt-note-touch {
+  font-size: 4vh;
+  font-weight: 800;
+}

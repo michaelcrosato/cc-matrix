@@ -1,0 +1,36 @@
+/** @file Strain health, attack telegraphs and three-note sonic identities. */
+export const STRAINS = {
+  lull: {
+    color: '#bd91ff',
+    hp: 1.5,
+    speed: 1.2,
+    period: 6,
+    telegraph: 1.5,
+    radius: 1.2,
+    damage: 2,
+    notes: [62, 65, 69],
+  },
+  matron: { color: '#9e68e3', hp: 2, speed: 0, period: 8, telegraph: 2.5, radius: 2, damage: 3, notes: [50, 53, 57] },
+  solace: {
+    color: '#ffc45d',
+    hp: 1,
+    speed: 0.25,
+    period: 7,
+    telegraph: 2,
+    radius: 0.9,
+    damage: 5,
+    notes: [65, 69, 70],
+  },
+  reverie: {
+    color: '#7694ff',
+    hp: 5,
+    speed: 3,
+    period: 8,
+    telegraph: 1.2,
+    radius: 1.6,
+    damage: 4,
+    notes: [60, 61, 67],
+  },
+  balm: { color: '#c9f8e7', hp: 1, speed: 0.5, period: 4, telegraph: 1, radius: 1, damage: 1, notes: [67, 71, 74] },
+  mercy: { color: '#fff2ab', hp: 3, speed: 0.2, period: 9, telegraph: 1.5, radius: 2, damage: 4, notes: [69, 72, 76] },
+};

@@ -1,0 +1,15 @@
+import {readFile,readdir} from 'node:fs/promises';
+import {execFileSync} from 'node:child_process';
+import {checkModel,validateTexture,parseSong,renderSound,compileClips,buildModel,validateClip} from '../../pixel-engine.js';
+import {ALL_MODELS,MODELS} from '../../src/art/models.js';
+import {VIEW_DEFS,HAND_CLIPS,HAND_RIG,MAP_HANDS} from '../../src/art/viewmodels.js';
+import {ACTOR_CLIPS} from '../../src/art/clips.js';
+import {ALL_TEXTURES} from '../../src/art/textures.js';
+import {SFX} from '../../src/audio/sfx.js';
+import {SONGS} from '../../src/audio/music.js';
+import {MISSIONS} from '../../src/content/missions.js';
+import {SITE_BY_ID} from '../../src/content/sites.js';
+import {DIALOGUE} from '../../src/content/dialogue.js';
+async function walk(dir){const list=[];for(const e of await readdir(dir,{withFileTypes:true})){if(e.isDirectory())list.push(...await walk(dir+'/'+e.name));else list.push(dir+'/'+e.name);}return list;}
+export const covers=['src/art/models.js','src/art/viewmodels.js','src/art/clips.js','src/audio/sfx.js','src/audio/music.js','src/content/missions.js'];
+export async function run(check){const original=execFileSync('unzip',['-p','vendor/pixel-engine.zip','pixel-engine/pixel-engine.js'],{maxBuffer:1<<26});check(original.equals(await readFile('pixel-engine.js')),'engine is byte identical to release');const files=await walk('src');let clean=true;for(const f of files){const txt=await readFile(f,'utf8');if(/Math\.random|\bTODO\b|\bFIXME\b|\bplaceholder\b|\bstub\b|coming soon/i.test(txt)){check(false,'unfinished content or unseeded randomness in '+f);clean=false;}}check(clean,'source complete');for(const m of [...ALL_MODELS,...VIEW_DEFS,MAP_HANDS]){const r=checkModel(m,{catalog:MODELS});check(!r.problems.length,m.id+': '+r.problems.join(', '));}for(const t of ALL_TEXTURES){const r=validateTexture(t);check(!r.problems.length,t.id+' texture valid');}for(const [id,s] of Object.entries(SONGS)){try{parseSong(s);check(true,id+' music valid');}catch(e){check(false,id+' music: '+e.message);}}for(const [id,s] of Object.entries(SFX)){const v=renderSound(s,22050,12);let peak=0;for(const x of v)peak=Math.max(peak,Math.abs(x));check(v.length>0&&peak>.0001,id+' synthesizes non-silent samples');}for(const m of MISSIONS){check(m.requires.every(id=>MISSIONS.some(m=>m.id===id)),m.id+' prerequisites');check(m.steps.every(s=>!s.site||SITE_BY_ID[s.site]),m.id+' sites');check((DIALOGUE[m.id]||[]).length>=8,m.id+' narrative content');}try{const view=buildModel(VIEW_DEFS.find(d=>d.id==='view-tractor')).object;const clips=compileClips(HAND_CLIPS,HAND_RIG,view);check(clips.length===HAND_CLIPS.length,'all first person clips compile');}catch(e){check(false,e.message);}const html=await readFile('../Hardly-Far-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-063014.html','utf8');check(!html.includes('src="http')&&!html.includes('href="http'),'single file has no remote runtime assets');check(html.indexOf('aihub-session')<html.indexOf('hub:session'),'session client precedes game scripts and tags');}

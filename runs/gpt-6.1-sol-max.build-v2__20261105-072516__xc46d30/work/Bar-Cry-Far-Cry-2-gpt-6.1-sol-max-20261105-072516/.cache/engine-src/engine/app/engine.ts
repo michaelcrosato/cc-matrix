@@ -1,0 +1,390 @@
+/**
+ * @file The engine in a page (PLAN.md §6.4, §6.9, §8.3, WP 2.7): `createEngine({ canvas, scenes, levels })` registers
+ * the levels the page imported as text, reads the page's routes (engine/app/routes.ts: `?scene ?seed ?cam ?replay`,
+ * settings by path, a gallery link `#gallery/<kind>/<id>` with its driver, engine/dev/galleryShoot.ts), starts the
+ * scene as a recorded run with its view (engine/app/headless.ts, engine/app/view.ts), publishes the run's inspector
+ * as `window.__engine`, starts the renderer (WebGPU or nothing, engine/gfx/renderer.ts) and the post-processing chain
+ * every frame and shot is drawn through (engine/gfx/post/chain.ts: the view settings `post.look`, `post.filters` and
+ * `post.show`; the look's sky and style, engine/app/look.ts), warms up every pipeline the view needs (`gfx.warmUp`,
+ * engine/gfx/warmup.ts), draws the first frame, then runs the frame loop (engine/app/loop.ts): the devices sampled
+ * into intents (engine/input/input.ts; `__engine.input` drives the same session), fixed steps from the clock, the
+ * view drawn at the clock's alpha; the map follows the camera, the look the view settings `input.*`, the aim the
+ * view, and a click takes the pointer lock where the map's mouse looks (WP 13.9).
+ *
+ * Ready or error (§8.3): `__engine.ready` turns true once the first frame is done on the GPU, never after a startup
+ * error; every failure (a frame that throws stops the loop) is one record in `__engine.errors` (the log's), shown as
+ * page text by the error overlay (engine/dev/overlay.ts), so a startup crash is one line, never a hang. Without WebGPU
+ * (`GFX_NO_WEBGPU`) the sim still runs, and `__engine` still steps it; only `render` and `shot` throw.
+ *
+ * Every frame drawn is timed by the run's stats meter, which reads the renderer's counts (`__engine.stats()`,
+ * engine/dev/stats.ts), and feeds the performance governor (engine/dev/governor.ts: `auto`'s tier by frame rate). The
+ * rendering members (engine/app/viewMembers.ts) draw through the page's drawing (engine/app/drawing.ts: `render(n)`,
+ * `shot`, and `replay(text)` drawing a frame after every step, §6.7). `?replay=<name>` plays one of `options.replays`
+ * in real time from step 0 (without `?scene`, in its own scene if the page has it), then hands back to the devices.
+ * The overlay (engine/ui/overlay.ts, `engine.ui`, WP 6.7) shows the sim's hits as damage numbers
+ * (engine/app/damageNumbers.ts); `onFrame` runs a page's own presentation (`EngineFrame`). A page's front end (WP
+ * 13.25): `store` keeps the bindings across sessions; while `modal()` holds the page (a menu, a photo mode) the devices
+ * still read the system layer, but no intent reaches the run; `cameraInput()` is laid over each frame's camera input.
+ *
+ * Touch (WP 3.12, ADR-0021: built, not tested): the app wires the touch device (engine/input/devices/touch.ts), the
+ * page's chrome, the touch layer from `touchLayout` and swiping (engine/ui/), the quality budget's pixel caps
+ * (engine/gfx/quality.ts) and, in touch mode, the loop's 60 fps cap; the menu button pauses, then calls `onMenu`.
+ *
+ * Invariants: rendering never writes the sim (doctrine: WebGPU only): the loop steps the session only with intents and
+ * recorded settings; cameras and view settings never reach the hash; time comes from the frames, never a wall clock.
+ *
+ * @example
+ * // const engine = await createEngine({ canvas, scenes: ['box:room'] }); // labs/box/main.ts
+ * // engine.ready; // true once the first frame is drawn
+ * @see tests/e2e/box.spec.ts
+ */
+import '../dev/members'; // declares the kind inspectorMember before input/devices/inspector registers its members
+import {
+  codeError,
+  codeInfo,
+  defineCodes,
+  log as sharedLog,
+  type CodeValues,
+  type ErrorRecord,
+  type Log,
+} from '../core/log';
+import { registry as sharedRegistry, type Registry } from '../core/registry';
+import type { Settings } from '../core/settings';
+import { createGalleryDriver, type GalleryDriver } from '../dev/galleryShoot';
+import { createOverlay } from '../dev/overlay';
+import { createMaterialLibrary } from '../gfx/materials/library';
+import { createStyleSet } from '../gfx/materials/styles';
+import type { QualitySetting } from '../gfx/quality';
+import { createPost } from '../gfx/post/chain';
+import { definePostSettings } from '../gfx/post/settings';
+import { createRenderer } from '../gfx/renderer';
+import { warmsAsked } from '../gfx/warmup';
+import type { CameraInput } from '../gfx/cameras/pose';
+import { connectVirtualDevice } from '../input/devices/inspector';
+import { createInput, type CameraLike, type Input } from '../input/input';
+import { lookOptions } from '../input/look';
+import type { TouchSetting } from '../input/devices/touch';
+import { createChrome } from '../ui/chrome';
+import { attachSwipes } from '../ui/swipe';
+import { createTouchLayer, getTouchLayout, type TouchLayout } from '../ui/touch';
+import type { Inspector } from '../dev/inspector';
+import { createOverlay as createUi, type Overlay } from '../ui/overlay';
+import { createDamageNumbers } from './damageNumbers';
+import { createPageDrawing, type EngineFrame, type PageParts } from './drawing';
+import { createPageLook } from './look';
+import { createAppHost, type AppRun } from './headless';
+import { createLoop, type Loop } from './loop';
+import { textStorage, type Store } from './store';
+import { createPlayback, type Playback } from './playback';
+import { defineLevel } from '../world/level/level';
+import { parseRoutes, type Routes } from './routes';
+import { createGovernor, governorMemory } from '../dev/governor';
+
+/** The codes this module raises, with their fixes. */
+export const ENGINE_CODES = defineCodes('app', {
+  APP_START: {
+    template: 'the page failed to start: {message}',
+    fix: 'the console names the cause; node x shot <page> reports it headless',
+  },
+  APP_FRAME: {
+    template: 'a frame threw, so the loop stopped: {message}',
+    fix: 'the console names the cause; reload the page to start again, or read __engine.state() to see where the run stands',
+  },
+  APP_NO_REPLAY: {
+    template: 'the page has no replay {name}',
+    fix: 'use one of: {names}',
+  },
+  APP_NO_FRAME: {
+    template: 'no frame was drawn in {tries} tries: the warm-up never finished',
+    fix: 'read __engine.errors for GFX_WARMUP_FAILED; node x shot <page> reports it headless',
+  },
+});
+
+export type { EngineFrame, FrameWorld } from './drawing';
+
+/** How a page starts the engine. */
+export interface EngineOptions {
+  /** The canvas it draws into; the page sizes it with CSS. */
+  canvas: HTMLCanvasElement;
+  /** The page's scenes, by id (registered with defineScene); `?scene` picks one, the first by default. */
+  scenes: readonly string[];
+  /**
+   * The levels the page's scenes load, by id: their text (Vite's `?raw` import), file and material swaps (the level
+   * entry's `materials`); registered unless already.
+   */
+  levels?: Readonly<Record<string, { text: string; file?: string; materials?: Readonly<Record<string, string>> }>>;
+  /** Replays the page offers by name (`?replay=<name>`): name → its text, loaded when asked for. */
+  replays?: Readonly<Record<string, () => Promise<string>>>;
+  /** The query to read (`location.search`). */
+  search?: string;
+  /** The hash to read (`location.hash`): a gallery deep link, `#gallery/<kind>/<id>` (engine/app/routes.ts). */
+  hash?: string;
+  /** Where scenes, levels, components, settings and materials are declared (the shared registry). */
+  registry?: Registry;
+  /** Where errors and advice go (the shared log). */
+  log?: Log;
+  /** The page's touch buttons, a `touchlayout` id (engine/ui/touch.ts); without it, only the touch stick shows. */
+  touchLayout?: string;
+  /**
+   * The action map the devices read (`actionMap:thirdPerson` by default): its actions are the intents' buttons. A
+   * function gives the map for the camera now (its code, `cam3=first,…`), so each camera mode has its own (WP 13.9).
+   */
+  actionMap?: string | ((camera: string) => string);
+  /** A view action of the map pressed (its `view`: a camera switch, a view's turn), as it happens (WP 13.9). */
+  onView?: (action: string) => void;
+  /** Opens the page's menu, called after the touch menu button has paused the game. */
+  onMenu?: () => void;
+  /** The page's own presentation (its sound): called once per drawn frame, after the draw, with the run to read. */
+  onFrame?: (frame: EngineFrame) => void;
+  /** Where the bindings are kept across sessions (`createStore`, engine/app/store.ts); in memory without it. */
+  store?: Store;
+  /** True while the page's front end holds the devices (a menu, a photo mode): no intent reaches the run. */
+  modal?: () => boolean;
+  /** Camera input laid over the devices' each drawn frame, field by field (a photo mode's fly keys and drag look). */
+  cameraInput?: () => CameraInput | undefined;
+}
+
+/** A started engine. */
+export interface Engine {
+  /** The inspector, also `window.__engine`; null when the scene could not start. */
+  readonly inspector: Inspector | null;
+  /** True once the first frame is drawn; never after a startup error. */
+  readonly ready: boolean;
+  /** What the query asked for; null when it could not be read. */
+  readonly routes: Routes | null;
+  /** The game's HTML/CSS overlay over the canvas (engine/ui/overlay.ts); null until the renderer started. */
+  readonly ui: Overlay | null;
+  /** The devices (engine/input/input.ts): prompts, rebinding, the map in use; null when the scene could not start. */
+  readonly input: Input | null;
+  /** Stops the frame loop. */
+  stop(): void;
+}
+
+/** What `?replay=<name>` asked for: the replay, ready to play, or why there is none (raised once the page is up). */
+interface Asked {
+  playback?: Playback;
+  error?: unknown;
+}
+
+/** Reads the replay `name` of `replays` before the run starts, so its scene can start (see the file comment). */
+async function readReplay(name: string, replays: EngineOptions['replays']): Promise<Asked> {
+  const load = replays?.[name];
+  if (!load) {
+    const names = Object.keys(replays ?? {}).sort();
+    return { error: codeError('APP_NO_REPLAY', { name, names: names.join(', ') || 'none' }) };
+  }
+  try {
+    return { playback: createPlayback(JSON.parse(await load())) };
+  } catch (error) {
+    return { error };
+  }
+}
+
+/** A store that reads and writes whichever run's settings are current, for the renderer made once. */
+function currentSettings(run: () => AppRun): Settings {
+  return new Proxy({} as Settings, {
+    get(_, key: keyof Settings) {
+      const store = run().session.settings;
+      const value = store[key];
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(store) : value;
+    },
+  });
+}
+
+/**
+ * The log record for a thrown value: its own code and values when it is a coded error (a `GfxError` carries only its
+ * message, so the values are read back from it through the code's template), else `code` with the message.
+ */
+export function recordOf(error: unknown, code: string): [string, CodeValues] {
+  const coded = error as { code?: unknown; values?: CodeValues; message?: unknown };
+  const message = String(coded?.message ?? error);
+  const info = typeof coded?.code === 'string' ? codeInfo(coded.code) : undefined;
+  if (!info) return [code, { message }];
+  if (coded.values) return [info.code, coded.values];
+  const names: string[] = [];
+  const pattern = info.template
+    .split(/\{(\w+)\}/)
+    .map((part, i) => (i % 2 ? (names.push(part), '(.*)') : part.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    .join('');
+  const found = new RegExp(`^${pattern}$`, 's').exec(message);
+  return [info.code, Object.fromEntries(names.map((name, i) => [name, found?.[i + 1] ?? '?']))];
+}
+
+/** Starts the engine in a page (see the file comment); resolves once it is up or has failed. */
+export async function createEngine(options: EngineOptions): Promise<Engine> {
+  const log = options.log ?? sharedLog;
+  const registry = options.registry ?? sharedRegistry;
+  const overlay = createOverlay(document);
+  overlay.status('Loading…');
+  let routes: Routes | null = null;
+  let loop: Loop | null = null;
+  const parts: PageParts = { run: null, gfx: null, post: null, look: null, input: null, layer: null, ui: null, numbers: null, governor: createGovernor({ log, memory: governorMemory(options.store, () => routes?.scene) }), cameraInput: options.cameraInput, ready: false }; // prettier-ignore
+  const fail = (error: unknown, code = 'APP_START'): ErrorRecord => {
+    const record = log.error(...recordOf(error, code), error);
+    overlay.error(record);
+    return record;
+  };
+  const signals = {
+    get ready() {
+      return false;
+    },
+    get errors() {
+      return log.errors.map((record) => ({ ...record }));
+    },
+    info: () => ({ page: location.pathname, headless: true }),
+  };
+  Object.assign(window, { __engine: signals });
+  const engine: Engine = {
+    get inspector() {
+      return parts.run?.inspector ?? null;
+    },
+    get ready() {
+      return parts.ready;
+    },
+    get routes() {
+      return routes;
+    },
+    get ui() {
+      return parts.ui;
+    },
+    get input() {
+      return parts.input;
+    },
+    stop: () => loop?.stop(),
+  };
+
+  let layout: TouchLayout | null = null;
+  let playback: Playback | null = null;
+  const viewNow = () => parts.run!.view!;
+  const settingsNow = currentSettings(() => parts.run!);
+  const chrome = createChrome(document);
+  let gallery: GalleryDriver | null = null; // a gallery deep link's, fitting its camera and bursting its emitter
+  const onFrame = (shown: EngineFrame) => {
+    gallery?.frame(shown.dt);
+    options.onFrame?.(shown);
+  };
+  const { drawing, frame, settle, warmCameras } = createPageDrawing(parts, { chrome, settings: settingsNow, onFrame }); // prettier-ignore
+  let warming: Promise<void> | null = null;
+  let asked: Asked | null = null;
+  let materials: ReturnType<typeof createMaterialLibrary> | null = null;
+
+  try {
+    definePostSettings(registry);
+    for (const [id, level] of Object.entries(options.levels ?? {})) {
+      if (!registry.has('level', id)) defineLevel(id, level, registry);
+    }
+    const search = options.search ?? location.search;
+    routes = parseRoutes(search, { scenes: options.scenes, registry, hash: options.hash ?? location.hash, log });
+    if (routes.replay !== undefined) {
+      asked = await readReplay(routes.replay, options.replays);
+      const scene = asked.playback?.replay.scene;
+      if (scene && !new URLSearchParams(search).has('scene') && options.scenes.includes(scene)) {
+        routes = { ...routes, scene };
+      }
+    }
+    if (options.touchLayout !== undefined) layout = getTouchLayout(options.touchLayout, registry);
+    materials = createMaterialLibrary({ registry });
+    const { scene, seed, settings, cam } = routes;
+    parts.run = createAppHost({ scene, seed, settings, cam, registry, log, drawing, materials });
+    if (routes.gallery) gallery = createGalleryDriver(routes.gallery, () => parts.run!, registry);
+  } catch (error) {
+    fail(error);
+    return engine;
+  }
+  const started = parts.run;
+  Object.assign(window, { __engine: started.inspector });
+  const onTap = (name: string) => {
+    if (name === 'game') chrome.closeTopPanel();
+    if (name !== 'menu') return;
+    started.clock.pause();
+    options.onMenu?.();
+  };
+  const touchMode = () => settingsNow.get<TouchSetting>('touch');
+  const mapFor = () => {
+    const asked = options.actionMap;
+    return (typeof asked === 'function' ? asked(viewNow().camera.code()) : asked) ?? 'actionMap:thirdPerson';
+  };
+  const declared = (path: string) => registry.kinds().includes('setting') && registry.has('setting', path);
+  const look = () => lookOptions((path) => (declared(path) ? settingsNow.get(path) : undefined));
+  const input = (parts.input = createInput({ window, document, element: options.canvas, registry, log, touchMode, onTap, map: mapFor(), look, onView: options.onView, storage: options.store && textStorage(options.store) })); // prettier-ignore
+  /** The camera the devices read: its heading, its look, and the aim from the view (engine/input/aim.ts). */
+  const camera: CameraLike = {
+    yaw: () => viewNow().camera.yaw(),
+    pose: () => viewNow().camera.pose(),
+    aim: (rule, devices) => viewNow().aim(rule, devices),
+  };
+  /** The map for the camera now, and the pointer lock: a click takes it where the map's mouse looks; pause gives it back. */ // prettier-ignore
+  const sample = (now: number) => {
+    const id = mapFor();
+    if (id !== input.bindings.map.id) input.use(id);
+    if (input.mouse?.locked && (!input.bindings.map.lock || started.clock.paused)) input.mouse.unlock();
+    const intents = input.sample(camera, now);
+    return options.modal?.() ? {} : intents;
+  };
+  options.canvas.addEventListener('click', () => {
+    if (input.bindings.map.lock && !started.clock.paused && !input.mouse?.locked) input.mouse?.lock();
+  });
+  parts.layer = createTouchLayer(document, layout);
+  attachSwipes(document);
+  connectVirtualDevice(started.host, input.virtual);
+  try {
+    parts.gfx = await createRenderer(options.canvas, { settings: currentSettings(() => started), registry, log });
+  } catch (error) {
+    fail(error);
+    return engine;
+  }
+  const gfx = parts.gfx;
+  parts.numbers = createDamageNumbers((parts.ui = createUi({ canvas: options.canvas })));
+  try {
+    gfx.renderer.shadowMap.enabled = true;
+    const styles = createStyleSet({ library: materials!, registry });
+    const post = (parts.post = createPost(gfx, { settings: currentSettings(() => started), registry, log, styles }));
+    const budget = () => parts.governor!.budget(settingsNow.get<QualitySetting>('quality'), input.touch?.active ?? false); // prettier-ignore
+    parts.look = createPageLook({ post, styles, warmup: gfx.warmup, resolution: gfx.resolution, library: materials!, quality: budget, asked: () => warmsAsked(settingsNow) }); // prettier-ignore
+    post.attach(gfx.warmup);
+    viewNow().stage.register(gfx.warmup, gfx.features);
+    await warmCameras();
+    await settle(1, 0);
+  } catch (error) {
+    fail(error);
+    return engine;
+  }
+  const step = (intents: Record<string, unknown>) => {
+    if (playback && !playback.done) {
+      playback.step(started.session);
+      started.stepped(); // its hit-stops reach the clock as in live play
+    } else {
+      playback = null;
+      started.stepOnce(intents);
+    }
+  };
+  loop = createLoop({
+    clock: () => started.clock,
+    sample,
+    step,
+    draw: ({ alpha, dt }) => {
+      // frozen in a reproducible run: a replay playing, or the governor turned off (engine/dev/governor.ts)
+      parts.governor!.freeze((playback !== null && !playback.done) || !settingsNow.get<boolean>('gfx.governor'));
+      if (warming) return;
+      const report = frame(alpha, dt);
+      if (!report.drawn && report.warming) warming = warmCameras().finally(() => (warming = null));
+    },
+    hold: () => started.playing,
+    cap: () => input.touch?.active ?? false,
+    onError: (error) => fail(error, 'APP_FRAME'),
+  });
+  parts.ready = true;
+  overlay.hide();
+  loop.start();
+  const replay = asked?.playback;
+  if (asked && !replay) fail(asked.error);
+  else if (replay) {
+    try {
+      started.begin(replay.replay);
+      playback = replay;
+    } catch (error) {
+      fail(error);
+    }
+  }
+  return engine;
+}

@@ -1,0 +1,64 @@
+# Fields: docs in ../README.md. Coordinates: x -9..9, z -4..4.2. Angles in degrees.
+name = "Dies Irae"
+surgeon = "pet"
+plate = "pericardium"
+ring = ["scalpel", "forceps", "suture", "suction", "cryo", "gel", "scanner", "iv"]
+timer = 400.0
+par = 136200.0
+patient = "Ottoline Voss"
+life = "Chief of Surgery. Has carried this for eleven years and told no one."
+diagnosis = "R.E.Q.U.I.E.M., Dies Irae strain, pericardial. Fever rising. Self-reported."
+fate = "Ottoline Voss will live, and will complain about the stitches. They are, she concedes, adequate."
+before = "case6_before"
+after = "case6_after"
+gift = "echo"
+music = "dies"
+base_drain = 1.7
+
+[[phase]]
+name = "dies"
+now = "CRYO an ember. SCALPEL to crack it. FORCEPS the pieces. Lift off at the rings!"
+checkpoint = true
+strain = "dies"
+params = { rounds = 3 }
+meter = 5
+guide = true
+say = [
+  { who = "voss", text = "If I die on your table, Perpetua, you'll have to fill out the form.", at = 0.5 },
+  { who = "pet", text = "I have been looking forward to it.", at = 4.0 },
+  { who = "bashir", text = "Heat ring on every fifth beat, Doctor. Trigger up when it crosses.", at = 8.0 },
+]
+
+[[phase]]
+name = "burns"
+stagger = 2.4
+repeat = 6
+now = "GEL the burns and close what's open."
+checkpoint = true
+meter = 4
+spawn = [
+  { kind = "burn", a = [-3.0, -1.6], r = 1.1 },
+  { kind = "burn", a = [3.0, 1.6], r = 1.1 },
+  { kind = "lacer", a = [-1.2, 2.2], b = [1.8, 2.6] },
+]
+say = [{ who = "teddy", text = "Fever's breaking. Hers. Mine's fine, thanks for asking.", at = 0.5 }]
+
+[[phase]]
+name = "scars"
+stagger = 2.4
+repeat = 6
+now = "Eleven years of scarring. FORCEPS, SCALPEL, SUTURE. She can take it."
+checkpoint = true
+spawn = [
+  { kind = "object", a = [-4.2, 1.8], ang = 160.0, sub = 2 },
+  { kind = "object", a = [4.0, -2.0], ang = -30.0, sub = 2 },
+  { kind = "incision", a = [-2.6, -2.6], b = [2.4, -2.8], c = [0.0, -3.4] },
+  { kind = "lacer", a = [-1.6, 2.6], b = [1.6, 2.8] },
+  { kind = "pool", a = [3.8, 1.8], r = 1.2 },
+]
+say = [{ who = "voss", text = "You're stitching me like a mailbag, Perpetua. I can feel it through the anaesthetic.", at = 0.5 }]
+
+[[phase]]
+name = "close"
+now = "DRESSING. Make it pretty; she'll inspect it."
+spawn = [{ kind = "closure", a = [-4.5, 0.0], b = [4.5, 0.0], c = [0.0, 1.2] }]

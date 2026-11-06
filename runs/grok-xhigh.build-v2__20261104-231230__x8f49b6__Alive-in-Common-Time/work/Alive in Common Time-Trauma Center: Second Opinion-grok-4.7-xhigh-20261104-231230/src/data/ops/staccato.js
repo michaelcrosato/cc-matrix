@@ -1,0 +1,95 @@
+import { gel, gelDress, gates, line } from './shape.js';
+
+export default {
+  id: 'staccato',
+  chapter: 2,
+  title: 'Staccato',
+  doctor: 'ren',
+  scene: { before: 'S7', after: 'S8' },
+  patient: {
+    name: 'Ruben Castellano', age: 47, job: 'Ferry captain',
+    note: 'Has not missed a crossing in nineteen years. Is asking whether this will take long.',
+    followUp: 'Missed two crossings. Sent flowers to the ferry.',
+  },
+  timer: 360,
+  bpm: 84,
+  parScore: 17283,
+  music: 'strain-staccato',
+  teaches: ['staccato', 'tremolo', 'gel', 'scalpel', 'laser', 'scanner', 'forceps', 'suture'],
+  sites: [{ id: 'bowel', organ: 'bowel' }, { id: 'stomach', organ: 'stomach' }],
+  phases: [
+    {
+      id: 'open',
+      objective: 'Open the bowel',
+      tools: ['gel', 'scalpel'],
+      spawn: [
+        { kind: 'gelZone', site: 'bowel', rect: gel(-0.8, -0.26, 0.5, 0.26), parTime: 9 },
+        { kind: 'incision', site: 'bowel', at: [-0.4, 0], points: line(-0.45, 0, 0.4, 0.02, 12) },
+      ],
+      on: gelDress('bowel', 4),
+      done: { cleared: ['gelZone', 'incision'] },
+      say: [{ at: 0, who: 'bea', mood: 'stern', text: 'He has a timetable. We have a bowel. Open it before he asks again.' }],
+    },
+    {
+      id: 'wave1',
+      objective: 'Pop the first notes',
+      tools: ['laser', 'forceps', 'gel'],
+      spawn: [
+        { kind: 'hole', site: 'bowel', at: [-0.4, 0.15], hidden: false, quota: 3, strain: 'staccato' },
+        { kind: 'hole', site: 'bowel', at: [0.05, 0.18], hidden: false, quota: 3, strain: 'staccato' },
+        { kind: 'hole', site: 'bowel', at: [0.35, -0.05], hidden: false, quota: 2, strain: 'staccato' },
+      ],
+      done: { cleared: ['hole', 'note', 'spore'] },
+      say: [{ at: 0, who: 'bea', mood: 'focus', text: 'Notes. They sour if you leave them. Pop, then seal the holes.' }],
+    },
+    {
+      id: 'nests',
+      objective: 'Find the hidden holes',
+      tools: ['scanner', 'gel', 'laser'],
+      spawn: [
+        { kind: 'hole', site: 'stomach', at: [-0.7, 0.2], hidden: true, quota: 2, strain: 'staccato' },
+        { kind: 'hole', site: 'stomach', at: [-0.2, -0.2], hidden: true, quota: 2, strain: 'staccato' },
+        { kind: 'hole', site: 'stomach', at: [0.3, 0.15], hidden: true, quota: 2, strain: 'staccato' },
+        { kind: 'hole', site: 'stomach', at: [0.55, -0.15], hidden: true, quota: 2, strain: 'staccato' },
+      ],
+      done: { cleared: ['hole', 'note', 'spore'] },
+      say: [{ at: 0, who: 'bea', mood: 'stern', text: 'The stomach is keeping secrets. Sweep it, then shut every mouth.' }],
+    },
+    {
+      id: 'waves',
+      objective: 'Clear the next volleys',
+      tools: ['laser', 'gel', 'forceps'],
+      spawn: [
+        { kind: 'hole', site: 'stomach', at: [-0.55, 0.05], hidden: false, quota: 6, strain: 'staccato' },
+        { kind: 'hole', site: 'stomach', at: [0.1, -0.12], hidden: false, quota: 6, strain: 'staccato' },
+        { kind: 'hole', site: 'bowel', at: [0.2, 0.2], hidden: false, quota: 4, strain: 'staccato' },
+      ],
+      done: { cleared: ['hole', 'note', 'spore'] },
+      say: [{ at: 0, who: 'bea', mood: 'urgent', text: 'Another volley, then a thicker one. Do not let them bloom.' }],
+    },
+    {
+      id: 'moths',
+      objective: 'Pin the shivering moths',
+      tools: ['scanner', 'laser'],
+      spawn: [
+        { kind: 'tremolo', site: 'stomach', at: [-0.45, 0.18], hp: 40 },
+        { kind: 'tremolo', site: 'stomach', at: [0.15, -0.16], hp: 40 },
+        { kind: 'tremolo', site: 'bowel', at: [0.4, 0.12], hp: 40 },
+      ],
+      done: { cleared: ['tremolo', 'scratch'] },
+      say: [{ at: 0, who: 'bea', mood: 'quiet', text: 'Slow hands, child. They spook. Pin, then burn, three times if you must.' }],
+    },
+    {
+      id: 'close',
+      objective: 'Close both fields',
+      tools: ['suture', 'gel'],
+      spawn: [
+        { kind: 'wound', site: 'bowel', at: [-0.4, 0], gates: gates(-0.5, 0.05, 0.45, -0.02, 8) },
+        { kind: 'wound', site: 'stomach', at: [-0.3, 0.05], gates: gates(-0.45, 0.1, 0.5, 0, 8) },
+        { kind: 'gelZone', site: 'stomach', rect: gel(-0.85, -0.3, 0.55, 0.3), parTime: 11 },
+      ],
+      done: { cleared: ['wound', 'gelZone'] },
+      say: [{ at: 0, who: 'bea', mood: 'calm', text: 'Sew, dress, and tell him the ferry can have him back. Eventually.' }],
+    },
+  ],
+};

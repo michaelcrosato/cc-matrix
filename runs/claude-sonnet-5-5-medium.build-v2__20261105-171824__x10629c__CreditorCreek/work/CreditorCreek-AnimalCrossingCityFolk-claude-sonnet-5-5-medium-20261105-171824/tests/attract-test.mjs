@@ -1,0 +1,9 @@
+import { chromium } from 'playwright'; import { resolve } from 'node:path';
+const file = resolve(process.argv[2]); const b = await chromium.launch({ headless: true, args: ['--enable-unsafe-webgpu','--enable-features=Vulkan','--use-vulkan=swiftshader','--use-angle=swiftshader','--use-webgpu-adapter=swiftshader'] });
+const p = await b.newPage({ viewport: { width: 960, height: 540 } }); const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 300))); p.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); });
+await p.goto('file://' + file);
+const r = await p.evaluate(async () => { const e = await window.__PIXEL_READY__; const G = window.__GAME__.game; const out = []; const y = () => new Promise(r => setTimeout(r, 0)); const st = async (n) => { for (let i = 0; i < n; i += 6) { e.step(6); await y(); } }; await st(30); out.push(G.mode); await st(60 * 11); out.push(G.mode); const seen = new Set(); for (let i = 0; i < 400; i++) { await st(30); seen.add(G.place + ':d' + G.world.day + ':' + (G.ui.top?.id ?? '-')); if (e.errors.length) break; } out.push([...seen].join(',')); out.push('errors:' + e.errors.map(x => String(x.message ?? x)).slice(0, 2).join('|')); out.push(G.mode); const save0 = localStorage.getItem('creditor-creek:save:v1'); return out; });
+await p.keyboard.press('KeyA'); await p.waitForTimeout(400);
+const after = await p.evaluate(async () => { const G = window.__GAME__.game; const e = await window.__PIXEL_READY__; const y = () => new Promise(r => setTimeout(r, 0)); for (let i = 0; i < 20; i++) { e.step(3); await y(); } return G.mode + ' | save ' + localStorage.getItem('creditor-creek:save:v1'); });
+r.push('after key: ' + after);
+console.log(r.join('\n')); console.log('page errors', JSON.stringify(errs.slice(0, 4))); await b.close();

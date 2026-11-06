@@ -1,0 +1,4 @@
+import { chromium } from 'playwright'; import { dirname, join } from 'node:path'; import { fileURLToPath, pathToFileURL } from 'node:url'; import { mkdirSync } from 'node:fs';
+const here = dirname(dirname(fileURLToPath(import.meta.url))); const url = pathToFileURL(join(here, '..', `${here.split('/').pop()}.html`)).href + '?test=1&render=0&manual=1'; const out = join(here, 'notes/shots'); mkdirSync(out, { recursive: true });
+const b = await chromium.launch({ args: ['--no-sandbox'] }); const p = await b.newPage({ viewport: { width: 1920, height: 1080 } }); await p.goto(url); await p.waitForFunction(() => window.__TEST__); await p.evaluate(() => __TEST__.Menus.openAbout(__TEST__.g)); const n = await p.evaluate(() => __TEST__.about().length);
+for (let i = 0; i < n; i++) { await p.screenshot({ path: join(out, `about${String(i).padStart(2, '0')}.png`) }); await p.evaluate(() => __TEST__.g.ui.top().onRight()); } await b.close(); console.log(n);

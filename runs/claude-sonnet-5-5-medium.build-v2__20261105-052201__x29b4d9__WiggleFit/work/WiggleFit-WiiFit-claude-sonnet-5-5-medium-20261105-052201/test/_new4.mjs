@@ -1,0 +1,4 @@
+import { makeStub, run } from './headless.mjs';
+import { StillWater } from '../src/events/stillWater.js'; import { Plank } from '../src/events/plank.js'; import { Tug } from '../src/events/tug.js'; import { IslandLoop } from '../src/events/islandLoop.js';
+const game = await makeStub();
+for (const E of [StillWater, Plank, Tug, IslandLoop]) for (const tier of [0, 1, 2]) { const out = []; for (const skill of ['sharp', 'average', 'clumsy']) { try { const ev = new E(game, { tier, seed: 2, lanes: [{ kind: 'bot', skill }] }); run(ev, 200); const l = ev.lanes[0]; out.push(skill + ' ' + l.form.toFixed(0) + '/' + l.falls + 'f ' + ev.phase + ' t' + ev.t.toFixed(0)); ev.dispose(); } catch (e) { out.push(skill + ' ERR ' + String(e.stack).slice(0, 200)); } } console.log(E.id, 'T' + (tier + 1), out.join(' | ')); }

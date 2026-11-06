@@ -1,0 +1,2 @@
+// Par for each case: a perfect bot's score at Resident, less 5%. Written by node tools/balance.mjs --par.
+(() => { const G = (window.GAME ||= {}), P = {"glasshouse":2160,"lowbrass":3610,"crane9":5250,"whistling":3630,"slur":4550,"bedside":3450,"forcenine":4030,"fromthetop":5670,"deadman":3490,"eloquent":3850,"lastnote":10420,"grandrounds":4900}; for (const k in P) if (G.CASES[k]) G.CASES[k].par = P[k]; })();

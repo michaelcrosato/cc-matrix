@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 09:28:50",
+    "source": "Trauma Center: Second Opinion (Atlus, Wii, 2006)",
+    "plan": "PLAN.md",
+    "genre": "Surgical action with visual-novel medical drama",
+    "perspective": "First-person surgeon's-eye close-up on a 3D operating field; talking-head close-ups and 3/4 room shots in story scenes",
+    "tech": "Pixel Engine 0.46.0 (riftlight kit: three.js r186, Rapier, WebGPU), own systems in JavaScript, esbuild 0.28.2, AI Hub session client 1.4.0",
+    "artDirection": "The engine's native low-poly 3D rendered as pixel art; procedural painted tissue canvases, original busts, tools, strains and sets; Kenney furniture recoloured for generic props",
+    "animation": "The engine's native rig clips on custom figures, SpringChain, LegStepper and Squash, plus procedural bust, tool, heartbeat and breathing animation",
+    "audio": "Everything synthesised in code: engine Song chiptune music (10% default), SoundDef effects, Animalese-style gibberish voices from pure-JS formant syllables",
+    "online": "AI Hub Session Protocol v1, shared-world, 1 to 4 seats; couch co-op on its own with no network",
+    "testing": "Headless tools allowed, unlimited: Node sim, content and real-stage replay tests, the kit check.mjs, Playwright Chromium browser tests with stub pads, a bot playthrough of the whole game, five hub harness runs, screenshots at 1080p. No person played it",
+    "research": "The plan's planner read the source's Wikipedia page, the hub's protocol and the engine kit, and ran engine spikes; during the build I read the kit's guides and the hub README, and did no further research on the source",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 29 in the game: 8 from scripts (balance report, sim tests, the sound lint, which found a misnamed wave making nine sounds and the choirs fail, the kit replay check, which found level swaps racing a replay, and a pad test failing under load, which led to one press acting twice or not at all when the frame rate dipped), about 13 from screenshots, including a Dies Irae crown that never drew. Reading the code against the plan line by line then found 8 more that no test had caught, such as sliders that did not reach a running op and a missing wheel for co-op seats. Two more failures were bugs in the tests themselves.",
+    "1, now fixed: Op 4 could not be finished, because two bone fragments hid under pools that were already gone. The balance report found it, and the bot now clears Op 4 at every skill above idle.",
+    "The whole game played by the bot in the real page on manual time: every scene, op and screen with the view running, in about a minute.",
+    "The rumble check: a stub pad only proves the call path runs, and no script can say how it feels. No person played this game, so feel and real-player difficulty are untested."
+  ],
+  "engineFeedback": [
+    "Models as plain data plus the pixel pipeline. A 3D bust from a few boxes and slabs looks like a shipped game, with no art files.",
+    "Rarely. wasPressed misses taps when a test presses and releases inside one slow software frame, so tests had to hold keys across frames. check.mjs --headless replays only the last level and never yields, so my async level swaps failed it until I deferred them. Palette-only model colours forced a material swap for skin tones.",
+    "The painted tissue canvas: a per-frame 480x270 texture on a displaced mesh, which carries pools, wounds, stitches, gel and guides. Next, per-pad input with analog triggers.",
+    "Slow software WebGPU made browser tests timing-sensitive. Manual stepping with engine.step solved most of it.",
+    "none",
+    "Per-pad gamepad state with analog triggers built into Input, instead of one merged pad, so couch co-op needs no polling of its own."
+  ],
+  "promptFeedback": [
+    "The plan marks what was verified and gives working numbers, so I could trust them and spend the effort on the game.",
+    "Very little. The title riff asks for the source name while the plan keeps every other use of it out, so I chose a title that riffs on the second opinion without repeating the name.",
+    "Judging hands-on feel and difficulty with no person playing: the bot proves each op can be cleared, not that it feels right.",
+    "Say how long a first-time human should take per op, so a bot-based balance report can be checked against something."
+  ],
+  "aiHub": {
+    "name": "Second Stitch",
+    "tagline": "A surgical drama",
+    "description": "A melodramatic surgical action game in pixel art: ten operations against a clock, a terrifying nurse in your ear and a man-made disease called Mercy. Scrub in alone, or with up to four pairs of hands.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Trauma Center: Second Opinion",
+    "series": "Trauma Center",
+    "players": "1–4",
+    "controls": "Stick or mouse moves the tool, R2 or left click uses it, right stick or 1-8 picks a tool, L2 or Space for your gift",
+    "tags": [
+      "3d",
+      "pixel art",
+      "story",
+      "co-op",
+      "boss fights",
+      "comedy"
+    ]
+  }
+}

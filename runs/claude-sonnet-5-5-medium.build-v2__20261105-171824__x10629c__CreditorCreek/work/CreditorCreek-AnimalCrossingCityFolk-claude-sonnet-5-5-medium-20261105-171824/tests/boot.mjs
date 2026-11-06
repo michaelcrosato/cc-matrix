@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+import { resolve } from 'node:path';
+const f = resolve(process.argv[2]);
+const b = await chromium.launch({ headless: true, args: ['--enable-unsafe-webgpu','--enable-features=Vulkan','--use-vulkan=swiftshader','--use-angle=swiftshader','--use-webgpu-adapter=swiftshader'] });
+const p = await b.newPage({ viewport: { width: 960, height: 540 } });
+const errs = []; p.on('pageerror', e => errs.push(String(e))); p.on('console', m => { if (m.type()==='error') errs.push(m.text()); });
+await p.goto('file://' + f);
+const st = await p.evaluate(async () => { const e = await window.__PIXEL_READY__; e.step(30); return e.state().status; });
+console.log('status', st, 'errors', errs);
+await p.screenshot({ path: process.argv[3] || '/dev/null' });
+await b.close();

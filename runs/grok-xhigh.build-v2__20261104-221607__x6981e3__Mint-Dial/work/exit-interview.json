@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:16:07",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Sports",
+    "perspective": "Isometric island, with a fixed camera for each activity",
+    "tech": "Pixel Engine 0.46.0, three.js r186, Rapier 0.20 as bundled, esbuild 0.28.2",
+    "artDirection": "The engine native pixel look, with new models for the scale, stations, and props",
+    "animation": "Engine ClipDefs compiled onto the hero rig and played with AnimationMixer",
+    "audio": "Engine Song and SoundDef data, plus a Web Audio formant voice. Music defaults to 10 percent.",
+    "online": "AI Hub Session Protocol v1, ghost mode, own card, 1 to 4 players. Family Hour is local on one screen.",
+    "testing": "node tools/test.mjs, Playwright 1.63 Chromium with the five software WebGPU flags, WebKit and Firefox for the missing-WebGPU path, and the engine headless runner",
+    "research": "The director plan already included engine and hub research and spikes. I read PLAN.md, the engine guide where the recipes pointed, and the hub README, and I checked the Dot table in code. I did not do extra research on the source beyond that plan.",
+    "environment": "Grok CLI (headless); Linux",
+    "model": "xAI, grok-4.7, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Thirteen issues. The expert pier jump scored two stars, pause let the pose clock move on the frame the button went down, two songs had uneven pattern lengths, a tray board lookup named a variable that was not in scope, a few model parts floated, the seagull was spoken as the scale, a dev-tool page could not go back, the prompt could draw past a short screen, the scale's voice measured just under the loudness line, the About screen kept only the first six lines so later source fields never appeared, the menu cursor was a greater-than sign the font cannot draw, so it showed as a question mark, reps listened only to a downward lean so a sideways lunge and an upward press did nothing, and an activity kept the title camera, never played its pose, and labelled the screen activity.",
+    "Three were game-breaking. The pier jump sat under the three-star line until takeoff recentred the dot, the pose kept playing for one frame after pause, and a lunge or a press did not move when the stick did. The others failed a data check, a voice check, a menu, or the picture of the exercise, and they were fixed before the hand-in.",
+    "The most helpful test was driving a rep with the input the stick and the keys actually produce. The idle-versus-expert bots wrote the depth themselves, so they still scored while a sideways lunge stayed at zero. That same bot pass is what caught the pier jump.",
+    "The least helpful test was the glyph scan. Every line already used the allowed characters, so it passed on the first run and did not change the game."
+  ],
+  "engineFeedback": [
+    "Headless stepping, the pixel HUD, and a real input recorder made a week of play testable without a screen.",
+    "I guessed wrong about pause. At timeScale 0 the headless stepper still calls fixedUpdate, and that call happens before update reads the pause key, so the pose clock moved unless the sim refused the step. Menu presses do still arrive. The type note reads as if those presses are dropped. Capture also needs all five Vulkan flags or the picture comes back blank.",
+    "The centre-of-balance itself. The engine will move a character. It will not sway a polite dot, keep a week, or speak in formants.",
+    "The hardest part was trusting the frame clock. Game time, the press window, and the hub clock are three different clocks, and only one of them is allowed to move a score.",
+    "None. pixel-engine.js is the kit file, byte for byte.",
+    "I would give the music bus a default of silence until the game sets it, so a shared browser profile cannot leave yesterday volume on today game."
+  ],
+  "promptFeedback": [
+    "The plan named the mechanics, the sentences, and the tests, so the work was building a game rather than inventing one.",
+    "The cut list in the plan and the instruction to finish everything on this computer disagree. I followed the instruction and shipped the activities the cut list would drop.",
+    "The hardest piece was the pier jump star line. The same bot that holds a pose will dive off a dock, and the flight begins wherever the dot was left.",
+    "I would ask for the pause rule in one sentence: timeScale 0, fixedUpdate silent, update still reads keys. The guide and the type comment do not say the same thing."
+  ],
+  "aiHub": {
+    "name": "Mint Dial",
+    "tagline": "Keep the dot in the circle.",
+    "description": "A week on a small island with a polite scale. Hold still, keep time, and try not to believe the number.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "Wii Fit",
+    "players": "1–4",
+    "controls": "Left stick, WASD or mouse: lean. R2, Space or click: breathe. L1/R1, F/J or mouse buttons: step.",
+    "tags": [
+      "pixel art",
+      "comedy",
+      "versus",
+      "arcade",
+      "3d",
+      "story"
+    ]
+  }
+}

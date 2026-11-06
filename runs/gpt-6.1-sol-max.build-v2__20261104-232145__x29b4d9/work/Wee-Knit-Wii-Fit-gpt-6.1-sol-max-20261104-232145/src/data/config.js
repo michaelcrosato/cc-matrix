@@ -1,0 +1,11 @@
+export const TITLE = 'Wee Knit';
+export const TAGLINE = 'A little off. A little better.';
+export const SAVE_KEY = 'level-best-retreat-v1';
+export const VERSION = 1;
+export const COLOURS = ['#e76b57','#4e9cb5','#85af77','#eebc55','#bd83a4','#666fa4'];
+export const SEATS = ['#e8443a','#3b82f6','#22c55e','#f5b700'];
+export const DIFFICULTY = {Gentle:{ankle:1.25,disturbance:.65,window:1.4},Standard:{ankle:1,disturbance:1,window:1},Honest:{ankle:.9,disturbance:1.2,window:.8}};
+export const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+export const lerp=(a,b,t)=>a+(b-a)*t;
+export const rad=x=>x*Math.PI/180;
+export const TIERS=['Gentle','Honest','Unreasonable'];

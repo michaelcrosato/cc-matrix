@@ -1,0 +1,40 @@
+# Progress
+
+Read this first: where things stand, what is next and the open issues, on one screen (`node x docs --check` fails it
+past 40 lines). The integrator rewrites it at each gate; every WP's status and notes are in the ledger, PLAN.md §14.
+
+## Next: nothing scheduled; the owner's playtest of the tech demo
+
+- Gate G13 (PR #34): Phase 13 is done, with every WP it fired: the front end (WP 13.25), the governor (7.5),
+  GPU-driven crowds' stage 1 (11.4), templates and skills (12.1), the usability evals and mutation testing (12.2),
+  `x mcp` (7.6), the tour with its attract mode and a film per look (13.26). What follows waits: upgrades U-2 to U-7
+  from their dates (`node x deps --qualify`), on-demand WPs for their triggers (§9.1), Phase H for a game to ship.
+- The owner's, all in the playground's Owner checks (start menu; WP 13.28), each in plain words with Go there: the
+  playtest (docs/PLAYGROUND.md §9.3), the looks to judge (the clean default, clean and cel at full resolution, the
+  accent weak from isometric, the cel look's dark night there, its near-black brick), the sound and a pad, and ESC-0002
+  to ESC-0006's calls (the Quaternius GLBs, model access for the live evals, the crowd's CPU render, the mutants outside
+  the sample), answered from Copy my answers. Their go-ahead (2026-10-22): a bot may play with infinite health and ammo.
+
+## Where things stand (2026-11-05)
+
+- Phases 0–9 and 13 are done (G10–G13: PR #22 to #34). The playground (`npm run dev`) is one map, the block, behind a
+  splash and a start menu (WP 13.33), shut doors walls to its cameras (13.34), no z-fighting (13.35–13.37), the audit's
+  gaps closed (13.38–13.41); the player moves as Apex in five cameras (doors, pickups, melee, guns, ragdolls,
+  neighbours, a dog, sound, day and night, GPU rain; clean, cel and pixel looks); Watch the tour plays it all. Agents
+  drive it through `node x`, `__engine` or `x mcp`. Games: lean/. Shipped as playground.html. Faster starts (ADR-0008
+  amendments 11, 12; Owner: a move still re-keys lit pipelines); Style Lab's filters in Tune the look.
+
+## What waits, and the open issues
+
+- Amendment 22 proposes triangle-mesh terrain. QA baselines: the timelines' knockdown slide, WP 8.8's. Owner:
+  top-down's pixel look panned across a whole pixel changes 7–10 pixels of a soft shadow band (amendment 35). Clip
+  contacts: hands read as holds in walks, idles and more (WP 8.8's row); no foot lock reads a clip's foot contacts yet.
+  Not verifiable here: speakers, touch (ADR-0021), pads, real GPUs (`stats().gpuMs`: the rain's 1 ms; load times), the
+  pixel look's glide, how the filters read, a desktop MCP client. A key pressed in a warm-up is lost (amendment 48).
+- Mutation (WP 12.2, ESC-0006): the run's tenth catches 94.40%, the rest 74.3%; rotate its seed and redraw each gate.
+- Near the size cap (390–397 lines), split on the next change: sim/world.ts, anim/{quadruped,clip/validate}.ts,
+  tools/cmd/replay.ts, app/engine.ts; four tests at 399–400.
+- The quick gate is over its 5 min (CI_BUDGET), its long pole the playground's soak and site tests; under load
+  `npm test` can fail on RPC timeouts; audio.spec's spatial test hung once in an offline render on GitHub (e6f38ba).
+- The tour's page goldens come from its spec (amendment 41). Random play lost the shooter's chest in 4–5% of frames
+  (before WP 13.27). A shot's ID pass builds a pipeline again after each lambert–toon style switch (frames never do).

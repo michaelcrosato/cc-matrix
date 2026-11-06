@@ -1,0 +1,129 @@
+{
+  "kind": "body",
+  "description": "Puppet bodies: parts on the humanoid skeleton, one line each, with material slots (the palette).",
+  "fields": [
+    {
+      "key": "description",
+      "type": "string",
+      "description": "What the body is, in plain sentences.",
+      "default": ""
+    },
+    {
+      "key": "slots",
+      "type": "object",
+      "description": "Material slots: each name with its hex colour (the palette).",
+      "default": {}
+    },
+    {
+      "key": "parts",
+      "type": "array",
+      "description": "The parts, one line each (engine/gfx/puppets/grammar.ts).",
+      "default": []
+    },
+    {
+      "key": "mirror",
+      "type": "array",
+      "description": "Parts written for the left side, drawn on both sides.",
+      "default": []
+    },
+    {
+      "key": "limbRadius",
+      "type": "number",
+      "minimum": 0,
+      "unit": "m",
+      "description": "A limb's radius, for sizes written [k, 'limb'] (my-3d2dge's limbW / 2).",
+      "default": 0.0625
+    },
+    {
+      "key": "torsoRadius",
+      "type": "number",
+      "minimum": 0,
+      "unit": "m",
+      "description": "The torso's radius, for sizes written [k, 'torso'] (my-3d2dge's torsoW).",
+      "default": 0.1875
+    },
+    {
+      "key": "builds",
+      "type": "object",
+      "description": "By build id: the limbRadius and torsoRadius it changes.",
+      "default": {}
+    },
+    {
+      "key": "material",
+      "type": "string",
+      "description": "The material of every part but eyes.",
+      "default": "material:puppet"
+    },
+    {
+      "key": "glowMaterial",
+      "type": "string",
+      "description": "The unlit material of eyes.",
+      "default": "material:puppetGlow"
+    },
+    {
+      "key": "build",
+      "type": "string",
+      "description": "The build it is made for, which the gallery draws it on (engine/dev/galleryScene.ts); '' for any.",
+      "default": ""
+    },
+    {
+      "key": "gallery",
+      "type": "object",
+      "description": "How the gallery shows it (engine/core/gallery.ts; x gallery, #gallery/<kind>/<id>): its camera, how long it plays and the states it is shown in.",
+      "default": {
+        "camera": "front",
+        "duration": 0,
+        "states": [
+          "idle",
+          "walk",
+          "run",
+          "guard",
+          "cast",
+          "kneel",
+          "hurt",
+          "knockedDown"
+        ]
+      },
+      "properties": [
+        {
+          "key": "camera",
+          "type": "string",
+          "description": "How the gallery frames it: `turntable` (Four views round it, a quarter turn apart, from 25° up, fitted to its size.), `front` (One view from its front left, 25° up, fitted to its size.), or a camera code drawn as written.",
+          "default": "front"
+        },
+        {
+          "key": "duration",
+          "type": "number",
+          "minimum": 0,
+          "unit": "s",
+          "description": "How long it plays: four frames, one in each quarter's middle; 0 for a still (a move's or an emitter's: its own length).",
+          "default": 0
+        },
+        {
+          "key": "states",
+          "type": "array",
+          "description": "The states it is shown in, one frame each (a body's: a sample state, a pose or a stance).",
+          "default": [
+            "idle",
+            "walk",
+            "run",
+            "guard",
+            "cast",
+            "kneel",
+            "hurt",
+            "knockedDown"
+          ],
+          "items": {
+            "key": "[]",
+            "type": "string"
+          }
+        }
+      ]
+    }
+  ],
+  "ids": [
+    "body:humanoid",
+    "body:mannequin"
+  ],
+  "fallback": "body:humanoid"
+}

@@ -1,0 +1,15 @@
+import { chromium } from 'playwright';
+import { createServer } from 'node:http';
+import { readFileSync, existsSync } from 'node:fs';
+import { FLAGS } from './lib.mjs';
+const dir = new URL('../.build/hubtest/', import.meta.url).pathname;
+const types = { '.html': 'text/html', '.js': 'text/javascript' };
+const srv = createServer((req, res) => { const p = new URL(req.url, 'http://x').pathname.slice(1) || 'harness.html'; const fp = dir + p; if (!existsSync(fp)) { res.statusCode = 404; res.end(); return; } res.setHeader('Content-Type', types[p.slice(p.lastIndexOf('.'))] ?? 'application/octet-stream'); res.end(readFileSync(fp)); });
+await new Promise((r) => srv.listen(0, '127.0.0.1', r)); const port = srv.address().port;
+const br = await chromium.launch({ headless: true, args: FLAGS });
+const ctx = await br.newContext({ viewport: { width: 1280, height: 720 } }); const page = await ctx.newPage();
+page.on('console', (m) => { if (m.type() === 'error') console.log('console:', m.text().slice(0, 200)); }); page.on('pageerror', (e) => console.log('pageerror:', e.message.slice(0, 200)));
+await page.goto(`http://127.0.0.1:${port}/harness.html?game=game.html&auto=1&${process.argv[2] ?? 'players=1'}`);
+await page.waitForFunction(() => document.body.dataset.complete === 'true', null, { timeout: 120000 }).catch(() => console.log('timeout'));
+console.log(JSON.stringify(await page.evaluate(() => window.__hubCheck), null, 1).slice(0, 3000));
+await br.close(); srv.close();

@@ -1,0 +1,1 @@
+The simulation checks now pass. The first screenshot exposed title text overlap and overly square tree canopies; both have been corrected. The campaign bot also found a guard-post blocker: enemies could spawn outside loaded terrain and fall underground. I’ve fixed their activation range and am rerunning the campaign while checking browser input and loading.

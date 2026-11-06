@@ -1,0 +1,99 @@
+# Fields: docs in ../README.md. Coordinates: x -9..9, z -4..4.2. Angles in degrees.
+name = "Shrapnel Night"
+surgeon = "mara"
+plate = "chest"
+timer = 300.0
+par = 23300.0
+patient = "Gideon Oyelaran"
+life = "Foreman, Terminal Four. Got eleven men out first."
+diagnosis = "Blast injury. Multiple metal fragments, left chest."
+fate = "Gideon Oyelaran will walk his eleven men's children to school. All of them, in shifts."
+before = "case2_before"
+after = "case2_after"
+gift = "none"
+music = "or"
+
+[[phase]]
+name = "open"
+now = "SCALPEL. Open the chest along the line."
+checkpoint = true
+guide = true
+spawn = [{ kind = "incision", a = [-4.5, 1.2], b = [4.2, -0.6], c = [0.0, 1.0] }]
+say = [{ who = "teddy", text = "He's got more iron in him than the terminal. Please go faster. I'm not panicking.", at = 0.5 }]
+
+[[phase]]
+name = "scan"
+stagger = 6.0
+repeat = 2
+now = "SCANNER. Sweep the lung to find the shards, then FORCEPS."
+guide = true
+reveal_plate = "lung"
+spawn = [
+  { kind = "object", a = [-4.0, -1.5], ang = 120.0, sub = 1, hidden = true },
+  { kind = "object", a = [-0.8, 2.0], ang = 70.0, sub = 1, hidden = true },
+  { kind = "object", a = [3.2, -2.2], ang = -40.0, sub = 1, hidden = true },
+  { kind = "object", a = [4.8, 1.4], ang = 20.0, sub = 1, hidden = true },
+]
+say = [
+  { who = "bashir", text = "You won't see them. The Scanner will. Hold and sweep.", at = 1.0 },
+  { who = "bashir", text = "A ping lights them for eight seconds, Doctor. Eight.", at = 6.0 },
+]
+
+[[phase]]
+name = "scan2"
+stagger = 6.0
+repeat = 2
+now = "More iron. Sweep the lower lobe. SCANNER, FORCEPS."
+checkpoint = true
+spawn = [
+  { kind = "object", a = [-5.4, 1.4], ang = 150.0, sub = 1, hidden = true },
+  { kind = "object", a = [-2.2, -2.6], ang = -100.0, sub = 1, hidden = true },
+  { kind = "object", a = [1.4, -0.4], ang = 30.0, sub = 1, hidden = true },
+  { kind = "pool", a = [1.2, -0.2], r = 1.1 },
+  { kind = "pool", a = [-5.2, 1.6], r = 0.9 },
+]
+say = [{ who = "teddy", text = "The X-ray has a bolt on it. A whole bolt. You could build a shed.", at = 0.5 }]
+
+[[phase]]
+name = "wounds"
+stagger = 5.0
+repeat = 2
+now = "Clean up: SUCTION and SUTURE."
+checkpoint = true
+spawn = [
+  { kind = "lacer", a = [-5.0, 0.2], b = [-2.0, 1.1] },
+  { kind = "lacer", a = [1.0, -2.6], b = [3.8, -1.4] },
+  { kind = "pool", a = [-3.0, 2.0], r = 1.1, optional = true },
+  { kind = "pool", a = [4.6, 0.6], r = 1.0, optional = true },
+  { kind = "bleeder", a = [0.0, 0.4], ang = 70.0 },
+]
+
+[[phase]]
+name = "stop"
+now = "DEFIBRILLATE. Hold both, release as the ghost beat crosses."
+code_shocks = 1
+guide = true
+say = [
+  { who = "mara", text = "Now.", at = 0.0 },
+]
+linger = 0.8
+
+[[phase]]
+name = "after_stop"
+stagger = 5.0
+repeat = 3
+now = "He's back. Finish it, Doctor."
+spawn = [
+  { kind = "object", a = [1.6, 1.0], ang = 45.0, sub = 1, hidden = true },
+  { kind = "patch", a = [-2.2, -1.4], r = 1.0 },
+  { kind = "lacer", a = [-1.0, 2.6], b = [1.6, 2.6] },
+]
+say = [
+  { who = "teddy", text = "I, what? You said now. The monitor hadn't. How did you...", at = 0.3 },
+  { who = "bashir", text = "Later, Teddy.", at = 3.0 },
+]
+
+[[phase]]
+name = "close"
+now = "Close the chest with the DRESSING."
+spawn = [{ kind = "closure", a = [-4.5, 1.2], b = [4.2, -0.6], c = [0.0, 1.0] }]

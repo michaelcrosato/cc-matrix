@@ -1,0 +1,36 @@
+// Chapter 1: First Incision. A case is data: patient, site, clock, vitals, drain, phases. See CONTENT.md.
+(() => {
+const G = (window.GAME ||= {}), { defCase, defScript, circlePts } = G;
+defScript('dip40', S => { S.v = Math.min(S.v, 40); });
+defCase({ id: 'c1', number: 1, title: 'Glasshouse', chapter: 1, doc: 'vale', site: 'forearm', seed: 3, clock: 180, vitals: 80, drain: .1,
+  patient: 'Agnes Pellow, 74', complaint: 'Fell through her own greenhouse roof. Forearm full of glass.', opinion: 'She wants the glass kept for the grandchildren.', story: { before: 'c1_before', after: 'c1_after' }, teach: 'Cursor, wheel, four tools, grades',
+  phases: [
+    { obj: 'Pull the glass', bark: 'Forceps, Doctor. Pull the way it went in.', tut: { verb: 'forceps', text: 'Grip the glass and pull it out along the arrow. Slowly.' }, spawn: [{ t: 'shard', x: 130, y: 104, a: -1.9, depth: 16 }, { t: 'shard', x: 196, y: 138, a: 1.25, depth: 15 }, { t: 'shard', x: 262, y: 88, a: -.8, depth: 18 }, { t: 'shard', x: 306, y: 132, a: .3, depth: 15 }, { t: 'shard', x: 104, y: 136, a: 2.6, depth: 14 }, { t: 'shard', x: 170, y: 82, a: -1.3, depth: 16 }, { t: 'shard', x: 250, y: 146, a: 1.1, depth: 15 }, { t: 'shard', x: 332, y: 96, a: -.4, depth: 14 }] },
+    { obj: 'Clean the cuts', bark: 'Salve. Paint it on. Nobody grades the brushwork.', tut: { verb: 'salve', text: 'Pick Salve, then hold and paint over the whole cut.' }, spawn: [{ t: 'laceration', x: 140, y: 120, r: 11 }, { t: 'laceration', x: 224, y: 92, r: 12 }, { t: 'laceration', x: 292, y: 118, r: 10 }, { t: 'laceration', x: 106, y: 96, r: 10 }, { t: 'laceration', x: 188, y: 150, r: 11 }, { t: 'laceration', x: 322, y: 90, r: 10 }] },
+    { obj: 'Close the wound', bark: 'Suture. Across the wound, Doctor, not along it.', tut: { verb: 'suture', text: 'Press on a blue dot, cross the wound, let go on the other dot.' }, spawn: [{ t: 'wound', x: 170, y: 100, a: .2, len: 76, n: 4, w: 13, bleeds: false }, { t: 'wound', x: 268, y: 138, a: -.25, len: 76, n: 4, w: 13, bleeds: false }] },
+    { obj: 'Give her a boost', bark: 'Pressure is dropping. Stimulant to the IV.', enter: 'dip40', when: 'flag:iv', tut: { verb: 'iv', text: 'Pick the Syringe. Hold to fill, let go anywhere to dose the IV.' } },
+  ] });
+defCase({ id: 'c2', number: 2, title: 'Low Brass', chapter: 1, doc: 'vale', site: 'abdomen', seed: 11, clock: 210, vitals: 70, drain: .2,
+  patient: 'Desmond "Slide" Achebe, 58', complaint: 'Trombonist. Pain under the ribs when he holds a long note.', opinion: 'Dr. Whitlock: "Hernia. Obviously."', story: { before: 'c2_before', after: 'c2_after' }, teach: 'Scalpel, Suction, Cautery, excision',
+  lightbox: { film: 'ribs', at: [262, 128], decoys: [[150, 96], [205, 170]], text: 'A round shadow behind the bowel. Not a hernia.', markAt: [213, 116] },
+  phases: [
+    { obj: 'Open him up', bark: 'Scalpel. Follow the marker. It has been to medical school.', tut: { verb: 'scalpel', text: 'Press on the start dot, then trace the purple line in one stroke.' }, spawn: [{ t: 'guide', pts: [[183, 72], [205, 96], [224, 128], [240, 156]] }] },
+    { obj: 'Clear the field', bark: 'Bleeder under that pool. Drain first. Burn second.', tut: { verb: 'suction', text: 'Pick Suction and hold it over the pool.' }, spawn: [{ t: 'pool', x: 150, y: 110, vol: 110, req: true }, { t: 'pool', x: 268, y: 126, vol: 120, req: true }, { t: 'bleeder', x: 268, y: 126 }] },
+    { obj: 'Burn the polyps', bark: 'Cautery. Short bursts. Mind the heat gauge.', tut: { verb: 'cautery', text: 'Pick Cautery and hold the beam on each pink polyp.' }, spawn: [{ t: 'polyp', x: 112, y: 92 }, { t: 'polyp', x: 160, y: 148 }, { t: 'polyp', x: 214, y: 76 }, { t: 'polyp', x: 266, y: 154 }, { t: 'polyp', x: 320, y: 100 }, { t: 'polyp', x: 136, y: 128 }, { t: 'polyp', x: 186, y: 110 }, { t: 'polyp', x: 240, y: 104 }, { t: 'polyp', x: 298, y: 136 }, { t: 'polyp', x: 348, y: 124 }] },
+    { obj: 'Take the mass', bark: 'Ring it, then lift it. Gently. It has a family.', spawn: [{ t: 'mass', x: 213, y: 118, r: 22, leaves: [{ t: 'shard', depth: 12, a: -1.1, kind: 'cork' }] }] },
+    { obj: 'Close him', bark: 'That is a cork, Doctor. I will label it.', spawn: [{ t: 'wound', x: 213, y: 118, a: 1.1, len: 86, n: 6, w: 12, bleeds: false }, { t: 'patch', x: 150, y: 128, r: 14 }, { t: 'patch', x: 280, y: 96, r: 14 }, { t: 'patch', x: 292, y: 146, r: 12 }, { t: 'wound', x: 124, y: 92, a: .4, len: 44, n: 3, w: 11, bleeds: false }] },
+  ] });
+defScript('crashEnter', S => { S.codeUsed = false; S.noIV = true; S.objs.forEach(o => { if (o.type === 'pool') o.req = false; }); });
+defScript('crashStep', (S, ph, w) => { if (S.flags.revived) return; if (S.diff.codeBlue) { S.v = Math.max(0, S.v - 16 * w); } else { S.v = Math.max(14, S.v - 16 * w); if (S.v <= 14) S.flags.revived = true; } });
+defScript('ruptureEnter', S => { S.steady = 100; S.noIV = false; for (let i = 0; i < 6; i++) { const a = i / 6 * 6.283; G.spawn(S, { t: 'bleeder', x: 213 + Math.cos(a) * 92, y: 116 + Math.sin(a) * 52, burn: .35, rupture: true, ontop: true }); } });
+defScript('ruptureStep', (S, ph, w) => { const d = S.ph.d; if (S.tut) return; d.t = (d.t || 0) + w; if (d.t >= 12) { d.t = 0; G.hurt(S, 14); G.ev(S, 'slip', 213, 116, 'rupture', 0); } });
+defCase({ id: 'c3', number: 3, title: 'Crane Nine', chapter: 1, doc: 'vale', site: 'abdomen', seed: 23, clock: 150, vitals: 55, drain: .5,
+  patient: 'Big Tam Rennie, 49', complaint: 'Crane foreman. The crane came down. He walked to the ambulance.', opinion: 'Everyone senior is at a conference. Quill has checked twice.', story: { before: 'c3_before', after: 'c3_after' }, teach: 'Triage, Code Blue, Long Breath', rainCut: true,
+  phases: [
+    { obj: 'Stop the bleeding', bark: 'Three arteries. Pick one. Quickly is a technique.', spawn: [{ t: 'arteryTear', x: 138, y: 96, a: .5 }, { t: 'arteryTear', x: 222, y: 138, a: -.3 }, { t: 'arteryTear', x: 306, y: 96, a: 1.1 }, { t: 'bleeder', x: 176, y: 152 }, { t: 'bleeder', x: 274, y: 150 }, { t: 'pool', x: 120, y: 138, vol: 70 }, { t: 'pool', x: 310, y: 148, vol: 70 }] },
+    { obj: 'Pull the shrapnel', bark: 'Steel, this time. Two under the pools.', spawn: [{ t: 'shard', x: 128, y: 84, a: -2.2, depth: 16, kind: 'steel' }, { t: 'shard', x: 205, y: 92, a: -1.4, depth: 14, kind: 'steel' }, { t: 'shard', x: 292, y: 84, a: -.7, depth: 16, kind: 'steel' }, { t: 'pool', x: 165, y: 134, vol: 130, req: true }, { t: 'shard', x: 165, y: 134, a: 1.9, depth: 14, kind: 'steel' }, { t: 'pool', x: 262, y: 142, vol: 130, req: true }, { t: 'shard', x: 262, y: 142, a: 1.1, depth: 14, kind: 'steel' }] },
+    { obj: "He's crashing", bark: 'Pressure is falling through the floor, Doctor.', enter: 'crashEnter', step: 'crashStep', when: 'flag:revived' },
+    { obj: 'Seal the ruptures', bark: 'Six ruptures. Twelve seconds. Doctor? How long is twelve seconds?', enter: 'ruptureEnter', step: 'ruptureStep', tut: { verb: 'gift', text: 'Something is different. Use the Steady: the world slows, your hands do not.' }, tip: { k: 'gift', text: 'Long Breath' } },
+    { obj: 'Close him', bark: 'Close, Doctor. You may shake afterward.', spawn: [{ t: 'wound', x: 213, y: 116, a: -.2, len: 84, n: 5, w: 12, bleeds: false }] },
+  ] });
+})();

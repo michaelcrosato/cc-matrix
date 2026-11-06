@@ -1,0 +1,39 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-04 22:40:25",
+  "source": "Wii Fit",
+  "plan": "PLAN.md",
+  "genre": "Sports mini-game anthology with a light life-sim frame (catalogue genre: Sports)",
+  "perspective": "Third person, camera chosen per activity: 3/4 follow on the island, mirror front view for exercises on the spot, chase for the paddle, tray walk and morning lap, high 3/4 for the tide table, side view for the dives",
+  "tech": "Pavilion engine (the Shardfall repo, commit 49ef2ba): Rust 1.98, wgpu on WebGPU, rapier, egui 0.36 painter UI, wasm-bindgen 0.2.129, cpal for audio. Fredoka and Nunito fonts. Tests: cargo test, Playwright 1.63 with Chromium, the AI Hub harness",
+  "artDirection": "The engine's native cel-shaded toy look taken high-key and pastel (sky #d6eef6, sea #8fdde0, deck #fbfaf6, coral and mint accents), soft sun shadows, thin ink outlines on figures, rounded Fredoka titles on white cards",
+  "animation": "The engine's procedural puppet with motion clips on top: 22 hand-keyed clips (anim/fit.json) plus CMU, Mesh2Motion, Quaternius and 100STYLE clips, and a whole-body tilt about the feet driven by the balance dot",
+  "audio": "Everything synthesised in code, no audio files: 41 sound effects, eight Animalese-style gibberish voices (saw blips through two band-pass formants), six original songs from a step sequencer, music bus at 10% by default",
+  "online": "AI Hub session, ghost mode, 1 to 4 players: the Inter-Resort Medley with the other players as tinted named figures. On its own: Play Together (hot-seat Medley with earlier runs as ghosts) and Yesterday You ghosts. No other network use",
+  "testing": "One command (tests/run.sh): Rust tests (a bot plays New Stay to the credits on 3 seeds, every event's bot earns 2 stars on 5 seeds while idle input earns under 1, balance core feel, save round trip, attract, pause, dev sliders, medley determinism, Play Together, snapshots and replays, script lint), audio and UI tests, Playwright at 320x180 with pad, keyboard, mouse and touch stand-ins, the hub harness at 2, 3 and 4 players with a bad network and host-leave, a solo check. Screenshots for composition only",
+  "research": "None beyond the plan, which already reflects a short web search on Wii Fit",
+  "environment": "Claude Code CLI (headless); Linux",
+  "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+  "usage": "added on import"
+ },
+ "testingFeedback": [
+  "About 12 real issues, most found by tests rather than by eye: wrong event scoring on idle input, a loop on the result screen, a missing day-5 stamp, a screen name that leaked Rust debug text, a camera that sat inside a tower, camera cues overridden by a room change, and the one below.",
+  "One game-breaking: a duplicate table in script.toml made every line of text load as empty, so the morning check never started. The playthrough test ran for 60 sim-minutes without finishing and exposed it.",
+  "The bot playthrough from New Stay to the credits on three seeds. It runs the whole flow in about 15 seconds and catches anything that breaks the loop.",
+  "Screenshots of everything: they cost the most time and found only composition problems that numbers could not, though those were real. The per-event idle checks were cheap and only ever confirmed scoring."
+ ],
+ "engineFeedback": [
+  "The headless tools: pav capture, repl, bot play and exact replays made a very large game testable without a window. Rooms as sets, one Sim for all nine, and TOML hot reload for rules, text and layouts made tuning quick.",
+  "Yes: a room's entrance must lie inside its map; a room change sets that room's camera on top of a cue given the same tick; the Debug text of enums leaks into JSON status if you are not careful; wasm needs Reflect, not typed web-sys, for the gamepad rumble.",
+  "The UI layer (egui painter, glyphs, pointer events), the whole input layout and menu repeat, the audio sequencer, voices and buses, hub ghost drawing, and an app-side bridge to the page. Also all game flow, which the engine leaves to the game.",
+  "pav_app/src/app.rs: one very long frame function that many features had to be threaded through. Knowing which of its panels, keys and per-frame paths to bypass for a game took the most reading.",
+  "InputFrame (lean, any, ui, song_pos, new buttons), Game::frozen/ui/camera_yaw, HudFrame status/fit/camera_yaw, new SimEvents (Sfx, Syllable, Music, BigSplash, Wake), puppet tilt about the feet, pav_ui fit_ui and glyphs, pav_audio buses/sequencer/voices/LFO pads, pav_view BigSplash and Wake, pav_app fit input, page link and seams, web/index.html for the hub and the page, tools accept lean and the new buttons. Each was needed by a rule of the game that the hook could not express.",
+  "A real game UI and camera hook: let a Game return a UI description, a camera request and its own input map, so a game does not have to patch the window app and the simulation step."
+ ],
+ "promptFeedback": [
+  "The plan: verified facts and traps, exact numbers, a build order that closes risks first, and the table that maps each brief item to a section. The Balance Core feel targets gave a clear target to test against.",
+  "Little was confusing. Some plan numbers assumed a layout I had not made yet (the dive camera yaw, the chase cameras' direction) and the brief's size is so large that choosing what to cut felt unguided at first.",
+  "Scope: a complete game, a custom UI, an audio engine, a hub integration and a full test suite in one session. The browser and hub tests were also slow, because software WebGPU runs at 12 to 60 ticks a second.",
+  "Keep the plan, add a short list of the few engine seams that every such game needs so they are not rediscovered, and say clearly which parts are the minimum for a first playable pass versus polish."
+ ]
+}

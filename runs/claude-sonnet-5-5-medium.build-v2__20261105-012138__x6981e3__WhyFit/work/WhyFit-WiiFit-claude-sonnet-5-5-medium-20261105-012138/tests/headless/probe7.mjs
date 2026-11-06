@@ -1,0 +1,11 @@
+import { boot, go, play, wait } from '../../tools/lib-node.mjs';
+const { app, engine } = await boot('title');
+engine.step(30);
+await wait(engine, 11);
+console.log('attract', !!app.attract);
+engine.input.setKey('KeyX', true); engine.step(2);
+console.log('device', app.device.last, app.device.anyInput, app.device.frame, 'exit?', app.attract?.exit, app.attract?.grace);
+engine.input.setKey('KeyX', false);
+await wait(engine, 3);
+console.log('after', !!app.attract, app.scene.status());
+process.exit(0);

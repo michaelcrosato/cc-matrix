@@ -1,0 +1,87 @@
+   Compiling thiserror v2.0.21
+    Checking smallvec v1.16.2
+    Checking log v0.4.34
+    Checking polycool v0.4.0
+    Checking font-types v0.12.5
+    Checking color v0.3.3
+    Checking euclid v0.22.14
+    Checking linebender_resource_handle v0.1.1
+   Compiling version_check v0.9.5
+    Checking either v1.18.0
+   Compiling unicode-general-category v1.1.0
+    Checking fearless_simd v0.4.1
+    Checking parking_lot_core v0.9.12
+    Checking kurbo v0.13.1
+    Checking rstar v0.13.0
+    Checking parking_lot v0.12.5
+    Checking read-fonts v0.41.0
+    Checking guillotiere v0.7.0
+    Checking ena v0.14.4
+    Checking emath v0.36.2
+    Checking unicode-segmentation v1.13.3
+    Checking nohash-hasher v0.2.0
+    Checking self_cell v1.3.0
+    Checking rustc-hash v2.1.3
+    Checking uuid v1.26.1
+    Checking type-map v0.5.1
+    Checking itertools v0.15.0
+    Checking ecolor v0.36.2
+    Checking accesskit v0.24.1
+    Checking web-time v1.1.0
+    Checking naga-types v30.0.1
+    Checking gpu-allocator v0.28.0
+    Checking parry3d v0.31.1
+    Checking peniko v0.6.1
+   Compiling ahash v0.8.12
+    Checking naga v30.0.1
+    Checking wgpu-types v30.0.1
+    Checking vello_common v0.1.0
+    Checking vello_cpu v0.1.0
+    Checking rapier3d v0.36.0
+    Checking harfrust v0.12.0
+    Checking skrifa v0.44.0
+    Checking wgpu-naga-bridge v30.0.1
+    Checking wgpu-hal v30.0.1
+    Checking epaint v0.36.2
+    Checking wgpu-core-deps-windows-linux-android v30.0.1
+    Checking wgpu-core v30.0.1
+    Checking egui v0.36.2
+    Checking wgpu v30.0.1
+    Checking pav_core v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_core)
+warning: unused import: `Vec2`
+ --> crates/pav_core/src/games/merc/actions.rs:1:12
+  |
+1 | use glam::{Vec2,Vec3};
+  |            ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `flat`
+ --> crates/pav_core/src/games/merc/bot.rs:3:35
+  |
+3 | use super::{*,act,data::{distance,flat,toward}};
+  |                                   ^^^^
+
+    Checking egui-wgpu v0.36.2
+    Checking pav_render v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_render)
+warning: `pav_core` (lib) generated 2 warnings (run `cargo fix --lib -p pav_core` to apply 2 suggestions)
+    Checking pav_view v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_view)
+    Checking pav_ui v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_ui)
+error: cannot explicitly dereference within an implicitly-borrowing pattern
+  --> crates/pav_view/src/merc/mod.rs:60:117
+   |
+60 | ...Vec<_>=g.fire.cells.iter().filter(|(&(x,z),_)|Vec2::new(x as f32*2.,z as f32*2.).distance(flat(eye))<210.).collect();cells.sort_b...
+   |                                        ^ reference pattern not allowed when implicitly borrowing
+   |
+   = note: for more information, see <https://doc.rust-lang.org/reference/patterns.html#binding-modes>
+note: matching on a reference type with a non-reference pattern implicitly borrows the contents
+  --> crates/pav_view/src/merc/mod.rs:60:116
+   |
+60 | ...=g.fire.cells.iter().filter(|(&(x,z),_)|Vec2::new(x as f32*2.,z as f32*2.).distance(flat(eye))<210.).collect();cells.sort_by(|a,b...
+   |                                 ^^^^^^^^^^ this non-reference pattern matches on a reference type `&_`
+help: match on the reference with a reference pattern to avoid implicitly borrowing
+   |
+60 |  fn fire(&self,scene:&mut Scene,g:&Merc){let eye=scene.camera.eye;let mut cells:Vec<_>=g.fire.cells.iter().filter(|&(&(x,z),_)|Vec2::new(x as f32*2.,z as f32*2.).distance(flat(eye))<210.).collect();cells.sort_by(|a,b|{let pos=|k:&(i32,i32)|Vec2::new(k.0 as f32*2.,k.1 as f32*2.).distance_squared(flat(eye));pos(a.0).total_cmp(&pos(b.0))});let mut lights=0;for (&(x,z),cell) in cells{let wx=x as f32*2.+1.;let wz=z as f32*2.+1.;let h=terrain::height(&g.data,wx,wz);let p=Vec3::new(wx,h+0.05,wz);part(scene,MeshKey::Plane,p,Vec3::new(2.,1.,2.),Quat::IDENTITY,c("#2a2420"),flags::NO_SHADOW,0.);if cell.state==1{let flicker=(g.view_time*13.+x as f32*3.1+z as f32).sin()*0.3+1.;part(scene,MeshKey::Cone,p+Vec3::Y*flicker,Vec3::new(1.8,2.8*flicker,1.8),Quat::from_rotation_z(-g.wind.x*0.15),c("#df661f"),flags::NO_SHADOW|flags::OBJECT,2.);part(scene,MeshKey::Cone,p+Vec3::Y*0.5,Vec3::new(1.,1.6,1.),Quat::IDENTITY,c("#ffcc54"),flags::NO_SHADOW|flags::OBJECT,3.);if x%3==0&&z%3==0{for j in 0..4{let t=(g.view_time*0.2+j as f32*0.25).fract();let smoke=p+Vec3::new(g.wind.x*t*7.,2.+t*16.,g.wind.y*t*7.);part(scene,MeshKey::Sphere,smoke,Vec3::splat(2.+t*4.),Quat::IDENTITY,c("#46493e"),flags::NO_SHADOW,0.);}}if lights<32&&x%3==0{scene.point_lights.push(PointLight{position:p+Vec3::Y*1.5,color:Vec3::new(2.,0.8,0.15)*flicker,radius:12.,shadows:lights<2});lights+=1;}}}}
+   |                                                                                                                    +
+
+error: could not compile `pav_view` (lib) due to 1 previous error

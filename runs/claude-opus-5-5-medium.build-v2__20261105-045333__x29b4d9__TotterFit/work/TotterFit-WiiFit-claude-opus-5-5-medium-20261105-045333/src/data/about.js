@@ -1,0 +1,53 @@
+// Written by tools/build.mjs from exit-interview.json.
+export const EXIT = {
+  "sourceInformation": {
+    "date": "2026-11-05 04:53:33",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Physics-balance party sports with a daily-ritual progression",
+    "perspective": "Third person: a framed stage camera per event, an orbitable chase camera on the island",
+    "tech": "Three.js R180 on the WebGPU backend (WebGL2 fallback), TSL toon materials and ink post-processing, Rapier 0.19.3 (rapier3d-compat), Web Audio, Gamepad API, esbuild 0.28.2, Playwright 1.63.0 for tests, Fredoka 5.3.0 (inlined), AI Hub session client 1.4.0",
+    "artDirection": "Cel-shaded ink filter over a sun-bleached wooden-toy resort; every model built in code from Three.js primitives and node materials",
+    "animation": "Three.js AnimationMixer clips on jointed rigs, compiled from pose tables; procedural lean from the physics; Rapier ragdolls built from the rig",
+    "audio": "Code-synthesised city-pop and bossa at 10% by default, a detune that follows the island's tilt, synthesised sound effects, Animalese and Simlish-style gibberish voices spoken from each line's text; no audio files",
+    "online": "AI Hub Session Protocol v1 in ghost mode for 1-4 devices, plus Group Class with 1-4 players on one screen",
+    "testing": "As allowed: headless scripts that play the game and check its state, including a scripted playthrough of the whole game, behind one command printing only failures and a count; screenshots only for what a script can't check; no subagents or workflows to debate, review, judge or audit. Ran: node tools/test.mjs with unit, flow, events, balance, input, coverage, audio, hub and ui groups, the hub's own harness at 1, 2 and 4 players, on the bad network and with the host leaving, Chromium with software WebGPU, WebKit on the WebGL2 fallback, phone and tablet profiles, emulated gamepads, OfflineAudioContext renders, and screenshots at 1920x1080. No real controller, TV, phone or listener",
+    "research": "Mine: the AI Hub session README and client. Beside this plan's, done at the planning stage and not repeated: the hub's protocol pages and code; background on the source from Wikipedia, a Nintendo World Report review and Nintendo's Iwata Asks interviews, read as search summaries",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "32 real issues, logged one line each in notes/issues.md as they happened.",
+    "10: a crash in The Cairn on every run; Room Service spilling every glass (two separate bugs); the island's low side under the sea; Esc closing Pause in the same tick; classes racing past the Check-In; the game stuck after the first Age Reveal; quick foot taps not counting on a keyboard; presses lost during a hit-stop; and Tug of Peace losing its one decision, because a retune of mine had hidden a bot bug.",
+    "The scripted whole-game playthrough with an emulated pad. It found the Pause bug, the Age Reveal hang and the race with the Check-In, none of which any single-event test could see. Screenshots were next, because no script of mine noticed the island was under water. A late keyboard bot pressing real keys was the best value: it found two critical bugs that every stick and pad test had missed.",
+    "The source greps for audio files, dialogs and sockets. They are worth having as a guard, but they never found a real problem; the only time a grep fired, it was a false alarm on a variable name."
+  ],
+  "engineFeedback": [
+    "toonOutlinePass with a short TSL pass gave the whole ink look with almost no code, and the same materials ran unchanged on WebGPU and the WebGL2 fallback. Rapier's speed also made it possible to play the whole game headless in seconds.",
+    "Yes. I guessed instance colours could be added later, but the marbles stayed white until the buffer existed before the first compile. Physics was the other one: the plan's numbers assumed a course direction and a tumbler layout I got wrong at first, and glasses inside the doll's own capsule were silently thrown off the tray.",
+    "The game's director: a fixed-step loop, generator scripts on sim time and lane-based events, so every event can run with one player, four players, bots or ghosts, and tests can skip real time. The balance core itself came from the plan.",
+    "Knowing what the GPU side is doing. A test with no renderer can pass while the picture is wrong, so visual bugs such as the sunken island only appear in screenshots, and those take seconds each under software WebGPU.",
+    "None.",
+    "Make Three.js warn when a material is compiled without a buffer that is added later, as with instance colours, instead of silently drawing white."
+  ],
+  "promptFeedback": [
+    "The exact facts about this computer and the hub, next to complete creative freedom. Knowing the flags, the stand-ins and the harness saved a lot of guessing, and the plan's measured numbers were mostly right.",
+    "The plan's bot model doesn't state its noise frequency, and bot scores swing widely with it, so its skill figures can't be reproduced exactly; I chose the closest stable value. Also SOURCE in the file name: I wrote it as WiiFit without the space, since the task doesn't say.",
+    "Making so many separate games within one game feel finished. Fourteen events each need their own set, rules, bot, results and tuning, and whether any of it is fun can't be checked from here; the bots only show it is balanced.",
+    "Ask for a recorded video or a short list of frames at hand-in, so a human can judge feel quickly. And give a clear rule for how Group Class should work in events that are solo in the fiction, which I had to decide case by case."
+  ],
+  "aiHub": {
+    "name": "Totter Fit",
+    "tagline": "Lean a little. Straighten an island.",
+    "description": "A wooden-toy wellness retreat on a crooked island, where you hold poses, stack stones and catch fruit in a hat with real balance physics, and straighten the whole island one class at a time.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "",
+    "players": "1–4",
+    "controls": "Lean: stick, WASD or mouse. Feet: L2 R2, Q E or clicks. Flail: Square or F",
+    "tags": ["3d", "comedy", "third-person", "versus", "arcade"]
+  }
+};
+export const SOURCE = 'Wii Fit';

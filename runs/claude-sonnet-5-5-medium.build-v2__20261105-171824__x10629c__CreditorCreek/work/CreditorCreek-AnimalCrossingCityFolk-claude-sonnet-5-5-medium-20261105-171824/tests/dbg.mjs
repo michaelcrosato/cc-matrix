@@ -1,0 +1,7 @@
+import { chromium } from 'playwright'; import { resolve } from 'node:path';
+const file = resolve(process.argv[2]); const js = process.argv[3]; const steps = +(process.argv[4] ?? 600);
+const b = await chromium.launch({ headless: true, args: ['--enable-unsafe-webgpu','--enable-features=Vulkan','--use-vulkan=swiftshader','--use-angle=swiftshader','--use-webgpu-adapter=swiftshader'] });
+const p = await b.newPage({ viewport: { width: 960, height: 540 } }); const errs = []; p.on('pageerror', e => errs.push(String(e).slice(0, 300))); p.on('console', m => { if (m.type() === 'error') errs.push(m.text().slice(0, 300)); });
+await p.goto('file://' + file);
+const r = await p.evaluate(async ({ js, steps }) => { const e = await window.__PIXEL_READY__; const G = window.__GAME__.game; const y = () => new Promise(r => setTimeout(r, 0)); const st = async (n) => { for (let i = 0; i < n; i += 6) { e.step(6); await y(); } }; window.__st2 = st; const out = []; await (0, eval)(`(async()=>{ const st = window.__st2; ${js} })()`).then(v => v !== undefined && out.push(v)); await st(steps); out.push(JSON.stringify(globalThis.__atr)); out.push(G.mode + ' ' + G.place + ' d' + G.world.day + ' ui:' + G.ui.stack.map(s => s.id) + ' errs:' + e.errors.map(x => String(x.message ?? x)).join('|')); return out; }, { js, steps });
+console.log(r.join('\n')); console.log('page errors', JSON.stringify(errs.slice(0, 4))); await b.close();

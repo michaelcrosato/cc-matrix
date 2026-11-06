@@ -1,0 +1,35 @@
+x help: ok: node x replay <file|dir…> [--update] [--browser sim|page] [--bisect] [--runs n] [--swap names] [--state] [--until n]
+Replays against their golden hashes (PLAN.md §8.4, §6.5 items 8–9, WPs 1.5 and 2.7). Usage: node x replay
+<file|dir…> [--update] [--browser sim|page] [--bisect] [--runs n] [--swap names] [--state] [--until n]. Exit 0 when
+every replay gives its goldens in every run (or, recorded elsewhere, agrees with itself; or was recorded), 1
+otherwise, 2 on a usage error. The verdict never says "match" unless this platform's goldens were compared.
+
+`--state` writes the state a replay ends in, as Node plays it: its canonical state and event trace, as `x sim`
+writes its own, to `out/replay/<name>/state.json` (`<name>`: the file's, without `.replay.json`); `--until n` (it
+implies `--state`) writes the state after step n instead. So an agent reads where a run left its bodies, its props
+and its components without a page or a probe of its own (tools/lib/replayState.ts).
+
+Each `*.replay.json` (a directory means every one under it) plays from step 0 in Node, `--runs` times (3), and with
+`--browser sim` as often again in Chromium, in tests/pages/replay.html: the sim in a page, no renderer, through the
+same player (engine/sim/replay.ts). Every run must give the goldens of this platform (`linux-x64`): one set, valid
+in Node and in Chromium alike (`judgeRuns`). A replay recorded on another platform only runs at least twice and
+compares the runs ("golden: other platform"). Its scene module is found from its `scene` id, as `x sim` finds it,
+and loads after the animation library, as there (tools/anim/library.ts; the page: tests/pages/replay.ts).
+`--browser page` plays each replay in its scene's own page instead (`labs/<name>/?scene=<scene>` for a module under
+`labs/<name>/scenes/`, through `__engine.replay`, engine/app/playback.ts), drawing a frame after every step: the
+CPU-only gameplay contract's proof that rendering never changes play (§6.7). Fixture scenes have no page.
+
+`--update` (with `--browser sim`, never `--swap`) records this platform's goldens (0, the replay's checkpoints, else
+every 60 steps, and the last) and the engine, three.js and Rapier versions. It judges every file and reads the
+page's errors first, and writes (through Prettier, readable text) only when every run of every file agreed and the
+page threw nothing. `--bisect` hashes every step of a Node run, a second Node run and, with `--browser sim`, a
+Chromium run, finds the first step where any two part, and replays both to it: the parts, entities and first field
+that differ go into the replay's failure (or its line); when one replay fails, every field that differs
+(`diffStates`) and the inputs applied just before follow. When every run agrees but the goldens differ, the code
+changed what the sim does: it names the checkpoints between which. `--swap` narrows Chromium's fdlibm swap (`none`,
+or `sin,pow`): a replay that depends on the swap then fails, and `--bisect` shows where Node and Chromium part.
+
+@example
+parseSwap('sin,pow'); // ['sin', 'pow']: Chromium leaves cos native
+@see tools/cmd/replay.test.ts
+flags: --update, --browser <value>, --bisect, --runs <value>, --swap <value>, --state, --until <value>

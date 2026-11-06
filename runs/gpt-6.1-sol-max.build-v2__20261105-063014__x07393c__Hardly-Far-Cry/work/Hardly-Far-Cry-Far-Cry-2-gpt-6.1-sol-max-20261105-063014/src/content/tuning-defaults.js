@@ -1,0 +1,6 @@
+export const SLIDERS = [
+ ['playerSpeed','MOVEMENT',1,.5,2,.1],['playerDamageTaken','DAMAGE RECEIVED',1,0,3,.1],['weaponDamage','WEAPON DAMAGE',1,.25,4,.25],['enemyHealth','ENEMY HEALTH',1,.25,4,.25],['enemyAccuracy','ENEMY ACCURACY',1,.25,3,.25],['enemyVision','SIGHT RANGE',90,20,200,5],['enemyReaction','REACTION TIME',.45,.1,2,.05],['wearRate','WEAPON WEAR',1,0,5,.25],['jamRate','JAM CHANCE',1,0,5,.25],['fireSpread','FIRE SPREAD',1,0,3,.1],['fireDamage','FIRE DAMAGE',8,0,30,1],['windEffect','WIND EFFECT',1,0,3,.1],['feverMinutes','FEVER INTERVAL',12,2,40,1],['vehicleTopSpeed','VEHICLE SPEED',26,10,45,1],['vehicleToughness','VEHICLE TOUGHNESS',1,.25,4,.25],['stonesReward','CONTRACT PAY',1,0,5,.25],['buddyWoundChance','RESCUE WOUND RISK',.15,0,1,.05],['dayMinutes','DAY LENGTH',30,2,120,2],['postRemanHours','POST RESET HOURS',24,1,96,1],['regrowHours','REGROWTH HOURS',48,1,200,1]
+];
+export const DEFAULTS = Object.fromEntries(SLIDERS.map(([id,,v])=>[id,v]));
+export const makeTuning = ()=>({...DEFAULTS});
+export const SETTINGS = {music:.1,effects:.8,voices:.75,mouse:1,pad:1.05,invert:false,assist:true,rumble:true,glyphs:'PlayStation',fov:68,subtitles:1,reducedFlashes:false,reducedFever:false,pixels:1,quality:'medium'};

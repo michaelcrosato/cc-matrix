@@ -1,0 +1,95 @@
+import { gel, gelDress, gates, line } from './shape.js';
+
+export default {
+  id: 'growth-spurt',
+  chapter: 1,
+  title: 'Growth Spurt',
+  doctor: 'ren',
+  scene: { before: 'S3', after: 'S4' },
+  patient: {
+    name: 'Hana Ito', age: 38, job: 'Crane operator',
+    note: 'Lifts forty tons for a living. Fainted at the consent form.',
+    followUp: 'Back on the cranes. Asks after you. Has asked you to stop visiting.',
+  },
+  timer: 330,
+  bpm: 76,
+  parScore: 11852,
+  music: 'or-tense',
+  teaches: ['scalpel', 'clamp', 'laser', 'hush', 'gel', 'suture', 'suction', 'forceps'],
+  sites: [{ id: 'skin', organ: 'abdomen' }, { id: 'bowel', organ: 'bowel' }],
+  phases: [
+    {
+      id: 'open',
+      objective: 'Open the abdomen',
+      tools: ['gel', 'scalpel'],
+      spawn: [
+        { kind: 'gelZone', site: 'skin', rect: gel(-0.9, -0.28, 0.7, 0.28), parTime: 10 },
+        { kind: 'incision', site: 'skin', at: [-0.7, 0], points: line(-0.7, 0.02, 0.7, -0.02, 18), opens: true },
+      ],
+      done: { cleared: ['gelZone', 'incision'] },
+      say: [{ at: 0, who: 'bea', mood: 'stern', text: 'Skin, then the long line. The board is watching, so do not invent a style.' }],
+      on: [
+        { when: { removed: 'incision' }, once: true, do: [{ wipeToSite: 'bowel' }] },
+        ...gelDress('skin', 6),
+      ],
+    },
+    {
+      id: 'bleed',
+      objective: 'Clamp the bleeders',
+      tools: ['clamp', 'suction'],
+      spawn: [
+        { kind: 'bleeder', site: 'bowel', at: [-0.35, 0.12] },
+        { kind: 'bleeder', site: 'bowel', at: [0.2, -0.08] },
+      ],
+      done: { clamped: true, poolsClear: true },
+      say: [{ at: 0, who: 'bea', mood: 'urgent', text: 'Two fountains. Clamp on the beat, then take the lake away.' }],
+    },
+    {
+      id: 'nodules',
+      objective: 'Burn the nodules',
+      tools: ['laser', 'scanner'],
+      spawn: [
+        { kind: 'nodule', site: 'bowel', at: [-0.55, 0.2], hp: 30 },
+        { kind: 'nodule', site: 'bowel', at: [-0.1, 0.22], hp: 30 },
+        { kind: 'nodule', site: 'bowel', at: [0.3, 0.05], hp: 30 },
+        { kind: 'nodule', site: 'bowel', at: [0.05, -0.25], hp: 30 },
+        { kind: 'nodule', site: 'bowel', at: [-0.4, -0.2], hp: 30, hidden: true },
+      ],
+      done: { cleared: ['nodule'] },
+      say: [{ at: 0, who: 'bea', mood: 'focus', text: 'Five little moons. One is shy. Burn only what you have named.' }],
+    },
+    {
+      id: 'tumor',
+      objective: 'Cut the tumor free',
+      tools: ['scalpel', 'forceps'],
+      spawn: [
+        { kind: 'tumor', site: 'bowel', at: [0.05, 0.02], axis: 0, embed: 0.4 },
+        { kind: 'tether', site: 'bowel', at: [-0.2, 0.12], x1: -0.28, y1: 0.18, x2: -0.02, y2: 0.06 },
+        { kind: 'tether', site: 'bowel', at: [0.05, 0.22], x1: -0.02, y1: 0.28, x2: 0.12, y2: 0.08 },
+        { kind: 'tether', site: 'bowel', at: [0.28, 0.02], x1: 0.12, y1: 0.02, x2: 0.4, y2: 0.02 },
+      ],
+      done: { cleared: ['tether', 'tumor'] },
+      say: [{ at: 0, who: 'bea', mood: 'stern', text: 'Three strings, then the mass. It is heavier than her signature.' }],
+    },
+    {
+      id: 'crash',
+      objective: 'Hold the rupture',
+      tools: ['suture', 'suction', 'hush'],
+      begin: [{ vitalsSet: 48 }, { scriptDrain: 1 }, { composure: 100 }],
+      spawn: [{ kind: 'wound', site: 'bowel', at: [-0.45, -0.05], gates: gates(-0.5, -0.02, 0.55, -0.08, 12) }],
+      done: { cleared: ['wound', 'pool'] },
+      say: [{ at: 0, who: 'bea', mood: 'shout', text: 'She is dropping. Use it. Use the quiet, if you have it.' }],
+    },
+    {
+      id: 'close',
+      objective: 'Close the abdomen',
+      tools: ['suture', 'gel', 'forceps'],
+      spawn: [
+        { kind: 'wound', site: 'skin', at: [-0.6, 0.05], gates: gates(-0.65, 0.08, 0.65, -0.02, 10) },
+        { kind: 'gelZone', site: 'skin', rect: gel(-0.95, -0.32, 0.75, 0.32), parTime: 12 },
+      ],
+      done: { cleared: ['wound', 'gelZone'], allClampsOff: true },
+      say: [{ at: 0, who: 'bea', mood: 'calm', text: 'Clamps out. Skin closed. She still has a shift in the morning, the fool.' }],
+    },
+  ],
+};

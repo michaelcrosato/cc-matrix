@@ -1,0 +1,391 @@
+# Cases for Tempo Trauma. One [[case]] per operation; [[case.phase]] lists what is on the field.
+# spawn strings: "<kind> x z [x2 z2 | r | angle | lvl] [flags]". Kinds are documented in README.md.
+# Field: x in -9..9, z in -4..4.2 is playable. `say` lines: "seconds|speaker|text".
+
+[[case]]
+id = 0
+name = "Barbs"
+surgeon = "mara"
+plate = "forearm"
+timer = 240
+par = 6700
+patient = "Anton Deverell"
+dx = "Fish hooks and cable splinters, left forearm"
+fate = "Anton Deverell will mend nets again by spring."
+guided = true
+ring = [1, 2, 3, 4, 0, 6, 0, 0]
+
+[[case.phase]]
+name = "Clear the blood"
+now = "SUCTION the pool"
+say = ["0.4|bashir|Your first one, Doctor. Take the suction. Hold it over the blood.", "3.0|bashir|Harder pressure, faster flow. Keep the field clear."]
+spawn = ["pool -2 0 1.1", "pool 3 1 0.8"]
+
+[[case.phase]]
+name = "Remove the barbs"
+now = "FORCEPS: pull each barb out along its length"
+say = ["0.4|bashir|Forceps, Doctor. Grip the barb. Pull the way it points.", "4.0|bashir|Clean. Again."]
+spawn = ["hook -4 -1 20", "hook 1 2.2 -30", "hook -2 0 80 covered"]
+checkpoint = true
+
+[[case.phase]]
+name = "One more"
+now = "FORCEPS: the barb under the blood"
+say = ["0.2|mara|There is another one. Under the pool. I felt it.", "2.0|bashir|Then you have good hands. Suction first, Doctor."]
+spawn = ["pool -2 0 1.0", "hook -2 0 -60 covered"]
+
+[[case.phase]]
+name = "Close the wounds"
+now = "SUTURE: zigzag across the wound"
+say = ["0.4|bashir|Suture. Cross the wound, side to side. Even stitches.", "8.0|bashir|Doctor, that's healthy tissue. Even spacing."]
+spawn = ["lace -4 -1 0 1", "lace 1 2.5 5 2.5"]
+checkpoint = true
+
+[[case.phase]]
+name = "Burns and dressing"
+now = "GEL the inflammation, then DRESS the arm"
+say = ["0.4|bashir|Gel on the inflamed tissue. Paint it until the ring fills.", "6.0|bashir|Last. The dressing, Doctor. Draw it along the closure."]
+spawn = ["burn 2 -1 1.2", "dress -5 3.4 5 3.4"]
+
+[[case]]
+id = 1
+name = "Routine"
+surgeon = "mara"
+plate = "abdomen"
+timer = 270
+par = 6300
+patient = "Rosalind Pike"
+dx = "Acute appendicitis, harbour pilot, 44"
+fate = "Rosalind Pike will pilot the morning tide on Thursday."
+ring = [1, 2, 3, 4, 5, 6, 0, 8]
+
+[[case.phase]]
+name = "Open the abdomen"
+now = "SCALPEL: one stroke along the dashed line"
+say = ["0.4|bashir|Scalpel, Doctor. One stroke. Do not lift.", "6.0|voss|Adequate so far."]
+spawn = ["line -5 0 5 0.4"]
+plate_next = "bowel"
+
+[[case.phase]]
+name = "Polyps"
+now = "LASER: hold until the ring is nearly full, release"
+say = ["0.4|bashir|Laser. Hold until the ring fills nearly to the top. Release.", "5.0|teddy|Vitals are steady. I am also steady. Nobody ask me anything."]
+spawn = ["polyp -5 -1", "polyp -2 2", "polyp 1 -2", "polyp 4 1.5", "polyp 6 -2"]
+checkpoint = true
+
+[[case.phase]]
+name = "The artery"
+now = "SUTURE the bleeders. IV PUSH if vitals fall"
+say = ["0.2|teddy|Pressure's dropping. That is an artery. That is a real artery.", "0.8|bashir|Vitals falling. IV Push, up-left. Release in the green.", "6.0|bashir|Stitch the bleeder, Doctor. Three quick crossings."]
+spawn = ["bleeder -1 0.5", "pool -1 0.5 1.4", "lace -5 -1.5 -1 -2.5"]
+drop_vitals = 40
+
+[[case.phase]]
+name = "Close"
+now = "DRESS the closure"
+say = ["0.4|voss|Adequate.", "1.5|bashir|Close, Doctor."]
+spawn = ["dress -5 0.2 5 0.2"]
+
+[[case]]
+id = 2
+name = "Shrapnel Night"
+surgeon = "mara"
+plate = "chest"
+timer = 300
+par = 5800
+patient = "Gunnar Holt"
+dx = "Blast shrapnel in the chest wall and lung, grain-terminal foreman, 52"
+fate = "Gunnar Holt will complain about the grain prices for years."
+ring = [1, 2, 3, 4, 5, 6, 7, 8]
+
+[[case.phase]]
+name = "Open the chest"
+now = "SCALPEL along the dashed line"
+say = ["0.4|teddy|Doctor, this man is sixty percent grain dust.", "1.0|bashir|Scalpel, Doctor. Quickly."]
+spawn = ["line -5 0 5 -0.2"]
+plate_next = "lung"
+
+[[case.phase]]
+name = "Find the shrapnel"
+now = "SCANNER: sweep to reveal hidden shards"
+say = ["0.4|bashir|You cannot see them. The Scanner, left. Sweep slowly.", "5.0|bashir|Now Forceps. Pull the way they point."]
+spawn = ["hook -5 -2 40 hidden", "hook 0 2.5 -70 hidden", "hook 4 -1 10 hidden", "hook -3 1.5 110 hidden", "pool 4 -1 1.0"]
+checkpoint = true
+
+[[case.phase]]
+name = "The heart stops"
+now = "DEFIBRILLATE: hold both triggers, release on the ghost beat"
+say = ["0.2|mara|Now.", "1.0|teddy|Asystole! He's flat! Bashir, he is FLAT!"]
+shocks = 1
+scripted = true
+
+[[case.phase]]
+name = "Finish"
+now = "SUTURE and DRESS"
+say = ["0.4|bashir|You called it before the monitor did, Doctor. I noticed.", "6.0|bashir|Suture."]
+spawn = ["lace -4 0 4 0.6", "dress -5 3.4 5 3.4"]
+
+[[case]]
+id = 3
+name = "Something Moved"
+surgeon = "mara"
+plate = "liver"
+timer = 360
+par = 19000
+patient = "Piet Marlow"
+dx = "'Benign' liver mass, courier, 37"
+fate = "Piet Marlow is asleep in recovery. He will not remember the waltz."
+ring = [1, 2, 3, 4, 5, 6, 7, 8]
+strain = "introit"
+
+[[case.phase]]
+name = "The mass"
+now = "SCALPEL ring, FORCEPS out, GEL the bed"
+say = ["0.4|bashir|Forceps, Doctor. Lift the mass. ...Doctor.", "1.8|mara|It moved.", "3.0|bashir|Masses do not move.", "4.0|mara|Bashir. It moved."]
+spawn = ["tumor 0 0.5 1.3"]
+checkpoint = true
+
+[[case.phase]]
+name = "Introit"
+now = "SCANNER the nodule, LASER it at rest, FORCEPS within two beats"
+say = ["0.2|teddy|Guys? The ECG just went into three-four time. That is a waltz. Hearts are not allowed to waltz.", "4.0|bashir|Scanner. Find it. Laser it when it rests."]
+spawn = ["nodule -3 1 0"]
+beats = 3
+checkpoint = true
+
+[[case.phase]]
+name = "Four small"
+now = "Four quick ones on two-beat steps"
+say = ["0.2|bashir|It is splitting. Doctor... your hands.", "3.0|mara|I can hear it. It is counting."]
+spawn = ["nodule -5 -2 2", "nodule -1 2 2", "nodule 3 -1 2", "nodule 6 2 2"]
+beats = 2
+hush_wake = true
+
+[[case.phase]]
+name = "Amen"
+now = "SCALPEL the tethers, LASER, FORCEPS"
+say = ["0.2|teddy|They are merging. That is not a waltz any more. That is a finale.", "3.0|bashir|Three tethers. Scalpel."]
+spawn = ["nodule 0 0.4 3"]
+beats = 3
+
+[[case.phase]]
+name = "Close"
+now = "SUTURE and DRESS"
+say = ["0.4|voss|Seal the theatre.", "3.0|bashir|Dressing, Doctor."]
+spawn = ["lace -4 -1 4 -1", "dress -5 3.4 5 3.4"]
+
+[[case]]
+id = 4
+name = "The Night Ward"
+surgeon = "mara"
+plate = "lung"
+timer = 360
+par = 12300
+patient = "Rosalind Pike"
+dx = "R.E.Q.U.I.E.M. strain Lacrimosa, seeded during recovery"
+fate = "Rosalind Pike breathes. The tide will wait for her."
+ring = [1, 2, 3, 4, 5, 6, 7, 8]
+strain = "lacrimosa"
+silent = true
+
+[[case.phase]]
+name = "First wave"
+now = "LASER each stem before the sacs burst"
+say = ["0.4|voss|You are on your own, Doctor.", "2.0|teddy|Sacs! Swelling! Mara, they are swelling!"]
+spawn = ["sac -6 -2 9", "sac -3.5 2 10", "sac -0.5 -2.5 11", "sac 2 2.5 12", "sac 5 -2 9", "sac 7 1.5 10"]
+checkpoint = true
+
+[[case.phase]]
+name = "The eye opens"
+now = "SCALPEL across the eye, twice"
+say = ["0.2|bashir|The eye. It is open. Cut it, Doctor."]
+spawn = ["eye 0 0.3"]
+
+[[case.phase]]
+name = "Second wave"
+now = "Faster this time"
+say = ["0.2|teddy|It is doing it again. It is doing it faster."]
+spawn = ["sac -6 2 8", "sac -2.5 -2.5 8", "sac 1 2 9", "sac 4 -2.5 8", "sac 7 2 9", "sac 0 0 10"]
+checkpoint = true
+
+[[case.phase]]
+name = "The eye again"
+now = "SCALPEL across the eye, twice"
+spawn = ["eye 0 0.3"]
+
+[[case.phase]]
+name = "Third wave"
+now = "Faster still"
+say = ["0.2|bashir|Doctor. Steady."]
+spawn = ["sac -6 0 7", "sac -3 2.5 7", "sac -1 -2.5 7", "sac 2 0 8", "sac 5 2.5 7", "sac 7 -2 8"]
+checkpoint = true
+
+[[case.phase]]
+name = "Pull the eye"
+now = "FORCEPS the eye bed, GEL the burn"
+say = ["0.2|mara|Out. Come out.", "2.0|bashir|Gel the bed. Then rest."]
+spawn = ["tendril 0 0.3", "burn 0 0.3 1.4"]
+
+[[case]]
+id = 5
+name = "Second Opinion"
+surgeon = "pet"
+plate = "femur"
+timer = 360
+par = 10200
+patient = "Dmitri Okafor"
+dx = "Shattered femur with marrow cysts, longshoreman, 41"
+fate = "Dmitri Okafor will walk the quay again, slowly, complaining."
+ring = [1, 2, 3, 4, 5, 6, 7, 8]
+strain = "cysts"
+
+[[case.phase]]
+name = "Reassemble"
+now = "FORCEPS the bone to its outline, rotate it to fit, then SUTURE the wire"
+say = ["0.4|pet|I have buried better surgeons than you, and I liked them less. Scalpel.", "2.0|pet|Rotate it. Bring it home. Gently."]
+spawn = ["bone -5 2.5 70 -3 -0.5", "bone 4 2.5 -40 3 -0.5", "bone 0 -3 130 0 0.2"]
+checkpoint = true
+
+[[case.phase]]
+name = "Cysts"
+now = "LASER the cysts. Wake the ECHO when the gift is ready"
+say = ["0.2|pet|Cysts in the marrow. Of course there are.", "3.0|pet|My hands. Do you hear that, young man? There were two of me."]
+spawn = ["polyp -6 -2", "polyp -3 2", "polyp 0 -2", "polyp 3 2", "polyp 6 -2", "nodule 0 0.4 0"]
+beats = 3
+echo_wake = true
+checkpoint = true
+
+[[case.phase]]
+name = "Close"
+now = "SUTURE and DRESS"
+say = ["0.4|pet|Scalpel. Needle. Thread. The oldest song there is."]
+spawn = ["lace -4 -1 4 -1", "dress -5 3.4 5 3.4"]
+
+[[case]]
+id = 6
+name = "Dies Irae"
+surgeon = "pet"
+plate = "pericardium"
+timer = 420
+par = 19000
+patient = "Chief Ottoline Voss"
+dx = "R.E.Q.U.I.E.M. strain Dies Irae, carried eleven years"
+fate = "Ottoline Voss will name the funder when she wakes."
+ring = [1, 2, 3, 4, 5, 6, 0, 8]
+strain = "dies_irae"
+cryo = true
+
+[[case.phase]]
+name = "Embers"
+now = "CRYOPROBE an ember, SCALPEL to crack it, FORCEPS the pieces. Never hold the trigger as a ring passes"
+say = ["0.4|voss|If I die on your table, Perpetua, you will have to fill out the form.", "1.2|pet|I have been looking forward to it.", "4.0|bashir|Count-in. Five beats. Lift off, Doctor!"]
+spawn = ["ember -5 1.5", "ember -2 -2", "ember 1 2.5", "ember 4 -1.5", "ember 7 1"]
+rings = 5
+fever = true
+checkpoint = true
+
+[[case.phase]]
+name = "Roaming ember"
+now = "Two embers have merged and roam"
+say = ["0.2|teddy|Two embers merged. They are roaming. I did not know embers could roam."]
+spawn = ["burn -3 0 1.2", "burn 3 1 1.2"]
+rings = 5
+fever = true
+
+[[case.phase]]
+name = "The furnace"
+now = "SCALPEL, then every tool in sequence"
+say = ["0.2|bashir|Incision. The furnace is beneath."]
+spawn = ["line -5 0 5 0", "ember 0 0.5"]
+rings = 5
+fever = true
+checkpoint = true
+
+[[case.phase]]
+name = "Close"
+now = "DRESS the closure"
+spawn = ["dress -5 3.4 5 3.4"]
+
+[[case]]
+id = 7
+name = "Libera Me"
+surgeon = "both"
+plate = "heart"
+timer = 540
+par = 19900
+patient = "Bashir Haddad"
+dx = "R.E.Q.U.I.E.M. strain Libera Me, delivered in flowers"
+fate = "Bashir Haddad woke at dawn and said: clean, Doctor."
+ring = [1, 2, 3, 4, 5, 6, 7, 8]
+strain = "libera"
+cryo = true
+
+[[case.phase]]
+name = "A: Introit"
+now = "Nodules and pools"
+say = ["0.4|mara|Scalpel.", "1.2|teddy|...I will do it. I have seen it done. Mostly.", "3.0|pet|Breathe, Doctor. I have you."]
+spawn = ["nodule -4 1 0 seen", "pool 3 -1 1.2", "pool -2 -2 1.0"]
+beats = 3
+checkpoint = true
+
+[[case.phase]]
+name = "B: Lacrimosa"
+now = "Sacs on the coronary arteries"
+say = ["0.2|pet|Sacs. Laser the stems."]
+spawn = ["sac -5 -2 9", "sac -2 2.5 9", "sac 1 -2.5 9", "sac 4 2 9", "sac 7 -1 9"]
+
+[[case.phase]]
+name = "C: Dies Irae"
+now = "Embers and heat rings"
+say = ["0.2|teddy|Heat! It is seven-eight now! I do not know what to do with seven-eight!"]
+spawn = ["ember -4 1", "ember 2 -2", "ember 6 2"]
+rings = 7
+fever = true
+checkpoint = true
+
+[[case.phase]]
+name = "D: The heart stops"
+now = "Three shocks, each on a ghost beat"
+say = ["0.2|pet|It stopped on purpose.", "1.0|mara|Charge it."]
+shocks = 3
+checkpoint = true
+
+[[case.phase]]
+name = "E: The Soloist"
+now = "SCALPEL strokes on the beat. Fire the DUET when the meter is full"
+say = ["0.2|teddy|Something just stood up in there.", "2.0|pet|There you are."]
+spawn = ["line -6 -1 -2 -1", "line -2 -1 2 -1", "line 2 -1 6 -1"]
+rhythm = true
+hush_wake = true
+checkpoint = true
+
+[[case.phase]]
+name = "The tendril"
+now = "FORCEPS: pull only while the heart relaxes"
+say = ["0.2|pet|Pull when it relaxes. Not before. Wait for it."]
+spawn = ["tendril 0 0.3"]
+
+[[case.phase]]
+name = "Close"
+now = "DRESS the closure"
+say = ["0.4|teddy|Clean, Doctor? That is Bashir's line. I am just saying it for him."]
+spawn = ["dress -5 3.4 5 3.4"]
+
+[[case]]
+id = 8
+name = "Code Blue"
+surgeon = "team"
+plate = "torso"
+timer = 240
+par = 65000
+patient = "A stranger from the harbour"
+dx = "Mass casualty, one patient, many hands"
+fate = "The stranger lives. The team has no idea who he is."
+ring = [1, 2, 3, 4, 5, 6, 7, 8]
+director = true
+
+[[case.phase]]
+name = "Code Blue"
+now = "Keep the patient alive until the clock runs out"
+say = ["0.4|bashir|Everyone to the table. Keep him alive."]
+spawn = ["pool 0 0 1.0", "hook -4 1 30", "polyp 4 -1"]

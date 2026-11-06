@@ -1,0 +1,7 @@
+// Real time, real loop, real rendering, keyboard only: title to island.
+import { chromium } from 'playwright'; import { dirname, join } from 'node:path'; import { fileURLToPath, pathToFileURL } from 'node:url';
+const here = dirname(dirname(fileURLToPath(import.meta.url))); const url = pathToFileURL(join(here, '..', `${here.split('/').pop()}.html`)).href + '?test=1';
+const b = await chromium.launch({ args: ['--enable-unsafe-webgpu', '--enable-features=Vulkan', '--use-webgpu-adapter=swiftshader', '--use-vulkan=swiftshader', '--use-angle=swiftshader', '--no-sandbox'] }); const p = await b.newPage({ viewport: { width: 1280, height: 720 } }); p.on('pageerror', e => console.log('ERR', e.message.slice(0, 200)));
+await p.goto(url); await p.waitForFunction(() => window.__TEST__, null, { timeout: 120000 }); const st = () => p.evaluate(() => { const s = __TEST__.state(); return `${s.screen} ${s.render.backend} frames=${s.render.frames} lost=${s.render.lost} audio=${s.audio.state} track=${s.audio.track} sp=${(s.speech || '').slice(0, 30)}`; });
+for (const k of ['Enter', 'Enter', 'Enter', 'Enter', 'Enter']) { await p.keyboard.press(k); await p.waitForTimeout(900); console.log(k, await st()); }
+await p.waitForTimeout(9000); console.log(await st()); await p.keyboard.press('Enter'); await p.waitForTimeout(1500); console.log(await st()); await p.keyboard.press('Enter'); await p.waitForTimeout(1500); console.log(await st()); await p.screenshot({ path: join(here, 'notes/shots/smoke.png') }); await b.close();

@@ -1,0 +1,10 @@
+import { boot, go, wait, press } from '../../tools/lib-node.mjs';
+import { newSlot } from '../../src/core/save.js';
+const { app, engine } = await boot('title'); engine.step(10); app.save.clear(); app.openSlot(0, newSlot('T', 0));
+await go(engine, 'activity', { id: 'tree', skipIntro: true }); await wait(engine, 6);
+const sc = app.scene; console.log(sc.phase, sc === app.scene);
+await press(engine, 'Escape');
+console.log(app.scene.stack.length, engine.timeScale, app.scene === sc);
+await wait(engine, 0.3);
+console.log(app.scene.stack.length, engine.timeScale, app.scene.stack[0]?.id);
+process.exit(0);

@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:21:32",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Sports mini-game anthology with a light life-sim frame",
+    "perspective": "Third person",
+    "tech": "Shardfall engine (Pavilion: Rust, wgpu, egui 0.36.2), commit 49ef2ba, wasm-bindgen 0.2.129, AI Hub session.js 1.4.0",
+    "artDirection": "The engine's cel look, high-key pastel, beach and wellness props. Library props only for generic dressing.",
+    "animation": "The engine puppet tilts about the feet from the balance dot. Exercise poses are hand-keyed clips on that puppet: Tree, Warrior, Fold, Squat, Plank and Bloom.",
+    "audio": "Music, effects and voices are synthesized in code. No audio files. Seven music beds, default music gain 0.10. At least 30 effects. Animalese voices.",
+    "online": "AI Hub ghost mode for 1–4 players. The round is the Inter-Resort Medley (Paddle Slalom, Tide Table, Cannonball Cup).",
+    "testing": "Headless sim tests, Playwright Chromium with software WebGPU at 320×180, phone and tablet profiles, WebKit iPhone fallback, and the AI Hub harness.",
+    "research": "The build followed PLAN.md and the engine source. The title was drawn with a real RNG from 50 riffs. No separate web search in this session.",
+    "environment": "Grok CLI (headless); Linux",
+    "model": "xAI, grok-4.7, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Fifteen defects showed up in testing. The first six were a gust check that did not match the acceleration model, an egui texture delta dropped on the floor, a private intent module, fonts bound in the same pass that drew them, a hub ghost field that was a boolean, and About pages that did not turn. A review of that build found eight more: sliders that never moved, Dev Mode with no jump, cheats or time scale, a free-play schedule stuck on the first four events, a Big Stand that kept its song and never showed the fake skip or the final age cut, an eyes-closed check with no tone, name and outfit lists that stopped at six, and a beach with no props or exercise poses. The drag path then failed to compile because a set lookup wanted a reference.",
+    "Three were critical. The font and texture-delta panic stops the browser frame loop, so the page sits there with a status that never ticks. After credits, seven events could not be started. A morning age of 41 to 50 could not reach the rowboat even after a strong finale.",
+    "The most helpful test was the bot playthrough: three seeds from New Stay to the credits, plus each event on five seeds against an idle player. The later menu tests drive the real pad and pointer path, including a held pointer on a slider row.",
+    "The least helpful check is a 1920×1080 WebGPU screenshot. On this machine that bitmap can come back blank while the sim is fine. 320×180 is the timing check, and the engine's own capture is the picture."
+  ],
+  "engineFeedback": [
+    "The sim is one tick you can drive with no GPU, and the picture is a pure view of that tick. That split is what made the whole stay testable.",
+    "Yes. A gust is an acceleration, so gust 30 with no lean settles inside the disc and does not tip. egui 0.36 panics if a TexturesDelta is dropped. Pause still increments the tick; the world time is what freezes.",
+    "The balance model, the day loop, and every event. The engine does not have a centre-of-pressure verb.",
+    "The app frame. The demo's keys, menus and chrome run in the same function as the game, and a fit frame has to turn all of that off without breaking the engine's other scenes.",
+    "frozen() returns early inside the tick. InputFrame gained lean, device, ui and hub. The HUD carries the fit UI and a status string. The mixer plays song beds. The page bridge publishes status. Captures composite the fit UI. Puppets tilt about the feet. Splash and a silent wake were added for the lagoon. Fit pointer drags emit slider values. Hand-keyed clips play the exercise poses. The beach room gained dressing with no collision.",
+    "A supported way to publish one JSON value that is both a string (for JSON.parse) and an object (for .tick), without hand-rolling a String constructor."
+  ],
+  "promptFeedback": [
+    "The plan is specific about the feel, the roster and the hub snippet, and it says behaviour is the contract when a filename does not match the engine.",
+    "Song numbers in the plan and the beds the sim actually requests do not use the same index. The hub snippet sends whatever status.hub.ghost is, so a boolean there is sent as a boolean.",
+    "Shipping the full roster, the 10-foot shell and the hub harness on a 20 GB machine where one extra browser gets killed.",
+    "Say, next to the gust sentence, that a full lean alone must not tip and a gust on top of that lean must. State that plan filenames are guidance in the same paragraph as the file tree."
+  ],
+  "aiHub": {
+    "name": "Wobble Minutes",
+    "tagline": "Five days, one mat",
+    "description": "A third-person balance comedy at Tippy Cay. Lean through a week of sports mini-games, then stand still when it matters.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "Wii Fit",
+    "players": "1–4",
+    "controls": "Lean with the stick, WASD or the mouse. Confirm with Cross, Space or click.",
+    "tags": ["3d", "third-person", "sports", "comedy", "low-poly", "versus"]
+  }
+}

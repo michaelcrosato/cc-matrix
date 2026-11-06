@@ -1,0 +1,29 @@
+# Issues caught by tests (one line each; [C] = critical / game breaking)
+- [C] Bot and players stuck forever when embedded in a wall edge after a blink or dash (campaign bot softlock).
+- [C] One-wide doors blocked heroes off-centre; bot stuck at door cells (campaign bot softlock). Fixed with corner sliding and three-wide doors.
+- [C] moor5 and stair7 templates had a door socket cut off by water, so maps could have no path (room template check).
+- [C] Room overlap check rejected a room's own neighbour: causeway generation failed (zone test).
+- Bot oscillated between far loot and an exit (campaign softlock in the bot, not the game).
+- [C] Solid props as push circles trapped walkers; moved to closing nav cells (campaign bot softlock).
+- [C] Ambrose's exit spawned at map centre, unreachable (campaign softlock).
+- Sound defs used wave 'sawtooth'; the engine's name is 'saw' and it rendered NaN (lint).
+- Thrice-Buried and Last Light could not trigger at time zero (skills test).
+- [C] New clips left joints out of some keys, so compiled tracks held NaN; ragdolls born from those poses poisoned Rapier and crashed the whole physics step (headless playthrough).
+- [C] Eases on clip keys compiled to NaN tracks in engine 0.46.0, and NaN poses crash Rapier through ragdolls; new clips use linear keys (lint scan of compiled tracks, headless playthrough).
+- [C] Long sessions crashed Rapier with a wasm panic once enough Breakables had come and gone; replaced by cosmetic chunks (headless playthrough).
+- Hub host-leave check failed: no traffic before play began; heartbeats now flow from load (hub harness).
+- [C] HUD projected labels with the wrong object, so damage numbers and world labels were all NaN-placed and invisible (mouse test).
+- [C] The Cross press that left a menu also acted in the world; a new hero in town opened the map at once and froze a pad player (pad and couch tests).
+- Town arrival point sat on the road gate (pad test).
+- Tests could hang forever on a failed browser step; runner now always exits.
+- Keys pressed in a paused menu did not flip prompts to keycaps (pad test).
+- Session rounds killed idle heroes within seconds of the start; session monster damage eased (screenshot, not a script).
+- Hub host-leave check flaked under load: heartbeats tied to frames starved on a slow machine; moved to a timer, plus one reliable hello (hub harness).
+- [C] Walking head-on into a round obstacle such as a pillar stopped you dead; a Malison fight could stall forever. Obstacles now slide you round them (headless playthrough).
+- [C] A pit opening beside a pillar could leave a gap too narrow to walk, walling off a bell rope; pits now keep clear of pillars and paths route round them (headless playthrough).
+- [C] Bursar, Malison and Ambrose lengths swung by a factor of four with loot found; story bosses are now sized to the party (balance report).
+- Shamble's planted foot slid 1.13 m/s; gait retuned (analyzeClip).
+- [C] Malison's touch hit sixty times a second, killing anyone she reached and stalling the rope phase; it now strikes once per 0.8 s (balance report).
+- Screenshot review: tutorial prompt stuck on after the story, plum labels unreadable on plum, clipped Vow text, toast pile-ups, DEMO tag over the hero name.
+- Item labels printed over each other in big drops; they now stack (screenshot review).
+- The hero was hard to find in a 76-monster horde; a ground ring now marks the hero in solo play too (screenshot review).

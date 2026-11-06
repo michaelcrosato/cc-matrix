@@ -1,0 +1,66 @@
+// Pure rules, fast. Prints only failures.
+import { dayInfo, realDayInfo, WEATHER, rollWeather, nextFestivalDay } from '../../src/core/calendar.js';
+import { rngOf } from '../../src/core/util.js';
+import { newWorld, addEnt, info, rebuildGrid, SAVE_V, giveItem, debtTotalFor } from '../../src/core/world.js';
+import { serialize, deserialize } from '../../src/core/save.js';
+import { rollDay, cheesePrice, CHEESE_PATTERNS, FAVOUR_COUNT } from '../../src/systems/days.js';
+import { FISH_LIST, BUG_LIST, FOSSIL_LIST, ART_LIST, FURNITURE, CLOTHES, HATS_DATA, GLASSES_DATA, UMBRELLAS, ITEMS, sellPriceOf, buyPriceOf } from '../../src/data/items.js';
+import { T } from '../../src/dev/tuning.js';
+import { TOWN_ROWS, CITY_ROWS } from '../../src/data/townMap.js';
+import { Place } from '../../src/world/place.js';
+import { BUILDINGS, LANDMARK, BENCHES, CITY, LAMPS } from '../../src/world/layout.js';
+import { TYPE_LINES, UNIQUE, GOSSIP, GANDER, HOSTS, BALLAD, COUNT_LINES } from '../../src/data/lines.js';
+import { allSongs, LEADS } from '../../src/audio/composer.js';
+import { parseSong, validateClip, renderSound, checkModel, MODEL_LIBRARY, TEXTURE_LIBRARY, validateTexture } from '../../src/engine.js';
+import { CLIP_DEFS } from '../../src/actors/clips.js';
+import { RIG, SPECIES, critterDef } from '../../src/art/critter.js';
+import { SYLLABLES, HONK } from '../../src/audio/voice.js';
+import { SFX_DEFS, AMBIENCE } from '../../src/audio/sfx.js';
+import { ALL_MODELS } from '../../src/art/models.js';
+import { TEX } from '../../src/art/textures.js';
+import { CAST } from '../../src/data/cast.js';
+const fails = []; let n = 0; const ok = (name, v, info = '') => { n++; if (!v) fails.push(name + (info !== '' ? ` (${info})` : '')); };
+// Calendar
+const clk = (day, mode = 'village') => ({ day, mode, minute: 600 });
+ok('day 1 spring market', dayInfo(clk(1)).season === 0 && dayInfo(clk(1)).slot === 0);
+ok('day 4 festival', dayInfo(clk(4)).slot === 3 && dayInfo(clk(4)).type === 'Festival Day');
+ok('day 5 summer', dayInfo(clk(5)).season === 1); ok('day 16 winter festival', dayInfo(clk(16)).season === 3 && dayInfo(clk(16)).slot === 3); ok('rollover', dayInfo(clk(17)).yd === 1 && dayInfo(clk(17)).year === 2);
+ok('contests', dayInfo(clk(6)).contest === 'derby' && dayInfo(clk(10)).contest === 'bugoff' && dayInfo(clk(14)).contest === 'snowman');
+ok('next festival', nextFestivalDay(1) === 4 && nextFestivalDay(4) === 8 && nextFestivalDay(5) === 8);
+// Real Clock mapping
+ok('march spring', realDayInfo(new Date(2026, 2, 10)).season === 0); ok('june summer', realDayInfo(new Date(2026, 5, 10)).season === 1); ok('sep autumn', realDayInfo(new Date(2026, 8, 10)).season === 2); ok('jan winter', realDayInfo(new Date(2026, 0, 10)).season === 3); ok('dec winter', realDayInfo(new Date(2026, 11, 10)).season === 3);
+ok('sunday market', realDayInfo(new Date(2026, 5, 7)).slot === 0); ok('saturday show', realDayInfo(new Date(2026, 5, 6)).slot === 2); ok('monday errand', realDayInfo(new Date(2026, 5, 8)).slot === 1);
+ok('middle month last saturday is the festival', realDayInfo(new Date(2026, 6, 25)).slot === 3); ok('second wed is the contest', realDayInfo(new Date(2026, 6, 8)).contest === true); ok('real-clock dayInfo', dayInfo({ day: 3, mode: 'real', minute: 0 }, new Date(2026, 6, 25)).slot === 3);
+// Weather
+for (let s = 0; s < 4; s++) { const seen = new Set(); for (let i = 0; i < 400; i++) seen.add(rollWeather(rngOf('w' + s + i), s).kind); for (const [k] of WEATHER[s]) ok(`weather ${s} ${k}`, seen.has(k)); }
+{ let rain = 0; for (let i = 0; i < 2000; i++) if (rollWeather(rngOf('r' + i), 0).kind === 'rain') rain++; ok('spring rain near 30%', rain > 450 && rain < 750, rain); let none = 0; for (let i = 0; i < 400; i++) if (rollWeather(rngOf('n' + i), 0, 0).kind === 'rain') none++; ok('rain tuning zero', none === 0); }
+// Drop tables
+ok('18 fish incl. boot', FISH_LIST.length + 1 >= 18, FISH_LIST.length); ok('18 bugs', BUG_LIST.length >= 18); ok('10 fossils', FOSSIL_LIST.length === 10); ok('8 paintings', ART_LIST.length === 8); ok('furniture 40+', FURNITURE.length >= 40, FURNITURE.length); ok('clothes 20+', CLOTHES.length >= 20); ok('hats 8+', HATS_DATA.length >= 8); ok('glasses 3+', GLASSES_DATA.length >= 3); ok('umbrellas 3+', UMBRELLAS.length >= 3); ok('favours 12+', FAVOUR_COUNT >= 12);
+for (const s of '0123') { ok(`fish in season ${s}`, FISH_LIST.some((f) => f.seasons.includes(s))); ok(`bug in season ${s}`, BUG_LIST.some((f) => f.seasons.includes(s))); }
+ok('prices sane', [...FISH_LIST, ...BUG_LIST].every((i) => i.price > 0 && i.line));
+// Day roll
+{ const w = newWorld({ seed: 'sim' }); rebuildGrid(w); const treeN = Object.values(w.ents).filter((e) => e.t === 'tree').length; ok('about 55 trees', treeN >= 45 && treeN <= 70, treeN); ok('6 rocks', Object.values(w.ents).filter((e) => e.t === 'rock').length === 6); w.clock.day = 2; rollDay(w); ok('three new cracks', Object.values(w.ents).filter((e) => e.t === 'crack').length >= 3); ok('weeds per day', Object.values(w.ents).filter((e) => e.t === 'weed').length >= 3); ok('shells', Object.values(w.ents).filter((e) => e.t === 'shell').length >= 6); ok('stock', w.shop.stock.length >= 8); ok('weather set', !!w.weather); ok('tools on sale day 2', w.shop.stock.some((s) => s.id === 'axe')); ok('favours two', w.favours.length === 2, w.favours.length); const a = JSON.stringify(Object.keys(w.ents)); const w2 = newWorld({ seed: 'sim' }); rebuildGrid(w2); w2.clock.day = 2; rollDay(w2); ok('deterministic day roll', a === JSON.stringify(Object.keys(w2.ents))); }
+// Flower rules
+{ const w = newWorld({ seed: 'fl' }); rebuildGrid(w); const prev = T.hybrid; T.hybrid = 1; w.ents = {}; rebuildGrid(w); const a = addEnt(w, { t: 'flower', sp: 'tulip', c: 'red', x: 60.5, z: 30.5, dry: 0, wet: 1 }), b = addEnt(w, { t: 'flower', sp: 'tulip', c: 'white', x: 61.5, z: 30.5, dry: 0, wet: 1 }), dry = addEnt(w, { t: 'flower', sp: 'daisy', c: 'white', x: 20.5, z: 28.5, dry: 1, wet: 0 }); w.clock.day = 2; w.lastWeather = 'sun'; rollDay(w); ok('hybrid plum', Object.values(w.ents).some((e) => e.t === 'flower' && e.hybrid && e.c === 'plum')); ok('unwatered wilts in two days', dry.wilted === true); T.hybrid = prev; }
+// Cheese
+{ for (const pat of CHEESE_PATTERNS) { const w = newWorld({ seed: 'ch' }); w.cheese = { pattern: pat, base: 100, seed: 7, buyDay: 5 }; w.clock.day = 5; w.clock.minute = 480; const a = cheesePrice(w); w.clock.day = 7; w.clock.minute = 900; const b = cheesePrice(w); if (pat === 'Rising') ok('rising rises', b > a, `${a} ${b}`); if (pat === 'Falling') ok('falling falls', b < a, `${a} ${b}`); } const w = newWorld({ seed: 'ch' }); w.cheese = { pattern: 'Spike', base: 100, seed: 7, buyDay: 1 }; let top = 0; for (let d = 1; d <= 4; d++) for (const m of [480, 840]) { w.clock.day = d; w.clock.minute = m; top = Math.max(top, cheesePrice(w)); } ok('spike peak 3-6x', top >= 300 && top <= 600, top); }
+// Debt maths
+ok('tier debts', debtTotalFor(0) === 8000 && debtTotalFor(1) === 30000 && debtTotalFor(2) === 80000 && debtTotalFor(3) === 150000);
+ok('sell price', sellPriceOf({ id: 'carp' }, { sell: 1 }) === 300); ok('gift bag value', sellPriceOf({ id: 'bag', value: 700 }, { sell: 1 }) === 700); ok('buy tuning', buyPriceOf(ITEMS.c_chair, { buy: 2 }) === 1000); ok('quest items unsellable', sellPriceOf({ id: 'parcel' }, { sell: 1 }) === 0);
+// Save round trip and migration
+{ const w = newWorld({ seed: 'sv' }); rebuildGrid(w); giveItem(w, 'carp'); const t = serialize(w); ok('grid not stored', !t.includes('"grid"')); const c = deserialize(t); ok('round trip', c.p.pockets[0].id === 'carp' && Object.keys(c.ents).length === Object.keys(w.ents).length && c.grid.size > 0); ok('save version', c.v === SAVE_V); const old = JSON.parse(t); old.v = 1; delete old.wishes; const m = deserialize(JSON.stringify(old)); ok('migrates v1', m.v === SAVE_V && Array.isArray(m.wishes)); }
+// Map flood fill: every door, stop and activity reachable
+{ ok('town 80×64', TOWN_ROWS.length === 64 && TOWN_ROWS.every((r) => r.length === 80)); ok('city rows even', CITY_ROWS.every((r) => r.length === CITY_ROWS[0].length)); const P = new Place('town', TOWN_ROWS); for (const b of BUILDINGS) P.rects.push({ x0: b.x - b.w / 2, z0: b.z - b.d / 2, x1: b.x + b.w / 2, z1: b.z + b.d / 2 }); const reach = P.flood(LANDMARK.busStop[0], LANDMARK.busStop[1] + 1); for (const b of BUILDINGS) ok(`door reachable ${b.id}`, reach(b.door[0], b.door[1] + 0.8)); for (const [k, at] of Object.entries(LANDMARK)) { if (['busShelter', 'oldPear', 'bell', 'notice', 'rindStall', 'lamp', 'lighthouse', 'mailbox', 'clothesline', 'pot', 'rocco', 'mayorStart', 'mayorEnd', 'lookout', 'plazaBench1', 'plazaBench2', 'dock'].includes(k)) { const around = [[0, 1.5], [1.5, 0], [-1.5, 0], [0, -1.5], [1.5, 1.5], [0, 2.5]].some(([dx, dz]) => reach(at[0] + dx, at[1] + dz)); ok(`near ${k} reachable`, around); } } ok('both terraces', reach(10, 8) && reach(60, 6)); ok('beach both sides', reach(10, 52) && reach(70, 52)); const C = new Place('city', CITY_ROWS, CITY.ox, CITY.oz); for (const f of CITY.fronts) C.rects.push({ x0: f.x - f.w / 2 + CITY.ox, z0: f.z - f.d / 2, x1: f.x + f.w / 2 + CITY.ox, z1: f.z + f.d / 2 }); const rc = C.flood(CITY.stop[0] + CITY.ox, CITY.stop[1] + 1); for (const f of CITY.fronts) ok(`city door ${f.id}`, rc(f.door[0] + CITY.ox, f.door[1] + (f.rot ? 0 : 0.8)), `${f.door}`); ok('fortune tent reachable', rc(CITY.tent[0] + CITY.ox, CITY.tent[1] + 2.4)); }
+// Lines: tags resolve; volumes hold
+{ const OK_TAGS = new Set(['player', 'town', 'item', 'neighbour', 'catch', 'tic', 'n1', 'n2', 'theme', 'gossip', 'price', 'debt', 'bug', 'fossil', 'pockets', 'season', 'tree', 'snip']); const scan = (o, path) => { if (typeof o === 'string') { for (const m of o.matchAll(/\{(\w+)\}/g)) ok(`tag ${m[1]} in ${path}`, OK_TAGS.has(m[1])); } else if (o && typeof o === 'object') for (const [k, v] of Object.entries(o)) scan(v, path + '/' + k); }; scan({ TYPE_LINES, UNIQUE, GOSSIP, GANDER, HOSTS, BALLAD }, 'lines'); ok('700+ lines', COUNT_LINES() >= 700, COUNT_LINES()); for (const [t, b] of Object.entries(TYPE_LINES)) { let c = 0; for (const v of Object.values(b)) c += v.length; ok(`type ${t} 40+`, c >= 40, c); } for (const [id, l] of Object.entries(UNIQUE)) ok(`unique ${id} 12+`, l.length >= 12); ok('gossip 30+', GOSSIP.length >= 30); let g = 0; for (const v of Object.values(GANDER)) g += v.length; ok('Gander 30', g >= 30, g); for (const [id, l] of Object.entries(HOSTS)) ok(`host ${id} 15+`, l.length >= 15, l.length); ok('20 ballad verses', BALLAD.verses.length >= 20); }
+// No names from the series
+{ const banned = /\b(nook|tom nook|resetti|gyroid|isabelle|k\.k\.|able sisters|stalk market|turnip|bells?\b(?= currency))/i; const txt = JSON.stringify({ TYPE_LINES, UNIQUE, GOSSIP, GANDER, HOSTS, BALLAD }); ok('originality: no series names', !banned.test(txt)); }
+// Songs, clips, models, voices
+{ const songs = allSongs(); ok('24 hourly with variants', Object.keys(songs).filter((k) => /^h\d+-/.test(k)).length === 72); let bad = 0; for (const [k, s] of Object.entries(songs)) { try { parseSong(s); } catch (e) { bad++; fails.push(`song ${k}: ${String(e.message).slice(0, 120)}`); } } ok('every song parses', bad === 0); ok('venue songs', ['store', 'museum', 'mothwick', 'hall', 'cityDay', 'cityNight', 'salon', 'couture', 'magda', 'theatre', 'auction', 'cafe', 'bureau'].every((k) => songs[k])); ok('festival and stings', ['seedToss', 'lantern', 'soup', 'longNight', 'contest', 'sting0', 'sting1', 'sting2', 'sting3'].every((k) => songs[k])); ok('six records', ['rain', 'small', 'debt', 'sea', 'goose', 'bye'].every((k) => songs[k])); for (const [k, s] of Object.entries(songs)) { const v = Object.values(s.tracks).reduce((a, t) => a + (t.volume ?? 0), 0); ok(`song ${k} hot, not clipping`, v > 0.55 && v < 1.15, v.toFixed(2)); } }
+ok('30+ clips', CLIP_DEFS.length >= 30, CLIP_DEFS.length); for (const c of CLIP_DEFS) { const p = validateClip(c, RIG); ok(`clip ${c.name}`, p.length === 0, p[0] ?? ''); }
+{ let peak = 0; for (const d of Object.values(SYLLABLES)) for (const v of renderSound(d)) peak = Math.max(peak, Math.abs(v)); ok('voice peak under 1', peak < 1, peak.toFixed(3)); ok('6 archetypes × 10', Object.keys(SYLLABLES).length === 60); ok('40+ effects', Object.keys(SFX_DEFS).length >= 40); for (const [k, d] of Object.entries({ ...SFX_DEFS, ...AMBIENCE })) { const r = renderSound(d); ok(`sfx ${k}`, r.length > 0 && r.some((x) => x !== 0) && r.every(Number.isFinite)); } for (const [k, d] of Object.entries(LEADS)) { const r = renderSound({ ...d, freq: 440, sustain: 0.2 }); ok(`lead ${k} finite`, r.every(Number.isFinite)); } }
+for (const d of ALL_MODELS) { const r = checkModel(d, { catalog: MODEL_LIBRARY }); ok(`model ${d.id}`, r.problems.length === 0, r.problems[0] ?? ''); }
+for (const t of TEX) { const r = validateTexture(t); ok(`texture ${t.id}`, r.problems.length === 0, r.problems[0] ?? ''); }
+for (const [id, c] of Object.entries(CAST)) if (c.look.species) { const r = checkModel(critterDef({ id: 'chk-' + id, ...c.look }), { catalog: MODEL_LIBRARY }); ok(`critter ${id}`, r.problems.length === 0, r.problems[0] ?? ''); }
+for (const f of fails.slice(0, 40)) console.log('sim FAIL', f);
+console.log(`sim: ${n - fails.length}/${n} passed`); process.exitCode = fails.length ? 1 : 0;

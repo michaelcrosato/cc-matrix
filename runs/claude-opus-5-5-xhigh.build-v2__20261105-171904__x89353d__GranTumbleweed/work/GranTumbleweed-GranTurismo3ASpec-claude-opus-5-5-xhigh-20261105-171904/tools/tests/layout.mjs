@@ -1,0 +1,41 @@
+// The 10-foot rules at 360, 480 and 640 art pixels wide: every line of text and every focusable item on every screen stays on the screen.
+import { suite } from './_lib.mjs';
+import { boot } from './_drive.mjs';
+import { addCar } from '../../src/game/sim/career.js';
+import { HANDBOOK } from '../../src/game/data/text.js';
+const t = suite();
+for (const [w, h] of [[640, 480], [1920, 1080], [2560, 1080]]) {
+  const b = await boot({ engine: { viewport: { width: w, height: h, dpr: 1 } } }), app = b.app, over = new Map(), hud = app.ctx.hud, art = hud.width;
+  t.near(art, Math.round((w / h) * 270), 2, `${w}x${h} is ${Math.round((w / h) * 270)} wide`); t.eq(hud.height, 270, 'and 270 high');
+  const note = (what) => { const k = b.id ?? app.scene?.name ?? '?'; if (!over.has(k)) over.set(k, new Set()); over.get(k).add(what); };
+  const T = hud.text.bind(hud); hud.text = (x, y, s, o = {}) => { const sc = o.scale ?? 1, tw = hud.measure(String(s), sc).width; if (String(s).trim() && (x < -1 || x + tw > hud.width + 1 || y < -1 || y + 7 * sc > hud.height + 1)) note(`text "${String(s).slice(0, 34)}" at ${Math.round(x)},${Math.round(y)}`); else if (y < hud.height - 32) { const box = panels.filter((q) => x >= q.x && x < q.x + q.w && y >= q.y && y < q.y + q.h).at(-1); if (box && x + tw > box.x + box.w + 1) note(`text "${String(s).slice(0, 34)}" past its panel at ${Math.round(x)},${Math.round(y)}`); else if (!box) { const into = panels.find((q) => x < q.x && x + tw > q.x + 1 && y >= q.y && y < q.y + q.h); if (into) note(`text "${String(s).slice(0, 34)}" runs into a panel at ${Math.round(x)},${Math.round(y)}`); } } return T(x, y, s, o); };
+  const P0 = app.ui.panel; let panels = []; app.ui.panel = function (x, y, pw, ph, o) { panels.push({ x, y, w: pw, h: ph }); return P0.call(this, x, y, pw, ph, o); }; const C0 = hud.clear.bind(hud); hud.clear = (...a) => { panels = []; return C0(...a); };
+  const under = () => { const u = app.ui, r = u.subtitleRect(); if (!r) return; for (const i of u.items) if (i.w > 0 && !i.noBox && i.x < r.x + r.w && i.x + i.w > r.x && i.y < r.y + r.h && i.y + i.h > r.y) note(`item ${i.id} under the subtitle at ${r.y}`); if (r.y + r.h > u.h - 15) note(`the subtitle runs into the prompts: ${r.y + r.h}`); };
+  const check = () => { under(); for (const i of app.ui.items) if (i.w > 0 && (i.x < -1 || i.y < -1 || i.x + i.w > hud.width + 1 || i.y + i.h > hud.height + 1)) note(`item ${i.id}`); };
+  const seen = async (n = 3) => { for (let i = 0; i < n; i++) { await b.frames(1); check(); } };
+  const pick = async (id) => { await b.choose(id); await seen(); };
+  const back = async () => { await b.press('back'); await seen(2); };
+  const tabs = async (n) => { for (let i = 0; i < n; i++) { await b.press('tabR'); await seen(2); } };
+  await seen(); await pick('new'); await pick('go'); for (let i = 0; i < 2; i++) { app.actions.inject('moveX+'); await seen(2); } await b.press('info'); await seen(2); await b.press('info'); await tabs(3); await b.press('confirm'); await seen(2);
+  app.profile.credits = 1e6; if (!app.profile.cars.length) { addCar(app.profile, 'kite'); app.profile.current = app.profile.cars[0].uid; }
+  await app.jumpMenu('map'); await b.settle(); await seen(); for (const id of app.ui.items.map((i) => i.id)) { app.ui.top.focus = id; await seen(2); }
+  await pick('licence'); for (const l of ['C', 'B', 'A']) { app.profile.licences.C = true; app.profile.licences.B = true; await pick(l); if (b.id === 'testList') { const list = app.ui.items.map((i) => i.id); for (const id of list) { await pick(id); if (b.id === 'testCard') await back(); } await back(); } } await back();
+  await pick('events'); for (const tier of [0, 1, 2]) { app.profile.licences.A = true; const ids = app.ui.items.map((i) => i.id).filter((i) => !['tier'].includes(i)); for (const id of ids) { await b.choose(id); await seen(); if (b.id === 'eventCard') { await pick('start'); if (b.id === 'roundCard') await back(); await back(); } } await tabs(1); void tier; } await back();
+  await pick('dealer'); for (let i = 0; i < 4; i++) { for (let k = 0; k < 4; k++) { app.actions.inject('moveX+'); await seen(2); } await b.press('info'); await seen(2); await b.press('info'); await b.press('tabR'); await seen(2); } await back();
+  await pick('tuning'); for (const round of [0, 1]) { const tiles = app.ui.items.map((i) => i.id).filter((i) => ['engine', 'weight', 'drive', 'drivetrain', 'suspension', 'brakes', 'aero', 'tyres', 'body'].includes(i)); for (const id of tiles) { await b.choose(id); await seen(); if (b.id === 'parts') { for (const it of app.ui.items.map((i) => i.id)) { app.ui.top.focus = it; await seen(2); } await back(); } } if (b.has('pageNext')) await pick('pageNext'); else if (b.has('next')) await pick('next'); void round; } await tabs(1); await seen(4); await back();
+  await pick('service'); await seen(); await back(); await pick('garage'); await seen(); await tabs(3); await back();
+  await pick('museum'); for (let i = 0; i < 14; i++) { app.actions.inject('moveX+'); await seen(2); } app.profile.seen = Object.fromEntries(['pico', 'kite', 'ginga', 'moth', 'ryu', 'longhorn', 'brandt32', 'heck', 'libeccio', 'kiteCup', 'ryuRally', 'works', 'corsa', 'type9'].map((k) => [k, true])); for (let i = 0; i < 14; i++) { app.actions.inject('moveX+'); await seen(2); } await b.press('tabR'); await seen(2); for (let i = 0; i < 6; i++) { app.actions.inject('moveX+'); await seen(2); } await back();
+  await pick('theatre'); await back(); await pick('arcade'); for (const m of ['quick', 'trial', 'couch']) { await pick(m); for (let k = 0; k < 4 && !['arcade'].includes(b.id); k++) { await seen(); if (b.id === 'pickRace') break; const id = app.ui.items.find((i) => ['track', 'car'].includes(i.id))?.id; if (!id) break; if (m === 'trial' && b.id === 'pickCar') break; await pick(id); } while (b.id !== 'arcade') await back(); } await back();
+  await b.press('pause'); await seen(2); await pick('settings'); await tabs(4); await back(); await pick('handbook'); { const hb = b.top; for (let k = 0; k < HANDBOOK.length; k++) { hb.page = k; await seen(2); } } await back(); await pick('about'); { const ab = b.top; for (let k = 0; k < ab.pages.length; k++) { ab.page = k; await seen(2); } } await back(); await back();
+  // In a race.
+  await app.startQuick({ track: 'harbour', carId: 'ginga', laps: 10, field: 8, difficulty: 'normal' }); await b.settle(); await seen(4); const s = app.scene, me = s.sim.cars.at(-1); me.bestLap = 71.23; me.c.yaw += Math.PI; await seen(3); me.c.yaw -= Math.PI; me.c.wear.fill(0.2); await seen(3); s.hud.flash('LAP 1:11.23', 3); s.hud.flash('FINAL LAP', 3, true); await seen(3);
+  await b.press('pause'); await seen(2); await pick('assists'); await back(); await pick('dev'); for (let k = 0; k < 6; k++) { await seen(2); await b.press('tabR'); } await back(); await back(); await seen(2);
+  s.sim.finishNow(me.i, 1); await b.until(() => b.id === 'results', 500); await seen(4); await b.frames(120); check(); await pick('save'); await back(); await b.choose('replay'); await b.settle(); await seen(4); await b.press('info'); await seen(2); await b.press('back'); await b.settle(); await seen(2);
+  // A time trial, with and without a ghost; a licence test.
+  await app.startTimeTrial({ track: 'kestrel', carId: 'ginga' }); await b.settle(); await seen(4); { const data = { time: 90, carId: 'ginga', pts: [0, 0, 0, 0, 1, 0, 1, 0] }; app.scene.setGhost(app.ctx, data); await seen(4); } app.scene.ended = true; await app.toTitle(); await b.settle(); await seen(2);
+  // A test, its card, its result; a rally.
+  await app.startTest('B-3'); await b.settle(); await seen(4); app.scene.judge.fail('STOPPED OUTSIDE THE BOX'); await b.until(() => b.id === 'testResult', 300); await seen(4); await b.choose('backTo'); await b.settle(); await seen(2);
+  app.profile.licences.B = true; await app.startEventRound('clay'); await b.settle(); await seen(4); app.scene.sim.finishNow(app.scene.sim.cars.find((e) => e.player === 0).i, 1); await b.until(() => b.id === 'results', 800); await seen(4); await b.choose('continue'); await b.settle(); await seen(3);
+  t.eq(over.size, 0, `at ${art} wide: ${[...over].map(([k, v]) => `${k}: ${[...v].slice(0, 30).join('; ')}`).join(' | ')}`); t.eq(app.engine.errors.length, 0, `no game errors at ${art} wide: ${app.engine.errors[0]}`);
+}
+t.done();

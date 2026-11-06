@@ -1,0 +1,5 @@
+const key={confirm:'Enter',back:'Esc',use:'J',steady:'Shift',alt:'K',syringe:'F',special:'Space',prev:'Q',next:'E',pause:'Esc',hint:'H',charge:'J + K',swap:'R',recenter:'C',tools:'1–8',aim:'WASD',skip:'Tab',more:'M'};
+const ps={confirm:'✕',back:'○',use:'R2',steady:'L2',alt:'○',syringe:'□',special:'△',prev:'L1',next:'R1',pause:'Options',hint:'↓',charge:'L2 + R2',swap:'→',recenter:'L3',tools:'LS',aim:'RS',skip:'△',more:'△'};
+const xbox={confirm:'A',back:'B',use:'RT',steady:'LT',alt:'B',syringe:'X',special:'Y',prev:'LB',next:'RB',pause:'Menu',hint:'↓',charge:'LT + RT',swap:'→',recenter:'LS',tools:'LS',aim:'RS',skip:'Y',more:'Y'};
+export const glyph=(action,device='keyboard',set='playstation')=>(device==='pad'?(set==='xbox'?xbox:ps):device==='mouse'?{...key,use:'LMB',alt:'RMB',charge:'LMB + RMB',aim:'Mouse'}:key)[action]||action;
+export function renderTokens(text,device='keyboard',set='playstation'){return text.replace(/\{(\w+)\}/g,(_,a)=>`<kbd class="glyph glyph-${a}">${glyph(a,device,set)}</kbd>`);}

@@ -1,0 +1,35 @@
+import { FrontScene } from './front.js';
+import { HubScene } from './hub.js';
+import { WeighInScene } from './weighin.js';
+import { ReportScene } from './report.js';
+import { FerryScene, EndingScene } from './cutscene.js';
+import { JarScene, LockerScene, RecordsScene, AnimViewerScene } from './screens.js';
+import { JoinScene, CardScene, PodiumScene } from './medley.js';
+import { ACTIVITIES } from '../data/activities.js';
+import { StillActivity } from './activity/still.js';
+import { RepsActivity } from './activity/reps.js';
+import { HoopActivity } from './activity/hoop.js';
+import { HeaderActivity } from './activity/header.js';
+import { StepActivity } from './activity/step.js';
+import { SlackActivity } from './activity/slack.js';
+import { TrayActivity } from './activity/tray.js';
+import { PierActivity } from './activity/pier.js';
+import { JogActivity } from './activity/jog.js';
+import { LongStandActivity } from './activity/longstand.js';
+export const KINDS = { longstand: LongStandActivity, jog: JogActivity, pier: PierActivity, tray: TrayActivity, slack: SlackActivity, still: StillActivity, reps: RepsActivity, hoop: HoopActivity, header: HeaderActivity, step: StepActivity };
+export function registerAll(app) {
+  app.register('title', (a, args) => new FrontScene(a, args));
+  app.register('hub', (a, args) => new HubScene(a, args));
+  app.register('weighin', (a, args) => new WeighInScene(a, args));
+  app.register('report', (a, args) => new ReportScene(a, args));
+  app.register('ferry', (a, args) => new FerryScene(a, args));
+  app.register('ending', (a, args) => new EndingScene(a, args));
+  app.register('jar', (a, args) => new JarScene(a, args));
+  app.register('locker', (a, args) => new LockerScene(a, args));
+  app.register('records', (a, args) => new RecordsScene(a, args));
+  app.register('animviewer', (a, args) => new AnimViewerScene(a, args));
+  app.register('join', (a, args) => new JoinScene(a, args));
+  app.register('card', (a, args) => new CardScene(a, args));
+  app.register('podium', (a, args) => new PodiumScene(a, args));
+  app.register('activity', (a, args) => { const A = ACTIVITIES[args.id]; const C = KINDS[A.kind]; if (!C) throw new Error('no class for ' + A.kind); return new C(a, args); });
+}

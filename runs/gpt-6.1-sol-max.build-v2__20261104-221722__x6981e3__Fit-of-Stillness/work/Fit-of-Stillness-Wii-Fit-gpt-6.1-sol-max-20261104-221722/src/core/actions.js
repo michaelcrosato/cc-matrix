@@ -1,0 +1,4 @@
+export const PAD_BUTTONS = { 0:'PadCross',1:'PadCircle',2:'PadSquare',3:'PadTriangle',4:'PadL1',5:'PadR1',6:'PadL2',7:'PadR2',8:'PadCreate',9:'PadOptions',10:'PadL3',11:'PadR3',12:'PadUp',13:'PadDown',14:'PadLeft',15:'PadRight' };
+export const ACTIONS = { confirm: ['Enter','Space','KeyE','PadCross'], back: ['Escape','Backspace','PadCircle','MouseRight'], pause: ['Escape','KeyP','PadOptions'], up: ['ArrowUp','KeyW','PadUp'], down: ['ArrowDown','KeyS','PadDown'], left: ['ArrowLeft','KeyA','PadLeft'], right: ['ArrowRight','KeyD','PadRight'], tabL: ['KeyQ','PadL1'], tabR: ['KeyE','PadR1'], breath: ['Space','PadR2','PadCross','MouseLeft'], stepL: ['KeyF','ArrowLeft','PadL1','PadL2','MouseLeft'], stepR: ['KeyJ','ArrowRight','PadR1','PadR2','MouseRight'] };
+export const pressed = (input, action) => ACTIONS[action].some(k => input.wasPressed(k));
+export const held = (input, action) => input.anyDown(ACTIONS[action]);

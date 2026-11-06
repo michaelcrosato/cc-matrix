@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 16:20:33",
+    "source": "Far Cry 2",
+    "plan": "PLAN.md",
+    "genre": "Open-world first-person shooter with survival pressure and systemic fire",
+    "perspective": "First person on foot, at the wheel and in story scenes, with an optional chase camera in vehicles",
+    "tech": "Pixel Engine (riftlight) 0.46.0, three.js r186, Rapier 0.20, esbuild 0.28.2, Playwright 1.63.0 for tests; game code in plain JavaScript modules",
+    "artDirection": "The engine native 3D-as-pixel-art look at 480x270, toon materials, 16-colour palette; new models written as data for people, guns, vehicles and buildings; sand, orange and red land with plum shadows",
+    "animation": "Engine ClipDef data compiled to AnimationMixer clips on the hero rig, lower/upper body layering, Ragdoll on death; first-person hands and guns keyed by data clips",
+    "audio": "All sound written in code: SoundDef effects, Song music (default volume 10 percent), and Animalese-style gibberish voices; no audio files",
+    "online": "AI Hub Session Protocol v1, shared-world mode, 1 to 4 players (Cash Run); also solo with hired guns and a same-computer link",
+    "testing": "Headless Node suites (static, systems, playthrough, replay) plus Playwright Chromium on file:// and the AI Hub harness scenarios; no review subagents",
+    "research": "The plan supplied with the brief, the engine kit GUIDE/ASSETS/API docs and the AI Hub protocol README; no other research",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "15 logged in tests/ISSUES.md, plus a few small ones fixed on the spot.",
+    "9 of the 15.",
+    "The scripted playthrough: a bot plays M0 to both endings through the real key, mouse and hold-to-use input, with different choices in two runs. It exposed the frozen AI positions, the Rapier panic and the broken mission wiring that no unit test saw.",
+    "The attract-mode run: it proves the tour loops without errors but cannot say whether any beat looks right; only screenshots can, and software rendering shows about one frame a second."
+  ],
+  "engineFeedback": [
+    "Engine.headless with step(): fast, repeatable play in Node, and models, textures and sounds as plain data that a sheets tool and renderSound can check without a display. The pixel pipeline makes everything look like one game at once.",
+    "Yes: Node read pixel-engine.js as CommonJS until package.json said type module; CharacterController.feet returns a fresh vector, not a live one, so my AI froze; removing a controller body with physics.remove panics Rapier; the headless camera is not first person unless asked.",
+    "Everything that makes it a game: the 5 m fire grid and its look, first-person hands and wear and jams, soldier AI, the mission and dialogue runner, the screen and prompt system, and the Cash Run netcode.",
+    "First person and menus: replacing the rig step, owning pointer lock, a HUD with only a 5x7 font, and judging a 3D scene at one frame a second without being able to watch it move.",
+    "none",
+    "Give CharacterController a documented dispose and a live feet vector, so characters can be retired and read safely."
+  ],
+  "promptFeedback": [
+    "The plan decided what to build and listed verified engine traps, so effort went into building; the cut order and the done list kept scope honest.",
+    "How much a single run can finish: the plan is a whole game plus multiplayer, attract mode and dev mode, and some rules pull against each other, such as six items a screen against twenty balance sliders.",
+    "Breadth: keeping nine systems consistent while every check ran headless, and proving the story could be finished by a bot.",
+    "Name a minimum bar and a budget, and say which cuts are acceptable up front; split the plan into milestones with their own done lists."
+  ],
+  "aiHub": {
+    "name": "Far Pry 2",
+    "tagline": "Everything fails. The grass remembers.",
+    "description": "An original first-person war-zone survival shooter: guns that rust and jam, a fever on a timetable, grass fires that follow the wind, three friends for hire and a map that turns out to be the plot. Includes the Cash Run shared-world mode for 1 to 4 players.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Far Cry 2",
+    "series": "Far Cry",
+    "players": "1–4",
+    "controls": "Pad: sticks move and look, R2 fire, L2 aim, Square use or reload, L1 heal, D-pad up map. Keyboard and mouse: WASD, mouse, LMB fire, RMB aim, E use, R reload, Q heal, M map.",
+    "tags": [
+      "first-person",
+      "pixel art",
+      "co-op",
+      "versus",
+      "vehicles",
+      "story"
+    ]
+  }
+}

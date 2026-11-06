@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:40:15",
+    "source": "Trauma Center: Second Opinion",
+    "plan": "PLAN.md",
+    "genre": "Simulation",
+    "perspective": "Fixed overhead view of the operative field",
+    "tech": "Pavilion engine (Shardfall commit 49ef2ba), Rust 1.98.1, wgpu/WebGPU, wasm-bindgen 0.2.129, egui 0.36.2",
+    "artDirection": "Cel-shaded overhead operative field painted per vertex, with layered paper-theatre cards for story",
+    "animation": "Simulation-driven tissue, instruments, heartbeat, and paper-card motion",
+    "audio": "Synthesized music, effects, and short gibberish voices. No audio files. Music bus defaults to 0.10",
+    "online": "Optional AI Hub shared-world Code Blue for 1-4 surgeons",
+    "testing": "Deterministic sim suite, headless shell, Chromium file:// launches, hub harness",
+    "research": "Engine seams and the hub protocol, recorded in PLAN.md",
+    "environment": "Grok CLI (headless); Linux",
+    "model": "xAI, grok-4.7, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing caught five issues: a Rust or-pattern guard skipped stage-0 sutures, nearest-hazard selection stole forceps pulls, a sac's swell shared the laser charge meter, hub snapshots waited on a 60 Hz accumulator that never fired in an iframe, and ControlFlow::Poll cancelled the pending animation frame so an operation froze after one tick.",
+    "5",
+    "The most helpful checks were a skill-1.0 bot on every case from a fresh scene, and the hub harness traffic counters once the frame loop actually ticked.",
+    "The least helpful test was a temporary print probe that only dumped stuck hazards and was removed once the selection bug was fixed."
+  ],
+  "engineFeedback": [
+    "The Game hook, recorded input, RenderFrame, headless egui, and the single-file packer.",
+    "Yes. A colon in the project path makes rustc fail joining LD_LIBRARY_PATH, and the demo frame path captures the camera, pause menu, and touch layer unless a game returns first.",
+    "The operative rules, the plate mesh, the ten-foot shell, the cue and music buses, and the hub shim.",
+    "Keeping a surgery scene off the demo boot panel, stats, guide, toasts, and the engine pause menu.",
+    "Added the surgery frame, surgeon input, and cue event; a view emit and camera shot; a product frame branch; audio buses and formants; session.js injection in the packer; and js-sys. On the web the surgery loop waits for animation frames, because Poll cancelled the pending frame. The hook alone cannot draw, play cues, or join a hub.",
+    "A first-class per-game frame path, so a new game does not have to outrun the demo loop."
+  ],
+  "promptFeedback": [
+    "The tested camera, light, and palette numbers, and a hub shim that the harness had already accepted.",
+    "The deliverable folder name must contain a colon, which Cargo cannot use as its working directory.",
+    "Shipping one packed page that is the full game, a hub client, and a file:// WebGPU build.",
+    "Say at the start that the Cargo target directory cannot contain a colon."
+  ],
+  "aiHub": {
+    "name": "Hands of Harbor: Second Opinion",
+    "tagline": "Night Ward. Keep the beat. Keep them alive.",
+    "description": "Overhead surgical melodrama for one to four surgeons at Mercy Harbor General in Port Verity.",
+    "type": "Game",
+    "genre": "Simulation",
+    "source": "Trauma Center: Second Opinion",
+    "series": "Trauma Center",
+    "players": "1–4",
+    "controls": "Right stick or mouse aims, R2 or left click operates, left stick or 1–8 picks tools",
+    "tags": ["3d", "story", "co-op", "arcade", "boss fights"]
+  }
+}

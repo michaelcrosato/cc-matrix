@@ -1,0 +1,33 @@
+// Sound effects as data (engine SoundDef). Registered at boot on the engine's AudioManager.
+export const SFX_DEFS = {
+  tick: { wave: 'square', duty: 0.125, freq: 1800, freqEnd: 1500, decay: 0.03, volume: 0.25 },
+  chimeIn: { wave: 'triangle', freq: 660, decay: 0.35, volume: 0.45, arp: [0, 7, 12], arpRate: 0.05 },
+  chimeOut: { wave: 'triangle', freq: 440, freqEnd: 330, decay: 0.3, volume: 0.35 },
+  wobble: { wave: 'square', duty: 0.25, freq: 220, freqEnd: 180, decay: 0.18, volume: 0.25, vibrato: { depth: 1, rate: 14 } },
+  repTick: { wave: 'square', duty: 0.5, freq: 520, decay: 0.05, volume: 0.3 },
+  stepPerfect: { wave: 'triangle', freq: 880, decay: 0.14, volume: 0.5, arp: [0, 12], arpRate: 0.04 },
+  stepGood: { wave: 'triangle', freq: 660, decay: 0.1, volume: 0.4 },
+  stepMiss: { wave: 'noise', freq: 600, decay: 0.08, volume: 0.25 },
+  combo: { wave: 'square', duty: 0.25, freq: 523, decay: 0.3, volume: 0.35, arp: [0, 4, 7, 12], arpRate: 0.06 },
+  bonk: { wave: 'sine', freq: 300, freqEnd: 90, decay: 0.16, volume: 0.6, layers: [{ wave: 'noise', freq: 900, decay: 0.05, volume: 0.3 }] },
+  thwap: { wave: 'noise', freq: 1400, decay: 0.12, volume: 0.45, layers: [{ wave: 'square', duty: 0.25, freq: 200, freqEnd: 90, decay: 0.1, volume: 0.3 }] },
+  whirr: { wave: 'sawtooth', freq: 140, decay: 0.4, sustain: 0.2, volume: 0.12, vibrato: { depth: 2, rate: 9 } },
+  splash: { wave: 'noise', freq: 700, decay: 0.7, volume: 0.6, layers: [{ wave: 'sine', freq: 200, freqEnd: 60, decay: 0.4, volume: 0.4 }] },
+  gust: { wave: 'noise', freq: 300, attack: 0.2, sustain: 0.4, decay: 0.5, volume: 0.3 },
+  squawk: { wave: 'sawtooth', freq: 900, freqEnd: 450, decay: 0.22, volume: 0.35, vibrato: { depth: 3, rate: 22 } },
+  drip: { wave: 'sine', freq: 1200, freqEnd: 500, decay: 0.12, volume: 0.45 },
+  starPop: { wave: 'square', duty: 0.25, freq: 784, decay: 0.28, volume: 0.4, arp: [0, 5, 12], arpRate: 0.07 },
+  move: { wave: 'square', duty: 0.125, freq: 700, decay: 0.04, volume: 0.22 },
+  confirm: { wave: 'triangle', freq: 600, decay: 0.12, volume: 0.45, arp: [0, 7], arpRate: 0.05 },
+  back: { wave: 'triangle', freq: 500, freqEnd: 330, decay: 0.1, volume: 0.35 },
+  ow: { wave: 'square', duty: 0.25, freq: 520, freqEnd: 240, decay: 0.22, volume: 0.45 },
+  deny: { wave: 'square', duty: 0.5, freq: 180, decay: 0.1, volume: 0.3 },
+  fanfare2: { wave: 'triangle', freq: 523, decay: 0.7, volume: 0.5, arp: [0, 4, 7, 12, 16], arpRate: 0.09 },
+  thud: { wave: 'sine', freq: 140, freqEnd: 50, decay: 0.2, volume: 0.6 },
+  rumble: { wave: 'noise', freq: 120, attack: 0.1, sustain: 0.6, decay: 0.6, volume: 0.45 },
+  clap: { wave: 'noise', freq: 2400, decay: 0.05, volume: 0.35 },
+  sneeze: { wave: 'noise', freq: 1800, freqEnd: 600, decay: 0.2, volume: 0.45 },
+  whistle: { wave: 'sine', freq: 1500, freqEnd: 1900, decay: 0.3, volume: 0.35, vibrato: { depth: 0.6, rate: 8 } },
+};
+export const SFX_NAMES = Object.keys(SFX_DEFS);
+export function registerSfx(audio) { for (const [k, d] of Object.entries(SFX_DEFS)) audio.register(k, d); }

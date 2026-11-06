@@ -1,0 +1,1 @@
+No change. `/goal clear` ends the goal.

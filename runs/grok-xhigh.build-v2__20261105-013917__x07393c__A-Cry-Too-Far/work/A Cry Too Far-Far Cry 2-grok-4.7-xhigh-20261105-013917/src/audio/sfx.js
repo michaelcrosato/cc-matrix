@@ -1,0 +1,85 @@
+/** Every effect is a SoundDef. Nothing is loaded from a file. */
+
+function crack(freq, decay = 0.12, volume = 0.4) {
+  return {
+    wave: 'noise', freq, decay, volume,
+    layers: [
+      { wave: 'sine', freq: freq * 0.5, decay: decay * 1.4, volume: volume * 0.45 },
+      { wave: 'triangle', freq: freq * 0.25, decay: 0.08, volume: volume * 0.2 },
+    ],
+  };
+}
+
+const NAMES = [
+  ['gun-cane', crack(180, 0.08, 0.3)],
+  ['gun-m38', crack(420, 0.14, 0.45)],
+  ['gun-flare', crack(700, 0.2, 0.35)],
+  ['gun-tractor', crack(320, 0.09, 0.4)],
+  ['gun-mule', crack(220, 0.16, 0.5)],
+  ['gun-empire', crack(260, 0.22, 0.5)],
+  ['gun-weed', { wave: 'noise', freq: 400, sustain: 0.2, decay: 0.05, volume: 0.35 }],
+  ['gun-tube', crack(140, 0.28, 0.55)],
+  ['gun-mg', crack(360, 0.06, 0.35)],
+  ['gun-molotov', crack(500, 0.1, 0.3)],
+  ['gun-charge', crack(110, 0.3, 0.5)],
+  ['gun-far', { wave: 'noise', freq: 200, decay: 0.25, volume: 0.15, layers: [{ wave: 'sine', freq: 90, decay: 0.3, volume: 0.1 }] }],
+  ['jam-click', { wave: 'square', freq: 180, decay: 0.03, volume: 0.25 }],
+  ['slap', { wave: 'noise', freq: 800, decay: 0.04, volume: 0.3 }],
+  ['rack', { wave: 'noise', freq: 1200, decay: 0.06, volume: 0.28, layers: [{ wave: 'square', freq: 240, decay: 0.04, volume: 0.12 }] }],
+  ['magazine', { wave: 'noise', freq: 900, decay: 0.05, volume: 0.22 }],
+  ['shell', { wave: 'triangle', freq: 1400, decay: 0.04, volume: 0.18 }],
+  ['cylinder', { wave: 'square', freq: 320, decay: 0.05, volume: 0.16 }],
+  ['flare-pop', crack(900, 0.08, 0.3)],
+  ['flare-hiss', { wave: 'noise', freq: 5000, decay: 0.4, volume: 0.12 }],
+  ['flame-roar', { wave: 'noise', freq: 300, sustain: 0.3, decay: 0.1, volume: 0.3 }],
+  ['bottle', crack(600, 0.12, 0.35)],
+  ['rocket', crack(160, 0.25, 0.45)],
+  ['explosion', crack(80, 0.45, 0.6)],
+  ['ricochet', { wave: 'square', freq: 1800, freqEnd: 400, decay: 0.08, volume: 0.2 }],
+  ['whip', { wave: 'noise', freq: 2500, decay: 0.05, volume: 0.15 }],
+  ['hit-flesh', { wave: 'noise', freq: 200, decay: 0.08, volume: 0.3 }],
+  ['hit-metal', { wave: 'square', freq: 540, decay: 0.1, volume: 0.25 }],
+  ['fall-apart', crack(150, 0.3, 0.4)],
+  ['step-dirt', { wave: 'noise', freq: 180, decay: 0.05, volume: 0.2 }],
+  ['step-grass', { wave: 'noise', freq: 400, decay: 0.04, volume: 0.16 }],
+  ['step-road', { wave: 'noise', freq: 700, decay: 0.04, volume: 0.18 }],
+  ['step-wood', { wave: 'square', freq: 220, decay: 0.05, volume: 0.16 }],
+  ['step-water', { wave: 'sine', freq: 300, decay: 0.1, volume: 0.18, layers: [{ wave: 'noise', freq: 800, decay: 0.08, volume: 0.1 }] }],
+  ['breath', { wave: 'noise', freq: 600, attack: 0.05, decay: 0.25, volume: 0.1 }],
+  ['heartbeat', { wave: 'sine', freq: 60, decay: 0.12, volume: 0.35, layers: [{ wave: 'sine', freq: 90, delay: 0.16, decay: 0.1, volume: 0.2 }] }],
+  ['syrette', { wave: 'noise', freq: 3000, decay: 0.2, volume: 0.12 }],
+  ['pliers', { wave: 'square', freq: 240, decay: 0.08, volume: 0.22 }],
+  ['knife', { wave: 'noise', freq: 1600, decay: 0.06, volume: 0.2 }],
+  ['snap', { wave: 'noise', freq: 2000, decay: 0.03, volume: 0.22 }],
+  ['lighter', { wave: 'noise', freq: 1000, decay: 0.1, volume: 0.18 }],
+  ['tablets', { wave: 'noise', freq: 2500, decay: 0.05, volume: 0.14 }],
+  ['grunt', { wave: 'saw', freq: 140, decay: 0.15, volume: 0.2 }],
+  ['fire-loop', { wave: 'noise', freq: 500, sustain: 0.4, decay: 0.1, volume: 0.2 }],
+  ['wind-loop', { wave: 'noise', freq: 250, sustain: 0.5, decay: 0.2, volume: 0.12 }],
+  ['insects', { wave: 'square', freq: 3200, decay: 0.04, volume: 0.06, layers: [{ wave: 'square', freq: 4100, delay: 0.08, decay: 0.03, volume: 0.04 }] }],
+  ['birds', { wave: 'triangle', freq: 1800, freqEnd: 2200, decay: 0.12, volume: 0.1 }],
+  ['engine', { wave: 'saw', freq: 70, sustain: 0.2, decay: 0.05, volume: 0.2 }],
+  ['gravel', { wave: 'noise', freq: 900, decay: 0.1, volume: 0.15 }],
+  ['brakes', { wave: 'saw', freq: 200, freqEnd: 80, decay: 0.2, volume: 0.18 }],
+  ['door', { wave: 'noise', freq: 150, decay: 0.12, volume: 0.25 }],
+  ['horn', { wave: 'square', freq: 220, sustain: 0.15, decay: 0.1, volume: 0.25 }],
+  ['starter', { wave: 'saw', freq: 50, decay: 0.3, volume: 0.22 }],
+  ['wrench', { wave: 'square', freq: 300, decay: 0.06, volume: 0.2 }],
+  ['train', { wave: 'noise', freq: 120, decay: 0.1, volume: 0.25, layers: [{ wave: 'sine', freq: 80, decay: 0.08, volume: 0.15 }] }],
+  ['whistle', { wave: 'sine', freq: 880, sustain: 0.2, decay: 0.15, volume: 0.2 }],
+  ['paper', { wave: 'noise', freq: 2000, decay: 0.08, volume: 0.16 }],
+  ['tracker', { wave: 'square', freq: 1400, decay: 0.04, volume: 0.18 }],
+  ['radio', { wave: 'noise', freq: 1500, decay: 0.1, volume: 0.12 }],
+  ['thunder', { wave: 'noise', freq: 60, decay: 0.7, volume: 0.4 }],
+  ['rain', { wave: 'noise', freq: 4000, sustain: 0.4, decay: 0.1, volume: 0.1 }],
+  ['distant-guns', crack(300, 0.2, 0.12)],
+  ['ui-move', { wave: 'square', freq: 660, decay: 0.04, volume: 0.12 }],
+  ['ui-confirm', { wave: 'square', freq: 880, decay: 0.06, volume: 0.16 }],
+  ['ui-back', { wave: 'square', freq: 330, decay: 0.05, volume: 0.12 }],
+];
+
+export const SFX = Object.fromEntries(NAMES);
+
+export function registerSfx(audio) {
+  for (const [name, def] of NAMES) audio.register(name, def);
+}

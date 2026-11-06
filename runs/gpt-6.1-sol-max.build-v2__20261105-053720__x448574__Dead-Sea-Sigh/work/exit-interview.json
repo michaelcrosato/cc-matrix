@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 05:37:20",
+    "source": "Far Cry 2",
+    "plan": "PLAN.md",
+    "genre": "Open-world survival shooter",
+    "perspective": "First person",
+    "tech": "my-3D2dge v0.88.0 (0a463102), World3D, three.js r182, Rapier 0.19.3, esbuild 0.28.2; self-contained HTML with AI Hub Session Protocol v1 client 1.4.0.",
+    "artDirection": "Native low-poly pen geometry, outlines, chunky terrain and pixel UI; original rusted weapons, vehicles, trawlers, lighthouse, dam and held paper tools.",
+    "animation": "Native procedural IK soldier skeleton; first-person keyframes and procedural hands for tools, reloads, jams, surgery, steering and the wheel.",
+    "audio": "Original code-generated synth music at 10% by default, Karplus-Strong plucked strings, layered weapon effects, ambient loops and subtitled Animalese-style gibberish voices; no audio files.",
+    "online": "AI Hub shared-world Salvage Rights for 1–4 players: host-authoritative fire, AI, diamond cases, banking, scores, PvP, vehicle ownership and respawns. Solo mode has three AI rivals.",
+    "testing": "Allowed headless scripted and whole-game playthrough tests; screenshots for visual checks; emulated controller and touch profiles; OfflineAudioContext; AI Hub harness at 150 ms latency, 50 ms jitter and 5% loss. One test command prints failures and one count.",
+    "research": "Read the supplied PLAN.md and TASK.md, the pinned engine manual/API/asset documentation and source, and AI Hub protocol/client/harness. No additional source-game research.",
+    "environment": "Codex CLI (headless); Linux, Ubuntu 26.04 under WSL2. No physical controller, real iOS Safari, TV or human audio listening available.",
+    "model": "OpenAI, gpt-6.1-sol, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing and direct visual/input checks caught 27 distinct implementation issues, recorded and fixed in test/ISSUES.md. Test-fixture mistakes and shared-machine browser terminations are excluded.",
+    "11 were considered critical: the opening, progression/combat, multiplayer consistency, targeting and combat, controller usability, rendered boot, alternate-contract progression and Firefox module import.",
+    "The full campaign bot was most helpful: it used the real step/input seam to complete every contract and each ending, exposing shot alignment and convoy progression problems. Renderer checks additionally caught errors handled internally by the engine.",
+    "The earliest screenshot smoke check watched only uncaught page errors; it missed errors caught by game.fail. The final tests inspect both browser errors and game.errors."
+  ],
+  "engineFeedback": [
+    "The deterministic step/input seam and the combination of streamed World3D terrain, Rapier physics, procedural skeletons and overlay pen made a large offline first-person game practical.",
+    "I initially passed a null weapon into the native pose solver for unarmed NPCs, applied recoil before casting shots, and treated pre-warmup readiness as completed scene startup. Tests exposed these assumptions.",
+    "The most important custom system was wind-driven persistent fire connected to vegetation, actors, smoke, sickness, vehicles, story consequences and host-authoritative multiplayer.",
+    "The hardest part was coordinating engine units and metres, world and eye-space geometry, native pose assumptions, asynchronous shader warmup and early multiplayer readiness.",
+    "Patched the World3D vehicle draw seam to honor o.draw for original vehicle models. Added a page prelude supplying absent standard GPU flag constants so three r182 can import its WebGL fallback in Firefox. Other systems and visual adaptations live in game modules.",
+    "I would expose a documented first-person game scaffold with an unarmed pose, vehicle draw hook, explicit scene-ready versus renderer-ready phases and a cross-browser single-file build."
+  ],
+  "promptFeedback": [
+    "The five gameplay pillars, original setting, concrete contracts, acceptance checks and verified engine recipes made the intended experience clear.",
+    "No essential story ambiguity. The difference between a complete campaign and a feature-complete demo made the expected scope unusually broad; engine units and metres also required continual attention.",
+    "The hardest work was making fire, weapon wear, the lung, buddy permanence, story progression, hands, controller UX and shared-world networking operate as one playable game.",
+    "I would include machine-readable acceptance fixtures and distinguish mandatory vertical-slice content from optional campaign expansion, while keeping the explicit no-stubs rule."
+  ],
+  "aiHub": {
+    "name": "Dead Sea Sigh",
+    "tagline": "Everything wears out.",
+    "description": "A mercenary with a ruined lung works both sides of a burned-out republic on a dead inland sea. Fire spreads, guns jam, friends die for good, and the dam waits.",
+    "type": "Game",
+    "genre": "Shooter",
+    "source": "Far Cry 2",
+    "series": "Far Cry",
+    "players": "1–4",
+    "controls": "Stick or WASD move, stick or mouse look, R2 or click fire, L2 or right click aim, Square or E use; M map, N locator, B monocular, H medicine; Options or Esc pause.",
+    "tags": [
+      "3d",
+      "first-person",
+      "vehicles",
+      "exploration",
+      "story",
+      "versus"
+    ]
+  }
+}

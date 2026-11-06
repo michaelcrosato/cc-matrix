@@ -1,0 +1,58 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 16:20:48",
+    "source": "Resident Evil 4",
+    "plan": "PLAN.md",
+    "genre": "Third-person action-horror shooter with crowd control, resource management and an escort",
+    "perspective": "Over-the-shoulder third person with a laser sight; letterboxed cinematic cameras; one on-rails shooting finale",
+    "tech": "Riftlight pixel-engine 0.46.0 (three.js r186 WebGPU, Rapier), plain JavaScript modules bundled with esbuild, AI Hub session client 1.4.0",
+    "artDirection": "The engine native pixel style at 480 by 270 with a soft vignette: palette toon materials, data-driven puppets and props, plus library props for generic things",
+    "animation": "Engine clip system on the hero rig: masked upper and lower layers, about 60 new clips and gaits, spring-chain scarf, ragdolls, head look",
+    "audio": "All code, no files. Ten original songs as data with music at 10 percent by default, about 60 synthesised sound effects, Animalese-style gibberish voices per speaker",
+    "online": "AI Hub Session Protocol v1 shared-world co-op (1 to 4); standalone parties over BroadcastChannel and WebRTC invite codes with a public STUN server",
+    "testing": "Headless node scripts and Playwright browsers on this computer, behind one command (node tools/test.mjs): a scripted whole-game playthrough, unit and AI suites, stubbed gamepad, phone profile, Web Audio levels, two-page parties, the AI Hub harness. The game itself, the AI Hub harness and a stubbed touch-only device also ran in Firefox with WebGPU forced on, a virtual display and a null audio sink. WebKit has no WebGPU here, so it shows the clear message. No subagents for review. No human playtest.",
+    "research": "Read the design plan, the engine kit guide, API and assets docs, and the AI Hub protocol README and example. No web research on the source.",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-opus-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "52, itemised in docs/TESTING.md: 21 from the whole-game bot playthrough, 9 from the node suites, 11 from browser and harness runs, 10 from captures, 1 from checking the code against the plan. Bugs in the bot or the tests themselves are not counted, and how to split or merge an issue is a judgement call.",
+    "15. For example: reloading a checkpoint left the game stuck; set pieces changed shared level data and broke every retry; a mid-vault checkpoint put you inside a wall; the road had no door action; the final boss could not be hurt; launch mines could not be shot; Night Shift crashed on its first frame; opening the Case with Triangle dropped your gun; Esc opened Pause and shut it in the same frame; hub traffic starved under slow rendering, and a host leaving early could fail the hub check.",
+    "The scripted whole-game playthrough in Node. It runs about 60 times faster than real time, so one run of the entire game took under a minute, and it found most of the game-breaking bugs.",
+    "The per-sound render checks. They stayed green after the first run. They guard against typos, but never found a gameplay problem."
+  ],
+  "engineFeedback": [
+    "Engine.headless. The same game code runs in Node with no GPU, deterministic and very fast, so a bot can play the whole game. A close second is writing models, textures and clips as plain data.",
+    "A few times. One model id clashed with the library (armchair) and the catalog threw. shelf is not an id, it is bookshelf. TEXTURE_LIBRARY.get throws rather than returning null. I also wrongly blamed dropped pad presses at time scale 0 for a menu bug that was my own; a direct test showed pad presses work there. And I wrongly concluded the game could not run in Firefox here, because my first attempt had no display. A full-size ground collider silently blocked shots at things below y = 0.",
+    "The Intent layer with the shared Bot and the story stage system. Everything else, from attract mode to the playthrough test, hangs off them. After that, the over-the-shoulder aiming with hit zones built from joint positions.",
+    "Working out frame and input timing at low frame rates in the software WebGPU browser here: which presses survive, when a level swap really happens, and what can run at time scale 0.",
+    "none",
+    "An official shoulder-offset third-person rig, so a game need not replace rig.step by hand."
+  ],
+  "promptFeedback": [
+    "The plan is a complete design with verified engine facts, real numbers and a real script. I could spend the effort on building instead of guessing. The originality guardrails were clear too.",
+    "Mostly the Online line, which is only a link, until the plan explained it. The plan also lists more animations and props than a single vertical slice strictly needs, so I had to judge where a shared clip was good enough.",
+    "Keeping every system working together across a long linear game alone: the Dame, the crowd AI, checkpoints and set pieces all interact, and most of the serious bugs were at those joins. I could not judge game feel with hands on a pad here, only through the bot and screenshots.",
+    "Ask for a short human-style feel checklist that a script can approximate, and say up front which listed assets are required and which are optional. A real person should still play it: balance here was only tuned against the bot."
+  ],
+  "aiHub": {
+    "name": "PRESIDENT EVIL 4",
+    "tagline": "Kidnap and ransom, premium tier",
+    "description": "An insurance adjuster goes alone to a storm-beaten island to recover the rudest woman alive. Over-the-shoulder precision shooting, kicks, a sample case, a merchant in a diving helmet, and a villain on the loudspeakers.",
+    "type": "Game",
+    "genre": "Horror",
+    "source": "Resident Evil 4",
+    "series": "Resident Evil",
+    "players": "1–4",
+    "controls": "Pad: L2 aim, R2 fire, Cross kick and action, Circle run. Keyboard and mouse: WASD, right mouse aim, left mouse fire, E action, Shift run.",
+    "tags": [
+      "3d",
+      "third-person",
+      "horror",
+      "co-op",
+      "boss fights",
+      "pixel art"
+    ]
+  }
+}

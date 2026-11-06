@@ -1,0 +1,16 @@
+// A first clear, measured: the whole game through its real scenes on game time, at a first-timer's pace. It reads every story page, walks the ward and talks to everyone, reads each chart, and on a loss restarts the case, taking the offered Intern.
+import { load } from '../tests/lib.mjs';
+console.warn = () => {}; const { G, game: g } = load({ draw: false }); const I = g.input, B = G.Bot; const K = { n: 0 };
+G.Bot = class extends B { constructor(o) { const k = Math.pow(.8, K.tries || 0); super({ ...o, seed: 1 + (K.n++), speed: 150 + (1 - k) * 80, react: 2 * k, err: 4 * k, phaseRead: 3 * k, beatErr: .35 * k }); } };
+G.testBot = true; g.fadeTime = .22; g.advance(.5); g.go('difficulty'); g.advance(.5); G.SCENES.difficulty.i = 1; I.tap('confirm'); g.advance(.4);
+const name = () => G.sceneName(g.scene), T = { }; let t = 0, cases = {}, lost = 0, wasted = 0, opStart = 0, cur = null; const adv = s => { g.advance(s); t += s; const n = name(); T[n] = (T[n] || 0) + s; };
+while (t < 4 * 3600 && !(name() === 'title' && T.credits)) { const n = name();
+  if (n === 'story') { const V = G.storyView; if (V.cardT > 0 || V.player) { adv(.25); continue; } const talk = G.story.talk; if (talk.open && talk.typing) { adv(.1); continue; } adv(2.2); I.tap('confirm'); adv(.05); }
+  else if (n === 'chart') { const C = G.SCENES.chart; if (C.stage === 'chart') { adv(6); I.tap('confirm'); adv(.1); } else if (C.stage === 'lightbox') { if (!C.result) { adv(10); C.cur = C.c.lightbox.at.slice(); I.tap('confirm'); adv(.1); } adv(.5); } else adv(.25); }
+  else if (n === 'ward') { const W = G.SCENES.ward; const people = W.people.slice(); for (const p of people) { const d = Math.hypot(p.x - W.hero.x, p.y - W.hero.y); W.hero.x = p.x + 12; W.hero.y = p.y; adv(d / 95); W.talk(p); while (W.wardTalk.running) { const tk = W.wardTalk.talk; if (tk.typing) { adv(.1); continue; } adv(2.2); I.tap('confirm'); adv(.05); } } const d = Math.hypot(W.door.x - W.hero.x, W.door.y - W.hero.y); adv(d / 95); W.leave(); adv(.4); }
+  else if (n === 'op') { const id = G.op.S.caseId; if (cur !== id) { cur = id; cases[id] = { tries: 1, won: 0, all: 0 }; } adv(.5); cases[id].all += .5; cases[id].last = (cases[id].last || 0) + .5; }
+  else if (n === 'lost') { const c = cases[cur]; lost++; wasted += c.last || 0; c.last = 0; c.tries++; K.tries = c.tries - 1; adv(4); const L = G.SCENES.lost, low = L.items.findIndex(q => q.startsWith('Lower')), rs = L.items.indexOf('Restart case'); L.m.i = low >= 0 ? low : rs; I.tap('confirm'); adv(.5); }
+  else if (n === 'results') { K.tries = 0; adv(6); I.tap('confirm'); adv(.2); I.tap('confirm'); adv(.2); }
+  else if (n === 'credits') { adv(1); if (G.SCENES.credits.stage === 'last') { adv(1.2); I.tap('confirm'); adv(.3); } }
+  else if (n === 'about') { adv(10); I.tap('cancel'); adv(.3); } else adv(.25); }
+const m = s => +(s / 60).toFixed(1); const out = { reachedEnd: name() === 'title' && !!T.credits, errors: g.errors.length, totalMin: m(t), withoutFailedTriesMin: m(t - wasted - lost * 4.5), failedTriesMin: m(wasted), losses: lost, byScene: Object.fromEntries(Object.entries(T).map(([k, v]) => [k, m(v)])), perCaseAllTriesMin: Object.fromEntries(Object.entries(cases).map(([k, c]) => [k, c.tries + ' tries, ' + m(c.all)])) }; console.log(JSON.stringify(out, null, 1));

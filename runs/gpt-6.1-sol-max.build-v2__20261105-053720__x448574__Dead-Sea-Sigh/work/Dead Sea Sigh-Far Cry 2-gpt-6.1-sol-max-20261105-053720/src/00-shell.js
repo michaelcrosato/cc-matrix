@@ -1,0 +1,16 @@
+const E=My3D2dge,W3=E.World3D,{clamp,lerp,approach,TAU}=E;
+const GAME_TITLE='Dead Sea Sigh',M=16,HM=2048,SIZE=HM*M;
+const GRAV=314,JUMP=95,WALK=68,RUN=118,CROUCH=40,EYE=26,FOV=70;
+const KEYS={up:['KeyW','ArrowUp','Pad12'],down:['KeyS','ArrowDown','Pad13'],left:['KeyA','ArrowLeft','Pad14'],right:['KeyD','ArrowRight','Pad15'],jump:['Space','Pad0'],crouch:['KeyC','ControlLeft','Pad1'],sprint:['ShiftLeft','ShiftRight','Pad10'],fire:['Mouse0','Pad7'],aim:['Mouse2','Pad6'],use:['KeyE','Pad2'],reload:['KeyR','Pad2'],swap:['KeyQ','Pad3'],melee:['KeyV','Pad11'],bottle:['KeyF','Pad4'],grenade:['KeyG','Pad5'],map:['KeyM','Pad12'],locator:['KeyN','Pad15'],monocular:['KeyB','Pad14'],heal:['KeyH','Pad13'],radio:['KeyL'],seat:['Tab'],zoomIn:['WheelUp'],zoomOut:['WheelDown'],one:['Digit1'],two:['Digit2'],three:['Digit3'],start:E.Input.DEFAULT.start,pause:E.Input.DEFAULT.pause,confirm:E.Input.DEFAULT.confirm,cancel:E.Input.DEFAULT.cancel};
+const TUNE_DEFAULTS={fireSpread:1,wind:.65,wear:1,jam:1,enemyAccuracy:1,enemyDamage:1,enemySight:1,playerDamage:1,lung:1,rescueChance:.8,postRespawn:.4,carTop:1,dayLength:90};
+const TUNE={...TUNE_DEFAULTS},CHEATS={god:false,ammo:false,noclip:false,noFits:false,noJams:false,freezeAI:false,reveal:false};
+const inSession=!!window.__hub,NO_RENDER=/[?&]norender/.test(location.search);
+const SETTINGS=[...W3.SETTINGS.filter(s=>s.key!=='look3d').map(s=>s.key==='picture3d'?{...s,value:'balanced'}:s),{key:'music',value:.1},{key:'glyphs',value:'playstation',options:[['playstation','PlayStation'],['xbox','Xbox']]},{key:'difficulty',label:'Difficulty',group:'Game',options:['Contractor','Veteran','Dead Man'],value:'Veteran'}];
+const game=new E.Game({canvas:'screen',res:'ps1',expand:true,bg:null,input:KEYS,touch:'never',autoPause:!inSession,live:inSession,menu:{settings:SETTINGS,controls:{fire:'Fire',aim:'Aim',jump:'Jump / vault',crouch:'Crouch',sprint:'Sprint',use:'Use / enter / exit',reload:'Reload / clear jam',swap:'Next weapon',melee:'Machete / kick',bottle:'Fire bottle',grenade:'Grenade',map:'Held map',locator:'Locator',monocular:'Monocular',heal:'Syrette / hold for ampoule',radio:'Vehicle radio',seat:'Technical gun seat'},items:inSession?[]:[['Dev mode',()=>openDev()],['About / Credits',()=>showAbout()]],saves:inSession?false:{version:1},quit:inSession?false:'title'}});
+const A=game.audio,P=game.particles,scenes={},BOOT=[];
+const prompt=(action,text)=>game.input.label(action)+'  '+text;
+let world=null,hero=null,pb=null,S=null,rnd=E.rng(1),drawT=0,active=null;
+const raiders=[],loot=[],nades=[],vehicles=[],people=[];
+const N2=E.noise2,sstep=(a,b,x)=>{const t=clamp((x-a)/(b-a),0,1);return t*t*(3-2*t);};
+const fbm=(x,y,o)=>{let v=0,a=1,t=0;for(let k=0;k<o;k++){v+=a*N2(x,y);t+=a;a*=.5;x=x*2.03+17.1;y=y*2.03+3.7;}return v/t;};
+const veil=(g,r,y0=0,a=.5)=>{g.save();g.fillStyle='#100f0c';g.globalAlpha=a;g.fillRect(0,y0,r.bw,r.bh-y0);g.restore();g._c=null;};

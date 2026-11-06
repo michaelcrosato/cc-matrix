@@ -1,0 +1,15 @@
+import {chromium} from '@playwright/test';
+import {globSync} from 'node:fs';
+import {resolve} from 'node:path';
+const executablePath=globSync('/home/micha/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell')[0];
+const browser=await chromium.launch({executablePath,args:['--enable-unsafe-webgpu','--enable-features=Vulkan','--use-vulkan=swiftshader','--use-angle=swiftshader']});
+console.log('Browser launched');
+const page=await browser.newPage({viewport:{width:1920,height:1080}});
+page.on('pageerror',e=>console.log('ERROR',String(e)));
+page.on('console',m=>{if(m.type()==='error')console.log('CONSOLE',m.text().slice(0,600));});
+await page.goto('file://'+resolve('../Bar-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-072516.html')+'?game.attract=off',{waitUntil:'domcontentloaded'});
+console.log('Page parsed');
+await page.waitForFunction(()=>window.__engine?.ready===true,undefined,{timeout:120000}).catch(e=>console.log('WAIT',String(e).slice(0,200)));
+console.log(JSON.stringify(await page.evaluate(()=>({ready:window.__engine?.ready,errors:window.__engine?.errors,screen:window.__game?.screen(),text:document.body.innerText.slice(0,1500),info:window.__engine?.info?.()}))));
+await page.screenshot({path:'out/title.png'});
+await browser.close();
