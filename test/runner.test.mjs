@@ -457,9 +457,9 @@ test('stages: a plan branches into builds and each build into content passes, ea
   assert.match(csv, /plan:opus-max > build:sol-max > content:sonnet-medium/);
 });
 
-test('stages: a stage that doesn\'t name TASK.md gets none, not even its parent\'s: it has PLAN.md and its own text, and its exit interview still counts', (t) => {
-  const stages = [{ id: 'plan', text: 'Plan TASK.md. FAKE:plan', game: false },
-    { id: 'build', text: 'Build PLAN.md. Source: {{source}}. File: {{package}} Save exit-interview.json beside the game.', goal: 'all STAGE.md asks for is in this folder' },
+test('stages: a stage that doesn\'t name TASK.md gets none, not even its parent\'s: it has PLAN.md and its own text, and the exit interview PLAN.md asks for counts', (t) => {
+  const stages = [{ id: 'plan', text: 'Plan TASK.md, with its exit-interview.json. FAKE:plan', game: false },
+    { id: 'build', text: 'Build the game PLAN.md describes. Your model is {{model}}, your effort is {{effort}}.', goal: 'all PLAN.md asks for is in this folder' },
     { id: 'content', text: 'Polish the game as TASK.md says.' }];
   const sb = sandbox({ dimensions: { source: [{ id: 'z', text: 'Zelda' }], package: [{ id: 'p', text: 'G-{{model}}-{{effort}}.html' }] }, agents: stageAgents, stages, template: 'SOURCE: {{source}}\nFile: {{package}}\n' });
   t.after(() => cleanup(sb));
@@ -469,9 +469,9 @@ test('stages: a stage that doesn\'t name TASK.md gets none, not even its parent\
   assert.ok(all.every((x) => x.status === 'ok'), r.all);
   assert.ok(fs.existsSync(path.join(sb.out, of('plan')[0].id, 'work', 'TASK.md')), 'the plan names it, so it gets it');
   for (const b of of('build')) {
-    const work = path.join(sb.out, b.id, 'work'), text = `Build PLAN.md. Source: Zelda. File: G-${b.model}-${b.effort}.html Save exit-interview.json beside the game.\n`;
+    const work = path.join(sb.out, b.id, 'work'), text = `Build the game PLAN.md describes. Your model is ${b.model}, your effort is ${b.effort}.\n`;
     assert.ok(!fs.existsSync(path.join(work, 'TASK.md')), `${b.id}: no TASK.md, not even the plan's`);
-    assert.ok(fs.existsSync(path.join(work, 'PLAN.md')), b.id);
+    assert.match(fs.readFileSync(path.join(work, 'PLAN.md'), 'utf8'), /exit-interview\.json/);
     assert.equal(fs.readFileSync(path.join(sb.out, b.id, 'prompt.md'), 'utf8'), text);
     assert.equal(b.exitInterview, 'ok', b.id);
     if (b.provider === 'claude') assert.equal(fs.readFileSync(path.join(work, 'STAGE.md'), 'utf8'), text);

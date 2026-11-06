@@ -1312,10 +1312,11 @@ function plannerInterview(home) {
 }
 // exitInterview: whether a run left the exit interview its prompt asks for (exit-interview.json beside the game, one
 // JSON object; see run-record.mjs): ok, invalid or missing. Left out when its prompt (for a stage run TASK.md, or its
-// stage's text if it has none) doesn't ask for one, and for a plan, which makes no game.
+// stage's text and PLAN.md if it has none) doesn't ask for one, and for a plan, which makes no game.
 function exitInterview(home, stage, expectsGame) {
   const read = (f) => { try { return fs.readFileSync(path.join(home, f), 'utf8'); } catch { return null; } };
-  if (expectsGame === false || !((stage ? read('work/TASK.md') : null) ?? read('prompt.md') ?? '').includes(EXIT_FILE)) return {};
+  const asked = stage ? read('work/TASK.md') ?? `${read('prompt.md') ?? ''}\n${read('work/PLAN.md') ?? ''}` : read('prompt.md') ?? '';
+  if (expectsGame === false || !asked.includes(EXIT_FILE)) return {};
   const text = read(path.join('work', EXIT_FILE));
   return { exitInterview: text == null ? 'missing' : parseInterview(text).error ? 'invalid' : 'ok' };
 }

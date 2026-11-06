@@ -77,7 +77,7 @@ def main():
             out['error'] = str(e).strip().splitlines()[0][:300]
         finally:
             browser.close()
-        if webgpu: webgpu_picture(p, html, shot, min(secs, 45)) # my-3dge takes about 40 s to boot
+        if webgpu: webgpu_picture(p, html, shot, min(secs, 45)) # a WebGPU game can take most of a minute to boot in software
     for k, v in (('pageErrors', errs), ('consoleErrors', cons), ('failedRequests', failed)):
         out[k] = len(v)
         if v: out[k + 'First'] = firsts(v)
