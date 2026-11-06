@@ -92,8 +92,9 @@ export async function run(cli) {
     : cli === 'grok' ? after(argv, '-p') : argv[argv.length - 1];
   const goal = /^\/goal /.test(msg ?? '');
   const read = (f) => fs.existsSync(f) ? fs.readFileSync(f, 'utf8') : '';
-  const prompt = goal ? (/STAGE\.md/.test(msg) ? `${read('STAGE.md')}\n${read('TASK.md')}` : read('TASK.md'))
+  const given = goal ? (/STAGE\.md/.test(msg) ? `${read('STAGE.md')}\n${read('TASK.md')}` : read('TASK.md'))
     : `${msg ?? ''}${/TASK\.md/.test(msg ?? '') ? `\n${read('TASK.md')}` : ''}`;
+  const prompt = `${given}${/PLAN\.md/.test(given) ? `\n${read('PLAN.md')}` : ''}`; // a stage that points at PLAN.md reads it
   // env: what keeps a run on its own (the runner's isolate), as the CLI got it.
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => /^(DISPLAY|WAYLAND_DISPLAY|CLAUDE_CODE_DISABLE_(AUTO_MEMORY|CLAUDE_MDS)|GROK_(MEMORY|CLAUDE_\w+_ENABLED))$/.test(k)));
   if (process.env.FAKE_LOG) fs.appendFileSync(process.env.FAKE_LOG, JSON.stringify({ cli, argv, cwd: process.cwd(), stdin, goal, env,
@@ -118,7 +119,7 @@ export async function run(cli) {
     reply = 'You\'ve hit your 5-hour limit · resets 10:10am (America/Vancouver)';
     if (!limit[1]) { fs.mkdirSync('src', { recursive: true }); fs.writeFileSync(path.join('src', 'partial.js'), 'console.log("half a game");\n'); }
   } else if (/smoke\.txt/.test(prompt)) { fs.writeFileSync('smoke.txt', 'ok\n'); reply = 'SMOKE-OK'; }
-  else if (!fail && /FAKE:plan/.test(prompt)) fs.writeFileSync('PLAN.md', `# Plan by ${model}\n\n1. Engine\n2. Levels\n3. Polish\n`);
+  else if (!fail && /FAKE:plan/.test(prompt)) fs.writeFileSync('PLAN.md', `# Plan by ${model}\n\n1. Engine\n2. Levels\n3. Polish\n${/exit-interview\.json/.test(prompt) ? '\nHand in exit-interview.json.\n' : ''}`);
   else if (!fail && !hang && !/FAKE:nogame/.test(prompt)) { // a hang makes its dev file below, as it gets going
     fs.mkdirSync('src', { recursive: true });
     fs.writeFileSync(path.join('src', 'main.js'), 'console.log("game");\n');
