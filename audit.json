@@ -1,775 +1,498 @@
 {
- "title": "The next batch's prompts (Nov 4, evening), and the v6 batch (Nov 3–4)",
- "date": "2026-11-04",
- "summary": "**The next batch's prompts (Nov 4, evening).** I read what plan and build runs are sent now, as the runner fills it in a dry run (nothing ran). That covers Setup · Basic's prompt, with the config as you'd saved it at 7:20 pm (8 sources, 5 tech stacks, Haiku out of build), and Setup · Advanced's plan and build stages. I checked what they say against this computer, the four engine repos and the v6 agents' answers.\n\nThe prompt holds up for my-3d2dge:\n\n- Every placeholder fills.\n- The stage texts do what you decided.\n- The planner's review is read and flagged.\n- PROGRESS.md is worth having: 15 of 24 Opus xhigh builds in v6 were compacted.\n\nThe problems are in what's new. Four of the five tech stacks meet text written for my-3d2dge (STACK-1). And this computer has WebGPU, though the agents are told it doesn't (ENV-4). The new findings are at the top of each severity: tick **Unread only** to see just them. Everything below is the v6 audit as it was.\n\n**Later the same evening** you answered, and the fixes went in: each finding says what was done. Then you installed shardfall's two system packages and left tech-v4 as it is, so nothing from this review is left open.\n\n**The v6 batch.** I went through all 120 runs of prompt v6 (Nov 3, 17:47 to Nov 4, 10:55): 24 plans by Opus 5.5 at max effort, each built four times, by Opus xhigh, Opus medium, Sonnet medium and Haiku medium. I read the goal checks in every transcript. Three helper agents read and tagged all 1,344 exit-interview answers, and a fourth read the 24 planners' replies. I spot-checked their counts against the raw answers. I also loaded all 96 games in headless Chromium. Nothing real was run: the dashboard and runner changes were tested in sandboxes with the fake CLIs, and `runs/` is as it was.\n\nWhat we learned, in short:\n\n1. **The goal check decided the outcome more than the models did.** 73 of 96 builds never passed it, and Claude Code stopped 64 of them after 9 blocked stops. The last checks mostly asked for things this computer can't show (a real pad, sound heard, a person playing) or for proof the agent's own tests couldn't give, and TASK.md forbade asking anyone else. $544 (22%) of the build spend came after a builder first tried to stop. #22 changed the goal and added the machine file after this batch started, so the next batch is the test of that fix (GOAL-1 to GOAL-3).\n\n2. **The plan is the next lever.**\n   - Every builder said the plan is too big, and 77 asked for a must/should/could ranking (PLAN-1).\n   - 23 of 25 plans write the plan run's own file names, which 67 builders had to translate (PLAN-2).\n   - The title rule pulls two ways: 10 builds re-drew the title, and 2 that kept the plan's were marked down for it (PLAN-3).\n\n3. **Opus xhigh is the builder that finishes.**\n   - It met the goal 13 times, against 8 for Opus medium, 2 for Sonnet and 0 for Haiku.\n   - It costs $96 per goal met, the lowest of the four (Opus medium $115, Sonnet $138).\n   - Haiku stopped after 29 minutes (median) and openly cut features (MODEL-1 to MODEL-3).\n\n| | Opus xhigh | Opus medium | Sonnet medium | Haiku medium |\n|---|---|---|---|---|\n| Goal met | 13 of 24 | 8 of 24 | 2 of 24 | 0 of 24 |\n| Stopped by Claude Code | 7 | 15 | 22 | 20, and 4 timed out |\n| First tried to stop (median) | 124 min | 75 min | 41 min | 29 min |\n| Time (median) | 162 min | 110 min | 56 min | 56 min |\n| Cost (median / total) | $54 / $1,253 | $38 / $919 | $10 / $275 | $6 / $147 |\n| Cost per goal met | $96 | $115 | $138 | none met |\n| Issues its own testing found (median) | 33 | 25 | 10 | 12 |\n| Changed the engine | 24 | 24 | 19 | 11 |\n| Drew its own title | 1 | 2 | 0 | 7 |\n| Game size (median) | 1,746 KB | 1,641 KB | 1,467 KB | 1,425 KB |\n| Attract demo starts on its own (within 2 min) | 24 | 24 | 23 (1 throws on every frame) | 23 (1 throws on every frame) |\n| No touch-only notice | 0 | 0 | 2 | 3 |\n\n4. **Run data had a hole.** None of the 64 builds Claude Code stopped kept its final reply: the CLI's result was empty, though the answer was in the output. The runner now reads it, and `--reparse` fills the 64 in. That rewrites committed run data, so the permission check stopped me, and it's your call (DATA-1).\n\n5. **The computer was under strain.**\n   - All 24 planners filled /tmp, which is held in memory, by downloading the engine and hub repos into it at the same time. 6.4 GB of older agent leftovers are still there.\n   - 33 test servers that agents started are still running (ENV-1, ENV-2).\n\n6. **The games mostly hold up when loaded cold.** All 96 load headless without an error. Two attract modes throw on every frame, and 5 games skip the touch-only notice, though their builders' tests passed (GAME-1).\n\nThe Insights tab gained **What the agents said**, which shows every answer to one question across the runs in view, by model, with a search. It also has a check that the builds of one plan keep its title. Engine feedback for the my-3D2dge repo is under Engine.\n\n**Since then (Nov 4, later):**\n\n- The 64 lost replies are back, and the 378 older games carry their record.\n- /tmp and the stray servers are cleaned up.\n- Builders draw their own titles, and Usage is added on import.\n- The runner gives each run its own temp folder, stops what an agent leaves running, and loads every finished game headless for a minute (the game check).\n- Haiku stays in the dashboard but won't be a primary builder. At this plan size it pays its higher price on 93% of calls, so a build costs half of a Sonnet build, and it met no goals (MODEL-1).\n\nThe v6 audit left three decisions under Your call.",
- "decisions": [
-  {
-   "title": "Check the finished games: `node run-matrix.mjs --check-games` (GAME-1)",
-   "detail": "New runs get the game check as they end. This command checks the games already in `runs/` that haven't been checked: about 70 s per game, two at a time. That's about an hour for the 96 v6 games and about 4 hours for all 470 or so. It writes `gameCheck` into each result.json and a `game-check.png` beside it. It never touches the game files."
-  },
-  {
-   "title": "Watch the goal check in the next batch (GOAL-3)",
-   "detail": "If builders still get blocked for lacking an \"independent\" review, either allow one review subagent at the end, or say in the goal that the agent's own tests count."
+  "title": "Riftlight review (Nov 6): the runs, what the agents said, a light look at the games, the plans then and now, and home's GPT runs",
+  "date": "2026-11-06",
+  "summary": "**28 finished Riftlight builds and 7 plans.** 20 builds are Claude's. 8 are from other models in the first batch, and all of those are flagged with `*` in Results. RegrettableEvil4 (Opus xhigh) was still going at 18 hours, so it isn't counted.\n\n**In short:** all 28 games load, run and make sound, and 26 of the 28 agents say the whole-game bot was their most helpful test. Claude's and GPT Sol's builds all look like real games in this light look, with one visible bug. Grok's and Muse's are rougher. Agents' top engine requests repeat: errors that fail silently, per-pad input, a menu layer and proper camera rigs.\n\n**What this was:** I read every result and exit interview, then opened each game on the graphics card. I watched its demo, pressed through its menus and gave it crude input. **Nobody played these games properly, me included,** so this says nothing about feel or how they play past the first minutes.\n\n**Also here:** the HOME findings cover the GPT Sol runs on your home computer, as pushed by 07:33 on Nov 6 (commit a91c8b4). More runs are still coming, so those are a snapshot. Six agents reviewed that branch from a separate copy, three reading and three checking, and I verified the points below that you'd act on. Nothing was merged.",
+  "decisions": [
+    {
+      "title": "Check home's Codex credits now (HOME-5)",
+      "detail": "Its week was at 92% at 06:54 and a new batch started at 07:27. Past 100% it spends paid credits, which the dashboard can't see. Only you can check this: it's on the home computer."
+    },
+    {
+      "title": "Turn Retry failed off before lifting GPT's hold on this computer (HOME-2)",
+      "detail": "It's on now. With it on, lifting the hold deletes 5 finished GPT games here and pays to rebuild them, because a harmless reconnect message labelled them failed."
+    },
+    {
+      "title": "Decide what to take from home's branch when it's finished (HOME-4)",
+      "detail": "I'd take the queue change, the Playwright lookup, the environment file and the run data, and leave the GPT-only config out of this computer. The `.gitignore` narrows your \"commit every run file\" rule, so that one needs your yes. Are there dashboard edits still at home? `dashboard.mjs` and `dashboard.html` are unchanged on the branch."
+    },
+    {
+      "title": "Your next run: Shardfall on the new stages",
+      "detail": "You said the next run starts fresh on Shardfall, and that it will show how the new stages work: only stand-in CLIs have run them so far. The paused batch's Priority rules hold Shardfall, and its pause applies to every batch, so those have to be cleared or that batch ended first. Tell me when and I'll do it."
+    },
+    {
+      "title": "Have the game check press a key (GAME-2)",
+      "detail": "The check loads a game and leaves it alone, so it passed WhyFit, which shows an error banner after one key press. Adding a press after the demo starts would catch that kind of bug, at about a minute a game. It's a repo change, so it's yours to call."
+    },
+    {
+      "title": "Pass the engine requests to each engine's repo (ENGINE-1 to ENGINE-4, ENGINE-6)",
+      "detail": "Your rule: engine problems go to an agent in that engine's repo, and cc-matrix stays out of them. For Riftlight, making quiet failures throw is the smallest change with the biggest payoff."
+    }
+  ],
+  "findings": [
+    {
+      "id": "GAME-1",
+      "severity": "high",
+      "area": "Games",
+      "status": "note",
+      "title": "WhyFit shows a GAME ERROR banner to the player if a key is pressed during part of its demo",
+      "found": "Let the demo run, press a key while it's showing the island, and a purple banner appears: `GAME ERROR: TypeError: Cannot read properties of null (reading 'day')`. It stays on screen for the rest of the session, over the title and into the game. The game still works underneath it.\n\nIt happened at 9 of 13 press times tried: every one from 12 to 23 s, plus 44 and 55 s; not at 5, 26, 30 or 36 s.\n\n**Cause:** leaving the demo clears the player's save slot (`stopAttract` in `src/app.js`), but the island scene draws once more before the title loads, and reads `S.day` from the empty slot. A fresh player has no save, so they're the ones who hit it.\n\n**Also once:** in one late press the demo kept playing for 20 s through four key presses. I couldn't repeat that in two further tries.",
+      "did": "Not fixed: this is a finished run's game. It would be a one-line guard in `HubScene.draw`. Its agent couldn't have seen it through the game check, because the check doesn't press anything (GAME-2).",
+      "check": "Fresh page per try, one key press at a set time. The stack names `HubScene.draw`.",
+      "where": [
+        "claude-sonnet-5-5-medium.build-v2__20261105-012138__x6981e3__WhyFit/work/…/src/app.js:148",
+        "…/src/scenes/hub.js:201"
+      ]
+    },
+    {
+      "id": "GAME-2",
+      "severity": "medium",
+      "area": "Testing",
+      "status": "yours",
+      "title": "The game check only loads a game and waits, so it misses bugs that need a key press",
+      "found": "All 28 games passed it with 0 errors. In this review, pressing keys found 1 error it missed (GAME-1).",
+      "did": "Your call (see above). I didn't change it.",
+      "check": "28 games in two passes, with page errors and console errors logged by phase.",
+      "where": [
+        "check-game.py"
+      ]
+    },
+    {
+      "id": "GAME-3",
+      "severity": "medium",
+      "area": "Games",
+      "status": "note",
+      "title": "The Claude and Sol builds all look like real games, and Grok and Muse are rougher",
+      "found": "Claude's 19 builds besides WhyFit, and all 3 of Sol's, look finished in these moments: clean menus, readable text, and a demo showing real play. On this look I can't separate Sonnet from Opus, except that FarPry2 is the weakest. The longest builds don't look better than the shortest: TollBoothOfDoom (11.4 h) against Diabellical (2.8 h), FarDrySeason (16.1 h) against FarCryUncle (7.2 h). That's presentation only, not depth, balance or feel.\n\nStrongest first impressions: FarCryUncle, Trauma Ward (Sol), WeFitIn, HonkIfYouOwe, GranTumbleweed, Diabellical.\n\nRougher:\n- **Fit-Getaway (Muse, 0.3 h):** text overlapping the scale, and grey boxes that look like debug drawing.\n- **Mint-Dial (Grok):** text across the characters, with low contrast.\n- **A Cry Too Far (Grok):** flat and sparse (GAME-4).\n- **The Second Opinion Clinic (Grok):** a flat surgical field, and PRESS hidden behind the figures.\n- **A Little Off Balance (Terra):** clean, but it looks like a web app, not the engine's pixel look. Terra compacted 65 times in that build ([Codex catalog gap, Nov 5]), so don't judge the model by it.",
+      "did": "No action. The Screens table below has every game.",
+      "check": "Six screenshots per game at 1280×720 and six at 1920×1080: title, demo at 10 to 55 s, after key presses, and in play."
+    },
+    {
+      "id": "GAME-4",
+      "severity": "medium",
+      "area": "Games",
+      "status": "note",
+      "title": "A Cry Too Far: the menu starts on About and Credits, so Enter opens that, and its text overlaps",
+      "found": "The title menu's cursor sits on the last item instead of New Game, so pressing Enter from the title opens About. \"NEXT PAGE\" and \"BACK\" are then drawn on top of the source lines. Escape, Down and Enter still left it on the About screen, so I didn't get into the game with the keyboard.",
+      "did": "Not fixed: a finished run's game. Grok's first-batch build.",
+      "check": "Six key presses from a fresh load, with a screenshot after each."
+    },
+    {
+      "id": "GAME-5",
+      "severity": "medium",
+      "area": "Games",
+      "status": "note",
+      "title": "The Far Cry 2 builds and TollBoothOfDoom run at 14 to 27 fps on the card here",
+      "found": "Most games hold near 60 fps at 1080p. Measured alone for 20 s, with only the last build running beside them:\n\n| Game | Model | fps |\n|---|---|---|\n| FarPry2, in play | Sonnet medium | 14 |\n| TollBoothOfDoom, in its demo | Sonnet medium | 14 |\n| Hardly Far Cry, in play | Sol max | 22 |\n| FarDrySeason, in play | Opus medium | 26 |\n| PresidentEvil4, in its demo | Opus medium | 27 |\n\nA Cry Too Far holds 60 fps because it draws so little.",
+      "did": "Worth trying in Chrome on Windows, which I can't do from here. This route goes through WSL's graphics layer and WebGPU's compatibility mode, so real numbers may be better.",
+      "check": "Frame counts over 20 s on the RTX 3060 Ti, one browser at a time."
+    },
+    {
+      "id": "GAME-6",
+      "severity": "low",
+      "area": "Games",
+      "status": "note",
+      "title": "Both Opus Animal Crossing builds can peak above full scale on sound",
+      "found": "HonkIfYouOwe peaked at 1.52 and 1.34 in two passes, and SillyFolk at 1.19 once, during the opening dialogue. Above 1.0 can clip. The others stay under 1.0.\n\n**The 10% music rule looks fine:** title music peaks at 0.03 to 0.13 on 27 games. The 28th, WhyFit, read 0 because it was still in its demo. All 28 are silent until the first key press, which browsers require anyway.",
+      "did": "Nobody has listened to these. Worth a listen on the two builds.",
+      "check": "An analyser tapped on what reaches the audio output, polled every 120 ms."
+    },
+    {
+      "id": "GAME-7",
+      "severity": "low",
+      "area": "Games",
+      "status": "note",
+      "title": "13 games sit inside dark borders at 1280×720, and fill the screen at 1080p",
+      "found": "All Animal Crossing, Far Cry 2, Gran Turismo 3 and Resident Evil 4 builds use whole-number pixel scaling, so at 720p they fill about 75% of the width. Fine on a TV, but smaller on a laptop.",
+      "did": "No action.",
+      "check": "Compared the 1280×720 and 1920×1080 passes."
+    },
+    {
+      "id": "DATA-1",
+      "severity": "medium",
+      "area": "Data",
+      "status": "note",
+      "title": "Opus xhigh tests more and finds more, which supports your read that its testing time is productive",
+      "found": "| Model | Builds | Median hours | Model working | Median cost | Output | Issues caught | Goal met |\n|---|---|---|---|---|---|---|---|\n| Opus xhigh | 6 | 4.9 | about 50% | $56 | 887K | 50 | 4 of 6 |\n| Opus medium | 7 | 4.5 | about 32% | $41 | 629K | 33 | 3 of 7 |\n| Sonnet medium | 7 | 3.2 | about 33% | $35 | 515K | 16 | 0 of 7 |\n| Sol max | 3 | 2.3 | not recorded | not recorded | 239K | 20 | no goal |\n| Grok xhigh | 3 | 3.3 | about 83% | $19 | 840K | 13 | no goal |\n| Terra max | 1 | 3.9 | not recorded | not recorded | 121K | 5 | no goal |\n| Muse max | 1 | 0.3 | not recorded | not recorded | 76K | 3 | no goal |\n\n\"Issues caught\" is each agent's own count, so treat it as a rough guide.\n\nThe long builds: 60% of build hours and about 47% of the cost came after a build first tried to stop, at a median of 2.6 hours. A test was running for 63% of build time. On RegrettableEvil4 those later hours did find real bugs: a crash, a 73-minute stalemate, a chapter that could end early. They also went into tuning a bot and the game against a deaths-per-chapter target, on up to 240 seeds.",
+      "did": "You said on Nov 6 that testing and fixing is fine when it's efficient, so I've changed nothing. The numbers are here for when you compare models.",
+      "check": "result.json for all 28, and transcripts for the 16 from this run (`game_story.mjs`, `test_share.mjs`, `goal_share.mjs` in the session scratchpad; my model-time figure matched the reported one on the 2 builds I compared)."
+    },
+    {
+      "id": "DATA-2",
+      "severity": "low",
+      "area": "Data",
+      "status": "note",
+      "title": "Sol's Trauma Ward is recorded as failed, but its game works",
+      "found": "Its run ended with `Reconnecting…` as the error, and it has no title in its folder name. The game loads, plays into surgery and has a complete interview. It looks among the best on this list, so it would be easy to skip in Results because of the failed status. It's one of 5 such false failures here (HOME-2).",
+      "did": "Left as recorded.",
+      "where": [
+        "gpt-6.1-sol-max.build-v2__20261105-031206__x24ebb3"
+      ]
+    },
+    {
+      "id": "HOME-5",
+      "severity": "high",
+      "area": "Batch",
+      "status": "yours",
+      "title": "Home's Codex week was at 92% with a new batch starting: it may be on paid credits by now",
+      "found": "Home's commit says it paused at 87% \"so the runs going could finish without spending credits\", and that it ended at 92%. The last run on the branch reads 92% at 06:54, with the reset on Nov 12. The commit says the next batch started at 07:27. At home's rate of about 12 points an hour with 16 running, that reaches 100% around 8 am. Past that, Codex spends paid credits, and no result or dashboard page records them.\n\nThat's an estimate: nothing after 06:54 has been pushed, and that batch's plans come from Astra, whose pace at home isn't measured.",
+      "did": "I can't see this from here. The newest session log in `~/.codex/sessions` at home shows the balance (`credits.balance`).",
+      "check": "Home's commits a91c8b4 and 44081a5, and the plan windows in result.json."
+    },
+    {
+      "id": "HOME-2",
+      "severity": "high",
+      "area": "Data",
+      "status": "yours",
+      "title": "A \"Reconnecting\" message labels finished GPT runs as failed, and Retry failed would delete them",
+      "found": "The runner marks a run failed on any `error` event in Codex's stream. Codex sends those while reconnecting, even when it then falls back to HTTPS and finishes. These 5 Sol builds here all exit 0, reach `turn.completed`, and have a game and an interview, but they're labelled failed:\n\n- `x54facc` my-3dge, Wii Fit\n- `x29b4d9` tech-v5, Wii Fit\n- `x24ebb3` riftlight, Trauma Center (Trauma Ward)\n- `xc21248` tech-v5, Far Cry 2\n- `xd6caf5` my-3d2dge-v3, Diablo 3\n\n5 more at home are the same: 4 max and 1 ultra.\n\n**The risk:** Retry failed is on in the live batch, and GPT is on hold. A retried run deletes its old folder when the new name differs, and names carry the start time. So lifting GPT's hold with Retry on would delete those 5 games and pay to rebuild them.",
+      "did": "Nothing changed. Turn Retry failed off before lifting the hold. The real fix is to count a run as failed only on `turn.failed` or a non-zero exit, and that's a repo change for you to call.",
+      "check": "Read each log's end and the code: `isDone` treats only status ok as done, and the folder is removed on retry.",
+      "where": [
+        "run-matrix.mjs:984",
+        "run-matrix.mjs:485",
+        "run-matrix.mjs:1472"
+      ]
+    },
+    {
+      "id": "HOME-1",
+      "severity": "medium",
+      "area": "Batch",
+      "status": "note",
+      "title": "Home's GPT runs: high completion holds, but 24 at once lasted 44 minutes before memory ran short",
+      "found": "| Stage and effort | Runs | Labelled OK | Median minutes |\n|---|---|---|---|\n| One-shot, max | 47 | 39 | 53 |\n| One-shot, ultra | 51 | 50 | 30 |\n| Plan, ultra | 22 | 22 | 15.5 |\n| Build, max | 21 | 21 | 93.5 |\n| Build, ultra | 20 | 20 | 51 |\n\n**Completion:** 152 of 161 are labelled OK (94.4%). All 157 that started reached their end. 4 never started, because the environment file was missing, and 5 are false failures (HOME-2).\n\n**Not in those numbers:** the PC's sleep cut off 16 runs, which started over. 6 planned one-shots have no record, because a stopped run's folder is deleted, so the cause is unknown. 3 builds were held back by the pause.\n\n**24 at once:** one stretch, 19:14 to 19:58, all one-shot max. Home's own commit says \"Parallel runs lowered to 16 at about 19:50, when memory ran short\", and the next batch ran \"16 at a time\". So 16 was the working level on 16 GB. Ultra and the builds never went above 16. Logs from the 24 stretch show a run seeing 1.2 GB available with all 8 GB of swap used, and some browsers dying or hanging, though nothing proves a memory kill. No memory log came from home.\n\n**No spiralling:** 0 compactions in 157 runs, and about $700 of tokens at list price.\n\n**Quality is unmeasured.** The game check ran on 96, all clean, and was skipped on 39. 48 of the 55 one-shot check screenshots are mostly white. In the 6 opened, the score and timers are live over a blank 3D picture. That's the game check's flags (PROMPT-2), not broken games, and #37 fixes it for checks from now on. Nobody has seen these games run.",
+      "did": "No action. Redo these numbers on the final commit, because more runs are coming.",
+      "check": "All 161 result.json, about 50 logs, and home's commit messages, with a second agent recomputing each claim."
+    },
+    {
+      "id": "HOME-3",
+      "severity": "medium",
+      "area": "Goal check",
+      "status": "note",
+      "title": "Why GPT builds are shorter: mostly no goal check, and it doesn't sit waiting on tests",
+      "found": "Compared on this computer, on the same plans and engines:\n\n- **No goal check:** Sol's prompt has no \"Done when\", so nothing ever sends it back. Where Claude's goal settled within 2 checks, Claude took 1.08 times as long as Sol. With more checks, 2.29 times. Against Claude's fastest build on each of 5 plans, Sol is only about 8% faster at the median.\n- **Test share:** a test was going for 23% of the time on Sol's 3 Riftlight builds, 38% on Claude's builds with 2 or fewer checks, and 65% on those with more.\n- **Price:** Sol's list price is 5% to 26% of Claude's (median 16.5%) on the same plans. That's list price, not what you paid.\n- **Test wording isn't it:** `test-tools-v2` and `v3` differ by one sentence about subagents.\n\n**Memory follows what's being tested more than how many runs are going.** Real earlyoom kills here: 1 on Sep 30, 5 on Oct 10, and 318 on Nov 5. There were none with 57 runs at once on Oct 29, and none with 24 Claude builds on the 2D engine on Nov 4. So the RAM should help, but software WebGPU testing and `/tmp` were the cause, not the count alone.\n\n**Max per model:** home ran up to 24 of one model with no \"at capacity\" errors, while here 2 such failures came with only 4 or 5 Sol running. So the cap of 3 here may be stricter than it needs to be. One night isn't proof.\n\nModel, Codex and the missing goal check always change together, and builds that pass early may simply be easier ones, so none of this is a clean test. It says nothing about which games are better.",
+      "did": "No action. Your call on Nov 6 was that testing is fine when it's productive.",
+      "check": "Same-plan pairs from result.json, plus timing from 9 Sol session logs on this computer. Home's logs have no timestamps, so its own test share is only estimated."
+    },
+    {
+      "id": "HOME-4",
+      "severity": "medium",
+      "area": "Dashboard",
+      "status": "yours",
+      "title": "What to take from home's branch, and how",
+      "found": "`dashboard.mjs` and `dashboard.html` are unchanged on this branch, so any page edits you made at home haven't been pushed. All 101 Node tests pass on it. No browser tests were run.\n\n| Commit | What | Recommendation |\n|---|---|---|\n| 98ed0fa | Queue game by game | Take it: it only changes one-shot batches, and the live batch's dry run came out identical |\n| 49a424b | Find Playwright in its pipx folder | Take it |\n| 9ef09e9 | Home's environment file | Take it: this computer never reads it |\n| 3524eec | `.gitignore` leaves out caches, clones and downloads | Your call: it narrows \"commit every run file\", and doesn't cover Rust `target/` (about 7.3 GB here) |\n| 44081a5 | Config: GPT only, 2,781 sources | Leave it out of this computer |\n| d30195c, a91c8b4 | Run data | Take it when home finishes, then regenerate the reports |\n\n**Why not the config:** this computer's next Start would plan 8,343 GPT runs, a Claude pick would fail, the Claude Test buttons wouldn't find their models, and the reports would relabel 386 older runs. The running batch is safe either way, because it uses its own copy.\n\n**How:** the commits touch separate files, so they can be taken one at a time. A plain fast-forward is refused today, because `runs/index.html`, `runs/prompt-history.json` and `runs/results.csv` have local changes here. New runner code applies to the next batch, and \"Restart once it has finished\" avoids cutting a build off.\n\n**Two older bugs the review found, also on main:** Preview fails on a very big queue because the dry run's output gets cut short (`run-matrix.mjs:760`), and through the dashboard a next plan can start before a finished plan's builds. A small patch closed both in a scratch copy. It isn't applied anywhere.",
+      "did": "Nothing merged, as you asked.",
+      "check": "Test runs and merge simulations in a separate clone, with stand-in CLIs and only GET requests to the live dashboard.",
+      "where": [
+        ".gitignore",
+        "run-matrix.mjs",
+        "check-environment.mjs",
+        "matrix.config.json"
+      ]
+    },
+    {
+      "id": "ENGINE-1",
+      "severity": "high",
+      "area": "Engine",
+      "status": "yours",
+      "title": "Riftlight fails silently on wrong names: the worst bugs in several runs",
+      "found": "A wrong ease name in a clip, or `sawtooth` for the wave `saw`, gives NaN with no error. `validateClip` and `analyzeClip` both stay silent. 6 of 28 agents hit this. It cost them invisible avatars, every custom animation at once, or total silence through the master bus. One called it \"the worst bug of the run\". A NaN pose can also end in a bare Rapier `unreachable` panic: 6 agents mention Rapier crashes, and one never found the cause and replaced Breakables instead.",
+      "did": "Ask: throw on unknown names and non-finite values, naming the clip or joint.",
+      "check": "Keyword count over all 28 exit interviews, then read the answers."
+    },
+    {
+      "id": "ENGINE-2",
+      "severity": "medium",
+      "area": "Engine",
+      "status": "yours",
+      "title": "No menu layer, and a HUD limited to capitals with no alpha or wrapping",
+      "found": "12 of 28 agents built their own UI layer, usually as the most important thing they built: mixed-case font, screen stack, focus, hit areas, prompts. 12 name the HUD's limits, including art sizes that differ between a 720p page (427×240) and headless (480×270). Every game with menus rebuilds this.",
+      "did": "Ask: mixed-case text and a small retained widget layer.",
+      "check": "Keyword count, then read the answers."
+    },
+    {
+      "id": "ENGINE-3",
+      "severity": "medium",
+      "area": "Engine",
+      "status": "yours",
+      "title": "Pads are merged, with no analog triggers",
+      "found": "8 of 28 raise it, and 5 say pad buttons also press keyboard keys. Racing and couch co-op games poll `navigator.getGamepads` themselves.",
+      "did": "Ask: per-pad state with analog triggers in Input.",
+      "check": "Keyword count, then read the answers."
+    },
+    {
+      "id": "ENGINE-4",
+      "severity": "medium",
+      "area": "Engine",
+      "status": "yours",
+      "title": "No first-person or shoulder camera, and other traps agents keep hitting",
+      "found": "7 of 28 had to replace the rig step, mostly Far Cry 2 and Resident Evil 4: reserved keys, pointer lock, pad map.\n\nOther repeated traps:\n- 8: transitions or promises never finish under manual `step()`.\n- 6: a model or texture id clashes with the library and throws at import, or `.get` throws.\n- 4: NavGrid's origin is the corner of cell (0,0).\n- 2, plus RE4's tipping hero: additive poses pile up on unkeyed joints, and avatars slowly fall over.\n- 2: a negative `groundFog` top washes out everything.",
+      "did": "Ask: stock camera rigs, plus clearer errors for these.",
+      "check": "Keyword count, then read the answers."
+    },
+    {
+      "id": "ENGINE-6",
+      "severity": "low",
+      "area": "Engine",
+      "status": "yours",
+      "title": "my-3dge games take most of a minute to boot in software",
+      "found": "Under software WebGPU (headless Chromium, SwiftShader), 2 my-3dge games showed their Loading screen for 43 and 60 s, then ran at about 2.5 fps. cc-matrix's game check can catch that Loading screen in its screenshot. Its errors are unaffected.",
+      "did": "For an agent in the my-3dge repo, as you said on Nov 6. I dropped a cc-matrix change that would have waited for it.",
+      "check": "Polled each page's text every 5 s on 2 games."
+    },
+    {
+      "id": "ENGINE-5",
+      "severity": "info",
+      "area": "Engine",
+      "status": "note",
+      "title": "What agents like about Riftlight is consistent",
+      "found": "24 of 28 name `Engine.headless` as the best part: the same game in Node with no GPU, so a whole playthrough takes about a minute. 17 name models and clips as plain data, and 17 the pixel look. No agent changed the engine, and several added a test proving it's byte-identical.",
+      "did": "Keep these. They're what makes the bot testing possible."
+    },
+    {
+      "id": "TEST-1",
+      "severity": "info",
+      "area": "Testing",
+      "status": "note",
+      "title": "The whole-game bot is the most useful test by a wide margin",
+      "found": "26 of 28 agents name a whole-game bot or scripted playthrough as their most helpful test. Least helpful: screenshots with no check behind them (11), text, glyph or lint checks (7), and WebKit or Firefox runs, which only show the no-WebGPU message (2). Some say the glyph scans add thousands of passes to the count and never fail.\n\n10 agents say software WebGPU made it hard to judge the look, at 1 to 15 fps, with screenshots taking from 25 seconds to 3 minutes on the shared machine. 13 say outright that feel is unjudged or nobody has played it.",
+      "did": "The card works from WSL for Riftlight at about 60 fps (tested Nov 5), but you decided not to change the test setup for now, so I left it.",
+      "check": "Keyword count, then read the answers."
+    },
+    {
+      "id": "PLAN-1",
+      "severity": "medium",
+      "area": "Plan",
+      "status": "note",
+      "title": "Nov 3 plans against Nov 4-5 plans: shorter and tested, at the same cost",
+      "found": "| Median, or share of plans | Nov 3 (25) | Nov 4-5 (27) |\n|---|---|---|\n| Length | 142K characters | 93K characters |\n| Time / cost | 51 min / $14 | 57 min / $14 |\n| Time running things, not model | 2 min | 17 min |\n| Verified recipes or engine facts section | 40% | 93% |\n| Cut list | 20% | 37% |\n| Build order | 100% | 89% |\n| Architecture section | 100% | 78% |\n| Appendices | 60% | 26% |\n| Risks section | 100% | 7% |\n| Builders who mention verified facts when asked what they liked (rough keyword count) | 2 of 100 | 33 of 34 |\n\nThe planner's instructions got shorter, but the brief grew from about 8,700 to 12,500 characters because it gained the \"This computer\" section. All 27 planners mention that section when asked what they liked most, and it appears to be what got them testing on the real machine. So simplifying probably wasn't the biggest change.\n\n**The builders' bar moved too.** The Nov 3 build goal asked for the `.html`, every feature in `TASK.md`, the interview and the reply sections. The Nov 5 goal asks for \"Everything in PLAN.md that can be done on this computer\", which takes in the plan's own test routines and every detail. That came in at the same time builds got longer, along with other changes, so I can't prove it alone.\n\n**Effect on builds: not known yet.** The runs share no source games and only one engine. On `my-3d2dge-v3` there are only 6 builds from the new plans, and they ran during the memory trouble. Goal-met rates barely moved: Opus xhigh 56% to 56%, Opus medium 32% to 33%, Sonnet 12% to 8%. The 15 queued `my-3d2dge` builds should give the first fair comparison.",
+      "did": "No action.",
+      "check": "All 52 plans' result.json, PLAN.md and TASK.md, in `plan_compare*.mjs` in the session scratchpad. Section shares come from matching heading words."
+    },
+    {
+      "id": "PLAN-2",
+      "severity": "medium",
+      "area": "Plan",
+      "status": "note",
+      "title": "What past plans left to TASK.md: the design is there, the hand-in and engine links mostly aren't",
+      "found": "You asked whether plans left out anything that was in `TASK.md`. Of the 27 `plan-v2` plans:\n\n| In `PLAN.md` itself | Plans |\n|---|---|\n| Attract mode, dev mode, 10-foot UI, hub, music at 10%, no stubs | 26 or 27 |\n| Single html file, dev folder, test rule, playthrough | 27 |\n| Controller and sound stand-ins, WebGPU flags | 25 to 27 |\n| Title rule | 13 |\n| A way to get the engine: its link, another working link, or a clone line | 20 of 27 (Riftlight 0 of 7) |\n| Machine facts: cores, RAM, versions | 9 |\n| Exit interview's shape | 7 |\n| Feedback questions | 6 or 7 |\n| File name pattern with model and effort | 7 |\n| `exit-interview.json` named | 1 |\n| Defers to \"your `TASK.md`\" somewhere | 20 |\n\nThat's what they were told to do: builders had `TASK.md`, so nothing was lost then. Without it, those are what a builder would miss.\n\n**The engine's link, corrected Nov 6.** An exact link isn't needed if the plan gives what the builder needs. Every my-3d2dge, shardfall, my-3dge and tech-v5 plan does, usually as a working `git clone` line. Only Riftlight's 7 plans don't: they say \"the kit you download\", and 2 say the URL is in `TASK.md`.\n\n**Why left out:** no planner says, because none was asked. The likeliest reason is that builders had `TASK.md`. The planner interview now asks.\n\n**Did it cause problems? No.** All 34 Claude builds read `TASK.md`, and all 32 whose engine has a link fetched the engine from it. Only 2 of their 136 prompt-feedback answers mention anything like this, and neither is about the engine. It would only have mattered without `TASK.md`, which is the new setup.",
+      "did": "#38 tells the planner to write these out, and its goal holds it to that. The engine can be its link, the planner's own instructions from reading it, or both, and the planner interview now asks \"If you left out any links from TASK.md, why?\". Those two wording changes are in this computer's config and not pushed yet.",
+      "check": "Text searches over all 27 `PLAN.md` files, tightened after the first pass matched the wrong things, so treat these as close rather than exact. Builders from their transcripts' first 400 tool calls. `plan_vs_task*.mjs`, `link_why.mjs` and `link_counts.mjs` in the session scratchpad."
+    },
+    {
+      "id": "PROMPT-1",
+      "severity": "medium",
+      "area": "Prompt",
+      "status": "fixed",
+      "title": "All 27 planners find the multiplayer line unclear",
+      "found": "\"Follow the hub for multiplayer integration into ai-hub as well as for the game on its own.\" The hub's own docs say a game outside a session is unaffected, so planners can't tell whether standalone play needs multiplayer, or only needs to keep running. Builders then built both transports or guessed.",
+      "did": "**Fixed Nov 6 in #37,** as `mp-hub-v2`, from your answer: \"Follow the hub link for multiplayer integration into ai-hub. Apart from parallel and ghost modes, every multiplayer feature is also part of the game when it's played on its own, whether through single player in ai-hub or as the self-contained html file outside ai-hub. This should take almost no extra code.\"",
+      "check": "Keyword count over all 27 planner interviews, then read the answers.",
+      "where": [
+        "matrix.config.json"
+      ]
+    },
+    {
+      "id": "PROMPT-2",
+      "severity": "medium",
+      "area": "Prompt",
+      "status": "fixed",
+      "title": "The WebGPU flags in \"This computer\" lose the device on these engines",
+      "found": "15 of 27 planners say so, and builders repeat it. The text lists `--enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader`. Planners report a lost device and a blank canvas until `--use-angle=swiftshader` is added. `check-game.py` already uses a different set, including that flag, and the environment file still has the old one.\n\nSmaller ones from the same answers: `python3 -m http.server` buffers its port line (9), `CHROMIUM_PATH` for my-3dge's tools (5), and a TMPDIR too long for a Unix socket (4).",
+      "did": "**Fixed Nov 6 in #37.** Tried on a real game from each of the 5 engines:\n\n| Flags | WebGPU games | Screenshot of a game that doesn't use WebGPU |\n|---|---|---|\n| The 3 agents were told | Device lost as the game starts | about 0.1 s |\n| The game check's 6 | Run, but the 3D picture is blank in a screenshot | about 0.2 s |\n| The engines' own 5 | Run, and the picture shows | 16 s to over a minute |\n\nAgents are now told the 5, and to use them only for WebGPU games, in place of the old note that a WebGPU canvas can come out blank. The game check checks every game as before, then takes a WebGPU game's screenshot from a second browser with the 5, which adds up to about 45 s or more per WebGPU game. A test keeps the two lists the same. my-3dge is so slow in software that its screenshot can still catch its Loading screen. Home needs `node check-environment.mjs` run after pulling, and the paused batch keeps the old text in its own copy.",
+      "check": "Device, frames and screenshots on all 5 engines with each set, the screenshots viewed side by side, then the new game check on the same games.",
+      "where": [
+        "environments/Worki9.md",
+        "check-environment.mjs",
+        "check-game.py"
+      ]
+    },
+    {
+      "id": "PROMPT-3",
+      "severity": "medium",
+      "area": "Prompt",
+      "status": "fixed",
+      "title": "Planners want to know who builds and how big, and the file-name rule contradicts the goal",
+      "found": "- 23 of 27 want to know which models build it, or on what budget.\n- 21 want to know which lines are for the planner and which for the builder.\n- 20 want a target length.\n- 13 of 28 builders agree in their own answers, asking for a ranked minimum or a cut list.\n\n**A contradiction:** the plan stage says to leave out `TASK.md`'s file names, and the goal says \"covers everything TASK.md asks for\". At least 2 of the 4 plans forced past their goal check failed on exactly that.",
+      "did": "**Fixed Nov 6 in #37 and #38,** from your answers. The Build tab only points at `PLAN.md`: \"Build the game PLAN.md describes\", the model, effort and stamp for its file names, which a plan can't know, and the `PROGRESS.md` line. A stage's runs get `TASK.md` only if its text or goal names it. `plan-v4` says `PLAN.md` is the only thing the builders get and they build all of it, and its goal takes file names as patterns, which ends the contradiction. The budget is in the Stage 1 prompt: assume it's unlimited, and don't let it influence the work.\n\n**Left out, as you decided:** a target length, because the planner decides how much is built and the builders build it. Who builds isn't named either. Home's `plan-v3` does that in one sentence, if you want it.\n\n**One thing to watch:** a plan now carries its computer's notes, so a plan made here and built at home has this computer's.",
+      "check": "Keyword counts, the 4 plans' goal reasons, and read the answers.",
+      "where": [
+        "matrix.config.json"
+      ]
+    }
+  ],
+  "changes": [],
+  "screens": {
+    "summary": "Every finished Riftlight game, opened read-only on the graphics card with no errors on load. This is a light look only: demo, menus and crude input, not real play. Far Cry 2, Resident Evil 4 and Gran Turismo 3 got as far as starting a mission or a first test. Diablo 3's three never got past character creation with keys alone, so its demo stands in for play.",
+    "note": "2 sizes, no real play",
+    "rows": [
+      {
+        "device": "HonkIfYouOwe (Animal Crossing)",
+        "engine": "Opus xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "sound peaks above 1.0"
+      },
+      {
+        "device": "SillyFolk (Animal Crossing)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "sound peaks above 1.0 once"
+      },
+      {
+        "device": "CreditorCreek (Animal Crossing)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "Diabellical (Diablo 3)",
+        "engine": "Opus xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "TolledYouSo (Diablo 3)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "TollBoothOfDoom (Diablo 3)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "14 fps in its demo"
+      },
+      {
+        "device": "FarCryUncle (Far Cry 2)",
+        "engine": "Opus xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "FarDrySeason (Far Cry 2)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "26 fps in play"
+      },
+      {
+        "device": "FarPry2 (Far Cry 2)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "14 fps in play, low-contrast title"
+      },
+      {
+        "device": "Hardly Far Cry (Far Cry 2)",
+        "engine": "Sol max",
+        "size": "1280×720, 1920×1080",
+        "result": "22 fps in play"
+      },
+      {
+        "device": "A Cry Too Far (Far Cry 2)",
+        "engine": "Grok xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "Enter opens About, text overlaps, plain look"
+      },
+      {
+        "device": "GranTumbleweed (Gran Turismo 3)",
+        "engine": "Opus xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "GrandpaTurismo (Gran Turismo 3)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "GranTourniquet (Gran Turismo 3)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "PresidentEvil4 (Resident Evil 4)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "27 fps in its demo"
+      },
+      {
+        "device": "ResidentHull4 (Resident Evil 4)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "TraumaCentralSecondStitch (Trauma Center)",
+        "engine": "Opus xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "SecondStitch (Trauma Center)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "TraumaCantina (Trauma Center)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "Trauma Ward (Trauma Center)",
+        "engine": "Sol max",
+        "size": "1280×720, 1920×1080",
+        "result": "recorded as failed, game works"
+      },
+      {
+        "device": "The Second Opinion Clinic (Trauma Center)",
+        "engine": "Grok xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "plain surgery view, title text hidden"
+      },
+      {
+        "device": "WeFitIn (Wii Fit)",
+        "engine": "Opus xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "WibbleFit (Wii Fit)",
+        "engine": "Opus medium",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "WhyFit (Wii Fit)",
+        "engine": "Sonnet medium",
+        "size": "1280×720, 1920×1080",
+        "result": "error banner after a key press"
+      },
+      {
+        "device": "Fit of Stillness (Wii Fit)",
+        "engine": "Sol max",
+        "size": "1280×720, 1920×1080",
+        "result": "ok"
+      },
+      {
+        "device": "A Little Off Balance (Wii Fit)",
+        "engine": "Terra max",
+        "size": "1280×720, 1920×1080",
+        "result": "web-app look, 65 compactions"
+      },
+      {
+        "device": "Mint Dial (Wii Fit)",
+        "engine": "Grok xhigh",
+        "size": "1280×720, 1920×1080",
+        "result": "text across the characters"
+      },
+      {
+        "device": "Fit Getaway (Wii Fit)",
+        "engine": "Muse max",
+        "size": "1280×720, 1920×1080",
+        "result": "text overlaps, debug-like boxes"
+      }
+    ]
   }
- ],
- "findings": [
-  {
-   "id": "STACK-1",
-   "severity": "high",
-   "area": "Prompt",
-   "status": "fixed",
-   "title": "Four of the five tech stacks get testing, art and engine text written for my-3d2dge",
-   "found": "Tech Stack now has five variants: my-3d2dge-v3, shardfall, riftlight, my-3dge and tech-v4. Other sections still assume my-3d2dge:\n\n- **Testing** says to test with \"the engine's game.advance and game.debug, as in game/test.mjs\". Only my-3d2dge has those: I listed all four repos' files, and `game/test.mjs` is only in my-3d2dge. The others test their own way. shardfall uses `cargo test` and its own tools, riftlight uses vitest and `npm run look`, and my-3dge uses its workspace's checks.\n- **Art Direction, Animation and Working Environment** say \"the engine's native style\", \"the engine's native animation system\" and \"the engine's headless tools\". tech-v4 (Three.js R180 and Rapier) has no engine, so these have nothing to point at, and neither do Engine Feedback's six questions about \"the engine\".\n- **Where they start.** my-3d2dge's variant points at its agent handoff (`dist/handoff`). The other three point at the repo root, though each has its own way in for agents: shardfall's `START_HERE.md` and `docs/MAKE_A_GAME.md`, riftlight's engine kit (`npm run bundle`, with `docs/GUIDE.md`), and my-3dge's `lean/README.md` or its README's \"Make a game with my-3dge\".\n- **my-3dge's engine is pinned.** Its new-game script copies the engine in read-only, pinned by `engine-lock.json`. The variant says \"You may change anything in it, the engine included\".",
-   "did": "**Done Nov 4**, after your answers:\n\n- **Testing:** you took the engine's names out (`test-tools-v2`).\n- **Where they start:** each engine's own way in for agents.\n  - shardfall: `https://github.com/michaelcrosato/shardfall/blob/main/START_HERE.md`. Its route for a new game is docs/MAKE_A_GAME.md.\n  - riftlight: the engine kit, `https://github.com/michaelcrosato/riftlight/releases/latest/download/pixel-engine.zip`.\n  - my-3dge: its full workspace, `https://github.com/michaelcrosato/my-3dge#make-a-game-with-my-3dge`, the route its handoff gives a coding agent that tests headless.\n- **Changing the engine:**\n  - riftlight and my-3dge now say to keep the engine as it ships and add whatever the game needs on top of it, as their own guides say. riftlight's: \"Never edit pixel-engine.js\". my-3dge's: the engine is read-only, `npm run check` fails when it changes, and a patch is only for when there's no workaround, listed in its ENGINE-FEEDBACK.md.\n  - So yes, the agent can still build whatever it wants, on top. Both export three.js and Rapier to the game's own code.\n  - shardfall keeps \"You may change anything in it, the engine included\". A game compiles into its engine crate, and its guide says menus and new sounds need engine code.\n- The pinned copies of the three variants got the same text. None of them had run, so they kept their names.\n\ntech-v4 has no engine, so Art and Animation's \"the engine's native style\" has nothing to point at. **Your call (Nov 4): leave it as it is.**",
-   "check": "Read each engine's handoff: shardfall's START_HERE.md and MAKE_A_GAME.md, riftlight's README, kit README and GUIDE.md, and my-3dge's HANDOFF.md, README and the AGENTS.md template its new-game script writes.",
-   "where": [
-    "matrix.config.json: dimensions.testing[test-tools]",
-    "dimensions.techStack",
-    "dimensions.artDirection[art-engine-v2]",
-    "dimensions.animation[ani-engine-v2]",
-    "dimensions.workspace[ws-sub-v2]"
-   ]
-  },
-  {
-   "id": "ENV-4",
-   "severity": "high",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "This computer has WebGPU in Chromium with one flag, but the agents are told it has none, and the game check doesn't use it",
-   "found": "Four of the five stacks draw with WebGPU: shardfall (wgpu), riftlight (\"WebGPU-first\", three/webgpu), my-3dge (\"WebGPU only\") and tech-v4 (\"WEBGPU\").\n\n- **The machine file says \"no WebGPU\".** check-environment.mjs looks for `navigator.gpu` on a blank page. A blank page isn't a secure context, so WebGPU is never there, whatever the browser can do.\n- **What's true:** on a `file://` page, Chromium 153 gets a WebGPU adapter (SwiftShader, in software) when it's started with `--enable-unsafe-webgpu`. Without the flag, `requestAdapter()` returns nothing. Firefox 155 and WebKit 26.6 have no WebGPU at all. my-3dge's README says the same: \"Chromium 153 (WebGPU on SwiftShader)\".\n- **The game check** (check-game.py) starts Chromium without the flag. A WebGPU-only game gets no adapter there, so the check sees its no-WebGPU path, not the game.",
-   "did": "**Done Nov 4.** `check-game.py` now starts Chromium with `--enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader`.\n\n- `--enable-unsafe-webgpu` alone found an adapter, but shardfall's device was lost as it started (\"Device was destroyed\").\n- Adding `--use-vulkan=swiftshader` made a v6 WebGL game's screenshot time out (30 s).\n- With the three flags, shardfall's, riftlight's and my-3dge's games start with no errors. Before, each failed with \"no WebGPU\". A v6 WebGL game's check came out the same as before.\n- riftlight's title screen shows in the screenshot. shardfall's and my-3dge's canvases came out white, though their logs and HUD show them running. A WebGPU canvas drawing about a frame a second in software can miss the screenshot, so its errors are what count. That's in the README and the machine file.\n\n`check-environment.mjs` now probes on a `file://` page, and asks Chromium again with those flags. `environments/Worki9.md` now says Chromium has WebGPU with them, on `file://` or `http://127.0.0.1` pages, in software.",
-   "check": "Ran the old and new check-game.py on shardfall's starter (built here), riftlight's latest single-file build, my-3dge's lean example and a v6 WebGL game, and tried six flag sets on the WebGPU ones.",
-   "where": [
-    "check-environment.mjs: PROBE",
-    "environments/Worki9.md: Browsers",
-    "check-game.py: ARGS"
-   ]
-  },
-  {
-   "id": "GOAL-1",
-   "severity": "high",
-   "area": "Goal check",
-   "status": "note",
-   "title": "73 of 96 builds never passed their goal check; Claude Code stopped 64 of them after 9 blocked stops",
-   "found": "Goal met: Opus xhigh 13 of 24, Opus medium 8, Sonnet 2, Haiku 0. All 24 plans passed on the first check. 17 of 24 briefs had at least one build that passed.\n\nThe last check of each unmet build said what was missing. I read all 73:\n\n- **Things this computer can't show.** No physical DualSense, no touch device, sound never heard, no human playthrough, no real AI Hub session with people. These come up in most Opus and Sonnet failures. Example: sonnet-medium TimeCrisis3 was checked 48 times in 32 minutes on the same three items: \"Real DualSense: there is no physical controller\", boss-state replica sync and one death never seen on screen.\n- **The agent's own evidence wasn't independent enough** (GOAL-3).\n- **Features really missing**, mostly Haiku. For example, haiku-medium WipeoutHD had \"only 5 of 10 weapons, 2 of 4 tracks\". 4 Haiku runs stopped to ask the user to choose a narrower scope, which nobody can answer in a headless run (densha-de-go, tenchu2, TrackMania and brigandine).\n- **Reply format.** 4 Sonnet runs said the sections were \"in my previous reply\" instead of repeating them.\n- **The title** (PLAN-3).",
-   "did": "Nothing new here: #22 (merged today, after this batch started) is the fix.\n\n- It changed the build goal to \"Everything in PLAN.md that can be done on this computer is done, and everything TASK.md asks you to hand in is in this folder.\"\n- It added `environments/Worki9.md`. That file says what this computer can't test, gives the stand-ins to use, and says anything that needs the real thing \"is checked as far as it can be here, never required\".\n\nThe next batch is the test. Insights → Expectations → \"Finished runs meet their /goal\" shows the rate.",
-   "check": "`goalMet`, `goalChecks`, `goalForced` and `goalReason` in all 120 result.json files, and each check read again from the transcripts in `~/.claude/projects` (117 of 120 found; 3 Haiku runs that hit the time limit have none).",
-   "where": [
-    "matrix.config.json: stages[build].goal",
-    "environments/Worki9.md"
-   ]
-  },
-  {
-   "id": "DATA-1",
-   "severity": "high",
-   "area": "Data",
-   "status": "fixed",
-   "title": "64 builds had no final reply: Claude Code's result is empty when it stops a /goal turn itself",
-   "found": "When Claude Code overrides the stop hook after 9 blocks, the stream's last `result` line has `\"result\":\"\"`. The runner took the reply only from that line, so `reply.md` was never written. Results' reply button and the record in each game came up empty for these runs, and Insights flagged them under \"no reply\" (77 of 488 finished runs).\n\nThe answer isn't lost. The agent's last response in `agent.out` holds it. In sonnet-medium TimeCrisis3 it has all four sections. Affected builds: Haiku 20, Sonnet 22, Opus medium 15, Opus xhigh 7. Older forced runs from Nov 3 are affected too.",
-   "did": "`parseClaude` now falls back to the last response's text when the result is empty (not for an error, and not for a made-up `<synthetic>` message), as `sessionEnd` already did for runs cut off mid-session. `--reparse` now writes `reply.md` for a run that has none and whose output has a reply; a `reply.md` already there is left alone. Running it on the real runs is in Your call.\n\n**Done Nov 4:** you ran `--reparse`, and the 64 builds plus 4 older stopped runs got their `reply.md`. One more case came up: the Haiku Wiretap build was resumed three times, and its `reply.md` held the first sessions' \"Credit balance is too low\". I wrote in its real final reply. `--reparse` now does that itself: a reply.md holding an earlier session's reply gives way to the last session's. The resume test covers it.",
-   "check": "`test/runner.test.mjs` (the /goal test): the fake Claude CLI now ends a forced turn with an empty result like the real one. The reply comes from the last response, and `--reparse` fills in a deleted `reply.md` and leaves one that's there alone. The test fails on the old runner. A sandbox copy of 5 real runs (3 forced) gave the 3 forced runs their reply (1,783 to 4,309 characters) and changed nothing else.",
-   "where": [
-    "run-matrix.mjs: readStream(), parseClaude(), reparseAll()",
-    "test/fake-cli/fake.mjs",
-    "test/runner.test.mjs"
-   ]
-  },
-  {
-   "id": "PLAN-1",
-   "severity": "high",
-   "area": "Plan",
-   "status": "note",
-   "title": "Every builder said the plan was bigger than one session, and 77 asked for it to be ranked",
-   "found": "The plans run 113 to 201 KB (median 142 KB, about 1,500 to 2,400 lines). They cover 8 to 14 milestones and 10 to 16 risks, with several modes, tracks or chapters each. All 96 builders raised scope somewhere in their prompt feedback: opus-xhigh 3, opus-medium 13, Sonnet 24 and Haiku 21 called it confusing or too big.\n\nTheir most common request was \"rank the plan must/should/could, with a cut order\" (77 runs). Next came a time or token budget (19), a smaller first milestone (18) and a target size for the demo (13).\n\nThe \"done\" bar read as the whole plan in 27 runs. Done and the goal say \"every feature … no stubs\", and STAGE.md says to follow the plan, so nothing could be left out without counting as a stub. opus-medium american-football: \"'follow the plan' versus 'TASK.md wins' and 'no stubbed features' needed judgment about what to cut without leaving stubs\".\n\nHow long each builder worked before it first tried to stop (median): Haiku 29 minutes, Sonnet 41, Opus medium 75, Opus xhigh 124.",
-   "did": "**Decided: no ranking.** The plan stays the whole design, and the goal-met rate measures how much of it each builder finishes. Note that #22's build goal is \"everything in PLAN.md that can be done on this computer is done\", so the bar is still the whole plan.",
-   "check": "The prompt-feedback catalogue (all 384 answers tagged; every quote checked to be verbatim), PLAN.md sizes from `planChars`, and first-check times from the transcripts.",
-   "where": [
-    "matrix.config.json: stages[plan].text"
-   ]
-  },
-  {
-   "id": "ENV-1",
-   "severity": "high",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "All 24 planners filled /tmp, which is held in memory, and 6.4 GB of older agent work is still in it",
-   "found": "/tmp is a 9.8 GB tmpfs, so whatever sits in it uses RAM on a computer with 20 GB.\n\n- **During the batch:** all 24 plan transcripts hit \"No space left on device\" or Claude Code's \"0 MB free\" notice, and so did 19 of 93 build transcripts. 22 of 24 planners downloaded the engine and ai-hub repos into /tmp, all starting within about a minute of each other. Three plans lost command output to it. The planners blamed \"other agents\".\n- **Now:** 1.8 GB is free. 6.4 GB is older agent work, mostly `/tmp/bb-xb81546/dl` (5.4 GB, from the Nov 2 Breaking Bad runs). The rest is `/tmp/x22cc1b-dl`, `/tmp/s55eng`, `/tmp/mm-research-xe8b2f0`, `/tmp/x3ec78e`, `/tmp/s55` and `/tmp/x96eb17`, each 150 to 175 MB.\n- **During this audit:** a sandbox copy of mine filled it for a moment. I deleted it at once and moved my sandboxes to `~/.cache`.",
-   "did": "**Done Nov 4:** you deleted the old /tmp folders; /tmp went from 7.8 GB used to 1.4 GB. Each run now gets a temp folder of its own, `tmp/` beside `work/` (`TMPDIR`, `TMP`, `TEMP` and `CLAUDE_CODE_TMPDIR`), so tools that write temp files can't fill /tmp. Agents that write to /tmp by name still can; the machine file asks them not to.",
-   "check": "`df -h /tmp`, `du -sh /tmp/*`, and a search of all 117 transcripts for the full-disk messages and for downloads into /tmp.",
-   "where": [
-    "/tmp",
-    "environments/Worki9.md"
-   ]
-  },
-  {
-   "id": "ENGINE-1",
-   "severity": "high",
-   "area": "Engine",
-   "status": "yours",
-   "title": "Builders made the same engine patches up to 55 times over, so they belong in my-3D2dge",
-   "found": "78 of 96 builds changed the engine: all 48 Opus builds, 19 Sonnet and 11 Haiku. The same changes were made over and over, each copy on its own:\n\n| Change | Runs |\n|---|---|\n| PlayStation button symbols by default (the setting defaults to \"auto\", and a game can't set it) | 55 |\n| A public audio bus, so code-made voices follow volume and mute | 39 |\n| Font glyphs: the 5×7 pixel font has no ✕ ○ □ △, though `input.label()` returns them, so they print as \"?\" (55 runs hit this); also missing are the middle dot, dashes, arrows, ticks and accents | 32 |\n| A per-letter voice hook in E.Dialog (it plays one sound per page) | 29 |\n| A guard so the AI Hub's Create+Options doesn't open the pause menu | 22 |\n| Humanoid hats and hair, outfits, weapons | 19, 17, 16 |\n| Settings rows on any Shell screen; synth extensions | 11 each |\n| Analog triggers; an exported per-step hook | 8 each |\n\nTASK.md requires PlayStation symbols by default, so the first row is a patch every game needs. The plans asked for several of these patches up front.",
-   "did": "Nothing here: it's for the engine repo. Each run's own patch is in its dev folder, under `runs/<run>/work/<Game>/` (not in git). The Engine Feedback question in Insights → What the agents said has every answer.",
-   "check": "Engine-feedback catalogue: all 576 answers tagged; every quote checked to be verbatim, and every run key checked to exist. I spot-checked the button-symbol, audio-bus and font counts against the raw answers (61, 37 and 32 mentions).",
-   "where": [
-    "my-3D2dge: dist/handoff"
-   ]
-  },
-  {
-   "id": "ENV-5",
-   "severity": "medium",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "shardfall's one-page build needs wasm-bindgen-cli 0.2.129, which this computer doesn't have",
-   "found": "shardfall makes its single-file game with `scripts/build-web.sh --single-file`. That needs two things:\n\n- **The wasm32 target** for the Rust it pins (1.98.1). It's already installed here.\n- **wasm-bindgen** at the version in its Cargo.lock (0.2.129). It isn't installed.\n\nSo each shardfall builder would `cargo install` it into the shared `~/.cargo/bin`, outside its folder, several at a time. As saved, there are up to 24 shardfall builds (8 sources × 3 builders). They would also compile wgpu and Rapier in release mode side by side, on 20 GB of RAM.",
-   "did": "**Done Nov 4:**\n\n- Installed `wasm-bindgen-cli` 0.2.129 (`~/.cargo/bin`).\n- A test build in a throwaway clone made shardfall's starter as one page (11.4 MB, 1 min 18 s).\n- The machine file lists `wasm-bindgen 0.2.129`, plus a Rust line: the toolchains, and which have the wasm32 target (1.98.1, the one shardfall pins).\n\n**Then you installed the two packages** (`libasound2-dev`, `libudev-dev`), and shardfall's headless tool works here. In a throwaway clone (Nov 4), `pav` built in 1 min 23 s. The starter's bot won 3 of 3 seeds (`pav play scene=starter bot=true seeds=3`), and `pav capture` drew the starter at 640×360 in software.\n\nThe home computer needs the same three steps: `sudo apt-get install -y libasound2-dev libudev-dev`, `cargo install wasm-bindgen-cli --version 0.2.129`, and `rustup target add wasm32-unknown-unknown --toolchain 1.98.1`.",
-   "check": "`cargo build -p pav_tools --bin pav` stopped at alsa-sys (\"pkg-config … alsa\"); `pkg-config --exists alsa libudev` both fail; `sudo -n true` asks for a password.",
-   "where": [
-    "shardfall: scripts/build-web.sh",
-    "check-environment.mjs: tools"
-   ]
-  },
-  {
-   "id": "ENV-6",
-   "severity": "medium",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "The machine file's uv tip hides Playwright, and the obvious fix asks for `playwright install`",
-   "found": "The machine file says \"The system Python has no packages installed. For one (Pillow, numpy …), use uv: `uv run --with pillow python script.py`\". But Python's Playwright 1.63 is installed (in `~/.local`), and the same file tells agents to use it.\n\n- `uv run --with pillow` runs in its own environment, so `import playwright` fails there (ModuleNotFoundError).\n- Adding `--with playwright` gets the newest version, 1.64.1. It can't find the browsers downloaded for 1.63, and it says to run `playwright install`, which the same section forbids.\n- `--with playwright==1.63.0` works with the browsers already here.\n\nAny script that screenshots the game and reads the pixels with Pillow hits this. No run has yet: the v6 batch ran before this file existed. This line was also added to Worki9.md by hand. It isn't in check-environment.mjs's starting text, so another computer's file won't have it.",
-   "did": "**Done Nov 4.** The line in Worki9.md now says the system Python has Playwright and nothing else. For other packages, use `uv run --with pillow python script.py`, adding `--with playwright==1.63.0` when the script drives a browser too. `check-environment.mjs` writes the same line, with this computer's Playwright version, into a new computer's file.",
-   "check": "Ran a Pillow + Playwright script under uv three ways: without Playwright, with the newest Playwright, and with 1.63.0.",
-   "where": [
-    "environments/Worki9.md: Sharing this computer",
-    "check-environment.mjs: BY_HAND"
-   ]
-  },
-  {
-   "id": "ENV-7",
-   "severity": "medium",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "Agents are told to keep their files in their own folder, so a plan's research clones may now reach every build",
-   "found": "In v6, 22 of 24 planners downloaded the engine and ai-hub repos into /tmp (ENV-1), and every plan's work folder held only PLAN.md, STAGE.md and TASK.md (ENV-3). The machine file now says \"Keep every file you make inside your own folder, not /tmp or a parent folder\". A planner that follows it puts its clones in `work/`. A build starts from a copy of its plan's `work/` (without node_modules and .git), so the plan's research copies (about 20 to 175 MB each in v6) would go to all three of its builds.\n\nThe runner already gives each run a temp folder for this: `tmp/` beside `work/`, as $TMPDIR, which later stages don't get. But:\n\n- The prompt never mentions it, and by the prompt's own words it's \"a parent folder\".\n- Nothing deletes `tmp/` when a run ends. Under \"commit everything in runs/\", its clones would go into git with their .git folders (the broken-gitlink problem).",
-   "did": "**Done Nov 4**, your way: the prompt doesn't mention it, and the runner cleans up.\n\n- Each run's `tmp/` is deleted once the run has finished, OK or failed, after what its agent left running is stopped and its game is checked.\n- A cut-off run keeps it, to carry on with.\n- `runs/*/tmp/` is in `.gitignore`, for runs still going when you commit.\n\nA planner that clones the engine into `work/` still passes the clone on to its builds. You said space isn't an issue, so that's left as it is.",
-   "check": "Read prepareStage and agentEnv in run-matrix.mjs, and the machine file as it's sent.",
-   "where": [
-    "environments/Worki9.md: Sharing this computer",
-    "run-matrix.mjs: agentEnv, prepareStage",
-    ".gitignore"
-   ]
-  },
-  {
-   "id": "DASH-3",
-   "severity": "medium",
-   "area": "Dashboard",
-   "status": "fixed",
-   "title": "Changing a stage's text doesn't make its runs run again, and nothing warns you",
-   "found": "A stage run is matched by its chain (each step's stage, model and effort) and its brief (one variant per dimension). The stage's Instructions and Done when aren't part of that, and result.json keeps no hash of them. So after you edit a stage's text, its finished runs still count as done, and the new text never runs for those briefs.\n\n- **No warning.** Setup warns about this for an edited variant (\"…used its earlier text\"), but not for a stage.\n- **Results can't tell them apart.** Within one prompt version, a run of the old text and a run of the new one look the same.\n\nThe next batch isn't affected. Its brief is new (new sources, Source Information v3), so 0 of its 160 runs count as done.",
-   "did": "**Done Nov 4.** Stages follow the variants' convention now:\n\n- **What's saved:** each stage run records `stageHashes`, a hash of its stage's text and goal as set.\n- **What shows:** Results marks a run whose stage was edited since (\"old text\"), and Insights and the Run tab count it like an edited variant. Setup warns about a stage edited outside the page while it has runs. Runs from before this are checked against their `prompt.md` and `goal.md`.\n- **Names follow the text:** editing a stage that has runs, in Setup · Advanced, renames it as you type (`plan` → `plan-v2`), with a note under it. Putting the old text back brings the old name back, and a name typed by hand stays.\n- Stage names may have a hyphen now.\n\n**The current stages:** the 25 plans and 100 builds of Nov 3–4 all used the old texts, so today's plan and build texts have never run. They're now `plan-v2` and `build-v2`, so their runs don't count as the old ones'. Their folders are named `….plan-v2__…` and `….build-v2__…`.",
-   "check": "Read runKey, chainKey and stageRuns in run-matrix.mjs, and validate() in the dashboard. Also did a dry run of the config as saved.",
-   "where": [
-    "run-matrix.mjs: runKey, chainKey",
-    "dashboard.html: validate()"
-   ]
-  },
-  {
-   "id": "GOAL-2",
-   "severity": "medium",
-   "area": "Goal check",
-   "status": "note",
-   "title": "After the first stop attempt, the medium builders mostly just tried to stop again",
-   "found": "Most builds that kept going after a failed check didn't do much new work. They mostly ran the tests again and wrote the same message again.\n\n| | Haiku | Sonnet | Opus medium | Opus xhigh |\n|---|---|---|---|---|\n| Re-checks within a minute of the one before | 76% | 83% | 65% | 55% |\n| Median gap between checks | 0.1 min | 0.2 min | 0.4 min | 4.6 min |\n| Median checks per run | 13 | 21 | 17 | 5 |\n\nOpus xhigh still fixed real problems between checks. For opus-xhigh cricket, the checker notes that \"missing music layers, deep-link crashes, dead menu rows, the touch gate\" were found late.\n\nEstimated from each response's tokens at list-price ratios, $544 of the $2,523 build spend (22%) came after the builder first tried to stop, and $459 of that was in runs that never passed. That's 46 of 156 agent-hours.",
-   "did": "Nothing to change on its own. It shrinks when GOAL-1 and GOAL-3 do. Each run's details show its goal checks and the last reason.",
-   "check": "Goal-check timestamps and per-response usage in the transcripts. Cost after the first check is each run's reported cost times its share of weighted tokens after that point (output 5×, cache write 2×, cache read 0.1× input).",
-   "where": [
-    "~/.claude/projects/*/<session>.jsonl"
-   ]
-  },
-  {
-   "id": "GOAL-3",
-   "severity": "medium",
-   "area": "Goal check",
-   "status": "yours",
-   "title": "The goal check wanted an outside review that TASK.md forbids",
-   "found": "The Testing variant ends with \"Don't use subagents or workflows to debate, review, judge or audit.\" The goal check, which reads only the transcript, repeatedly called the builder's own evidence not independent:\n\n- opus-xhigh tenchu2: \"the transcript's only evidence for that is the agent's own tests/audit.mjs mapping\"\n- opus-medium rugby: \"verification rests on the agent's self-written checks\"\n- opus-medium Killer7: \"the per-feature evidence comes from tests the agent wrote rather than an independent check\"\n\nBuilders saw the conflict and stopped there. opus-medium DOAX: \"The one thing the review still asks for is an outside per-feature review, which TASK.md forbids, so I've stopped there\". It then asked you to run /goal clear, in a run nobody watches. Opus medium Killer7, BigBuckHunterPro and cricket did the same.",
-   "did": "Left for you. The new goal text may avoid it, since it asks what's done rather than what's proven. See Your call. Still open: the next batch shows whether it comes up again.",
-   "check": "Final goal reasons of the 73 unmet builds (`goalReason`), and the builders' last messages in their transcripts.",
-   "where": [
-    "matrix.config.json: dimensions.testing[test-tools]",
-    "matrix.config.json: stages[build].goal"
-   ]
-  },
-  {
-   "id": "PLAN-2",
-   "severity": "medium",
-   "area": "Plan",
-   "status": "fixed",
-   "title": "Plans hard-code the plan run's own file names, and 67 builders had to translate them",
-   "found": "The planner's TASK.md names its files after the plan run (`…-claude-opus-5-5-max-20261103-174728`), and 23 of 25 plans copy those names into PLAN.md, 91 times in all. Each builder's TASK.md has its own names. \"TASK.md wins\" settled it, and no build shipped under the planner's names, but 67 builders said it cost time: opus-xhigh baseball wrote that \"every path in the plan had to be translated\".",
-   "did": "**Decided Nov 4 (you left it to me): keep them out.** The plan stage now adds: \"Leave out TASK.md's file and folder names too, since each builder's TASK.md has its own; write paths relative to the dev folder.\"\n\n- **For:**\n  - Every one of those names is wrong for every builder: the model, effort and start time differ, and now the title too, since builders draw their own.\n  - 23 of 25 v6 plans had them (100 times), and 67 builders said translating them cost time.\n  - It's a fact the planner can't know: its TASK.md was filled in for its own run.\n- **Against:**\n  - One more sentence.\n  - So far it cost time, not failures. No build shipped under the planner's names, and no goal check cited them.\n  - A planner could take it as \"no paths at all\" and drop the module layout that 21 of 25 plans gave. That's why the sentence asks for paths relative to the dev folder.\n\n\"Add plan → build → content\" has the same text. plan-v2 has never run, so it keeps its name.",
-   "check": "`grep -c claude-opus-5-5-max` on every PLAN.md, and the prompt-feedback catalogue.",
-   "where": [
-    "matrix.config.json: stages[plan-v2].text",
-    "dashboard.html: DEFAULT_STAGES"
-   ]
-  },
-  {
-   "id": "PLAN-3",
-   "severity": "medium",
-   "area": "Plan",
-   "status": "fixed",
-   "title": "The title rule pulls two ways: 10 builds drew their own, and 2 that kept the plan's were marked down",
-   "found": "TASK.md's Game Title says to brainstorm 50 titles and pick one at random. Every plan had already drawn one, and 10 plans said not to draw again. STAGE.md said to use the plan's title, \"where they disagree, TASK.md wins\".\n\n- 10 of 96 builds drew their own title: Haiku 7, Opus medium 2 and Opus xhigh 1. The same game then exists under two names, like BASKETBLAM, BASHKETBALL and ZONEFIRE.\n- Two Sonnet builds kept the plan's title as told, and the goal check counted it against them: SmashTV (\"did not run a draw of my own\") and american-football.\n\n21 runs named it confusing. The new build stage (\"Build the game PLAN.md describes. Take your file names and what to hand in from TASK.md\") doesn't settle it, because TASK.md still asks for a draw.",
-   "did": "**Decided: builders draw their own titles,** as TASK.md's Game Title says. The plan stage now adds: \"Leave the game's title to them: each builder picks its own, as TASK.md says.\" Insights' check that a plan's builds share its title came out with it (DASH-2).",
-   "check": "Each build's title from its exit interview (`aiHub.name`), compared with PLAN.md's first heading.",
-   "where": [
-    "matrix.config.json: dimensions.gameTitle[ttl-riff]",
-    "matrix.config.json: stages[build].text"
-   ]
-  },
-  {
-   "id": "MODEL-1",
-   "severity": "medium",
-   "area": "Builders",
-   "status": "note",
-   "title": "Haiku builds a slice and says so: 0 of 24 goals met, first stop at 29 minutes",
-   "found": "Haiku medium, all 24 builds:\n\n- **Goal:** met by none. 20 were stopped by Claude Code, and 4 hit the 120-minute time limit (Killer7, brigandine, ice-hockey and cricket). Each of those 4 still left a game and an exit interview.\n- **Time and cost:** median 56 minutes and $6, $147 in all. It first tried to stop after a median of 29 minutes.\n- **Scope:** it says plainly what it cut. haiku-medium summer-and-winter-olympic: \"I built three events and stopped there\". WipeoutHD left out \"season, academy, versus, replay, ghosts, Overclock, Snipeout, hot lap, AI Hub multiplayer, voices\".\n- **The absent user:** 4 runs stopped to ask you to choose a scope.\n- **Titles:** it re-drew 7 of the 10 changed titles (PLAN-3).\n- **Testing:** thin. tenchu2 found 0 game bugs, and its checks \"do not cover a full playthrough\". cricket says \"no bot plays the whole five-chapter story\". Two exit interviews have their answers in the wrong slots (TimeCrisis3, Gauntlet).\n- **Players:** 5 of 24 builds report 1 player only, which suggests the hub multiplayer wasn't built.\n- **Price:** 93% of its API calls had prompts over 100,000 tokens (median 439K). Above that, Haiku 5.5 costs $0.50 / $2.50 per million tokens instead of $0.10 / $0.50, which is a quarter of Sonnet's price, and half of it on cache reads, most of the tokens. So a build cost about half of a Sonnet build ($6.11 against $11.46 on average), not a twentieth, and took as long (56 minutes median).",
-   "did": "**Decided: Haiku stays in the dashboard, but not as a primary builder.** Anthropic sells Haiku 5.5 for narrowly scoped work and as a subagent under Sonnet or Opus, not for complex agentic coding, and its prompting guide says it stops early and skips checks in long agent prompts at low and medium effort. Building with it would take the plan cut into small pieces and an orchestrator to run them, which isn't worth it. The build stage still lists `claude-haiku-5-5:medium` for now.",
-   "check": "result.json, goal reasons, exit interviews and transcripts of the 24 Haiku builds. The price: per-call usage in the stream logs of all 96 v6 builds, against Anthropic's pricing page. What it's for: Anthropic's Haiku 5.5 announcement and prompting guide.",
-   "where": [
-    "matrix.config.json: stages[build].models"
-   ]
-  },
-  {
-   "id": "MODEL-2",
-   "severity": "medium",
-   "area": "Builders",
-   "status": "note",
-   "title": "Sonnet finishes cheaply but passes no checks: 2 of 24 goals, and rounded self-reports",
-   "found": "Sonnet medium, all 24 builds:\n\n- **Goal and cost:** met 2. Median 56 minutes and $10, $275 in all, which is $138 per goal met.\n- **Its own view:** every one of its 24 runs said the plan was too big for one session.\n- **Titles:** it kept the plan's title in all 24.\n- **Goal checks:** it re-checked the most, a median of 21 times, 83% of them within a minute of the one before.\n- **Its numbers look rounded.** 13 of 24 runs report exactly 3 critical issues, and 9 report \"about ten\" issues in all.\n- **Plan items it skipped:** some runs skipped the plan's engine patches (Gauntlet skipped E1 to E8, and rugby used none). Two said everything was built (WipeoutHD, Outrun2006).",
-   "did": "Nothing to change.",
-   "check": "result.json, goal timelines, the testing and prompt catalogues.",
-   "where": []
-  },
-  {
-   "id": "MODEL-3",
-   "severity": "medium",
-   "area": "Builders",
-   "status": "note",
-   "title": "Opus xhigh against Opus medium: more goals met, a lower cost per goal met",
-   "found": "| | Opus xhigh | Opus medium |\n|---|---|---|\n| Goal met | 13 of 24 | 8 of 24 |\n| Same brief, only this one met it | 9 | 4 |\n| Median time | 162 min | 110 min |\n| Median cost | $54 | $38 |\n| Total cost | $1,253 | $919 |\n| Cost per goal met | $96 | $115 |\n| First stop attempt (median) | 124 min | 75 min |\n| Issues its testing found (median) | 33 | 25 |\n| Critical issues (median) | 7 | 6 |\n\nBoth met the goal on 4 briefs, and neither did on 7. xhigh also kept working between checks (4.6 minutes apart against 0.4). Its game files are a little bigger: 1,746 KB against 1,641 KB median. Only Opus runs, at both efforts, caught the real-keyboard bugs that scripted key presses hide (12 runs, TEST-1).",
-   "did": "Nothing to change. At current prices, xhigh is the better buy per finished game.",
-   "check": "result.json for both 24-run groups, paired by brief, and the testing catalogue's per-run counts.",
-   "where": []
-  },
-  {
-   "id": "TEST-1",
-   "severity": "medium",
-   "area": "Testing",
-   "status": "note",
-   "title": "The scripted playthrough is the most useful test, but headless runs that skip drawing hid real bugs",
-   "found": "What the builders said about their own tests (testing catalogue, 96 runs):\n\n- **Most helpful:** a scripted bot playthrough of the whole game (72). Next came AI-against-AI simulations (15) and the AI Hub harness (6 as the top pick, 19 mentions).\n- **Least helpful:** screenshots (19), smoke checks (16), determinism checks that \"never failed\" (14), and unit or data checks that never failed (12).\n\n**Screenshots found more than they got credit for.** In the 19 runs that say where each issue was found, screenshots found 236 of 621 issues (38%). Some crashes were caught only that way: haiku-medium BigBuckHunterPro's crash was \"found by a screenshot … not by the Node tests, which had passed\".\n\n**Headless Node runs skip drawing, so:**\n\n- Draw-time crashes passed the suites in 6 runs.\n- Menus whose hit areas exist only after a draw broke scripted input in 9.\n- Esc and pause clashed with Dev mode, or unbound keys didn't end the attract mode, in 12 Opus runs.\n\nDeterminism checks never failed, yet 10 runs report Math.random leaks or replay drift.\n\n\"Critical\" is used loosely. Runs count 12 fps rendering, slow AI turns and camera framing as critical, so the Q2 numbers don't compare well across builders.",
-   "did": "No prompt change: you decided 2 of 96 isn't bad, and the runner's game check (GAME-1) now catches what the headless tests missed.",
-   "check": "Testing-feedback catalogue: all 384 answers read, the numbers taken out per run, and every quote checked to be verbatim. I spot-checked the medians and the Sonnet \"3 critical\" count myself.",
-   "where": [
-    "matrix.config.json: dimensions.testing[test-tools]"
-   ]
-  },
-  {
-   "id": "ENV-2",
-   "severity": "medium",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "33 test servers that agents started are still running, some since Nov 2",
-   "found": "Agents start `python3 -m http.server` for the AI Hub harness, but many never stop it. Claude Code runs them in their own session, so stopping the agent doesn't stop them. 33 are still listening, from Nov 2 to Nov 4 runs. haiku-medium basketball (Zonefire) left 7 and american-football 4. Three serve folders in /tmp, and two serve folders that have been deleted. Each uses a little memory and a port.",
-   "did": "**Done Nov 4:** I stopped all 37 (four more than first counted). The runner now stops what an agent leaves running once it exits: a process started since the run did, with no terminal, whose working folder or command line is in the run's folder. Their command lines go in `leftovers` in result.json, and the run's details list them. Linux only.",
-   "check": "`pgrep -f http.server`, each process's working folder from `/proc/<pid>/cwd`, and its start time.",
-   "where": []
-  },
-  {
-   "id": "ENGINE-2",
-   "severity": "medium",
-   "area": "Engine",
-   "status": "yours",
-   "title": "Headless play is what builders liked most, and also where they lost the most time",
-   "found": "79 builders named headless play (`game.advance`, `game.debug`) as what they liked most. The friction around it:\n\n- **Scene switches don't take effect at once.** `game.go` fades, so the old scene is still current (21 runs). Timers die on every scene change, including the first (10). A `game.go` made before boot finishes is quietly replaced (10).\n- **`E.store` keeps nothing** where storage is blocked, and it has no in-memory fallback (16).\n- **Draw never runs headless** (13), so E.Menu's click targets exist only after a draw. Draw-time crashes passed the Node suites in 6 runs (TEST-1).\n\nBuilders asked for an instant `game.go` in tests, a memory store, and a mode that runs draw headless.",
-   "did": "Nothing here: it's for the engine repo.",
-   "check": "Engine-feedback catalogue: \"Did you get stuck\" and \"hardest part\" answers.",
-   "where": [
-    "my-3D2dge: dist/handoff"
-   ]
-  },
-  {
-   "id": "ENGINE-3",
-   "severity": "medium",
-   "area": "Engine",
-   "status": "yours",
-   "title": "No perspective camera in the handoff engine, and its 3D add-on is hard to find",
-   "found": "The top single request (13 runs) was a perspective, first-person or telephoto camera.\n\n- All 4 Big Buck Hunter and all 4 Time Crisis builders wrote their own perspective renderer.\n- Three Time Crisis builders said the handoff \"has no 3D engine\".\n- Yet all 16 builders of the four 3D plans used World3D. That's the repo's 3D add-on, with three.js 0.182 and Rapier 0.19.3 from a CDN, kept outside `dist/handoff`. opus-medium WipeoutHD: \"the add-on that can lives outside that folder\".\n- World3D's track and ball vehicle can't carry a racer: all 4 WipeoutHD and 3 of 4 TrackMania builders wrote their own track physics.\n- Racing tracks (a ribbon track with loops, a branching road) were asked for 12 times.",
-   "did": "Nothing here. A line in the handoff's README pointing to the 3D add-on would have saved the Time Crisis and Big Buck builders a renderer each.",
-   "check": "Engine and planner catalogues.",
-   "where": [
-    "my-3D2dge: dist/handoff",
-    "my-3D2dge: the 3D add-on"
-   ]
-  },
-  {
-   "id": "ENGINE-4",
-   "severity": "medium",
-   "area": "Engine",
-   "status": "yours",
-   "title": "38 specific engine bugs that builders described, 15 of them found only by Opus xhigh",
-   "found": "Reported by the builders (I didn't reproduce them):\n\n- **Input**\n  - A scripted tap sets the last device to touch.\n  - `halfKeys` gives two menu actions the same key.\n  - Pad codes are released every tick when no pad is connected.\n  - `feed('move')` doesn't update `mouse.t`, which menus use for hover.\n  - `Input.use()` drops held keys.\n  - A tap releases a hold on the same action.\n- **Rigs**\n  - `rig.update` with `vx` but no `vy` gives a permanent NaN walk phase.\n  - `Math.random` in the constructor and in blinking breaks determinism.\n- **Views**\n  - E.View rounding puts rigs up to 7 px off their hit zones.\n  - Sprites scale by zoom alone, while geometry scales by view scale × zoom.\n  - `m7.shape` ignores params and mats.\n  - E.Road projects x and y with different scales, which squashes wide screens.\n  - The x-ray mask uses a fixed box per item.\n  - Depth sorting breaks for big geometry.\n  - The chunked floor-cache trim was broken.\n- **3D add-on**\n  - With the cel filter on, the first-person overlay renders black.\n  - Post filters render black without a GPU.\n  - A literal `</script>` in the header breaks single-file builds.\n  - Split-screen viewports are numbered from the bottom.\n  - Text planes come out mirrored.\n- **Other**\n  - The 0.15 s music look-ahead drops notes on laggy outputs such as Bluetooth.\n  - E.Arcade reads only player one.\n  - A hit-stop timer leaves `timeScale` changed across scenes.\n  - FlowField keeps the old map and ignores `map.solid`.\n  - E.hex returns arrays that the px helpers reject.\n\nSilent failures come up again and again: rgb() colours draw magenta, a scene field named `view` is replaced, a `camera()` method overrides the option, and mocap clips never play. Undocumented argument orders and return shapes cost 36 runs; for example, `mouseGround` returns `[x, y]`, which made a camera NaN.\n\nTV readability (36 runs): E.Menu is fixed at scale 1 with no scrolling, the HTML Shell uses 14 px text, and E.Dialog has no width option.",
-   "did": "Nothing here: it's a list for the engine repo. The run keys for each bug are in the catalogue file listed under How I checked.",
-   "check": "Engine-feedback catalogue (`engineProblems`, 69 entries; 38 specific bug claims with who reported and who fixed each). The catalogue file was in this audit's scratchpad, and its run keys are in the Engine Feedback answers in Insights.",
-   "where": [
-    "my-3D2dge"
-   ]
-  },
-  {
-   "id": "GAME-1",
-   "severity": "medium",
-   "area": "Games",
-   "status": "fixed",
-   "title": "All 96 games start headless without an error; 2 attract modes throw on every frame, and 5 games miss the touch notice",
-   "found": "I loaded each game's .html from `file://` in headless Chromium (software WebGL), first at 1280×720 and then on a 390×844 touch phone. No input for 16 seconds, then Enter twice.\n\n- **Loading:** all 96 loaded in under 2.5 s, with no uncaught errors, and every CDN library loaded.\n- **Attract modes that throw on every frame.** The engine catches it and logs `error in draw (scene \"attract\")`. Neither builder's tests caught it.\n  - haiku-medium basketball (Zonefire): \"Cannot read properties of undefined (reading 'sky')\" in `drawCourt`. The error text also shows on screen.\n  - sonnet-medium brigandine (Brigantime): \"Cannot set properties of null (setting 'stage')\".\n- **No title screen:** haiku-medium TrackMania (Crackmania) opens straight into a tutorial dialog over an empty sky, with no title or menu, and stays there through Enter.\n- **Attract mode:** with no input, 94 of 96 started an attract demo within 2 minutes. Only 47 had by 26 s and 86 by 60 s, because the games ran at 6 to 60 fps here (median 19, in software rendering), and a game whose clock advances per frame counts its 10 seconds slowly. The two that never start are the Sonnet and Haiku TrackMania builds: their opening dialog waits for a key.\n- **The touch-only notice** (\"Controller or keyboard required\" and Settings) shows on 87 of 96.\n  - It's missing in haiku-medium DOAX, Eye of the Beholder and TrackMania, and in sonnet-medium WipeoutHD and densha-de-go.\n  - Two Operation Wolf builds draw their whole screen as a small 16:9 box on a portrait phone, too small to tell.\n  - Two 3D builds were still showing the engine's boot log at 4.5 s.\n  - In about 10 games the notice text runs off the sides of a portrait screen.\n- **Enter:** it changed the screen in 95 of 96.",
-   "did": "The runner now does this for every new game. With `gameCheck` in the config, it loads each finished game in headless Chromium for 60 s and records what it throws, logs or fails to load, with a screenshot. Needs a look flags a game with errors, its details show the check, and Expectations counts them. `node run-matrix.mjs --check-games` checks the runs that finished before (see Your call).\n\nZonefire's attract error showed up in 4 of 4 loads from its run folder, but in none from a copy elsewhere. The page asks for nothing else, so it likely picks something at random from its own path, and some picks crash.",
-   "check": "Playwright (Chromium 153, software WebGL). Screenshots at 4, 14, 16 and 26 s, after Enter and on the touch phone, then at 60 and 120 s for the games still on their title, with their frame rate measured. All reviewed by eye on contact sheets, with console and page errors recorded throughout. This shows what loads and runs on its own, not whether a game is good: nothing was played.",
-   "where": [
-    "runs/*.build__*/work/*.html"
-   ]
-  },
-  {
-   "id": "DASH-4",
-   "severity": "low",
-   "area": "Dashboard",
-   "status": "fixed",
-   "title": "The ready-made stages and the README still describe the v6 stage texts",
-   "found": "- **Add plan → build → content** (DEFAULT_STAGES, used when a config has no stages) still has the old texts. The plan starts \"PLAN.md with the game's title\", the build uses \"the title it gives; where they disagree, TASK.md wins\", and the build and content goals leave out Testing Feedback, which TASK.md asks for. That goes against your Nov 4 call that builders draw their own titles.\n- **README** says \"the goal (`on-exit`; the build and content stages' goals too) checks the file is there and parses\". The build goal now says \"everything TASK.md asks you to hand in is in this folder\", and the config has no content stage.",
-   "did": "**Done Nov 4.**\n\n- \"Add plan → build → content\" now starts from the current plan and build texts, plus a content pass written the same way. It keeps the game's title and takes its file names from TASK.md.\n- Each ready-made stage is named the way a typed one would be, so it never takes over the old runs' names.\n- The README line now says the 1-shot goal (`on-exit-v2`) checks the file parses, and a build stage's goal asks for what TASK.md says to hand in.",
-   "where": [
-    "dashboard.html: DEFAULT_STAGES",
-    "README.md: The record in each game"
-   ]
-  },
-  {
-   "id": "GOAL-4",
-   "severity": "low",
-   "area": "Goal check",
-   "status": "fixed",
-   "title": "The 1-shot goal didn't get the build goal's \"on this computer\"",
-   "found": "The build stage's goal now says \"Everything in PLAN.md that can be done on this computer is done\". The 1-shot goal (`on-exit`) still asks for two things:\n\n- that \"every feature in TASK.md is implemented\";\n- that the final reply has all four sections.\n\nThings this computer can't show were the most common reason a check blocked (GOAL-1), and four Sonnet builds were blocked on the reply's sections. For 1-shot runs, only the machine file's \"never required\" covers this. It matters only if you run a 1-shot batch: CLIs → Models has Opus, Sonnet and Haiku at medium for that.",
-   "did": "**Done Nov 4** (your call to make it): the 1-shot goal is now `on-exit-v2`, \"every feature in TASK.md that can be done on this computer is implemented …\", the build goal's wording. The rest is as it was.",
-   "where": [
-    "matrix.config.json: dimensions.goal[on-exit]"
-   ]
-  },
-  {
-   "id": "PROMPT-4",
-   "severity": "low",
-   "area": "Prompt",
-   "status": "fixed",
-   "title": "\"Other agents share this directory\" isn't true any more",
-   "found": "Working Environment (`ws-sub-v2`) says \"Do not read files outside what you need - other agents share this directory\". Each run has a work folder of its own now, and the other runs are in the folders beside it, which is what the machine file's \"your own folder\" says. The rule (don't read outside your folder) still stands; only the reason given is out of date.",
-   "did": "**Done Nov 4:** Working Environment is now `ws-sub-v3`: \"Do not read files outside what you need: other agents work in the folders beside this one.\"",
-   "where": [
-    "matrix.config.json: dimensions.workspace[ws-sub-v2]"
-   ]
-  },
-  {
-   "id": "PROMPT-5",
-   "severity": "low",
-   "area": "Prompt",
-   "status": "fixed",
-   "title": "Small things in how the prompt reads",
-   "found": "- The machine file's two hand-written headings are `##`. So in TASK.md, \"What this computer doesn't have\" and \"Sharing this computer\" sit at the level of \"## Goal\" rather than under \"## This computer\".\n- Three lines of prompt-template.md end in a space: Attract Mode, `{{testingFeedback}}` and Prompt Feedback.\n- Source Information's Environment is filled with \"…; Linux; browser unknown\", though TASK.md now names the browsers.\n- Package puts `.html` inside the brackets of the file name, and Working Environment puts it outside.\n- In Setup · Basic, moving Premise also moves \"## This computer\" and `{{machine}}`. Sections are cut at the dimensions' placeholders, and `{{machine}}` isn't one, so it goes with the section after it.",
-   "did": "**Done Nov 4:**\n\n- The machine file's headings go a level down as they're filled in, under \"## This computer\". CLIs → This computer shows them the same way.\n- The three trailing spaces are gone.\n- `{{environment}}` is now \"Claude Code CLI (headless); Linux\", without \"browser unknown\".\n- Package (`pkg-html-v3`) writes the file name as Working Environment does: `[GameTitle-SOURCE-{{model}}-{{effort}}-{{stamp}}].html`.\n\nLeft as it is: moving Premise in Setup · Basic still moves \"## This computer\" with it. Neither place it could stay is clearly right, and it's a rare move.",
-   "where": [
-    "environments/Worki9.md",
-    "prompt-template.md",
-    "run-matrix.mjs: runVars",
-    "dashboard.html: promptSections"
-   ]
-  },
-  {
-   "id": "DATA-2",
-   "severity": "low",
-   "area": "Data",
-   "status": "fixed",
-   "title": "Every --reparse rewrote every stamped game, only to change its stampedAt",
-   "found": "`stampGame` wrote the record again for every stamped game on each `--reparse` or `--stamp`, with a new `stampedAt`, even when nothing else had changed. A reparse to fill in the 64 replies would have rewritten about 460 game files of 1 to 2 MB each, for one changed line apiece, and git keeps a new copy of each.",
-   "did": "A game whose record would only get a new `stampedAt` is left as it is. One whose record changed, like the 64 that get their reply, is stamped again as before.",
-   "check": "`test/record.test.mjs`: `--stamp` and `--reparse` with nothing new leave the game byte for byte, a changed `reply.md` stamps it again, and the test fails without the change. On the sandbox copy only the 3 forced runs' games changed.",
-   "where": [
-    "run-matrix.mjs: stampGame()",
-    "test/record.test.mjs"
-   ]
-  },
-  {
-   "id": "DATA-3",
-   "severity": "low",
-   "area": "Data",
-   "status": "fixed",
-   "title": "Three runs whose goal check never gave a verdict showed as \"goal not met\"",
-   "found": "opus-xhigh OutBloom2006 and opus-xhigh Gauntletdown each finished with a reply and an exit interview, and so did the Nov 2 run opus-medium Rewired. Their transcripts have one stop-hook run that returned nothing (`hasOutput: false`) and no verdict, and then the session ended. `goalMet` is false with 0 checks, so the dashboard said \"Never met (no check)\", flagged them under Needs a look and counted them in the goal-met rates.",
-   "did": "A finished run with 0 checks now shows as unknown. The text says its session ended without a check giving a verdict, and the run is left out of the goal-met rates and flags. `result.json` is unchanged.",
-   "check": "Sandbox dashboard with the real run records: the three runs read \"unknown\", and Insights counts 77 of 164 finished runs not met, where it counted 80 of 167.",
-   "where": [
-    "dashboard.html: goalState(), goalRead()"
-   ]
-  },
-  {
-   "id": "PROMPT-1",
-   "severity": "low",
-   "area": "Prompt",
-   "status": "fixed",
-   "title": "\"Usage\" asks for a figure no agent can see: 94 of 96 wrote \"unknown\"",
-   "found": "Source Information asks for \"the estimated API cost in USD, total number of tokens … and session time\". A headless agent can't see its cost, so 94 builders wrote some form of \"unknown\". The other two found their own Claude Code session log in `~/.claude/projects`, outside their folder, and added it up: opus-xhigh's figure was within 6% of the real cost. 20 runs called the line confusing, and 16 suggested dropping it or having the harness fill it in. The runner already records the real usage in result.json and in each game's record.",
-   "did": "The Source Information variant is now `info-exit-v3` (the runs so far keep `info-exit-v2`). Usage says to write \"added on import\": the runner records the real cost, tokens and time, and the agent that imports the game into AI Hub puts them on its About/Credits screen. That was the Nov 3 decision. The exit interview's `usage` is \"added on import\" too, and it now says the catalogue's model, effort, CLI, date and usage come from the run's record after the run.",
-   "check": "`sourceInformation.usage` in all 96 exit interviews, against `costUsd`.",
-   "where": [
-    "matrix.config.json: dimensions.sourceInfo[info-exit-v2]"
-   ]
-  },
-  {
-   "id": "PROMPT-2",
-   "severity": "low",
-   "area": "Prompt",
-   "status": "note",
-   "title": "Builders weren't sure what the AI Hub requirement asks for",
-   "found": "17 builders asked about the AI Hub requirement. They wanted to know which hub mode counts (shared world, ghost or parallel), whether a stand-in hub counts, and whether online play is needed for \"done\" when the source is single-player. The plans chose for them: 13 shared-world, 10 ghost and 1 parallel. Even so, 42 builders named the hub spec one of the prompt's strengths, and 14 praised the harness's pass/fail. Haiku had the most trouble wiring the harness: KarateChamp and OperationWolf, and SmashTV skipped it.",
-   "did": "Nothing changed. If you want one mode, name it in the Online or Multiplayer variant.",
-   "check": "The prompt-feedback catalogue, and the planner catalogue's AI Hub modes.",
-   "where": [
-    "matrix.config.json: dimensions.online, dimensions.multiplayer"
-   ]
-  },
-  {
-   "id": "PROMPT-3",
-   "severity": "low",
-   "area": "Prompt",
-   "status": "note",
-   "title": "Planners skipped TASK.md's \"CRITICAL\" reply sections, and one plan's goal check asked it to build",
-   "found": "TASK.md (marked CRITICAL) asks for Source Information and the feedback sections in the chat reply, while the plan stage asked for a short summary. 22 of 24 planners left the sections out without comment, and plan dqbuilders said they belong to the build. In plan BigBuckHunterPro, the first goal check called the missing game and exit-interview.json gaps, against \"Don't build it yet\", so its reply became a change log and never names the game. Planner replies ran 422 to 599 words, long for \"short\". The plan stage has changed since (planner-exit-interview.json, and a simpler goal), so this is a note.",
-   "did": "Nothing changed.",
-   "check": "All 24 plan replies and transcripts (the planner catalogue).",
-   "where": [
-    "matrix.config.json: stages[plan]"
-   ]
-  },
-  {
-   "id": "ENV-3",
-   "severity": "low",
-   "area": "Machine",
-   "status": "fixed",
-   "title": "Agents left files outside their folders: three planners in ~/.cache, and one build in this repo's root",
-   "found": "- plan WipeoutHD left `~/.cache/opus55-plan-x978410` (23 MB), and its reply says so.\n- plan BigBuckHunterPro left `x2e02c0-plan-research` (22 MB).\n- plan EyeoftheBeholder left `plan-x193f88-scripts` (44 KB), though its reply says its research copies were deleted.\n- sonnet-medium brigandine cloned the engine and the hub into `.engsrc_x7910ab/` at the root of this repo (22 MB, Nov 4 05:02). It's untracked, so it isn't in git.\n\nAll 24 plan work folders hold only PLAN.md, STAGE.md and TASK.md.",
-   "did": "**Done Nov 4:** you deleted `.engsrc_x7910ab/`. The per-run temp folder (ENV-1) gives agents a place of their own for this kind of thing.",
-   "check": "The planner catalogue, `ls ~/.cache`, and `.engsrc_x7910ab` traced to that run's `agent.out`.",
-   "where": [
-    "~/.cache",
-    ".engsrc_x7910ab/"
-   ]
-  },
-  {
-   "id": "DATA-4",
-   "severity": "low",
-   "area": "Data",
-   "status": "note",
-   "title": "A game's size is mostly the engine, so size says little about how much game there is",
-   "found": "About 1.2 MB of every build is the bundled my-3D2dge engine. Haiku's tenchu2 ran for 7.5 minutes and its game is still 1,239 KB and 15,199 lines; the median v6 game is 1,425 to 1,746 KB. So `kb`, `loc` and Needs a look's \"a game under half the usual size\" mostly measure the engine.",
-   "did": "Nothing changed. Measuring the game without the engine would need the runner to know which part is the engine.",
-   "check": "`kb` and `loc` of the 96 v6 builds against their run times.",
-   "where": [
-    "run-matrix.mjs: measureOutput()"
-   ]
-  },
-  {
-   "id": "BATCH-1",
-   "severity": "info",
-   "area": "Batch",
-   "status": "note",
-   "title": "As saved, the next batch is 160 runs: 8 sources × 5 tech stacks",
-   "found": "A dry run of the config as saved when I checked (7:20 pm) queues 40 briefs: 40 plans (Opus max) and 120 builds (Opus xhigh, Opus medium and Sonnet medium). At v6's average costs (plan $14, builds $52, $38 and $11), that's about $4,650. The 8 my-3d2dge briefs alone would be about $930. Haiku is out of the build stage now, as you decided.",
-   "did": "Nothing to change if that's the plan. Run → Advanced ticks which variants a batch runs, so check the tech stacks there before Start. The stages are now `plan-v2` and `build-v2` (DASH-3), so every run of the next batch is new: no plan or build of Nov 3–4 counts for it.",
-   "check": "`node run-matrix.mjs --dry-run --json --stages`, which starts nothing, and v6's costUsd.",
-   "where": [
-    "matrix.config.json: dimensions.source, dimensions.techStack, stages"
-   ]
-  },
-  {
-   "id": "DASH-1",
-   "severity": "info",
-   "area": "Dashboard",
-   "status": "fixed",
-   "title": "Insights: What the agents said, every answer to one question side by side",
-   "found": "Each exit interview could only be read one run at a time, from the interview button in Results. Comparing 96 answers to \"What was confusing?\" meant opening 96 files.",
-   "did": "A new Insights card for the runs in view:\n\n- Pick a question to read every answer to it, by model + effort.\n- **Search** finds a word in all answers, and the question list then shows how many answers have it.\n- **Copy** puts the answers shown on the clipboard as plain text, for pasting into a document or a chat.\n\nAnswers come from `/api/feedback`. That's each exit interview's lists paired with the questions the run was sent, from the config, the prompt as sent or the record in the game. It also includes the planners' reviews (`plannerAnswers`).",
-   "check": "Sandbox dashboard with the real run records and fake CLIs: the answers of 124 runs, all but 2 paired with their questions (26 older runs through their game's record). It renders in Chromium at 1366 px and WebKit at 390 px with no console errors and no sideways scroll. The search found 4 of 122 answers to \"What was confusing?\" with \"attract\". `node --test` passes.",
-   "where": [
-    "dashboard.mjs: feedback()",
-    "dashboard.html: feedbackCard()"
-   ]
-  },
-  {
-   "id": "DASH-2",
-   "severity": "info",
-   "area": "Dashboard",
-   "status": "note",
-   "title": "Insights: the check that a plan's builds share its title, added and then taken out",
-   "found": "Nothing showed when a plan's builds came out under different names (PLAN-3).",
-   "did": "Taken out when you decided that builders draw their own titles (PLAN-3): different titles are now the plan.",
-   "check": "The sandbox dashboard lists Sublime Crisis 3 / Tide Crisis 3, Dipout HD / Snipeout HD, and Operation Wolfpack / Operation Big Bad Wolf, the same mismatches I found by script.",
-   "where": [
-    "dashboard.html: checksCard()",
-    "dashboard.mjs: results() hubName"
-   ]
-  }
- ],
- "changes": [
-  {
-   "title": "Plans leave out TASK.md's file names",
-   "detail": "The plan stage tells the planner its TASK.md's file and folder names are its own, so it writes paths relative to the dev folder instead (PLAN-2)."
-  },
-  {
-   "title": "WebGPU in the game check and the machine file",
-   "detail": "`check-game.py` starts Chromium with `--enable-unsafe-webgpu --enable-features=Vulkan --use-webgpu-adapter=swiftshader`, so WebGPU games run there in software. `check-environment.mjs` probes on a `file://` page and says which flags WebGPU needs (ENV-4)."
-  },
-  {
-   "title": "Each engine starts at its own handoff",
-   "detail": "shardfall: START_HERE.md. riftlight: its engine kit. my-3dge: its full workspace. riftlight and my-3dge keep their engine as it ships and build on top (STACK-1)."
-  },
-  {
-   "title": "wasm-bindgen for shardfall, and Rust in the machine file",
-   "detail": "wasm-bindgen-cli 0.2.129 is installed here. The machine file lists it, and Rust's toolchains with the wasm32 target (ENV-5). The uv line pins Playwright 1.63.0 (ENV-6)."
-  },
-  {
-   "title": "Stage names follow their text",
-   "detail": "Stage runs record `stageHashes`. Editing a stage that has runs renames it (`plan` → `plan-v2`), Results marks runs of an earlier text, and Setup warns. Today's stages are `plan-v2` and `build-v2` (DASH-3)."
-  },
-  {
-   "title": "A run's temp folder goes once it's done",
-   "detail": "`tmp/` is deleted when a run finishes (a cut-off run keeps it), and `runs/*/tmp/` is in `.gitignore` (ENV-7)."
-  },
-  {
-   "title": "Prompt fixes",
-   "detail": "`ws-sub-v3` (folders beside this one), `pkg-html-v3` (file name brackets), `on-exit-v2` (\"that can be done on this computer\"). Also the machine file's headings a level down, no \"browser unknown\", no trailing spaces, the current ready-made stages, and the README (PROMPT-4, PROMPT-5, GOAL-4, DASH-4)."
-  },
-  {
-   "title": "Replies of /goal runs Claude Code stopped",
-   "detail": "The runner takes the agent's last response when the CLI's result is empty, and `--reparse` fills in a missing `reply.md` (DATA-1)."
-  },
-  {
-   "title": "Stamping again only rewrites changed games",
-   "detail": "`--reparse` and `--stamp` leave a game whose record would only get a new `stampedAt` (DATA-2)."
-  },
-  {
-   "title": "What the agents said (Insights)",
-   "detail": "Every answer to one exit-interview or planner-review question across the runs in view, by model + effort, with a search and Copy (DASH-1)."
-  },
-  {
-   "title": "Goal checks with no verdict show as unknown",
-   "detail": "Not as \"never met\" (DATA-3)."
-  },
-  {
-   "title": "Audit tab: a little Markdown",
-   "detail": "**Bold**, lists (with one level of sub-items) and simple tables render in an audit's text, which this audit's tables need. Plain text renders as before."
-  },
-  {
-   "title": "The Insights card waits for a restart",
-   "detail": "A dashboard started before this change has no `/api/feedback`, so the card asks for a restart (Run tab → ⟳ Restart dashboard) instead of showing nothing (`canFeedback`, like `canResume`)."
-  },
-  {
-   "title": "README",
-   "detail": "The new card and check, how the reply is read, what `--reparse` now fills in, stamping only changed games, and the Audit tab's Markdown."
-  },
-  {
-   "title": "The game check",
-   "detail": "With `gameCheck` in the config (on, 60 s), the runner loads each finished game headless and records its errors and a screenshot (`check-game.py`; Needs a look, details, Expectations). `--check-games` for older runs."
-  },
-  {
-   "title": "A temp folder per run, and leftovers stopped",
-   "detail": "`tmp/` beside `work/` is each run's TMPDIR. Processes an agent leaves running in its folder are stopped when it exits (`leftovers`)."
-  },
-  {
-   "title": "Builders draw their own titles",
-   "detail": "The plan stage leaves the title to the builders. The Insights title check is gone."
-  },
-  {
-   "title": "Usage is added on import",
-   "detail": "`info-exit-v3`: the agent writes \"added on import\", and the exit interview names the fields that come from the run's record later."
-  },
-  {
-   "title": "Smaller follow-ups",
-   "detail": "A resumed run's stale reply.md gives way on `--reparse`. The flaky resume test waits 5 s, so it no longer races (4 of 4 at once pass). The 378 older games have their record stamped in (schema 2)."
-  }
- ],
- "tests": {
-  "passed": 235,
-  "failed": 0,
-  "summary": "The Nov 4 evening fixes, tested against fake CLIs in throwaway folders; `runs/` wasn't touched. The game check's flags were also tried on real games: shardfall, riftlight, my-3dge and a v6 WebGL game.",
-  "suites": [
-   {
-    "name": "`node --test test/*.test.mjs`",
-    "result": "pass",
-    "count": 88,
-    "detail": "Runner, server, record and environment tests. New or changed:\n\n- A stage name with a hyphen, and the stage hashes a run records.\n- A run's temp folder deleted once it's done, and kept by a cut-off run until it carries on.\n- The machine file's headings a level down.\n- The server marking a run whose stage was edited since, by its hashes or, for an older run, by what it was sent, and the stage texts runs used."
-   },
-   {
-    "name": "`python3 test/ui_check.py`",
-    "result": "pass",
-    "count": 147,
-    "detail": "Every tab at five sizes in Chromium, WebKit and Firefox, and the live checks. New: editing a stage that ran renames it to plan-v2 with a note, typing keeps focus, and the old text brings the old name back."
-   }
-  ]
- },
- "screens": {
-  "summary": "`viewport-matrix` on the Insights tab with the new **What the agents said** card, served by a sandbox dashboard with the real run records (fake CLIs, nothing real could run): iPhones and iPads in WebKit, Android in Chromium, desktop sizes in all three engines. None scrolls sideways or logs a console error. `test/ui_check.py` covers every other tab.",
-  "note": "24 screenshots, 0 issues",
-  "rows": [
-   {
-    "device": "Pixel 10",
-    "engine": "Chromium",
-    "size": "360×732",
-    "result": "ok"
-   },
-   {
-    "device": "iPhone SE",
-    "engine": "WebKit",
-    "size": "375×667",
-    "result": "ok"
-   },
-   {
-    "device": "iPhone 17 Pro",
-    "engine": "WebKit",
-    "size": "402×681",
-    "result": "ok"
-   },
-   {
-    "device": "iPhone 17 Pro Max",
-    "engine": "WebKit",
-    "size": "440×763",
-    "result": "ok"
-   },
-   {
-    "device": "iPhone 17 Pro landscape",
-    "engine": "WebKit",
-    "size": "756×352",
-    "result": "ok"
-   },
-   {
-    "device": "Galaxy Z Fold 7 (open)",
-    "engine": "Chromium",
-    "size": "984×1016",
-    "result": "ok"
-   },
-   {
-    "device": "Galaxy Tab S9",
-    "engine": "Chromium",
-    "size": "640×1024",
-    "result": "ok"
-   },
-   {
-    "device": "iPad Mini",
-    "engine": "WebKit",
-    "size": "768×1024",
-    "result": "ok"
-   },
-   {
-    "device": "iPad Pro 11 landscape",
-    "engine": "WebKit",
-    "size": "1194×834",
-    "result": "ok"
-   },
-   {
-    "device": "4:3 1024x768",
-    "engine": "Chromium",
-    "size": "1024×768",
-    "result": "ok"
-   },
-   {
-    "device": "4:3 1024x768",
-    "engine": "Firefox",
-    "size": "1024×768",
-    "result": "ok"
-   },
-   {
-    "device": "4:3 1024x768",
-    "engine": "WebKit",
-    "size": "1024×768",
-    "result": "ok"
-   },
-   {
-    "device": "Laptop 1366x768",
-    "engine": "Chromium",
-    "size": "1366×768",
-    "result": "ok"
-   },
-   {
-    "device": "Laptop 1366x768",
-    "engine": "Firefox",
-    "size": "1366×768",
-    "result": "ok"
-   },
-   {
-    "device": "Laptop 1366x768",
-    "engine": "WebKit",
-    "size": "1366×768",
-    "result": "ok"
-   },
-   {
-    "device": "16:10 1440x900",
-    "engine": "Chromium",
-    "size": "1440×900",
-    "result": "ok"
-   },
-   {
-    "device": "16:10 1440x900",
-    "engine": "Firefox",
-    "size": "1440×900",
-    "result": "ok"
-   },
-   {
-    "device": "16:10 1440x900",
-    "engine": "WebKit",
-    "size": "1440×900",
-    "result": "ok"
-   },
-   {
-    "device": "16:9 1920x1080",
-    "engine": "Chromium",
-    "size": "1920×1080",
-    "result": "ok"
-   },
-   {
-    "device": "16:9 1920x1080",
-    "engine": "Firefox",
-    "size": "1920×1080",
-    "result": "ok"
-   },
-   {
-    "device": "16:9 1920x1080",
-    "engine": "WebKit",
-    "size": "1920×1080",
-    "result": "ok"
-   },
-   {
-    "device": "21:9 2560x1080",
-    "engine": "Chromium",
-    "size": "2560×1080",
-    "result": "ok"
-   },
-   {
-    "device": "21:9 2560x1080",
-    "engine": "Firefox",
-    "size": "2560×1080",
-    "result": "ok"
-   },
-   {
-    "device": "21:9 2560x1080",
-    "engine": "WebKit",
-    "size": "2560×1080",
-    "result": "ok"
-   }
-  ]
- }
 }
