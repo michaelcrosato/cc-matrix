@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#252c20" />
+    <link rel="icon" href="data:," />
+    <title>Bar Cry</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        background: #232b20;
+        color: #eee4c6;
+      }
+      #touch-notice {
+        display: none;
+      }
+      #touch-notice.active {
+        display: flex;
+        position: fixed;
+        inset: 0;
+        z-index: 60;
+        background: #232b20;
+        align-items: center;
+        justify-content: center;
+        flex-direction: column;
+        text-align: center;
+        font:
+          24px Arial,
+          sans-serif;
+        padding: 8vw;
+      }
+      #touch-notice.dismissed {
+        display: none;
+      }
+      #touch-notice h1 {
+        font-size: clamp(28px, 6vh, 64px);
+      }
+      #touch-notice button {
+        font: inherit;
+        background: #d7c89f;
+        color: #232b20;
+        border: 0;
+        padding: 0.6em 1.4em;
+      }
+      .loading-screen {
+        position: fixed;
+        inset: 0;
+        background: #232b20;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        text-align: center;
+        z-index: 40;
+      }
+      .loading-screen h1 {
+        font:
+          16vh Impact,
+          sans-serif;
+        margin: 0;
+      }
+      .loading-screen p {
+        font:
+          2.3vh 'Courier New',
+          monospace;
+        color: #afa78a;
+      }
+    </style>
+    <script>
+      window.__engine = { ready: false, errors: [] };
+      addEventListener('error', function (e) {
+        var m = document.getElementById('msg');
+        if (m) m.textContent = String(e.message || 'Unable to load the field office.');
+      });
+    </script>
+  </head>
+  <body>
+    <canvas id="view" aria-label="The dry-season basin"></canvas>
+    <div id="front"></div>
+    <div id="msg" role="status"></div>
+    <div id="loading" class="loading-screen">
+      <div>
+        <h1>BAR CRY</h1>
+        <div class="loading-line"></div>
+        <p>Opening the field office…<br />Check the wind before you strike a match.</p>
+      </div>
+    </div>
+    <div id="touch-notice" role="dialog" aria-label="Input required">
+      <div class="notice-mark">B/C</div>
+      <h1>Controller or keyboard required</h1>
+      <p>
+        Connect a controller or keyboard to enter the basin.<br />The field demonstration continues in the meantime.
+      </p>
+      <button id="touch-settings" onclick="window.__settingsRequested = true">Settings</button>
+    </div>
+    <script>
+      if (matchMedia('(hover: none) and (pointer: coarse)').matches) {
+        document.getElementById('touch-notice').classList.add('active');
+        if (!navigator.gpu) document.getElementById('touch-notice').classList.add('no-gpu');
+      }
+      addEventListener(
+        'keydown',
+        function () {
+          document.getElementById('touch-notice').classList.add('dismissed');
+        },
+        { once: true },
+      );
+    </script>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

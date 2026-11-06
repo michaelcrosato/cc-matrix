@@ -1,0 +1,1 @@
+/goal Read STAGE.md in the current folder and do what it says. Done when: Everything in PLAN.md that can be done on this computer is done, and everything TASK.md asks you to hand in is in this folder.

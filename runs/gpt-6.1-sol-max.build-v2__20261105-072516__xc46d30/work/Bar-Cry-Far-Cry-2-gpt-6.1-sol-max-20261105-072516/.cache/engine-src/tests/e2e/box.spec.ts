@@ -1,0 +1,284 @@
+/**
+ * @file T2 for the Stress Box, stage 1 (PLAN.md §9.0, WP 2.7): the box page (labs/box) on WebGPU. The room starts
+ * ready on WebGPU, its route's seed kept (the landing page opens the playground since ADR-0021 amendment 3:
+ * tests/e2e/playground.spec.ts); without WebGPU it shows `GFX_NO_WEBGPU` on the page as its one error record,
+ * never turns ready and still steps through `__engine`, while `render` and `shot` throw; from cam iso the ID pass lists
+ * the floor, every wall run, the low wall, the pillar and the three movers, the look metrics raise no note, and the
+ * thumbnail matches its baseline (`x shot labs/box --scene room --cam iso --thumb box-room-iso`); cycling every camera
+ * preset and resolution mode builds 0 pipelines after the warm-up; every setting the page knows is reachable through
+ * `__engine.set` (every inspector member: tests/e2e/box-members.spec.ts); the routes reach the
+ * run (`?seed`, settings, `?replay` in real time) and a bad one is one error record on the page; and `x inspect` keeps
+ * the page open for `x eval`, `x set`, `x dump` and `x shot`, opens another page and goes back to the first, and with
+ * a page open that has no `__engine.shot` (labs/hello), `x shot` takes its own. The CPU-only contract is
+ * tests/e2e/parity.spec.ts.
+ *
+ * Invariants: the page is driven only through `window.__engine` and the virtual clock (tools/lib/browser.ts), as an
+ * agent drives it; frames are drawn by `__engine.render()` or `__clock.tick()`. The startup test launches its own
+ * Chromium without `WEBGPU_FLAGS`; everything else uses the project's browser.
+ */
+import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { chromium, type Page } from '@playwright/test';
+import { CAMERA_3D, VIEW_NAMES } from '../../engine/gfx/cameras/codes';
+import { RESOLUTION_MODES } from '../../engine/gfx/resolution';
+import { chromiumPath, preparePage, VIEWPORT, type GpuLog } from '../../tools/lib/browser';
+import { findUnlisted, loadAllowList } from '../setup/adviceTrap';
+import { CHROMIUM_NO_ADAPTER, expect, test, type Harness } from './fixtures';
+
+const ROOT = join(import.meta.dirname, '..', '..');
+/** Variables a test runner sets for its own workers; the `x` children start without them. */
+const RUNNER_VARIABLE = /^(VITEST|TEST_WORKER_INDEX$|TEST_PARALLEL_INDEX$|PW_TS_ESM|PW_TEST_SOURCE_TRANSFORM)/;
+const REPLAY = readFileSync(join(ROOT, 'tests/replays/box-1-room.replay.json'), 'utf8');
+const GOLDEN = (JSON.parse(REPLAY) as { hashes: Record<string, Record<string, string>> }).hashes['linux-x64'];
+
+/** Every camera preset: each classic view in both projections, then each 3D camera (engine/gfx/cameras/codes.ts). */
+const CAMERA_PRESETS = [
+  ...VIEW_NAMES.flatMap((view) => [`cam=${view}`, `cam=${view},persp`]),
+  ...CAMERA_3D.map((type) => `cam3=${type}`),
+];
+
+/** `window.__engine` as these tests call it: members by dotted name. */
+type Engine = Record<string, unknown>;
+/** The page's engine, inside `evaluate`. */
+declare const __engine: Engine & { [name: string]: (...args: unknown[]) => unknown };
+
+/** Calls the member `path` with `args` in the page; resolves with its result. */
+function call<T = unknown>(page: Page, path: string, ...args: unknown[]): Promise<T> {
+  return page.evaluate(
+    ([name, rest]) => {
+      const fn = name.split('.').reduce<unknown>((at, part) => (at as Record<string, unknown>)[part], __engine);
+      return (fn as (...a: unknown[]) => unknown)(...rest) as T;
+    },
+    [path, args] as const,
+  );
+}
+
+/** Runs `node x <args>` from the repository root; returns its exit code and printed text. */
+function x(...args: string[]) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !RUNNER_VARIABLE.test(key)));
+  const run = spawnSync(process.execPath, ['x', ...args], { cwd: ROOT, encoding: 'utf8', env, timeout: 180_000 });
+  return { code: run.status, output: `${run.stdout}${run.stderr}` };
+}
+
+/** Opens the box with `query` and waits for ready on WebGPU. */
+async function open(page: Page, harness: Harness, query = '') {
+  await page.goto(`labs/box/${query}`);
+  await harness.ready({ timeout: 60_000 });
+  await harness.assertWebGPU();
+}
+
+test.describe('the box, stage 1', () => {
+  test.setTimeout(180_000);
+
+  test("opens the room, ready on WebGPU, its route's seed kept", async ({ page, harness }) => {
+    await page.goto('labs/box/?seed=2');
+    await harness.ready({ timeout: 60_000 });
+    await harness.assertWebGPU();
+    expect(new URL(page.url()).pathname).toBe('/labs/box/');
+    expect(await call(page, 'info')).toMatchObject({ scene: 'box:room', seed: 2, headless: false, runtime: 'browser' });
+    expect(await page.locator('#msg').isHidden()).toBe(true);
+  });
+
+  test('the startup test: without WebGPU the box shows GFX_NO_WEBGPU, never turns ready, and still steps', async ({
+    baseURL,
+  }) => {
+    // An explicit empty args: Playwright Test merges the project's launch options (WEBGPU_FLAGS) into a launch without.
+    const browser = await chromium.launch({ executablePath: chromiumPath(), args: [] });
+    try {
+      const page = await browser.newPage({ viewport: VIEWPORT });
+      const watch = await preparePage(page);
+      await page.goto(new URL('labs/box/?scene=room', baseURL).href);
+      const state = () =>
+        page.evaluate(() => {
+          const message = document.querySelector<HTMLElement>('#msg');
+          return {
+            ready: __engine.ready as unknown as boolean,
+            errors: __engine.errors as unknown as { code: string; message: string; fix: string; values: object }[],
+            text: message?.hidden ? '' : (message?.textContent ?? ''),
+            gpu: window.__gpu,
+          };
+        });
+      await expect.poll(async () => (await state()).errors.length, { timeout: 60_000 }).toBe(1);
+      const started = await state();
+      const reason = 'navigator.gpu.requestAdapter() gave no adapter';
+      expect(started.errors).toEqual([
+        expect.objectContaining({
+          code: 'GFX_NO_WEBGPU',
+          message: `WebGPU is unavailable: ${reason}`,
+          fix: expect.stringContaining('WEBGPU_FLAGS'),
+          values: { reason }, // read back from the GfxError's message through the code's template
+        }),
+      ]);
+      const [error] = started.errors;
+      expect(started.text).toBe(`GFX_NO_WEBGPU: ${error.message}\nFix: ${error.fix}`);
+      expect(started.ready).toBe(false);
+      const nothing: GpuLog = { adapters: [null], devices: 0, contexts: 0, submits: 0, lost: [] };
+      expect(started.gpu).toEqual(nothing);
+
+      // The sim still runs through __engine; only the members that draw throw.
+      const members = await page.evaluate(async () => {
+        const thrown = async (run: () => unknown) => {
+          try {
+            await run();
+            return 'no throw';
+          } catch (caught) {
+            return String((caught as Error).message);
+          }
+        };
+        const tick = __engine.step(5);
+        return {
+          tick,
+          info: __engine.info(),
+          render: await thrown(() => __engine.render()),
+          shot: await thrown(() => __engine.shot()),
+        };
+      });
+      expect(members).toMatchObject({ tick: 5, info: { tick: 5, scene: 'box:room' } });
+      expect(members.render).toMatch(/^\[DEV_NO_RENDERER\] __engine\.render needs a renderer/);
+      expect(members.shot).toMatch(/^\[DEV_NO_RENDERER\] __engine\.shot needs a renderer/);
+      await page.evaluate(() => window.__clock.tick(10)); // animation frames come and go; nothing draws or steps
+      expect(await state()).toEqual(started);
+      expect(await page.evaluate(() => (__engine.info() as { tick: number }).tick)).toBe(5);
+      expect(await watch.errors()).toEqual([]);
+      // The page prints one line, the log's (engine/core/log.ts: the code, the message, the fix, then the cause).
+      // Chromium itself says WebGPU is missing in lines without a source URL and in its no-adapter warning, and
+      // Vite's client logs its connection: none is the page's doing.
+      const theirs = (line: { url?: string; text: string }) => line.url?.endsWith('/@vite/client') || line.text === CHROMIUM_NO_ADAPTER; // prettier-ignore
+      const pageLines = watch.console.filter((line) => line.url && !theirs(line));
+      expect(pageLines.map(({ type, text }) => ({ type, text }))).toEqual([
+        { type: 'error', text: expect.stringMatching(/^\[GFX_NO_WEBGPU\] /) },
+      ]);
+      expect(pageLines[0].text.startsWith(`[GFX_NO_WEBGPU] ${error.message}: ${error.fix}`)).toBe(true);
+      expect(findUnlisted(pageLines, loadAllowList()).map((warning) => warning.code)).toEqual(['GFX_NO_WEBGPU']);
+    } finally {
+      await browser.close();
+    }
+  });
+
+  test('from cam iso the ID pass lists the floor, every wall run, the low wall, the pillar and the movers', async ({
+    page,
+    harness,
+  }) => {
+    await open(page, harness, '?scene=room&cam=iso');
+    const shot = await call<{ ids: { visible: { name: string; entity?: number }[] }; notes: unknown[] }>(page, 'shot');
+    const names = shot.ids.visible.map((entry) => entry.name);
+    for (const name of [
+      'level:room/floor',
+      'level:room/wall@0,0-15,0',
+      'level:room/wall@0,1-0,11',
+      'level:room/wall@15,1-15,11',
+      'level:room/wall@1,11-14,11',
+      'level:room/lowWall',
+      'level:room/pillar',
+      'pathMover#1',
+      'pathMover#2',
+      'pathMover#3',
+    ]) {
+      expect(names, name).toContain(name);
+    }
+    expect(
+      shot.ids.visible
+        .filter((entry) => entry.entity !== undefined)
+        .map((e) => e.entity)
+        .sort(),
+    ).toEqual([1, 2, 3]);
+    expect(shot.notes).toEqual([]);
+    const tool = x('shot', 'labs/box', '--scene', 'room', '--cam', 'iso', '--thumb', 'box-room-iso');
+    expect(tool.code, tool.output).toBe(0);
+    const report = JSON.parse(readFileSync(join(ROOT, 'out/shot/labs-box-room-iso/report.json'), 'utf8'));
+    expect(report.metrics).toMatchObject({ thumbCells: 0, visible: 11, 'px.pathMover#3': expect.any(Number) });
+    expect(report.warnings).toEqual([]);
+  });
+
+  test('cycling every camera preset and resolution mode builds 0 pipelines after the warm-up', async ({
+    page,
+    harness,
+  }) => {
+    await open(page, harness, '?scene=room');
+    for (const code of CAMERA_PRESETS) {
+      await call(page, 'camera.set', code);
+      for (const mode of RESOLUTION_MODES) {
+        await call(page, 'set', 'gfx.resolution', mode);
+        const frame = await call<{ drawn: boolean; built: number }>(page, 'render', 2);
+        expect(frame, `${code}, ${mode}`).toMatchObject({ drawn: true, built: 0 });
+      }
+    }
+    const advice = await page.evaluate(() => (__engine.advice as unknown as { code: string }[]).map((a) => a.code));
+    expect(advice).not.toContain('GFX_COLD_PIPELINE');
+    expect(harness.advice()).toEqual([]);
+  });
+
+  test('every setting the page knows is reachable through __engine.set', async ({ page, harness }) => {
+    await open(page, harness, '?scene=room');
+    const rows = await page.evaluate(() => {
+      const kind = __engine.describe('setting') as { ids: string[] };
+      return kind.ids.map((id) => {
+        const { fields } = __engine.describe('setting', id) as { fields: { key: string; value: unknown }[] };
+        const fallback = fields.find((field) => field.key === 'default')!.value;
+        const text = typeof fallback === 'string' ? fallback : JSON.stringify(fallback);
+        return { id, value: (__engine.set(id, text) as { value: unknown }).value, expected: fallback };
+      });
+    });
+    expect(rows.map((row) => row.id)).toEqual(
+      expect.arrayContaining(['box.room.speed', 'gfx.resolution', 'time.scale']),
+    );
+    for (const row of rows) expect(row.value, row.id).toEqual(row.expected);
+  });
+
+  test('the routes reach the run, and a bad one is one error record shown on the page', async ({ page, harness }) => {
+    await open(page, harness, '?scene=room&seed=5&box.room.speed=3&cam=topdown');
+    expect(await call(page, 'info')).toMatchObject({ seed: 5 });
+    expect(await call(page, 'camera.get')).toMatchObject({ code: 'cam=topdown' });
+    await call(page, 'step', 60);
+    expect((await call<{ pathMover: { s: number } }>(page, 'get', 1)).pathMover.s).toBeCloseTo(3, 9);
+    await page.goto('labs/box/?scene=rom');
+    await expect
+      .poll(() => page.evaluate(() => (__engine.errors as unknown as { code: string }[]).map((e) => e.code)))
+      .toEqual(['APP_BAD_ROUTE']);
+    await expect(page.locator('#msg')).toContainText('APP_BAD_ROUTE');
+    await expect(page.locator('#msg')).toContainText('did you mean "room"?');
+    expect(await page.evaluate(() => __engine.ready)).toBe(false);
+    expect(harness.advice().map((warning) => warning.code)).toEqual(['APP_BAD_ROUTE']); // printed once, on purpose
+  });
+
+  test('?replay plays a box replay in real time, a step a frame', async ({ page, harness }) => {
+    await open(page, harness, '?replay=box-1-room');
+    await page.evaluate(() => window.__clock.tick(61)); // the first frame sets the clock's origin
+    expect(await call(page, 'info')).toMatchObject({ tick: 60, seed: 1 });
+    expect(await call(page, 'hash')).toBe(GOLDEN['60']);
+  });
+
+  test('x inspect keeps the page open for x eval, x set, x dump and x shot', async () => {
+    test.setTimeout(400_000);
+    try {
+      const started = x('inspect', '--scene', 'room');
+      expect(started.code, started.output).toBe(0);
+      const evaluated = x('eval', '__engine.info().scene');
+      expect([evaluated.code, evaluated.output]).toEqual([0, expect.stringContaining('"box:room"')]);
+      const set = x('set', 'box.room.speed', '3');
+      expect(set.output).toContain('applied in labs/box/?scene=room: 1.5 → 3 (recorded at this step)');
+      const dump = x('dump', '--step', '60', '--filter', 'pathMover');
+      expect([dump.code, dump.output]).toEqual([0, expect.stringContaining('tick 60')]);
+      expect(dump.output).toMatch(/pathMover#1 Mesh at 6\.5,0,4\.5/); // 3 m/s for 1 s along the line east
+      const shot = x('shot', 'labs/box', '--scene', 'room');
+      expect([shot.code, shot.output]).toEqual([0, expect.stringContaining('reused the inspect session')]);
+      // another page, then back: session.json and x eval follow the page open now
+      const topdown = 'labs/box/?scene=room&cam=topdown';
+      expect(x('inspect', '--scene', 'room', '--cam', 'topdown').output).toContain(`on ${topdown}: ready`);
+      expect(JSON.parse(readFileSync(join(ROOT, 'out/inspect/session.json'), 'utf8'))).toMatchObject({ page: topdown });
+      expect(x('eval', '__engine.camera.get().code').output).toContain(`${topdown}: "cam=topdown"`);
+      expect(x('inspect', '--scene', 'room').output).toContain('on labs/box/?scene=room: ready');
+      const camera = x('eval', '__engine.camera.get().code').output;
+      expect(camera).toContain('labs/box/?scene=room: "');
+      expect(camera).not.toContain('topdown');
+      // a page without __engine.shot open in the session (labs/hello): x shot screenshots it in its own browser
+      expect(x('inspect', '--page', 'labs/hello').output).toContain('on labs/hello/: ready');
+      const hello = x('shot', 'labs/hello');
+      expect([hello.code, hello.output]).toEqual([0, expect.stringContaining('SHOT_NO_ID_PASS')]);
+      expect(hello.output).not.toContain('reused the inspect session');
+    } finally {
+      x('inspect', '--stop');
+    }
+  });
+});

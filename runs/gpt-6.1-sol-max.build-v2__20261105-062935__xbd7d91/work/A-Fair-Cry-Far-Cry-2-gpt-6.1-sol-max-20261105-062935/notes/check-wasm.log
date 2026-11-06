@@ -1,0 +1,47 @@
+    Blocking waiting for file lock on build directory
+warning: unused import: `Vec2`
+ --> crates/pav_core/src/games/merc/actions.rs:1:12
+  |
+1 | use glam::{Vec2,Vec3};
+  |            ^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused import: `flat`
+ --> crates/pav_core/src/games/merc/bot.rs:3:35
+  |
+3 | use super::{*,act,data::{distance,flat,toward}};
+  |                                   ^^^^
+
+warning: `pav_core` (lib) generated 2 warnings (run `cargo fix --lib -p pav_core` to apply 2 suggestions)
+    Checking pav_ui v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_ui)
+    Checking pav_tools v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_tools)
+    Checking pav_app v0.1.0 (/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261105-062935__xbd7d91/work/A-Fair-Cry-Far-Cry-2-gpt-6.1-sol-max-20261105-062935/engine/crates/pav_app)
+warning: unused imports: `GameBox`, `act`, and `input::buttons as b`
+ --> crates/pav_app/src/merc_shell.rs:5:44
+  |
+5 | use pav_core::{Sim,InputFrame,games::{Game,GameBox,merc::{Merc,act,net::Packet}},input::buttons as b};
+  |                                            ^^^^^^^             ^^^               ^^^^^^^^^^^^^^^^^^^
+  |
+  = note: `#[warn(unused_imports)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused imports: `ElementState`, `MouseButton`, and `PhysicalKey`
+ --> crates/pav_app/src/merc_shell.rs:7:129
+  |
+7 | ...low},event::{WindowEvent,DeviceEvent,ElementState,MouseButton},keyboard::{KeyCode,PhysicalKey},window::{Window,WindowId}};
+  |                                         ^^^^^^^^^^^^ ^^^^^^^^^^^                     ^^^^^^^^^^^
+
+error[E0277]: `?` couldn't convert the error: `wasm_bindgen::JsValue: StdError` is not satisfied
+  --> crates/pav_app/src/merc_shell.rs:52:347
+   |
+52 | ...)->Result<()>{let driver=Rc::new(RefCell::new(Driver::new(&settings)?));#[cfg(target_arch="wasm32")] {let d=driver.clone();let tick=Closure::<dyn FnMut()>::new(move||{if let Ok(mut d)=d.try_borrow_mut(){d.tick();}});let w=web_sys::window().unwrap();js_sys::Reflect::set(&w,&JsValue::from_str("mercPump"),tick.as_ref())?;ti...
+   |       ----------                                                                                                                                                                                                                                            ---------------------------------------------------------------------^ the trait `StdError` is not implemented for `wasm_bindgen::JsValue`
+   |       |                                                                                                                                                                                                                                                     |
+   |       required `wasm_bindgen::JsValue: StdError` because of this                                                                                                                                                                                            this has type `Result<_, wasm_bindgen::JsValue>`
+   |
+   = note: the question mark operation (`?`) implicitly performs a conversion on the error value using the `From` trait
+   = note: required for `anyhow::Error` to implement `From<wasm_bindgen::JsValue>`
+
+For more information about this error, try `rustc --explain E0277`.
+warning: `pav_app` (bin "shardfall") generated 2 warnings
+error: could not compile `pav_app` (bin "shardfall") due to 1 previous error; 2 warnings emitted

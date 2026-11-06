@@ -1,0 +1,119 @@
+/**
+ * @file Unit tests for engine/app/playback.ts (T1, PLAN.md §6.5 item 9, WP 2.7): a replay played one step at a time
+ * gives `playReplay`'s hashes at every step (the kernel's replays, with intents, settings and dev actions, and the
+ * box's), and its goldens; it records itself again point for point; `playInto` hashes the checkpoints or every step,
+ * stops at `until` with the state and trace, draws after every n-th step (moving the view on by a frame at each step
+ * between), applies view changes and shoots where one asks, and refuses a view change that would change play (`APP_PLAY_SETTING`) or a replay holding a view setting
+ * (`SIM_BAD_REPLAY`).
+ * @see engine/app/playback.ts
+ */
+import { readFileSync } from 'node:fs';
+import { describe, expect, it } from 'vitest';
+import '../../fixtures/scenes/kernel';
+import '../../labs/box/scenes/room';
+import { registry } from '../core/registry';
+import type { SettingValue } from '../core/settings';
+import { playReplay, type Replay } from '../sim/replay';
+import { getScene } from '../sim/scene';
+import { createSession, type Session } from '../sim/session';
+import { createPlayback, playInto, type PlayTarget } from './playback';
+
+const REPLAYS = ['kernel-movers', 'kernel-crowd', 'box-1-room', 'box-1-tuned'];
+const text = (name: string) => readFileSync(`tests/replays/${name}.replay.json`, 'utf8');
+
+/** A play target over a fresh session per replay, counting draws and recording view changes. */
+function target() {
+  let session: Session | undefined;
+  const log: string[] = [];
+  const played: PlayTarget = {
+    registry,
+    begin: (replay: Replay) =>
+      (session = createSession(getScene(replay.scene), { seed: replay.seed, settings: replay.settings })),
+    stepped: () => void log.push(`step ${session!.world.tick}`),
+    draw: async () => void log.push('draw'),
+    camera: (code) => void log.push(`camera ${code}`),
+    setView: (path: string, value: SettingValue) => void session!.set(path, value),
+  };
+  return { played, log, session: () => session! };
+}
+
+describe('createPlayback', () => {
+  it("gives playReplay's hash at every step, and records the replay again", () => {
+    for (const name of REPLAYS) {
+      const replay = JSON.parse(text(name)) as Replay;
+      const expected = playReplay(replay, { checkpoints: 'every' }).hashes;
+      const playback = createPlayback(replay);
+      const session = createSession(getScene(replay.scene), { seed: replay.seed, settings: replay.settings });
+      const got: Record<string, string> = { 0: session.world.hash() };
+      while (!playback.done) {
+        playback.step(session);
+        got[playback.tick] = session.world.hash();
+      }
+      expect(got, name).toEqual(expected);
+      expect(session.record().inputs, name).toEqual(replay.inputs);
+    }
+  });
+});
+
+describe('playInto', () => {
+  it('gives the goldens at the checkpoints, drawing after every step', async () => {
+    for (const name of REPLAYS) {
+      const replay = JSON.parse(text(name)) as Replay;
+      const { played, log } = target();
+      const run = await playInto(played, text(name));
+      expect(run.hashes, name).toEqual(replay.hashes['linux-x64']);
+      expect([run.steps, run.frames, log.filter((line) => line === 'draw').length]).toEqual([600, 600, 600]);
+      expect(run.state).toBeUndefined();
+    }
+  });
+
+  it('stops at until with the state and trace, hashes every step, draws every n-th, and applies view changes', async () => {
+    const { played, log, session } = target();
+    const views = [[2, { cam: 'cam=topdown', set: { 'kernel.trail': 4 } }]] as const;
+    const run = await playInto(played, text('kernel-movers'), { until: 5, every: true, draw: 2, views });
+    expect(Object.keys(run.hashes)).toEqual(['0', '1', '2', '3', '4', '5']);
+    expect([run.steps, run.frames, run.trace?.tick, run.trace?.hash]).toEqual([5, 2, 5, run.hash]);
+    expect(run.state?.entities.length).toBeGreaterThan(0);
+    expect(log.slice(0, 6)).toEqual(['step 1', 'step 2', 'draw', 'camera cam=topdown', 'step 3', 'step 4']);
+    expect(session().settings.get('kernel.trail')).toBe(4);
+    expect(
+      session()
+        .record()
+        .inputs.some(([, change]) => change.set),
+    ).toBe(false);
+  });
+
+  it('moves the view on by a frame at each step it draws none for, drawing every n-th; at 0 or 1, never (WP 13.26)', async () => {
+    const { played, log } = target();
+    const carried: PlayTarget = { ...played, carry: () => void log.push('carry') };
+    await playInto(carried, text('kernel-movers'), { until: 6, draw: 3 });
+    expect(log).toEqual(['step 1', 'carry', 'step 2', 'carry', 'step 3', 'draw', 'step 4', 'carry', 'step 5', 'carry', 'step 6', 'draw']); // prettier-ignore
+    for (const draw of [0, 1]) {
+      log.length = 0;
+      await playInto(carried, text('kernel-movers'), { until: 3, draw });
+      expect(
+        log.filter((line) => line === 'carry'),
+        `draw ${draw}`,
+      ).toEqual([]);
+    }
+  });
+
+  it('shoots the view where a view change asks, each shot at its step, a film of the replay (WP 13.26)', async () => {
+    const { played, session } = target();
+    const shoot = async (options: Record<string, unknown>) => ({ tick: session().world.tick, options });
+    const views = [
+      [0, { shot: true }],
+      [3, { cam: 'cam=iso', shot: { pixels: true } }],
+    ] as const;
+    const run = await playInto({ ...played, shoot }, text('kernel-movers'), { until: 5, views });
+    expect(run.shots).toEqual([{ step: 0, shot: { tick: 0, options: {} } }, { step: 3, shot: { tick: 3, options: { pixels: true } } }]); // prettier-ignore
+    expect((await playInto(played, text('kernel-movers'), { until: 5, views })).shots).toBeUndefined(); // no shoot: headless
+  });
+
+  it('refuses a view change that changes play, and a replay holding a view setting', async () => {
+    const views = [[0, { set: { 'kernel.speed': 2 } }]] as const;
+    await expect(playInto(target().played, text('kernel-movers'), { views })).rejects.toThrow(/APP_PLAY_SETTING/);
+    const viewed = { ...JSON.parse(text('kernel-movers')), settings: { 'kernel.trail': 3 } };
+    await expect(playInto(target().played, JSON.stringify(viewed))).rejects.toThrow(/SIM_BAD_REPLAY.*marked view/);
+  });
+});

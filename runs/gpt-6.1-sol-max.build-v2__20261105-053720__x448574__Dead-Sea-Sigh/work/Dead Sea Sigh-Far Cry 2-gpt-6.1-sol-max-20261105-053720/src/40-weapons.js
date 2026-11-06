@@ -1,0 +1,38 @@
+function equip(id){if(!S.inventory[id])return;S.cur=id;S.act=null;S.tool=null;A.sfx('rack');}
+function giveGun(id,cond=1){const W=WEAPONS[id];S.inventory[id]={cond,mag:W.mag,reserve:W.reserve,jammed:false};const i=['side','primary','heavy'].indexOf(W.slot);const old=S.slots[i];S.slots[i]=id;if(old&&old!==id)delete S.inventory[old];equip(id);}
+function startReload(){if(S.act)return;const g=S.inventory[S.cur],w=WEAPONS[S.cur];if(!g)return;if(g.jammed){S.jamKind=Math.floor(rnd()*3);act('jam',1.3,()=>{g.jammed=false;A.sfx('rack');});A.sfx('rack');}else if(g.mag<w.mag&&g.reserve>0){act('reload',w.reload,()=>{const n=Math.min(w.mag-g.mag,g.reserve);g.mag+=n;g.reserve-=n;A.sfx('rack');});A.sfx('reload');}}
+function gunShot(){if(S.cur==='machete')return machete();if(S.act||S.fireCd>0)return false;const g=S.inventory[S.cur],w=WEAPONS[S.cur];if(!g)return false;if(g.jammed){S.fireCd=.25;A.sfx('jam');return false;}if(g.mag<=0){A.sfx('jam');S.fireCd=.3;return false;}if(g.cond<.7&&!CHEATS.noJams&&rnd()<TUNE.jam*w.jam*.09*(1-g.cond/.7)**2){g.jammed=true;A.sfx('jam');S.fireCd=.3;S.jams=(S.jams||0)+1;return false;}if(g.cond<.15&&rnd()<.08){A.sfx('jam');S.fireCd=.4;return false;}
+ if(!CHEATS.ammo)g.mag--;g.cond=Math.max(0,g.cond-w.wear*TUNE.wear*(S.merc===3&&S.cur==='sexton'?.5:1));S.shots++;S.lastShot=S.time;S.flash=1;S.fireCd=1/w.rate;S.tool=null;A.sfx('gun_'+w.id);game.input.rumble?.(.2,.6,70);noise(hero.x,hero.y,150);burnPapers();
+ const eye=[hero.x,hero.y,hero.z+S.eye],F=frameYP(eye,S.yaw,S.pitch);for(let i=0;i<w.pellets;i++){const spread=S.ads?.002:w.hip*(S.tool==='locator'?2:1),D=nrm(add(add(F.f,F.r,(rnd()-.5)*spread),F.u,(rnd()-.5)*spread));castShot(w.id,eye,D,hero);if(inSession&&!AIHub.isHost)queueShot(w.id,eye,D);}
+ S.pitch=clamp(S.pitch+(w.slot==='side'?.018:w.rate<2?.045:.007),-1.45,1.45);
+ if(w.id==='gardener'&&g.cond<.1&&rnd()<.004){explodeAt(hero.x,hero.y,hero.z,5,70);g.cond=0;}
+ if(g.cond<=0){say(MERCS[S.merc].name,'That was the last thing it had to say.');loot.push({id:'broken'+S.time,x:hero.x,y:hero.y,z:hero.z,weapon:S.cur,cond:0});const i=S.slots.indexOf(S.cur);if(i>=0)S.slots[i]=null;delete S.inventory[S.cur];S.cur=S.slots.find(Boolean)||'machete';A.sfx('break');}return true;
+}
+function castShot(id,eye,D,owner=hero){const w=WEAPONS[id],range=w.range*M,hit=world.ray(...eye,...D,range,{skip:owner}),p=hit?[hit.x,hit.y,hit.z]:add(eye,D,range);if(!NO_RENDER&&id!=='machete')tracer(add(eye,D,12),p);if(inSession&&!AIHub.isHost)return;
+ if(id==='gardener'){for(let d=2;d<13;d+=2)Fire.ignite(eye[0]+D[0]*d*M,eye[1]+D[1]*d*M,2);}
+ if(id==='bishop'){explodeAt(...p,7,200);return;}if(id==='acolyte')Fire.ignite(p[0],p[1],4,true);if(hit){const e=hit.actor?.data?.entity;if(e)hurtEnemy(e,w.dmg*TUNE.playerDamage*(p[2]>e.a.z+24?2:1),p[2]>e.a.z+24);else if(hit.actor?.data?.remote!==undefined)netDamage(hit.actor.data.remote,w.dmg);else if(hit.actor===hero&&owner!==hero)hurtPlayer(w.dmg);if(!NO_RENDER)decal(p,[hit.nx||0,hit.ny||0,hit.nz||1],.5);}
+ for(const v of vehicles){if(v.hp<=0)continue;const f=dot(sub([v.v.x,v.v.y,v.v.z+10],eye),D);if(f>0&&f<Math.min(range,hit?.dist??range)+30&&Math.hypot(...sub(add(eye,D,f),[v.v.x,v.v.y,v.v.z+10]))<23){damageVehicle(v,id==='bishop'?140:w.dmg*.45);break;}}
+ for(const b of barrels){if(b.dead)continue;const f=dot(sub([b.x,b.y,b.z+8],eye),D);if(f>0&&f<Math.min(range,hit?.dist??range)+10&&Math.hypot(...sub(add(eye,D,f),[b.x,b.y,b.z+8]))<12){b.hp-=w.dmg;if(b.hp<=0)barrelBoom(b);}}
+ if(id==='choir'&&rnd()<.02)Fire.ignite(p[0],p[1],2);
+}
+function throwObject(kind){if(S.act)return;if(kind==='bottle'?!S.bottles:!S.nades)return;S.throwKind=kind;act('throw',.7,()=>{if(kind==='bottle')S.bottles--;else S.nades--;const F=frameYP([hero.x,hero.y,hero.z+S.eye],S.yaw,S.pitch);const p=add(F.o,F.f,9);nades.push({kind,x:p[0],y:p[1],z:p[2],vx:F.f[0]*340+hero.vx*.4,vy:F.f[1]*340+hero.vy*.4,vz:F.f[2]*340+55,t:0});A.sfx('throw');});}
+function stepNades(dt){for(const n of nades.slice()){const p=[n.x,n.y,n.z];n.vz-=GRAV*dt;const D=[n.vx*dt,n.vy*dt,n.vz*dt],len=Math.hypot(...D);const h=world.ray(...p,...nrm(D),len+1,{skip:hero});n.x+=D[0];n.y+=D[1];n.z+=D[2];n.t+=dt;if(h||n.z<height(n.x,n.y)+2||n.t>2.3){if(inSession&&!AIHub.isHost){Net.requests.push({t:'throw',kind:n.kind,x:Math.round(n.x),y:Math.round(n.y),z:Math.round(n.z)});}else if(n.kind==='bottle'){Fire.ignite(n.x,n.y,S.merc===0?8:6,true);A.sfx('glass');}else explodeAt(n.x,n.y,n.z,7,110);nades.splice(nades.indexOf(n),1);}}}
+function explodeAt(x,y,z,r=7,damage=110){Fire.ignite(x,y,4,true);A.sfx('explode');game.shake(5);for(const e of raiders)if(e.alive){const d=Math.hypot(e.a.x-x,e.a.y-y,e.a.z-z)/M;if(d<r)hurtEnemy(e,damage*(1-d/r),true);}for(const v of vehicles){const d=Math.hypot(v.v.x-x,v.v.y-y)/M;if(d<r)damageVehicle(v,140*(1-d/r));}if(inSession&&AIHub.isHost)for(const p of Net.players.values())if(p.id!==AIHub.me&&p.hp>0){const d=Math.hypot(p.x-x,p.y-y,p.z-z)/M;if(d<r)netDamage(p.id,damage*(1-d/r));}const d=Math.hypot(hero.x-x,hero.y-y,hero.z-z)/M;if(d<r)hurtPlayer(damage*(1-d/r));for(const b of barrels)if(!b.dead&&Math.hypot(b.x-x,b.y-y)<r*M){b.dead=true;Fire.ignite(b.x,b.y,8,true);} }
+function actions(dt,I){if(S.bound||S.ending)return;S.fireCd=Math.max(0,S.fireCd-dt);S.ads=I.down('aim')&&!S.tool&&!S.act;actionStep(dt);if(S.act==='surgery')return;
+ for(const [i,a]of ['one','two','three'].entries())if(I.pressed(a)){I.use(a);if(S.slots[i])equip(S.slots[i]);}
+ if(I.pressed('swap')){I.use('swap');const ids=S.slots.filter(Boolean);equip(ids[(ids.indexOf(S.cur)+1)%ids.length]);}
+ if(I.pressed('reload')&&(!S.near||game.input.lastDevice!=='gamepad')){I.use('reload');startReload();}
+ if(['log','card','watch'].includes(S.tool)&&(I.pressed('fire')||I.pressed('jump')||I.pressed('confirm'))){I.use('fire');I.use('jump');I.use('confirm');if(S.tool==='log')closeCard();else if(S.tool==='card')buyGun();else sleep(S.sleepHour);return;}
+ for(const tool of ['map','locator','monocular'])if(I.pressed(tool)){I.use(tool);S.tool=S.tool===tool?null:tool;S.toolT=0;A.sfx('paper');}
+ if(S.tool==='map'){
+  const pad=game.input.lastDevice==='gamepad';if((pad&&I.pressed('jump'))||(!pad&&I.pressed('fire'))){I.use(pad?'jump':'fire');S.waypoint=[S.pencil[0]*SIZE,S.pencil[1]*SIZE];A.sfx('beep');}
+  if(pad&&I.pressed('fire')){I.use('fire');S.mapZoom=clamp(S.mapZoom+.5,1,3);}if(pad&&I.pressed('aim')){I.use('aim');S.mapZoom=clamp(S.mapZoom-.5,1,3);}return;
+ }
+ if((WEAPONS[S.cur]?.auto?I.down('fire'):I.pressed('fire'))&&!S.vehicle){if(S.tool){S.tool=null;A.sfx('paper');}if(gunShot())I.use('fire');}
+ if(I.pressed('bottle')){I.use('bottle');throwObject('bottle');}if(I.pressed('grenade')){I.use('grenade');throwObject('frag');}
+ if(I.pressed('melee')&&!S.act){I.use('melee');machete();}
+ if(I.pressed('use')){I.use('use');if(S.near)useNear(S.near);else if(S.vehicle)exitVehicle();else startReload();}
+ if(S.tool==='monocular'){const F=frameYP([hero.x,hero.y,hero.z+S.eye],S.yaw,S.pitch);let tag=null;for(const e of raiders)if(e.alive){const D=nrm(sub([e.a.x,e.a.y,e.a.z+20],F.o));if(dot(D,F.f)>.996)tag=e;}if(tag){S.tagTime=(S.tagTarget===tag.id?S.tagTime:0)+dt;S.tagTarget=tag.id;if(S.tagTime>.6&&!S.tags.includes(tag.id)){S.tags.push(tag.id);A.sfx('beep');}}}
+}
+
+function machete(){if(S.act)return false;act('melee',.6,()=>{if(inSession&&S.mode==='salvage'){if(AIHub.isHost)hostUse(AIHub.me,{t:'melee'});else Net.requests.push({t:'melee'});return;}for(const e of raiders)if(e.alive&&Math.hypot(e.a.x-hero.x,e.a.y-hero.y)<3*M&&Math.cos(Math.atan2(e.a.y-hero.y,e.a.x-hero.x)-S.yaw)>.4){hurtEnemy(e,60,false);break;}const d=doors.find(d=>Math.hypot(d.x-hero.x,d.y-hero.y)<3*M);if(d)d.open=true;});A.sfx('swing');return true;}

@@ -1,0 +1,19 @@
+import { TITLE } from './title.js';
+
+export const about = {
+  sourceInformation: {
+    date:'2026-11-04 22:18:46', source:'Wii Fit', plan:'PLAN.md', genre:'Sports',
+    perspective:'Isometric 3D island', tech:'Pixel Engine 0.46.0, three.js r186, JavaScript, Web Audio',
+    artDirection:'Pastel, low-poly island and friendly, rounded fitness interface',
+    animation:'Procedural posing and three.js AnimationMixer',
+    audio:'Original procedural Web Audio music, effects, and syllabic character voice',
+    online:'AI Hub ghost session with score and position messages',
+    testing:'No subagents; automated simulations, browser and viewport tests permitted. No physical controller or iOS device available.',
+    research:'Pixel Engine 0.46.0 documentation and AI Hub session protocol',
+    environment:'Codex CLI (headless); Linux', model:'OpenAI, gpt-6.1-terra, reasoning effort max', usage:'added on import'
+  },
+  testingFeedback:['Five issues: WebGPU startup failure, title sizing, AI Hub readiness timing, a narrow-phone hint overflow, and sequential rather than simultaneous Family Hour.','Two were game-breaking: WebGPU startup and AI Hub readiness.','Real-browser interaction and AI Hub harness runs.','Static inspection without running the game.'],
+  engineFeedback:['The compact scene lifecycle and built-in camera.','WebGPU availability varies between browsers.','The balance physics, activities and UI.','Validating WebGPU behavior across browser engines.','None; pixel-engine.js remains unchanged.','Provide an explicit supported fallback for browsers without WebGPU.'],
+  promptFeedback:['The emphasis on a playable, controller-first vertical slice.','The scope combines a large simulation, multiplayer and a standalone deliverable.','Balancing the breadth of activities with cross-browser verification.','Prioritize required features and define an explicit minimum for each.'],
+  aiHub:{name:TITLE,tagline:'A very serious game about a very wobbly week.',description:'Balance, breathe, and bravely face a talking scale on a cozy island. Play a week of delightfully questionable fitness or challenge friends in a three-event medley.',type:'Game',genre:'Sports',source:'Wii Fit',series:'Wii Fit',players:'1–4',controls:'Left stick / WASD: lean; R2 / Space: breathe; L1/R1 or F/J: step; Escape / Options: pause.',tags:['3d','sports','comedy','arcade','versus']}
+};

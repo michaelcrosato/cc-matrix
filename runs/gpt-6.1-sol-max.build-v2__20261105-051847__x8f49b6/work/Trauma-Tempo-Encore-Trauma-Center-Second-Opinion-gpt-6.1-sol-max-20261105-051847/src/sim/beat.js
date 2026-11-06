@@ -1,0 +1,2 @@
+export function stepBeat(state,dt,tuning,base){const target=base+tuning.tempoPressure*(1-state.vitals/100);state.bpm+=(target-state.bpm)*Math.min(1,dt);if(state.arrest)return false;state.beatPhase+=dt*state.bpm/60;let hit=false;while(state.beatPhase>=1){state.beatPhase-=1;state.beat++;state.bar=Math.floor(state.beat/4);hit=true;}state.pulse=Math.exp(-state.beatPhase*9);return hit;}
+export function beatDistance(s){return Math.min(s.beatPhase,1-s.beatPhase)*60/s.bpm;}

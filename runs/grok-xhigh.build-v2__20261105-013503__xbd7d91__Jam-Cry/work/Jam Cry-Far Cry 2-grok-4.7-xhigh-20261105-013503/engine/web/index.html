@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<script>/*__SESSION_JS__*/</script>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>Jam Cry</title>
+<meta name="description" content="A first-person contract in the last dry season. Keep the rifle working, burn a path, and choose how the ledger ends.">
+<meta name="theme-color" content="#2a2420">
+<meta name="hub:session" content="1">
+<meta name="hub:session-players" content="1-4">
+<meta name="hub:session-mode" content="shared-world">
+<meta name="hub:session-minutes" content="10">
+<meta name="hub:session-goal" content="Burn the depot, take the ledger, get out together">
+<meta name="hub:session-howto" content="Stick/WASD move · R2/LMB fire · L2/RMB aim · Square/R reload or clear jam">
+<meta name="hub:webgpu" content="required">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="data:,">
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #2a2420; overscroll-behavior: none;
+    touch-action: none; user-select: none; -webkit-user-select: none; }
+  canvas { display: block; width: 100vw !important; height: 100vh !important; height: 100dvh !important;
+    outline: none; touch-action: none; }
+  #msg { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    font: 22px system-ui, sans-serif; color: #f0d8b0; text-align: center; padding: 24px; z-index: 5;
+    background: #2a2420; }
+  #shell { position: fixed; left: 0; top: 0; bottom: 0; width: min(440px, 42vw); z-index: 4;
+    padding: 28px 28px 32px; box-sizing: border-box; overflow: auto;
+    background: rgba(28, 22, 18, 0.55); color: #f4e6cf; font: 28px/1.25 system-ui, sans-serif;
+    pointer-events: auto; }
+  h1 { margin: 0 0 8px; font-size: 64px; line-height: 0.95; letter-spacing: -1px; }
+  #tag, #notice, #about p, #card p, #results { font-size: 28px; line-height: 1.3; }
+  #notice { color: #ffd090; }
+  button { display: block; width: 100%; text-align: left; margin: 8px 0; padding: 12px 16px;
+    font: 32px/1.2 system-ui, sans-serif; color: #f4e6cf; background: transparent;
+    border: 0; border-left: 6px solid transparent; min-height: 64px; }
+  [hidden] { display: none; }
+  button.on, button:focus { border-left-color: #e0703a; background: rgba(224, 112, 58, 0.18); }
+  #settings-btn { border: 2px solid #e0703a; }
+  #about p { margin: 0 0 18px; }
+  #card, #results, #invite { margin-top: 12px; }
+  #paste { width: 100%; min-height: 72px; font: 16px monospace; }
+  #turn { display: none; }
+</style>
+</head>
+<body>
+<div id="msg" role="status" aria-live="polite">Loading Jam Cry…</div>
+<div id="shell" data-screen="Title">
+  <h1>Jam Cry</h1>
+  <p id="tag">Everything rusts. The grass burns anyway.</p>
+  <p id="notice" hidden></p>
+  <button id="settings-btn" type="button" hidden>Settings</button>
+  <div id="rows"></div>
+  <div id="about" hidden></div>
+  <div id="card" hidden></div>
+  <div id="results" hidden></div>
+  <div id="invite" hidden>
+    <button id="make-offer" type="button">Make code</button>
+    <p id="offer"></p>
+    <textarea id="paste" aria-label="Invite code"></textarea>
+    <button id="join-code" type="button">Join code</button>
+  </div>
+</div>
+<script>
+(function () {
+  var pending = { look: [0, 0], move: null, axes: null, pressed: 0, act: 0, hover: null, click: false, device: null, touch: null, xbox: null, lock: false, hub: false };
+  window.__jamScene = 'merc';
+  try {
+    var q = new URLSearchParams(location.search);
+    if (!q.get('scene') && !q.get('room')) {
+      q.set('scene', 'merc');
+      history.replaceState(history.state, '', '?' + q.toString() + location.hash);
+    }
+  } catch (e) {}
+  var held = {};
+  var screenName = 'Title';
+  var started = false;
+  var ended = false;
+  var finished = false;
+  var present = {};
+  var info = null;
+  window.gameTest = window.gameTest || { queue: [] };
+  window.__jamSkipGpu = !!(window.AIHub && AIHub.active) || /[?&]nogpu=1/.test(location.search);
+
+  function touchOnly() {
+    try { return matchMedia('(pointer: coarse)').matches && matchMedia('(hover: none)').matches; }
+    catch (e) { return false; }
+  }
+  function sensePad() {
+    var pads = [];
+    try { pads = navigator.getGamepads ? navigator.getGamepads() : []; } catch (e) { pads = []; }
+    var pad = pads && pads[0];
+    if (pad && pad.connected && String(pad.id).indexOf('054c') >= 0 && String(pad.id).indexOf('0ce6') >= 0) {
+      pending.device = 'gamepad';
+      pending.lock = true;
+    }
+  }
+  function applyCmd(c) {
+    if (!c || typeof c !== 'object') return;
+    if (c.act) pending.act = c.act | 0;
+    if (c.look && c.look.length === 2) { pending.look[0] += +c.look[0] || 0; pending.look[1] += +c.look[1] || 0; }
+    if (c.move) pending.move = c.move;
+    if (c.hover) pending.hover = c.hover;
+    if (c.click) pending.click = true;
+    if (c.device) pending.device = c.device;
+    if (c.lock) pending.lock = true;
+    if (c.touch) pending.touch = true;
+    if (c.xbox) pending.xbox = true;
+    if (c.key === 'Enter' || c.key === ' ') pending.act = 1;
+    if (c.key === 'Escape') pending.act = 10;
+  }
+  function drain() {
+    var q = window.gameTest && window.gameTest.queue;
+    if (!q || !q.length) return;
+    var batch = q.splice(0, q.length);
+    for (var i = 0; i < batch.length; i++) applyCmd(batch[i]);
+  }
+  function stick() {
+    var x = (held.d || held.ArrowRight ? 1 : 0) - (held.a || held.ArrowLeft ? 1 : 0);
+    var y = (held.w || held.ArrowUp ? 1 : 0) - (held.s || held.ArrowDown ? 1 : 0);
+    if (!x && !y) return null;
+    var len = Math.hypot(x, y) || 1;
+    return [x / len, y / len];
+  }
+  window.gameBridge = {
+    pull: function () {
+      drain();
+      sensePad();
+      if (touchOnly()) pending.touch = true;
+      if (window.AIHub && AIHub.active) pending.hub = true;
+      var out = {
+        look: [pending.look[0], pending.look[1]],
+        move: pending.move || stick(),
+        axes: pending.axes,
+        pressed: pending.pressed,
+        act: pending.act,
+        hover: pending.hover,
+        click: pending.click,
+        device: pending.device,
+        touch: pending.touch,
+        xbox: pending.xbox,
+        lock: pending.lock,
+        hub: !!pending.hub
+      };
+      pending.look = [0, 0];
+      pending.pressed = 0;
+      pending.act = 0;
+      pending.click = false;
+      pending.hover = null;
+      pending.move = null;
+      pending.xbox = null;
+      return JSON.stringify(out);
+    },
+    publish: function (status, ui) { window.__game = { status: status, ui: ui }; paint(status, ui); }
+  };
+
+  function paint(status, ui) {
+    var u;
+    try { u = JSON.parse(ui); } catch (e) { return; }
+    screenName = u.screen || screenName;
+    var shell = document.getElementById('shell');
+    if (shell) shell.dataset.screen = screenName;
+    var rows = document.getElementById('rows');
+    var notice = document.getElementById('notice');
+    var about = document.getElementById('about');
+    var settings = document.getElementById('settings-btn');
+    if (notice) {
+      if (u.notice) { notice.hidden = false; notice.textContent = u.notice; }
+      else notice.hidden = true;
+    }
+    if (settings) settings.hidden = !u.notice;
+    if (rows && u.rows) {
+      while (rows.firstChild) rows.removeChild(rows.firstChild);
+      var list = u.rows.slice(0, 7);
+      for (var i = 0; i < list.length; i++) {
+        var b = document.createElement('button');
+        b.type = 'button';
+        b.className = i === u.focus ? 'on' : '';
+        b.textContent = list[i];
+        b.dataset.i = String(i);
+        b.addEventListener('click', onRow);
+        rows.appendChild(b);
+      }
+    }
+    if (about) {
+      var show = screenName === 'About';
+      about.hidden = !show;
+      if (show && u.about) {
+        while (about.firstChild) about.removeChild(about.firstChild);
+        for (var j = 0; j < u.about.length; j++) {
+          var p = document.createElement('p');
+          p.textContent = u.about[j];
+          about.appendChild(p);
+        }
+      }
+    }
+    var invite = document.getElementById('invite');
+    if (invite) invite.hidden = screenName !== 'Mp';
+  }
+  function onRow(ev) {
+    var i = Number(ev.currentTarget.dataset.i);
+    var label = ev.currentTarget.textContent || '';
+    pending.hover = [400, 220 + i * 80 + 10];
+    pending.click = true;
+    if (label === 'This computer' && window.gameNet) window.gameNet.startBroadcast();
+  }
+  document.getElementById('settings-btn').addEventListener('click', function () { pending.act = 18; });
+
+  function onCardKey(e) {
+    if (!(window.AIHub && AIHub.active) || started) return false;
+    if (e.key === 'Enter') { AIHub.answer('ready'); e.preventDefault(); e.stopPropagation(); return true; }
+    if (e.key === 'm' || e.key === 'M') { AIHub.answer('more'); e.preventDefault(); e.stopPropagation(); return true; }
+    return false;
+  }
+  function actFor(key) {
+    if (key === 'Enter' || key === ' ') return 1;
+    if (key === 'Escape') return 10;
+    if (key === 'ArrowUp') return 3;
+    if (key === 'ArrowDown') return 4;
+    if (key === 'ArrowLeft') return 5;
+    if (key === 'ArrowRight') return 6;
+    if (key === 'Backspace') return 2;
+    return 0;
+  }
+  window.addEventListener('keydown', function (e) {
+    if (onCardKey(e)) return;
+    startMusic();
+    var k = e.key;
+    if (k === 'w' || k === 'a' || k === 's' || k === 'd' || k.indexOf('Arrow') === 0) held[k] = true;
+    var act = actFor(k);
+    if (act && !e.repeat) pending.act = act;
+    if ((k === 'r' || k === 'R') && !e.repeat) pending.pressed |= 32768;
+    if ((k === 'Enter' || k === ' ') && !e.repeat) pending.pressed |= 16777216;
+  }, true);
+  window.addEventListener('keyup', function (e) { held[e.key] = false; }, true);
+  window.addEventListener('mousemove', function (e) {
+    if (!document.pointerLockElement) return;
+    pending.look[0] += (e.movementX || 0) * 0.0025;
+    pending.look[1] += -(e.movementY || 0) * 0.0025;
+  }, true);
+  document.addEventListener('pointerlockchange', function () {
+    if (!document.pointerLockElement && screenName === 'Playing') pending.act = 10;
+  });
+  document.addEventListener('click', function (e) {
+    startMusic();
+    var canvas = document.querySelector('canvas');
+    if (!canvas || screenName !== 'Playing') return;
+    if (e.target === canvas) {
+      var req = canvas.requestPointerLock && canvas.requestPointerLock();
+      if (req && req.catch) req.catch(function () {});
+    }
+  }, true);
+
+  var audioOn = false;
+  function startMusic() {
+    if (audioOn) return;
+    audioOn = true;
+    var AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    var ctx = new AC();
+    var osc = ctx.createOscillator();
+    var gain = ctx.createGain();
+    gain.gain.value = 0.10;
+    osc.frequency.value = 98;
+    osc.type = 'triangle';
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    if (ctx.state === 'suspended' && ctx.resume) ctx.resume();
+    osc.start();
+  }
+
+  function showResults(how) {
+    var el = document.getElementById('results');
+    if (!el) return;
+    el.hidden = false;
+    el.textContent = 'Extracted together. The depot is ash. ' + how;
+  }
+  function waitIce(pc) {
+    return new Promise(function (resolve) {
+      if (pc.iceGatheringState === 'complete') { resolve(); return; }
+      function done() { if (pc.iceGatheringState === 'complete') { pc.removeEventListener('icegatheringstatechange', done); resolve(); } }
+      pc.addEventListener('icegatheringstatechange', done);
+      setTimeout(resolve, 1500);
+    });
+  }
+  function sdpText(desc) {
+    return btoa(JSON.stringify({ type: desc.type, sdp: desc.sdp }));
+  }
+  var hostPc = null;
+  window.gameNet = {
+    startBroadcast: function () {
+      if (window.AIHub && AIHub.active) return;
+      var bc = new BroadcastChannel('jamcry-depot');
+      var seen = false;
+      bc.onmessage = function (ev) {
+        var d = ev.data || {};
+        if (d.t === 'hello') bc.postMessage({ t: 'ack' });
+        if ((d.t === 'ack' || d.t === 'done') && !seen) { seen = true; bc.postMessage({ t: 'done' }); showResults('BroadcastChannel'); }
+      };
+      var n = 0;
+      var timer = setInterval(function () {
+        n += 1;
+        if (seen || n > 25) { clearInterval(timer); return; }
+        bc.postMessage({ t: 'hello' });
+      }, 120);
+      bc.postMessage({ t: 'hello' });
+    },
+    offerCode: function () {
+      if (window.AIHub && AIHub.active) return Promise.reject(new Error('hub'));
+      hostPc = new RTCPeerConnection({ iceServers: [] });
+      var ch = hostPc.createDataChannel('jam');
+      ch.onopen = function () { try { ch.send('go'); } catch (e) {} showResults('WebRTC'); };
+      ch.onmessage = function () { showResults('WebRTC'); };
+      return hostPc.createOffer().then(function (offer) { return hostPc.setLocalDescription(offer); }).then(function () { return waitIce(hostPc); }).then(function () { return sdpText(hostPc.localDescription); });
+    },
+    takeOffer: function (code) {
+      if (window.AIHub && AIHub.active) return Promise.reject(new Error('hub'));
+      var pc = new RTCPeerConnection({ iceServers: [] });
+      pc.ondatachannel = function (ev) {
+        ev.channel.onopen = function () { try { ev.channel.send('go'); } catch (e) {} showResults('WebRTC'); };
+        ev.channel.onmessage = function () { showResults('WebRTC'); };
+      };
+      var desc = JSON.parse(atob(code));
+      return pc.setRemoteDescription(desc).then(function () { return pc.createAnswer(); }).then(function (answer) { return pc.setLocalDescription(answer); }).then(function () { return waitIce(pc); }).then(function () { return sdpText(pc.localDescription); });
+    },
+    takeAnswer: function (code) {
+      if (!hostPc) return Promise.reject(new Error('no offer'));
+      return hostPc.setRemoteDescription(JSON.parse(atob(code)));
+    }
+  };
+  document.getElementById('make-offer').addEventListener('click', function () {
+    window.gameNet.offerCode().then(function (code) { document.getElementById('offer').textContent = code; });
+  });
+  document.getElementById('join-code').addEventListener('click', function () {
+    var code = document.getElementById('paste').value.trim();
+    if (!code) return;
+    var job = hostPc ? window.gameNet.takeAnswer(code) : window.gameNet.takeOffer(code);
+    Promise.resolve(job).then(function (answer) { if (typeof answer === 'string') document.getElementById('offer').textContent = answer; });
+  });
+
+  function finishRound() {
+    if (finished || ended || !window.AIHub || !AIHub.isHost) return;
+    finished = true;
+    var ids = [];
+    for (var k in present) if (Object.prototype.hasOwnProperty.call(present, k)) ids.push(Number(k));
+    ids.sort(function (a, b) { return a - b; });
+    AIHub.finish({ standings: [ids] });
+  }
+  function bootHub() {
+    if (!window.AIHub || !AIHub.connect) return;
+    AIHub.on('card', function (card) {
+      var box = document.getElementById('card');
+      if (!box) return;
+      box.hidden = false;
+      while (box.firstChild) box.removeChild(box.firstChild);
+      var h = document.createElement('h2');
+      h.textContent = 'Jam Cry';
+      box.appendChild(h);
+      var goal = document.createElement('p');
+      goal.textContent = 'Burn the depot, take the ledger, get out together';
+      box.appendChild(goal);
+      var how = document.createElement('p');
+      how.textContent = 'Stick or WASD to move. R2 or LMB fires. L2 or RMB aims. Square or R clears a jam. Enter says ready. M asks for more time.';
+      box.appendChild(how);
+      var left = document.createElement('p');
+      left.textContent = card && card.left == null ? 'Starting' : ('Card ' + Math.ceil((card.left || 0) / 1000) + 's');
+      box.appendChild(left);
+      var players = (info && info.players) || (window.AIHub && AIHub.players) || [];
+      for (var i = 0; i < players.length; i++) {
+        var line = document.createElement('p');
+        line.style.color = players[i].color || '#f0a060';
+        line.textContent = String(players[i].name || ('Seat ' + players[i].id));
+        box.appendChild(line);
+      }
+    });
+    AIHub.on('start', function () { started = true; var box = document.getElementById('card'); if (box) box.hidden = true; });
+    AIHub.on('message', function (data) {
+      if (ended || !window.AIHub || AIHub.server) return;
+      if (data && data.t === 'ack') return;
+      try { AIHub.send({ t: 'ack' }, { reliable: true }); } catch (e) {}
+    });
+    AIHub.on('leave', function (ev) { if (ev && typeof ev.id === 'number') delete present[ev.id]; });
+    AIHub.on('time-up', function () { finishRound(); });
+    AIHub.on('end', function () { ended = true; });
+    AIHub.connect({ mode: 'shared-world', seats: [1, 4], card: true }).then(function (got) {
+      if (!got) return;
+      info = got;
+      var list = got.players || [];
+      for (var i = 0; i < list.length; i++) present[list[i].id] = true;
+      if (got.server) document.documentElement.setAttribute('data-jam-server', '1');
+      window.__jamSkipGpu = true;
+      AIHub.ready();
+    });
+  }
+  setInterval(function () {
+    if (!window.AIHub || !AIHub.active || !started || ended) return;
+    if (AIHub.isHost) AIHub.send({ t: 'fire', c: [1, 2] }, { reliable: true });
+    else AIHub.send({ t: 'pose', x: 0, z: 0 }, { reliable: true });
+  }, 250);
+  bootHub();
+})();
+</script>
+<script type="module">
+  const name = document.title;
+  const msg = document.getElementById('msg');
+  if (window.__jamSkipGpu) {
+    msg.remove();
+  } else if (!navigator.gpu) {
+    msg.replaceChildren(`${name} needs WebGPU.`, document.createElement('br'),
+      'Use a recent Chrome, Edge or Safari (iOS 26 or later) with hardware acceleration enabled.');
+  } else {
+    new MutationObserver((_, obs) => {
+      const c = document.querySelector('canvas');
+      if (c) { c.setAttribute('aria-label', `${name} game`); msg.remove(); c.focus(); obs.disconnect(); }
+    }).observe(document.body, { childList: true });
+    try {
+      if (window.loadGame) await window.loadGame();
+      else await (await import('./shardfall.js')).default();
+    } catch (error) {
+      console.error(`${name} failed to load:`, error);
+      msg.textContent = `${name} could not load. Please reload the page. If it still fails, check that WebGPU and hardware acceleration are enabled.`;
+      document.body.append(msg);
+    }
+  }
+</script>
+</body>
+</html>

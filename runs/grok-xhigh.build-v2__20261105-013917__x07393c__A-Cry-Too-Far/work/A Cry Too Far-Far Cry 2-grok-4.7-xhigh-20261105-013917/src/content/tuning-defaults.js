@@ -1,0 +1,48 @@
+/** Live balance defaults. Systems read the TUNING copy at the moment of use. */
+export const TUNING_DEFAULTS = {
+  playerSpeed: 1,
+  playerDamageTaken: 1,
+  weaponDamage: 1,
+  enemyHealth: 1,
+  enemyAccuracy: 1,
+  enemyVision: 90,
+  enemyReaction: 0.45,
+  wearRate: 1,
+  jamRate: 1,
+  fireSpread: 1,
+  fireDamage: 8,
+  windEffect: 1,
+  feverMinutes: 12,
+  vehicleTopSpeed: 26,
+  vehicleToughness: 1,
+  stonesReward: 1,
+  buddyWoundChance: 0.15,
+  dayMinutes: 30,
+  postRemanHours: 24,
+  regrowHours: 48,
+};
+
+export const TUNING_RANGES = {
+  playerSpeed: [0.5, 2],
+  playerDamageTaken: [0, 3],
+  weaponDamage: [0.25, 4],
+  enemyHealth: [0.25, 4],
+  enemyAccuracy: [0.25, 3],
+  enemyVision: [20, 200],
+  enemyReaction: [0.1, 2],
+  wearRate: [0, 5],
+  jamRate: [0, 5],
+  fireSpread: [0, 3],
+  fireDamage: [0, 30],
+  windEffect: [0, 3],
+  feverMinutes: [2, 40],
+  vehicleTopSpeed: [10, 45],
+  vehicleToughness: [0.25, 4],
+  stonesReward: [0, 5],
+  buddyWoundChance: [0, 1],
+  dayMinutes: [2, 120],
+  postRemanHours: [1, 96],
+  regrowHours: [1, 200],
+};
+
+export const SLIDER_KEYS = Object.keys(TUNING_DEFAULTS);

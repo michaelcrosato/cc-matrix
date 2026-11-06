@@ -1,0 +1,8 @@
+- Last input device wins. Touch does not leave attract and does not count as a real controller.
+- Hub ghosts are drawn in the view from `window.__hub.ghosts`. The sim only publishes its own sample, so a session stays deterministic.
+- Long tests set `history_seconds` to 0. A normal boot keeps 8 seconds of rewind.
+- About text comes from `#about-data` when the page sets it. Native runs keep a readable fallback with the same headings.
+- Name, look, and outfit menus page six at a time. The ids stay absolute, so a later page can still pick Gray, Swim, and Golden.
+- Big Stand uses music bed 3 and the credits use bed 6. That is the sim's song map. Long Stillness is song 0, which stops the bed.
+- On a splash round the page calls `AIHub.ready()` when connect resolves. Waiting for `__gameStatus` left the fourth software-WebGPU copy past the harness's 20s ready gate. A later `ready()` is a no-op.
+- Dev Mode's View tab toggles an input line, a dot trace, engine stats, a free-camera yaw, and a wider ghost lane. Save resets this guest's stay and keeps the name.

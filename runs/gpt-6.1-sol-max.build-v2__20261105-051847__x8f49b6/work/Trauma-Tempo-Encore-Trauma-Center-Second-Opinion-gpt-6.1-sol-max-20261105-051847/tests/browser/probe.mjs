@@ -1,0 +1,5 @@
+import {chromium} from 'playwright';
+const browser=await chromium.launch({headless:true,args:['--enable-unsafe-webgpu','--enable-features=Vulkan','--use-vulkan=swiftshader','--use-webgpu-adapter=swiftshader','--use-angle=swiftshader']});
+const page=await browser.newPage({viewport:{width:1280,height:720}});page.on('pageerror',e=>console.log('PAGE ERROR',e.message));page.on('console',m=>{if(m.type()==='error'||m.type()==='warning')console.log(m.type(),m.text().slice(0,500));});
+await page.goto('http://127.0.0.1:37593/dist/game.html?test=1');await page.waitForTimeout(8000);console.log(await page.evaluate(()=>window.__game.state()));await page.screenshot({path:'artifacts/first-title.png'});
+await page.keyboard.press('Enter');await page.waitForTimeout(1000);console.log(await page.evaluate(()=>window.__game.state().screen));await page.screenshot({path:'artifacts/first-menu.png'});await page.evaluate(()=>{__game.test.skipTo(0,1)});await page.waitForTimeout(3000);console.log(await page.evaluate(()=>window.__game.state()));await page.screenshot({path:'artifacts/first-operation.png'});await browser.close();

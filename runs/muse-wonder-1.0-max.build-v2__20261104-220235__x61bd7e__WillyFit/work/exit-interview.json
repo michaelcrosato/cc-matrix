@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 22:02:35",
+    "source": "Wii Fit",
+    "plan": "PLAN.md",
+    "genre": "Sports",
+    "perspective": "Brawler (studio), three-quarter follow (island), Mode 7-style behind-skier (Slalom), pseudo-3D road (Jog), steep tray view, side (Laundry Line)",
+    "tech": "my-3D2dge handoff engine v0.89.0 (full engine, single file), Mocap with FITCLIPS clip set (23 clips, Mesh2Motion/Quaternius CC0 + CMU), AI Hub session client 1.4.0 (ghost), Node 24 build/test, Playwright 1.63.0",
+    "artDirection": "Engine-native HD pixel puppets in bright daylight: white studio, sea window, pale wood, coral player, cyan accents; hand-drawn Tare, Gerald, Plate, mats and props",
+    "animation": "Mocap clips driven on Humanoid rigs (Mocap.drive) with a wobble layer and hand-posed bodies (side lunge, hula, step-up); pose windows from the plan",
+    "audio": "All written in code, no files: 13 songs + 5 jingles (step notation), defined SFX, Animalese gibberish voices per letter on the voice bus; music 10% by default",
+    "online": "AI Hub ghost sessions 1-4 (Morning Class round, own card, ghosts, progress/result) plus local Class 2-4 on one screen; game also runs standalone",
+    "testing": "Headless allowed: Node vm rules suite (bot balance bands, scripted 5-day playthrough, saves, scenes, Class, determinism, data lint), Playwright browser checks on file://, engine check tool, AI Hub harness at 1/2/3/4 players incl. bad network and host-leave; controller/touch/audio stand-ins as in TASK.md",
+    "research": "No extra research beyond the plan's tested recipes and the AI Hub protocol README, which was read in full before implementing the round",
+    "environment": "Muse Code CLI (headless); Linux",
+    "model": "Meta, muse-wonder-1.0, reasoning effort max",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "Testing caught 9 issues: 3 bot balance-band misses (Stork tier 2 expert, Sun Flow passive breathing, Quiet Candle passive flame/thoughts), 1 content shortfall (line bank under 150), 1 hub test-server port parsing miss (python -u/stderr), 2 hub protocol misses (progress only sent mid-event, ghost sends only mid-event, both invisible at 1 player until multiplayer runs), 1 stale debug snapshot scene name, and 1 island HUD/label overlap pass found from screenshots.",
+    "3 would be critical / game-breaking: hub progress reporting and hub ghost sends (either fails AI Hub catalogue checks at 2+ players), and passive-input scoring above one star on Sun Flow/Candle (breaks the core balance contract that doing nothing must not score).",
+    "The most helpful test was node tests/run.mjs rules: seeded bot playthroughs of every activity on both tiers against the star bands. It caught real balance bugs in seconds, deterministically, with pct values that pointed straight at the fix (bot breath delay, thought push strength, ring size).",
+    "The least helpful test was the engine check tool's colour-count look notes. It correctly reported few distinct colours, but the bright, flat, ten-foot wellness look is the art direction, so the notes were noted and intentionally not acted on beyond adding floor texture variation."
+  ],
+  "engineFeedback": [
+    "The Humanoid + Mocap combination was the best part: real motion-capture yoga, stork and squat clips playing on chibi and heroic rigs with one sample call, plus drawPortrait for Member Cards, made the cast feel alive immediately. Dialog with per-letter voice hooks and the built-in saves/pause/settings shell saved days.",
+    "Yes: the renderer. I first assumed r.overlay could paint a room behind actors (it is on top), and that a custom input map extended the preset (it replaces it, silently breaking menus without confirm/start). The brawler +y-toward-camera note in the plan saved a second guess there.",
+    "The most important thing built from scratch was the Lean itself: the fixed-step balance simulation with seeded noise, stumble and ring steadiness, the three device intent sources plus skill bots sharing one intent object, and the generic session runner (Card, demo, breathe, play, results) that all twelve activities, Class, the Gentle Games and the hub round reuse.",
+    "The hardest part was timing: a frame over 50 ms gives up its time, software-rendered browsers run slow, and the hub round must run on AIHub.time() rather than the game clock. Anything that waited on wall-clock durations desynced; everything had to wait on game state instead.",
+    "One small change: in class Dialog in engine/my-3d2dge.js, the three hard-coded shadow '#05040a' values (name, text, choices) now read this.shadow === undefined ? '#05040a' : this.shadow, so the bright white dialog theme can set talk.shadow = null instead of smearing dark shadows on white. Nothing else in the engine was changed.",
+    "Document the draw-order contract for custom rooms (sky, world queue, overlay) and the brawler axis direction on the Game/scene options themselves, since every new game guesses them once. A built-in bright (light) Menu/Dialog theme would also help ten-foot games."
+  ],
+  "promptFeedback": [
+    "The tested recipes: lean parameters with simulated bands, exact input map, clip windows, hub snippet and the trap list. They turned a huge brief into a sequence of decisions that were already made, which is what made a single-session build possible.",
+    "The scope signalling: the plan describes a full commercial-sized game (twelve activities, five days, Class, hub, attract, dev mode) while the brief asks for a feature-complete demo vertical slice. The cut order in section 17 helped, but which reading wins when time runs out could be stated earlier and louder.",
+    "The hardest thing was breadth with depth: twelve activities each needing passive/average/good/expert bot bands on two tiers, plus a five-day loop, plus local Class, plus a networked hub round, all in one file with no stubs. The shared Lean and session runner were the only way it fit.",
+    "State the demo-versus-full-game expectation and the must-never-cut list at the very top (it is currently section 17), and give an approximate size/time budget per milestone so builders can cut earlier and cleaner instead of discovering the trade-off at the end."
+  ],
+  "aiHub": {
+    "name": "Willy Fit",
+    "tagline": "Gently, or not at all.",
+    "description": "A gentle deadpan balance comedy at a five-day wellness retreat: one lean drives twelve activities, coached by a needy talking scale, across a story, local Class and online Morning Class rounds.",
+    "type": "Game",
+    "genre": "Sports",
+    "source": "Wii Fit",
+    "series": "",
+    "players": "1–4",
+    "controls": "Lean: left stick, WASD or mouse. Breathe: R2, Space or click. Confirm: Cross / Enter.",
+    "tags": ["pixel art", "comedy", "arcade", "story", "versus", "2d"]
+  }
+}

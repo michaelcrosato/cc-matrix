@@ -1,0 +1,6 @@
+- Gust check expected a lean-free shove to tip. The model treats gust as acceleration, so it settles inside the disc. The check now holds a full lean first. Not a game bug.
+- Headless UI dropped an egui texture delta and panicked. Critical in the browser: the frame loop stops. Warmup now clears the delta.
+- `intent` was private, so the app could not shape lean. Made the module public.
+- Fonts must be installed a pass before they are drawn.
+- Status `hub.ghost` was a boolean. The hub snippet would send that boolean. It is now a sample object.
+- About pages did not turn with the shoulder buttons. They do now.

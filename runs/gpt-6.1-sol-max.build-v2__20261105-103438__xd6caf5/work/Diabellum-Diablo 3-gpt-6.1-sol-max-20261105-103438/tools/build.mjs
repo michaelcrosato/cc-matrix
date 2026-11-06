@@ -1,0 +1,28 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { fileURLToPath } from 'node:url';
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const cfg=JSON.parse(fs.readFileSync(path.join(root,'build-config.json'),'utf8'));
+const source=path.join(root,'game/src');
+const read=f=>fs.readFileSync(path.join(root,f),'utf8');
+const data=fs.readdirSync(path.join(source,'data')).filter(x=>x.endsWith('.js')).sort().map(x=>'game/src/data/'+x);
+const code=fs.readdirSync(source).filter(x=>x.endsWith('.js')).sort().map(x=>'game/src/'+x);
+const files=[code[0],...data,...code.slice(1)];
+const js='/* GAME START: '+cfg.title+' */\n(()=>{\n"use strict";\n'+files.map(read).join('\n\n')+'\n})();\n/* GAME END */\n';
+new vm.Script(js,{filename:'game.js'});
+fs.writeFileSync(path.join(root,'game/game.js'),js);
+const css=`html,body{margin:0;height:100%;background:#090e16;overflow:hidden}#screen{width:100%;height:100%;display:block;image-rendering:pixelated;touch-action:none} .esh{--esh-bg:#090e16;--esh-accent:#77c9bd}.esh button{font-family:Georgia,serif} [data-sys="need"]{background:transparent!important;align-items:flex-end!important;padding-bottom:6vh!important;pointer-events:none}[data-sys="need"] button{pointer-events:auto}[data-sys="need"]>div{background:#0b1721e8;border:1px solid #77c9bd;border-radius:6px;padding:16px;max-width:80vw;box-sizing:border-box}.esh input[type=range]{accent-color:#77c9bd}canvas:focus{outline:none}`;
+const head=`<!doctype html>\n<html lang="en"><head><meta charset="utf-8">\n`;
+const tags=`<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><title>${cfg.title}</title><meta name="description" content="Every soul counted. Except yours. A gothic co-op action RPG."><meta name="hub:type" content="Game"><meta name="hub:players" content="1-4"><meta name="hub:session" content="1"><meta name="hub:session-players" content="1-4"><meta name="hub:session-mode" content="shared-world"><meta name="hub:session-minutes" content="8"><meta name="hub:session-goal" content="Fill the Reckoning, then slay the Warden"><meta name="hub:session-howto" content="Stick/WASD move; Cross/click attack; RMB, 1-4 or Square Triangle Circle R1 R2 skills; Space/RS evade; E/L2 interact."><style>${css}</style></head><body>`;
+const boot=`<div id="e3-boot" role="status" style="position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;justify-content:flex-end;gap:9px;padding:28px;background:#090e16;color:#8fa3a4;font:16px Georgia,serif"><b style="color:#d9b77c;font-size:32px;letter-spacing:.14em">${cfg.title.toUpperCase()}</b><span>The parish is waking.</span><span>my-3D2dge v0.89.1</span></div><canvas id="screen" aria-label="${cfg.title}, a gothic action role-playing game"></canvas>`;
+const inline=s=>'<script>\n'+s.replace(/<\/script/gi,'<\\/script')+'\n</script>\n';
+const notices=fs.existsSync(path.join(root,'LICENSES.txt'))?'<!--\n'+read('LICENSES.txt').replace(/--/g,'- -')+'\n-->\n':'';
+const html=head+inline(read('hub/session.js'))+tags+notices+boot+inline(read('my-3d2dge.js'))+inline(js)+'</body></html>\n';
+fs.writeFileSync(path.join(root,'..',cfg.base+'.html'),html);
+const dev=head+'<script src="../hub/session.js"></script>'+tags+boot+'<script src="../my-3d2dge.js"></script><script src="game.js"></script></body></html>';
+fs.writeFileSync(path.join(root,'game/index.html'),dev);
+// The same data powers the in-game About pages and the machine-readable interview.
+const context={TITLE:cfg.title};vm.createContext(context);vm.runInContext(read('game/src/data/04-about.js')+';globalThis.interview=ABOUT;',context);
+fs.writeFileSync(path.join(root,'..','exit-interview.json'),JSON.stringify(context.interview,null,2)+'\n');
+if(!process.argv.includes('--quiet'))console.log(cfg.base+'.html');

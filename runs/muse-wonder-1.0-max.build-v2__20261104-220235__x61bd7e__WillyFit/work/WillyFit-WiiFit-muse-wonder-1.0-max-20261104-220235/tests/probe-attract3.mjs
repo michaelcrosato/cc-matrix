@@ -1,0 +1,13 @@
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = join(dirname(fileURLToPath(import.meta.url)), '..');
+const built = join(root, '..', 'WillyFit-WiiFit-muse-wonder-1.0-max-20261104-220235.html');
+const pw = await import('playwright');
+const browser = await pw.chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+page.on('pageerror', e=>console.log('PAGEERR', String(e).slice(0,300)));
+page.on('console', m=>{ if (m.type()==='error'||m.type()==='warning') console.log('CONSOLE', m.type(), m.text().slice(0,300)); });
+await page.goto('file://' + built);
+await page.waitForTimeout(11500);
+console.log(JSON.stringify(await page.evaluate(() => ({ snap: window.G.game.debug.snapshot(), errors: (window.G.game.errors||[]).map(e=>({where:e.where, message:String(e.message||e).slice(0,300)})), sceneName: window.G.game.sceneName, hasAttract: !!window.G.scenes.attract })), null, 1).slice(0,2000));
+await browser.close();

@@ -1,0 +1,7 @@
+import {CONTRACTS,STEP_TYPES} from '../src/data/contracts.js';
+import {POI,MERCS,PREFABS} from '../src/data/world.js';
+import {FEATURES,TIPS} from '../src/data/features.js';
+import {WEAPONS,SHOP} from '../src/data/weapons.js';
+import {TUNABLES} from '../src/data/tunables.js';
+export function validate(){const errors=[],ids=new Set;for(const c of CONTRACTS){if(ids.has(c.id))errors.push('Duplicate contract '+c.id);ids.add(c.id);for(const s of c.steps){if(!STEP_TYPES.includes(s.do))errors.push('Unknown handler '+s.do);if(!POI[s.poi])errors.push('Unknown place '+s.poi);if(!s.note)errors.push('Missing objective '+c.id);}}for(const c of CONTRACTS)for(const r of c.requires)if(!ids.has(r))errors.push('Missing prerequisite '+r);const reachable=new Set;for(let i=0;i<CONTRACTS.length;i++)for(const c of CONTRACTS)if(c.requires.every(id=>reachable.has(id)))reachable.add(c.id);for(const id of ids)if(!reachable.has(id))errors.push('Unreachable '+id);for(const id of FEATURES)if(!TIPS[id])errors.push('Missing field note '+id);for(const t of TUNABLES)if(t.def<t.min||t.def>t.max||!t.note)errors.push('Invalid tunable '+t.id);for(const i of SHOP)if(!i.name||i.price<0)errors.push('Invalid stock '+i.id);return errors;}
+if(process.argv[1]?.endsWith('validate-data.mjs')){const errors=validate();for(const e of errors)console.error('FAIL '+e);console.log(`${CONTRACTS.length+FEATURES.length+TUNABLES.length} data checks, ${errors.length} failed`);if(errors.length)process.exitCode=1;}

@@ -1,0 +1,86 @@
+/**
+ * @file Unit tests for labs/playground/ui/hud.ts (WP 13.25): every camera mode has its HUD, the crosshair only where
+ * the screen's centre aims; the feel readout reads the speed over the ground and how the player moves, and shows where
+ * `playground.readout` and the mode say; the weapon line names the keys that draw a holstered gun, or a pad's trigger;
+ * hidden (photo mode), the HUD clears.
+ * @see labs/playground/ui/hud.ts
+ */
+import { describe, expect, it } from 'vitest';
+import type { Input, Overlay } from '../../../engine';
+import { PLAYGROUND_CAMERAS } from '../views';
+import { PISTOL } from '../weapons/guns';
+import { feelLine, HINT_LINE, hintLine, HUD_MODES, showHud } from './hud';
+
+/** An overlay that keeps its lines and its crosshair. */
+function lines() {
+  const shown: Record<string, string | null> = {};
+  let crosshair = false;
+  const modeLine = { dataset: {} as Record<string, string> };
+  const root = { querySelector: (query: string) => (query.includes('data-id=mode') ? modeLine : null) };
+  const ui = { root, hud: (id: string, text: string | null) => void (shown[id] = text), crosshair: (on: boolean) => void (crosshair = on) }; // prettier-ignore
+  return { ui: ui as unknown as Overlay, shown, crosshair: () => crosshair, faded: () => modeLine.dataset.value === 'faded' }; // prettier-ignore
+}
+
+/** The input as the HUD reads it: prompts by action, a map that aims with the centre or the pointer. */
+const input = (aimWith: string) =>
+  ({ prompt: (action: string) => action.toUpperCase(), bindings: { map: { aimWith, lock: aimWith === 'centre', view: [] }, label: () => 'K' }, lastDevice: 'keyboard' }) as unknown as Input; // prettier-ignore
+
+/** The player with a pistol out, sights down, on the ground at a sprint. */
+const player = {
+  actor: { vx: 0, vz: 6 },
+  motion: { mode: 'ground', gait: 'sprint' },
+  interactor: { prompt: 'Open' },
+  weapons: { slots: [PISTOL.id], slot: 0, mags: [10], reload: -1, shots: 0, hits: 0, aim: 0 },
+};
+
+describe('the playground’s HUD', () => {
+  it('has a HUD for every camera mode, the crosshair only where the centre aims', () => {
+    for (const mode of PLAYGROUND_CAMERAS) expect(HUD_MODES[mode.name], mode.name).toBeDefined();
+    expect(Object.entries(HUD_MODES).filter(([, hud]) => hud.crosshair).map(([name]) => name)).toEqual(['shooter', 'first']); // prettier-ignore
+  });
+
+  it('hints at the menus on the device used last: the keys, a pad’s menu button, none on touch', () => {
+    const on = (lastDevice: string, touch = false) => ({ prompt: (action: string) => (action === 'pause' ? 'Menu' : '?'), lastDevice, touch: { active: touch } }) as unknown as Input; // prettier-ignore
+    expect([hintLine(on('keyboard')), hintLine(on('mouse')), hintLine(on('gamepad')), hintLine(on('touch')), hintLine(on('keyboard', true))]).toEqual([HINT_LINE, HINT_LINE, 'Menu: menu, controls, go to', null, null]); // prettier-ignore
+  });
+
+  it('reads the speed over the ground and how he moves', () => {
+    expect(feelLine(player)).toBe('6.0 m/s · sprint');
+    expect(feelLine({ actor: { vx: 1, vz: 0 }, motion: { mode: 'zipline', gait: 'idle' } })).toBe('1.0 m/s · zipline');
+    expect(feelLine({ actor: { vx: 0, vz: 0 } })).toBe('0.0 m/s'); // the platformer profile has no motion
+  });
+
+  it('names the keys that draw a holstered gun as "key: action": both, the one bound, or a pad’s trigger', () => {
+    const holstered = { ...player, weapons: { ...player.weapons, slot: -1 } };
+    const frame = { mode: 'shooter', look: 'look:playground-cel', where: '', player: holstered, readout: 'auto' };
+    const keys = (bound: Record<string, string>) => ({ ...input('centre'), prompt: (action: string) => bound[action] ?? '—' }) as unknown as Input; // prettier-ignore
+    const weapon = (bound: Record<string, string>) => {
+      const hud = lines();
+      showHud(hud.ui, keys(bound), frame);
+      return hud.shown.weapon;
+    };
+    expect(weapon({ weapon1: '1', weapon2: '2', fire: 'LMB' })).toBe('Holstered · 1/2: draw');
+    expect(weapon({ weapon1: '1', fire: 'LMB' })).toBe('Holstered · 1: draw'); // only one bound
+    expect(weapon({ fire: 'RT' })).toBe('Holstered · RT: draw'); // a pad: its trigger draws one (engine/sim/weapons.ts)
+  });
+
+  it('shows the lines of the mode, the readout as the setting says, and clears all of it when hidden', () => {
+    const frame = { mode: 'shooter', look: 'look:playground-cel', where: 'House · hall', player, readout: 'auto' };
+    const shooter = lines();
+    showHud(shooter.ui, input('centre'), frame);
+    expect(shooter.shown).toMatchObject({ mode: 'Camera: shooter · Look: cel', room: 'House · hall', readout: null, use: 'INTERACT: Open', keys: HINT_LINE }); // prettier-ignore
+    expect([shooter.shown.weapon?.startsWith('Pistol'), shooter.crosshair()]).toEqual([true, true]);
+    const iso = lines();
+    showHud(iso.ui, input('pointer'), { ...frame, mode: 'isometric' });
+    expect([iso.shown.readout, iso.crosshair()]).toEqual(['6.0 m/s · sprint', false]);
+    const forced = lines();
+    showHud(forced.ui, input('centre'), { ...frame, readout: 'on' });
+    expect(forced.shown.readout).toBe('6.0 m/s · sprint');
+    showHud(forced.ui, input('centre'), { ...frame, modeShown: false });
+    expect([forced.shown.mode, forced.faded()]).toEqual(['Camera: shooter · Look: cel', true]); // shown a while after a switch
+    showHud(forced.ui, input('centre'), frame);
+    expect(forced.faded()).toBe(false);
+    showHud(forced.ui, input('centre'), frame, true);
+    expect([Object.values(forced.shown).every((text) => text === null), forced.crosshair()]).toEqual([true, false]);
+  });
+});

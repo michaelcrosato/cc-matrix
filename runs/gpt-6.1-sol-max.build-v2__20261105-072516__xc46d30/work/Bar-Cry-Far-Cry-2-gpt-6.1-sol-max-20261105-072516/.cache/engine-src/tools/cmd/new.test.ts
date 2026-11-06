@@ -1,0 +1,310 @@
+/**
+ * @file Tests `x new` (WP 0.6): kinds are discovered and their manifests validated, templates fill, never overwrite
+ * and keep every line within 120 columns, the module template passes its own checks (`x new module --test`), and a
+ * broken template fails them. The templates as a set (WP 12.1): tools/templates/README.md lists every kind, each with
+ * a path its kind takes and whether a game makes one, and cites only paths that exist; every template that defines an
+ * entry of a kind the gallery films writes its `gallery` hook.
+ * Fixture templates live in temporary directories; `--test` writes its sample into this repository and removes it.
+ * @see tools/cmd/new.ts
+ */
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, posix } from 'node:path';
+import { afterAll, describe, expect, it } from 'vitest';
+import { GALLERY_STAGING } from '../../engine/dev/gallery';
+import type { ModuleDoc } from '../lib/docs';
+import { checkPaths } from '../lib/docsPaths';
+import { CHILD_TIMEOUT_MS, ROOT, UsageError } from '../x';
+import command, { CHECKS, fill, listKinds, NEXT, nextIn, render, testKind, type Kind } from './new';
+
+const made: string[] = [];
+afterAll(() => made.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+
+/** A temporary directory holding `files`. */
+function tree(files: Record<string, string>): string {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'new-')));
+  made.push(root);
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  }
+  return root;
+}
+
+const manifest = (extra: object = {}) =>
+  JSON.stringify({
+    describe: 'A thing.',
+    id: 'a path',
+    pattern: '^things/[a-z]+$',
+    sample: 'things/sample',
+    files: { 'thing.txt': '{{id}}.txt' },
+    checks: [],
+    ...extra,
+  });
+
+describe('in a game', () => {
+  it('names the game’s checks where x docs is the engine’s own command, and refuses a kind made for the box', async () => {
+    const game = mkdtempSync(join(tmpdir(), 'x-new-game-'));
+    writeFileSync(join(game, 'engine-lock.json'), '{}');
+    cpSync(join(ROOT, 'tools', 'templates'), join(game, 'tools', 'templates'), { recursive: true });
+    expect(nextIn(ROOT, NEXT)).toBe(NEXT);
+    expect(nextIn(game, NEXT)).toBe('replace the placeholder text, then npm run check and npm test');
+    const run = command.run({ root: game, values: {}, positionals: ['scene', 'labs/game/scenes/level2'] });
+    await expect(run).rejects.toThrow(/x new scene makes no entry in a game: .*copy of labs\/game\/scenes\/play\.ts/);
+    expect(existsSync(join(game, 'labs'))).toBe(false);
+    rmSync(game, { recursive: true, force: true });
+  });
+});
+
+describe('kinds', () => {
+  it('discovers the module kind from tools/templates/', () => {
+    const kinds = listKinds(ROOT);
+    expect(kinds.map((kind) => kind.kind)).toContain('module');
+    expect(kinds.find((kind) => kind.kind === 'module')?.checks).toEqual([...CHECKS]);
+  });
+
+  it.each([
+    [{ extra: 1 }, 'unknown key "extra"'],
+    [{ files: { 'gone.txt': 'x' } }, '"files": gone.txt is missing'],
+    [{ checks: ['spell'] }, '"checks" lists some of types, lint, test, docs'],
+    [{ sample: 'elsewhere/x' }, 'does not match its pattern'],
+    [{ describe: '' }, '"describe" must be a non-empty string'],
+    [{ next: '' }, '"next", when present, must be a non-empty string'],
+  ])('rejects a manifest with %j', (extra, problem) => {
+    const root = tree({
+      'tools/templates/thing/template.json': manifest(extra),
+      'tools/templates/thing/thing.txt': 'x',
+    });
+    expect(() => listKinds(root)).toThrow(problem);
+  });
+
+  it('fills {{id}}, {{name}}, {{NAME}} and {{dir}}, and rejects any other placeholder', () => {
+    expect(fill('{{dir}} / {{name}} / {{id}}', 'engine/core/clock', 't')).toBe(
+      'engine/core / clock / engine/core/clock',
+    );
+    expect(fill('GFX_NO_{{NAME}}', 'engine/gfx/enhanced/tiledLighting', 't')).toBe('GFX_NO_TILED_LIGHTING');
+    expect(fill('{{NAME}}', 'a/ssr2x', 't')).toBe('SSR2X');
+    expect(() => fill('{{nmae}}', 'a/b', 'tools/templates/x/y')).toThrow('tools/templates/x/y holds {{nmae}}');
+  });
+});
+
+describe('writing an entry', () => {
+  it('writes the files formatted, runs the checks, and never overwrites', async () => {
+    const root = tree({ '.prettierrc.json': readFileSync(join(ROOT, '.prettierrc.json'), 'utf8') });
+    cpSync(join(ROOT, 'tools/templates/module'), join(root, 'tools/templates/module'), { recursive: true });
+    const file = join(root, 'tools/templates/module/template.json');
+    writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), checks: [] }));
+    const run = (positionals: string[]) => command.run({ values: {}, positionals, root });
+    const result = await run(['module', 'engine/core/clock']);
+    expect(result.ok).toBe(true);
+    expect(result.summary).toBe(`wrote engine/core/clock.ts, engine/core/clock.test.ts; next: ${NEXT}`);
+    expect(readFileSync(join(root, 'engine/core/clock.ts'), 'utf8')).toContain(
+      "export function clock(): string {\n  return 'clock';\n}",
+    );
+    expect(readFileSync(join(root, 'engine/core/clock.test.ts'), 'utf8')).toContain("import { clock } from './clock';");
+    await expect(run(['module', 'engine/core/clock'])).rejects.toThrow('already exist: x new never overwrites');
+    await expect(run(['module', 'engine/core/Clock'])).rejects.toThrow(UsageError);
+    await expect(run(['modul', 'engine/core/x'])).rejects.toThrow('did you mean module?');
+    await expect(run(['module'])).rejects.toThrow('name the new module');
+  });
+
+  it("prints the kind's own next step when its manifest has one, filled for the id", async () => {
+    const root = tree({
+      'tools/templates/thing/template.json': manifest({ next: 'record {{name}} as tests/{{name}}.json' }),
+      'tools/templates/thing/thing.txt': 'x',
+    });
+    const result = await command.run({ values: {}, positionals: ['thing', 'things/lamp'], root });
+    expect(result.summary).toBe('wrote things/lamp.txt; next: record lamp as tests/lamp.json');
+    const scene = listKinds(ROOT).find((kind) => kind.kind === 'scene');
+    for (const step of ['x sim', '--browser sim --update', '--browser page', 'labs/box/README.md', 'STAGES']) {
+      expect(scene?.next).toContain(step); // the scene's own steps: its replay, the README entry, the stage
+    }
+  });
+
+  it('rewraps a doc comment the id pushes past 120 columns, and keeps every line that fits', async () => {
+    const template = [
+      '/**',
+      ' * @file The thing `{{name}}` ({{id}}.ts): what it is, in one or two sentences that fill this line up to its end.',
+      ' * It fits.',
+      ' *',
+      ' * Kept as it is: it fits',
+      ' * on short lines.',
+      ' *',
+      ' * 1. `node x sim {{id}} --steps 600` runs it, then a few words more.',
+      ' * 2. A short item.',
+      ' *',
+      ' * @example',
+      ' * {{name}}; // 1, and this example line runs on past the limit when the id is filled in: {{id}}',
+      ' */',
+      '/** The {{name}} export: its one-line comment opens into a block when the id makes it too long. */',
+      'export const {{name}} = 1;',
+      '',
+    ].join('\n');
+    const root = tree({
+      '.prettierrc.json': readFileSync(join(ROOT, '.prettierrc.json'), 'utf8'),
+      'tools/templates/thing/template.json': manifest({
+        pattern: '^things/[a-zA-Z]+$',
+        files: { 'thing.ts.tmpl': '{{id}}.ts' },
+      }),
+      'tools/templates/thing/thing.ts.tmpl': template,
+    });
+    const [kind] = listKinds(root);
+    expect(await render(root, kind, 'things/lamp')).toEqual({ 'things/lamp.ts': fill(template, 'things/lamp', '') });
+    const name = 'aLampWithAVeryLongNameThatPushesTheLinesPastTheLimit';
+    const text = (await render(root, kind, `things/${name}`))[`things/${name}.ts`];
+    expect(text.split('\n')).toEqual([
+      '/**',
+      ` * @file The thing \`${name}\``,
+      ` * (things/${name}.ts): what it is, in one or two sentences that fill this`,
+      ' * line up to its end. It fits.',
+      ' *',
+      ' * Kept as it is: it fits',
+      ' * on short lines.',
+      ' *',
+      ` * 1. \`node x sim things/${name} --steps 600\` runs it, then a few words`,
+      ' *    more.',
+      ' * 2. A short item.',
+      ' *',
+      ' * @example',
+      ` * ${name}; // 1, and this example line runs on past the limit when the id is filled in: things/${name}`,
+      ' */',
+      '/**',
+      ` * The ${name} export: its one-line comment opens into a block when the id`,
+      ' * makes it too long.',
+      ' */',
+      `export const ${name} = 1;`,
+      '',
+    ]);
+  });
+
+  it('writes no line over 120 columns in any template, for its sample, a one-letter name or a long one', async () => {
+    const long: string[] = [];
+    for (const kind of listKinds(ROOT)) {
+      for (const name of ['', 'a', `${posix.basename(kind.sample)}WithAMuchLongerNameThanUsual`]) {
+        const id = name ? posix.join(posix.dirname(kind.sample), name) : kind.sample; // '' is what --test-all writes
+        for (const [path, text] of Object.entries(await render(ROOT, kind, id))) {
+          text.split('\n').forEach((line, k) => line.length > 120 && long.push(`${path}:${k + 1}: ${line.length}`));
+        }
+      }
+    }
+    expect(long).toEqual([]);
+  });
+
+  it('lists the kinds when given none', async () => {
+    const result = await command.run({ values: {}, positionals: [], root: ROOT });
+    expect(result.lines).toContainEqual(expect.stringMatching(/^module: /));
+  });
+
+  it('rejects an id that does not match the pattern', async () => {
+    const kind = listKinds(ROOT).find((candidate) => candidate.kind === 'module') as Kind;
+    await expect(render(ROOT, kind, 'Engine/core/clock')).rejects.toThrow('is not a module id');
+  });
+});
+
+describe('testing templates (x new … --test)', () => {
+  it('passes the module template and leaves nothing behind', { timeout: CHILD_TIMEOUT_MS }, async () => {
+    const result = await command.run({ values: { test: true }, positionals: ['module'], root: ROOT });
+    expect(result.failures).toEqual([]);
+    expect(result.lines).toEqual(['types: ok', 'lint: ok', 'test: ok', 'docs: ok']);
+    expect(existsSync(join(ROOT, 'tools/templates/module/sampleModule.ts'))).toBe(false);
+    expect(existsSync(join(ROOT, 'tools/templates/module/sampleModule.test.ts'))).toBe(false);
+  });
+
+  it('fails a broken template on every check', { timeout: CHILD_TIMEOUT_MS }, async () => {
+    const dir = tree({
+      'broken.ts.tmpl': "export const {{name}}: number = 'text';\n",
+      'broken.test.ts.tmpl':
+        "/**\n * @file A failing test.\n */\nimport { expect, it } from 'vitest';\n\nit('fails', () => expect(1).toBe(2));\n",
+    });
+    const kind: Kind = {
+      kind: 'broken',
+      dir,
+      describe: 'A broken template.',
+      id: 'a path',
+      pattern: '.',
+      sample: 'tools/templates/module/brokenSample',
+      files: { 'broken.ts.tmpl': '{{id}}.ts', 'broken.test.ts.tmpl': '{{id}}.test.ts' },
+      checks: [...CHECKS],
+    };
+    const result = await testKind(ROOT, kind);
+    expect(result.lines).toEqual(['types: 1 problem', 'lint: 1 problem', 'test: 1 problem', 'docs: 2 problems']);
+    expect(result.failures.map((finding) => finding.id)).toEqual([
+      'NEW_TYPES',
+      'NEW_LINT',
+      'NEW_TEST',
+      'NEW_DOCS',
+      'NEW_DOCS',
+    ]);
+    expect(existsSync(join(ROOT, 'tools/templates/module/brokenSample.ts'))).toBe(false);
+  });
+
+  it('fails a template whose comment cites a path that does not exist, as x docs --check does', async () => {
+    const dir = tree({
+      'cites.ts.tmpl':
+        '/**\n * @file A module run as `node x sim {{id}}`: a path without its .ts.\n */\n\n/** One. */\nexport const {{name}} = 1;\n',
+    });
+    const kind: Kind = {
+      kind: 'cites',
+      dir,
+      describe: 'A template citing a path that does not exist.',
+      id: 'a path',
+      pattern: '.',
+      sample: 'tools/templates/module/citesSample',
+      files: { 'cites.ts.tmpl': '{{id}}.ts' },
+      checks: ['docs'],
+    };
+    const result = await testKind(ROOT, kind);
+    expect(result.lines).toEqual(['docs: 1 problem']);
+    expect(result.failures[0].message).toMatch(/tools\/templates\/module\/citesSample does not exist.*DOCS_PATH/);
+    expect(existsSync(join(ROOT, 'tools/templates/module/citesSample.ts'))).toBe(false);
+  });
+});
+
+describe('the templates as a set (WP 12.1)', () => {
+  const README = 'tools/templates/README.md';
+
+  /** The README's table: each row's kind, path (its placeholders as written) and whether a game makes one. */
+  function rows(): { kind: string; path: string; game: string }[] {
+    const lines = readFileSync(join(ROOT, README), 'utf8').split('\n');
+    return lines
+      .filter((line) => line.startsWith('| `'))
+      .map((line) => line.split(/(?<!\\)\|/).map((cell) => cell.trim().replace(/^`|`$/g, '').replaceAll('\\|', '|')))
+      .map((cells) => ({ kind: cells[1], path: cells[3], game: cells[5] }));
+  }
+
+  it('lists every kind in tools/templates/README.md, each with a path its kind takes and whether a game makes one', () => {
+    const kinds = listKinds(ROOT);
+    expect(rows().map((row) => row.kind)).toEqual(kinds.map((kind) => kind.kind));
+    for (const row of rows()) {
+      const kind = kinds.find((candidate) => candidate.kind === row.kind)!;
+      const id = row.path
+        .replace('<lab>', 'box')
+        .replace('<dir>', 'core')
+        .replace('<name>', 'sample')
+        .replace(/<([^|>]+)\|[^>]*>/, '$1');
+      expect(new RegExp(kind.pattern).test(id), `${row.kind}: ${row.path}`).toBe(true);
+      expect(row.game, row.kind).toBe(kind.games ? 'no' : 'yes');
+    }
+  });
+
+  it('cites only paths and commands that exist in tools/templates/README.md', () => {
+    const raw = readFileSync(join(ROOT, README), 'utf8');
+    const fileComment = { description: '', tags: [], line: 1, lines: raw.split('\n').length, raw };
+    const module: ModuleDoc = { path: README, fileComment, purpose: '', exports: [], examples: [], tests: [], codes: [], kinds: [], imports: [] }; // prettier-ignore
+    expect(checkPaths(ROOT, [module], { sources: {} }).failures).toEqual([]);
+  });
+
+  it('writes the gallery hook in every entry of a kind the gallery films', () => {
+    // A kind's entries are made by its define function, defineProp for prop: the convention every kind keeps.
+    const calls = Object.keys(GALLERY_STAGING).map((kind) => `define${kind[0].toUpperCase()}${kind.slice(1)}(`);
+    const missing: string[] = [];
+    for (const kind of listKinds(ROOT)) {
+      for (const from of Object.keys(kind.files).filter((file) => !file.includes('.test.'))) {
+        const text = readFileSync(join(ROOT, kind.dir, from), 'utf8');
+        const defined = calls.reduce((n, call) => n + text.split(call).length - 1, 0);
+        if (defined > text.split('gallery: {').length - 1) missing.push(`${kind.dir}/${from}`);
+      }
+    }
+    expect(missing).toEqual([]);
+  });
+});

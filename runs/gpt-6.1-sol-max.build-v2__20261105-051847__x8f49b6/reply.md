@@ -1,0 +1,1 @@
+The combined suite passed: **94 checks, zero failures**, covering the offline file, full campaign, every rendered strain on three graphics paths, controls, co-op, audio, and hub networking. I’m checking one final portrait compositing adjustment and refreshing the viewport screenshots.

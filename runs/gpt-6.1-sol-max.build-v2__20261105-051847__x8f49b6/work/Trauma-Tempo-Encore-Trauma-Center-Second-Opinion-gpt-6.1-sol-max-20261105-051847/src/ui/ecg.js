@@ -1,0 +1,4 @@
+export class ECG{
+ constructor(canvas){this.canvas=canvas;this.ctx=canvas.getContext('2d');}
+ draw(s){const c=this.canvas,x=this.ctx,w=c.width=500,h=c.height=94;x.clearRect(0,0,w,h);x.strokeStyle='#44726e66';x.lineWidth=1;for(let i=0;i<w;i+=25){x.beginPath();x.moveTo(i,0);x.lineTo(i,h);x.stroke();}for(let i=0;i<h;i+=23){x.beginPath();x.moveTo(0,i);x.lineTo(w,i);x.stroke();}x.lineWidth=2.5;x.strokeStyle=s.arrest?'#e8443a':s.vitals<=30?'#f2b134':'#7cf2c9';x.shadowColor=x.strokeStyle;x.shadowBlur=7;x.beginPath();for(let i=0;i<=w;i++){let f=((i/w*2+s.beatPhase)%1),v=0;if(!s.arrest){v=Math.exp(-1*((f-.49)/.018)**2)*-37+Math.exp(-1*((f-.455)/.014)**2)*11+Math.exp(-1*((f-.53)/.02)**2)*20+Math.exp(-1*((f-.3)/.04)**2)*-5+Math.exp(-1*((f-.7)/.07)**2)*-9;}const y=h*.52+v;if(!i)x.moveTo(i,y);else x.lineTo(i,y);}x.stroke();x.shadowBlur=0;}
+}

@@ -1,0 +1,43 @@
+import { TITLE } from './title.js';
+export const ABOUT = {
+  sourceInformation: {
+    date: '2026-11-04 22:16:52', source: 'Wii Fit', plan: 'PLAN.md',
+    genre: 'Sports (fitness and balance minigame collection in a light life-sim week)',
+    perspective: 'Isometric on the island; fixed front-on for class activities; fixed side/top views per activity',
+    tech: 'Pixel Engine 0.46.0 (three.js r186, Rapier 0.20 bundled), esbuild single-file bundle, AI Hub Session Protocol v1 client 1.4.0',
+    artDirection: 'Engine native pixel look, 16-colour palette, white tile plaza on a pastel island of giant gym equipment',
+    animation: 'Engine ClipDef data with AnimationMixer; procedural lean layer from the Dot',
+    audio: 'Engine Song and SoundDef data, all written in code; Web Audio formant Animalese voices; music at 10% by default',
+    online: 'AI Hub ghost mode 1-4 players with own card; Family Hour local 1-4 on one screen; no other network use',
+    testing: 'Headless Node tests plus Playwright browser checks on this computer (WebGPU Chromium; gamepad/touch/analyser stand-ins). See Testing Feedback.',
+    research: 'Director plan included engine and hub research and verified spikes (PLAN sections 4, 17); builder read GUIDE.md, ASSETS.md and hub README.md whole and searched API.md/LIBRARY.md.',
+    environment: 'Muse Code CLI (headless); Linux', model: 'Meta, muse-wonder-1.0, reasoning effort max', usage: 'added on import',
+  },
+  testingFeedback: [
+    'Testing caught 3 issues: 2 song pattern step-count mismatches and a short line bank, all fixed. Final headless run: 230/230 passed.',
+    'Critical / game-breaking: 0 in the final run. Earlier harness 404 was a test-server path bug, not a game bug.',
+    'Most helpful: the headless activity runs and Dot bot table, which check balance, scoring and finishing without a browser.',
+    'Least helpful: screenshot-only checks, which confirm composition but not timing or scoring.',
+  ],
+  engineFeedback: [
+    'Liked most: the single-file engine with headless mode, recording/replay and the pixel HUD, which make scripted testing practical.',
+    'Stuck or guessed wrong: see final report; hub card timing and song step-clock details needed care.',
+    'Most important thing built on top: the Dot balance simulation with bot drivers shared by play, classmates, attract mode and tests.',
+    'Hardest part: fitting a 7-day week, ten activity kinds, lanes and hub ghosts into one HUD-driven architecture without dense screens.',
+    'Changed in the engine: none. pixel-engine.js is byte-identical (sha256 recorded in vendor/pixel-engine.sha256).',
+    'One change wished for: documented song step clock and audio bus access for voice routing (both are present but undocumented in 0.46.0).',
+  ],
+  promptFeedback: [
+    'Liked most: the plan\u2019s verified numbers (Dot defaults, bot table, camera framings) remove guesswork where feel matters most.',
+    'Confusing: the scope is very large for one build; the cut list in PLAN section 19 is essential.',
+    'Hardest thing: the hub ghost protocol plus the full week plus ten activities in a single file.',
+    'Change: split the build order into separately shippable stages with their own acceptance checks.',
+  ],
+  aiHub: {
+    name: TITLE, tagline: 'Keep it in the circle.',
+    description: 'A polite fitness comedy on Tare Island. Lean the Dot, hold poses, chase stars, and be judged, kindly, by Ounce the scale.',
+    type: 'Game', genre: 'Sports', source: 'Wii Fit', series: 'Wii Fit', players: '1\u20134',
+    controls: 'Left stick, WASD or mouse: lean. R2, Space or click: breathe. L1/R1, F/J or mouse buttons: step.',
+    tags: ['pixel art','comedy','versus','arcade','3d','story'],
+  },
+};

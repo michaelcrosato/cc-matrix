@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#BFE9FF" />
+    <link rel="stylesheet" href="../../engine/ui/touch.css" />
+    <link rel="icon" href="data:," />
+    <title>Thumb Yoga</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        background: #bfe9ff;
+        color: #3a4a55;
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        height: 100dvh;
+        outline: none;
+        touch-action: none;
+      }
+      #msg,
+      #shell,
+      [data-ui],
+      [data-ui] *,
+      .ui-overlay,
+      .ui-overlay * {
+        font-size: max(28px, 2.6vh) !important;
+        line-height: 1.25;
+      }
+      #msg {
+        position: fixed;
+        inset: 0;
+        z-index: 5;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+        font-family: system-ui, sans-serif;
+        text-align: center;
+        white-space: pre-line;
+        pointer-events: none;
+        background: #f7fafc;
+      }
+      #msg[hidden] {
+        display: none;
+      }
+      #shell {
+        position: fixed;
+        inset: 0;
+        z-index: 2;
+        pointer-events: none;
+        font-family: system-ui, sans-serif;
+        color: #3a4a55;
+      }
+      [data-ui='note'],
+      [data-ui='banner'],
+      [data-ui='copy'] {
+        margin: 0.4em 1em;
+        max-width: 46rem;
+      }
+      [data-ui='disc'] {
+        position: fixed;
+        right: 2rem;
+        bottom: 2rem;
+        width: 8rem;
+        height: 8rem;
+      }
+      [data-ui='card'],
+      [data-ui='about'] {
+        position: fixed;
+        inset: 8vh 8vw auto;
+        max-height: 80vh;
+        overflow: auto;
+        background: #f7fafc;
+        padding: 1rem 1.2rem;
+        pointer-events: auto;
+      }
+      [data-ui='sliders'] {
+        position: fixed;
+        left: 4vw;
+        bottom: 6vh;
+        display: grid;
+        gap: 0.3rem;
+        pointer-events: auto;
+      }
+      [data-ui='touch-settings'],
+      [data-ui='card-ready'],
+      [data-ui='card-more'] {
+        pointer-events: auto;
+        font-family: system-ui, sans-serif;
+        padding: 0.3em 0.7em;
+        margin: 0.3em;
+        color: #3a4a55;
+        background: #f4e8c8;
+        border: 3px solid #ff8a70;
+      }
+      [data-ui='touch-settings'] {
+        position: fixed;
+        right: 1.5rem;
+        bottom: 1.5rem;
+      }
+    </style>
+    <script>
+      window.__engine = { ready: false, errors: [] };
+      function gameFailed(message) {
+        if (!navigator.gpu) return;
+        if (!window.__engine || typeof window.__engine.help === 'function') return;
+        var fix = 'the console names the cause; node x shot labs/game reports it headless';
+        var record = { code: 'APP_START', message: 'the page failed to start: ' + message, fix: fix };
+        if (window.__engine.errors.length === 0) {
+          var node = document.getElementById('msg');
+          if (node) node.textContent = record.code + ': ' + record.message + '\nFix: ' + fix;
+        }
+        window.__engine.errors.push(record);
+      }
+      addEventListener('error', function (event) {
+        gameFailed(event.message || 'a script failed');
+      });
+      addEventListener('unhandledrejection', function (event) {
+        gameFailed(String((event.reason && event.reason.message) || event.reason));
+      });
+    </script>
+  </head>
+  <body>
+    <canvas id="view"></canvas>
+    <div id="msg" role="status" aria-live="polite">Calibrating. The island is putting its lawn on.</div>
+    <script>
+      if (!navigator.gpu) {
+        var node = document.getElementById('msg');
+        if (node) node.textContent = 'This game needs a browser with WebGPU, such as current Chrome or Edge.';
+      }
+    </script>
+    <script type="module" src="./main.ts" onerror="gameFailed('labs/game/main.ts did not load')"></script>
+  </body>
+</html>

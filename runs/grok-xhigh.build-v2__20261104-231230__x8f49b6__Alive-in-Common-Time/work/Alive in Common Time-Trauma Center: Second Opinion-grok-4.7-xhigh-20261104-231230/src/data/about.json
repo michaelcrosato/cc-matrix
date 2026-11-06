@@ -1,0 +1,46 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-04 23:12:30",
+    "source": "Trauma Center: Second Opinion",
+    "plan": "PLAN.md",
+    "genre": "Surgical action (arcade operation game) with a visual-novel story",
+    "perspective": "First-person surgeon's-eye 3D operative field; staged third-person story scenes",
+    "tech": "Three.js r180 (WebGPU, WebGL2 fallback), TSL ink post-filter, Rapier 0.19.3, Web Audio, Gamepad API, esbuild 0.28.2; hub session client 1.4.0",
+    "artDirection": "Comic-book medical drama: cel-shaded toon materials, ink outline filter, manga tone, all geometry made in code",
+    "animation": "Three.js AnimationMixer with code-built clips, skinned strains, procedural follow-through",
+    "audio": "All synthesized in code: step-sequenced music, procedural effects, Animalese-style gibberish voices; music at 10% by default",
+    "online": "AI Hub Session Protocol v1, shared world, 1–4 players; couch co-op on its own",
+    "testing": "Headless sim suite 51 checks, Playwright browser suite 80 checks on Chromium and WebKit, hub harness 26 checks. No physical controller, no second human, no real iOS device.",
+    "research": "AI Hub protocol and harness, engine prototypes on this computer, and the plan's notes on the source.",
+    "environment": "Grok CLI (headless); Linux",
+    "model": "xAI, grok-4.7, reasoning effort xhigh",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "The sim suite (51 checks) and the hub harness (26 checks) caught the issues that would have shipped. The browser suite (80 checks) caught UI timing: attract was swallowing the next confirm, and a reload was dropping screens the playthrough had already opened.",
+    "A few were critical: a story line that failed the Bea lint, snapshot traffic that could trip the hub rate warning, and a ready() call that the client ignores if it happens before welcome.",
+    "The most helpful test was the Normal bot playthrough with the 45 to 75 percent clear-time band. It kept the operations honest.",
+    "The least helpful test was staring at a single still of the title. Behavior checks found the breaks. A picture did not."
+  ],
+  "engineFeedback": [
+    "MeshToonNodeMaterial plus the ink graph is a complete look from primitives, and the hub client is small enough to read.",
+    "WebGPU on this machine needs five browser flags or the device dies after one frame. Rapier must be initialized before the first world, and ready() is a no-op until the welcome arrives.",
+    "The operation sim, the bot, and the snapshot codec. The engine draws and hears. It does not know surgery.",
+    "Software WebGPU is slow enough that a test has to drive the sim with step and warp, and four inked views in one harness is a memory tightrope.",
+    "Nothing in the engine source. The operative rules live in this game.",
+    "A supported way to boot SwiftShader WebGPU without a private flag recipe, and a ready() that queues until welcome instead of vanishing."
+  ],
+  "promptFeedback": [
+    "The plan is specific about feel: ten-foot type, one patient, four surgeons, and a story that knows when to be quiet.",
+    "Two WebGPU flag lists disagree. The shorter one draws a blank here. The plan's five flags are the ones that work.",
+    "Keeping a sloppy four-surgeon coda inside the rules without moving the Normal scores, then proving the hub harness on software WebGPU.",
+    "Say once, in the prompt, which browser flags this computer actually needs."
+  ],
+  "credits": [
+    "xAI grok-4.7, reasoning effort xhigh, via Grok CLI",
+    "Three.js r180",
+    "Rapier 0.19.3",
+    "Bangers and Barlow Condensed, SIL Open Font License",
+    "AI Hub session client 1.4.0"
+  ]
+}

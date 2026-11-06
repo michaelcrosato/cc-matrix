@@ -1,0 +1,1 @@
+The browser playthrough has reached the ending through all eight operations. Couch cursors, developer sliders, Xbox prompts, and phone/tablet settings also passed. I’m finishing the official multiplayer scenarios and Firefox/WebKit fallback checks.

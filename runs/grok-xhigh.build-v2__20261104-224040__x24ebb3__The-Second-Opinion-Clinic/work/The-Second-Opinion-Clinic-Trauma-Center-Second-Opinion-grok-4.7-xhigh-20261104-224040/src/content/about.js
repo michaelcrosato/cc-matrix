@@ -1,0 +1,72 @@
+/** About / Credits copy. The exit interview uses these same strings. */
+
+export const SOURCE_INFORMATION = {
+  date: '2026-11-04 22:40:40',
+  source: 'Trauma Center: Second Opinion',
+  plan: 'PLAN.md',
+  genre: 'Simulation',
+  perspective: 'Fixed overhead surgical view',
+  tech: 'Pixel Engine 0.46.0 (build 2026-11-02), AI Hub session client 1.4.0, esbuild 0.28.2',
+  artDirection: 'Engine pixel-toon look, original OR sets, primitive busts, canvas tissue',
+  animation: 'Engine clock plus sim-driven tool motion, heart pulse, and code-blue needle',
+  audio: 'Original chiptune songs, SoundDef effects, and formant gibberish voices. No audio files.',
+  online: 'Couch consult on one machine, and AI Hub shared-world for 1 to 4 players. No other network.',
+  testing: 'Node sim suite, Playwright on software WebGPU, hub harness on 127.0.0.1. No physical pad, no second person, no iOS Safari, no TV.',
+  research: 'The planner read the source Wikipedia page, the hub protocol, and the engine kit, and ran engine spikes. This build followed PLAN.md and the engine docs on this machine.',
+  environment: 'Grok CLI (headless); Linux',
+  model: 'xAI, grok-4.7, reasoning effort xhigh',
+  usage: 'added on import',
+};
+
+export const TESTING_FEEDBACK = [
+  'Testing caught 13 issues: a string id compared as a number, a magnet pull that snapped, overlapping suture targets, a missing clot flag, a copy-hand that ended before it landed, 2 syringe asserts on the wrong keeper, a title and clock drawn off screen, a vitals readout stuck at 0, finish stats the hub dropped, an idle pad that stole the mouse, a client hand that stayed at spawn, and a dev list that could not jump a stage.',
+  '6 would be game-breaking: hooks never left the field, the magnet could not be extracted, Op 5 never closed, the transplant skipped its forced rewind, an idle pad stole the mouse, and a client hand stayed at spawn.',
+  'The most helpful test was the skill-1 bot play of every operation, which failed in the live sim and named the stuck entity.',
+  'The least helpful test was a screenshot of a menu with no input behind it. Appearance did not show whether focus moved.',
+];
+
+export const ENGINE_FEEDBACK = [
+  'The pure renderSound and Song data made every effect and track testable in Node, and the HUD art-pixel grid matched the fill-mode canvas.',
+  'I guessed wrong once: a held entity id is a string, so a numeric comparison never saw the grab. The fixed camera and the audio storage key behaved as the guide describes.',
+  'The operation sim, the eight tools, the strains, couch seats, and the shared-world host loop. The engine does not ship a surgery model.',
+  'Keeping pad buttons from also pressing keyboard keys, while still reading analog triggers, took the longest to get straight.',
+  'none',
+  'A way to mark a gamepad button as "read it yourself" without clearing the whole map by hand.',
+];
+
+export const PROMPT_FEEDBACK = [
+  'The plan named the beats, the tools, and the pass lines, so the game could be built against checks instead of a vibe.',
+  'Two documents both said how to boot, and they disagreed about whether screens swap by loading a new game. Pause had to stay inside one game or the music died.',
+  'Making one bot clear every operation at the top rank, including the rewind and the two-handed pull, without lowering par.',
+  'Ask for the exit-interview counts after the suite has run, and name one file as the only source of the balance numbers.',
+];
+
+export const AI_HUB = {
+  name: 'The Second Opinion Clinic',
+  tagline: 'The truth, stat.',
+  description: 'A rainy harbour hospital where telling the truth is the first cut. Keep the patient alive, close the strain, and top the team score.',
+  type: 'Game',
+  genre: 'Simulation',
+  source: 'Trauma Center: Second Opinion',
+  series: 'Trauma Center',
+  players: '1\u20134',
+  controls: 'Stick or mouse moves the tool. R2 or click uses it. Right stick or keys 1-8 pick a tool.',
+  tags: ['3d', 'pixel art', 'story', 'co-op', 'boss fights', 'comedy'],
+};
+
+export const ABOUT_FIELDS = [
+  ['Date', SOURCE_INFORMATION.date],
+  ['Source', SOURCE_INFORMATION.source],
+  ['Plan', SOURCE_INFORMATION.plan],
+  ['Genre and Perspective', `${SOURCE_INFORMATION.genre}; ${SOURCE_INFORMATION.perspective}`],
+  ['Tech', SOURCE_INFORMATION.tech],
+  ['Art Direction', SOURCE_INFORMATION.artDirection],
+  ['Animation', SOURCE_INFORMATION.animation],
+  ['Audio', SOURCE_INFORMATION.audio],
+  ['Online', SOURCE_INFORMATION.online],
+  ['Testing', SOURCE_INFORMATION.testing],
+  ['Research', SOURCE_INFORMATION.research],
+  ['Environment', SOURCE_INFORMATION.environment],
+  ['Model', SOURCE_INFORMATION.model],
+  ['Usage', SOURCE_INFORMATION.usage],
+];
