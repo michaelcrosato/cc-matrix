@@ -1,0 +1,10 @@
+import * as T from 'three/webgpu';
+import {R,groups,RAG} from './world.js';
+import {mesh,ball,mat} from '../art/materials.js';
+export class Ragdoll{
+ constructor(w,scene,colour){this.w=w;this.scene=scene;this.colour=colour;this.parts=[];}
+ spawn(x,y,z,rotation){this.active=true;if(!this.parts.length){const parts=[['torso',[0,.85,0],.2,.2,.45,-1],['head',[0,1.28,0],.02,.21,.15,0],['armL',[-.32,.83,0],.12,.07,.05,0],['handL',[-.4,.55,0],.1,.065,.04,2],['armR',[.32,.83,0],.12,.07,.05,0],['handR',[.4,.55,0],.1,.065,.04,4],['thighL',[-.13,.4,0],.12,.09,.08,0],['legL',[-.13,.15,0],.12,.08,.06,6],['thighR',[.13,.4,0],.12,.09,.08,0],['legR',[.13,.15,0],.12,.08,.06,8]];for(const [name,p,hh,r,m,parent] of parts){let b=this.w.createRigidBody(R.RigidBodyDesc.dynamic().setTranslation(x+p[0],y+p[1],z+p[2]).setCanSleep(false).setLinearDamping(.05).setAngularDamping(.6));this.w.createCollider(R.ColliderDesc.capsule(hh,r).setMass(m).setFriction(.7).setRestitution(.15).setCollisionGroups(groups(RAG,1)),b);let v=mesh(new T.CapsuleGeometry(r,hh*2,4,12),name==='torso'?this.colour:0xf2d3a8,this.scene);this.parts.push({b,v,p,parent});if(parent>=0){let pp=parts[parent][1],mid=p.map((n,k)=>(n+pp[k])*.5);const j=this.w.createImpulseJoint(R.JointData.spherical({x:mid[0]-pp[0],y:mid[1]-pp[1],z:mid[2]-pp[2]},{x:mid[0]-p[0],y:mid[1]-p[1],z:mid[2]-p[2]}),this.parts[parent].b,b,true);j.setContactsEnabled(false);}}}
+ for(const p of this.parts){p.b.setEnabled(true);for(let i=0;i<p.b.numColliders();i++)p.b.collider(i).setEnabled(true);const off=new T.Vector3(...p.p).applyQuaternion(rotation);p.b.setTranslation({x:x+off.x,y:y+off.y,z:z+off.z},true);p.b.setRotation(rotation,true);p.b.setLinvel({x:0,y:0,z:0},true);p.b.setAngvel({x:0,y:0,z:0},true);p.v.visible=true;}this.parts[1].b.applyImpulse({x:.07,y:.02,z:.06},true);}
+ frame(){for(const {b,v} of this.parts){v.position.copy(b.translation());v.quaternion.copy(b.rotation());}}
+ hide(){this.active=false;for(const p of this.parts){for(let i=0;i<p.b.numColliders();i++)p.b.collider(i).setEnabled(false);p.b.setEnabled(false);p.v.visible=false;}}
+}

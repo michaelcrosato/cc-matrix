@@ -1,0 +1,166 @@
+/** @file The residency, stations and activities; new programme content is another row. */
+export const ACTIVITIES = [
+  {
+    id: 'check',
+    title: 'Morning Check',
+    sub: 'A little scientific standing.',
+    x: 0,
+    z: 34,
+    seconds: 75,
+    icon: '◉',
+    verbs: 'Lean into the ring. Follow six targets. Finish on one foot.',
+  },
+  {
+    id: 'pose',
+    title: 'Pose Class',
+    sub: 'Find your quite good side.',
+    x: -52,
+    z: 18,
+    seconds: 150,
+    icon: '✧',
+    verbs: 'Follow the coral ring with your balance dot. Breathe with the guide.',
+  },
+  {
+    id: 'pond',
+    title: 'Still Pond',
+    sub: 'Nothing is an activity.',
+    x: -70,
+    z: -12,
+    seconds: 75,
+    icon: '≈',
+    verbs: 'Breathe together. Ignore every invitation to move. Escape is always a real pause.',
+  },
+  {
+    id: 'reps',
+    title: 'Reps Hall',
+    sub: 'You are the repetition.',
+    x: 52,
+    z: 22,
+    seconds: 90,
+    icon: '↕',
+    verbs: 'Pull back to bend. Return to stand. Match the moving band.',
+  },
+  {
+    id: 'garden',
+    title: 'Sand Garden',
+    sub: 'Please rake responsibly.',
+    x: 30,
+    z: -48,
+    seconds: 90,
+    icon: '◎',
+    verbs: 'Tilt the tray gently. Settle each marble into its cup.',
+  },
+  {
+    id: 'paddle',
+    title: 'Paddle Glide',
+    sub: 'A small voyage of composure.',
+    x: -60,
+    z: 85,
+    seconds: 75,
+    icon: '≋',
+    verbs: 'Lean forward to glide. Steer through the buoys. Alternate feet for a boost.',
+  },
+  {
+    id: 'line',
+    title: 'The Line',
+    sub: 'The water is very patient.',
+    x: -65,
+    z: 42,
+    seconds: 75,
+    icon: '⌁',
+    verbs: 'Alternate feet to cross. Lean against the wind. The same foot twice is a stumble.',
+  },
+  {
+    id: 'step',
+    title: 'Step Class',
+    sub: 'One foot. Then the other.',
+    x: 52,
+    z: 28,
+    seconds: 100,
+    icon: '▰',
+    verbs: 'Tap the named foot as it meets the line. Both feet means a jump.',
+  },
+  {
+    id: 'hoop',
+    title: 'Hoop Patrol',
+    sub: 'Dignity comes in circles.',
+    x: 62,
+    z: 84,
+    seconds: 60,
+    icon: '◌',
+    verbs: 'Circle the stick or mouse. Keyboard: alternate Q and E briskly.',
+  },
+  {
+    id: 'dive',
+    title: 'Cliff Plunge',
+    sub: 'A considered departure.',
+    x: 0,
+    z: -88,
+    seconds: 54,
+    icon: '↓',
+    verbs: 'Hold both feet to compose. Release to dive. Lean to spin; enter straight.',
+  },
+  {
+    id: 'jog',
+    title: 'Island Jog',
+    sub: 'Gerald is already ahead.',
+    x: 10,
+    z: 55,
+    seconds: 150,
+    icon: '➝',
+    verbs: 'Follow the flags. Stay near Gerald. Alternate feet to find your pace.',
+  },
+  {
+    id: 'group',
+    title: 'Group Class',
+    sub: 'Company. Without pressure.',
+    x: -52,
+    z: 18,
+    seconds: 153,
+    icon: '⁙',
+    verbs: 'Three classes. Four mats. Keep your own balance; company does the rest.',
+  },
+  {
+    id: 'tilt',
+    title: 'The Great Tilt',
+    sub: 'Please remain approximately calm.',
+    x: 0,
+    z: 0,
+    seconds: 240,
+    icon: '⟡',
+    verbs: 'Calm the guests. Move them east. Then hold the whole island in balance.',
+  },
+] as const;
+export type EventId = (typeof ACTIVITIES)[number]['id'];
+export const activity = (id: string) => ACTIVITIES.find((a) => a.id === id) ?? ACTIVITIES[0];
+export const DAYS: { title: string; line: string; events: EventId[] }[] = [
+  { title: 'A small beginning', line: 'Please keep to the centre. No reason.', events: ['check', 'pose', 'pond'] },
+  {
+    title: 'The mat remembers',
+    line: 'Guests are reminded to distribute themselves evenly.',
+    events: ['check', 'reps', 'garden', 'pose'],
+  },
+  {
+    title: 'Water finds its level',
+    line: 'If your drink slides, that is a feature of the drink.',
+    events: ['check', 'paddle', 'line', 'step'],
+  },
+  {
+    title: 'A little out of true',
+    line: 'The island sits on one rock. I have not mentioned it.',
+    events: ['check', 'hoop', 'dive', 'jog'],
+  },
+  {
+    title: 'Hold everything',
+    line: 'Calm is now mandatory. Thank you for your cooperation.',
+    events: ['check', 'group', 'pose', 'tilt'],
+  },
+];
+export const rank = (score: number) =>
+  ['Present', 'Adequate', 'Composed', 'Serene', 'Unsettling'][
+    score >= 900 ? 4 : score >= 750 ? 3 : score >= 550 ? 2 : score >= 300 ? 1 : 0
+  ];
+export const pebblesFor = (score: number) =>
+  score >= 900 ? 5 : score >= 750 ? 4 : score >= 550 ? 3 : score >= 300 ? 2 : 1;
+export const ageFor = (score: number, k = 1.3) =>
+  Math.round(18 + 64 * Math.pow(1 - Math.max(0, Math.min(1000, score)) / 1000, k));

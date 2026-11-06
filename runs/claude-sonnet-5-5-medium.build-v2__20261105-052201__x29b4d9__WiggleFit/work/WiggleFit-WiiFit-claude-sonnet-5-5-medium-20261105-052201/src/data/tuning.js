@@ -1,0 +1,42 @@
+const T = (group, label, min, max, step, def) => ({ group, label, min, max, step, default: def });
+export const TUNING_DEFS = {
+  maxLean: T('Balance', 'Max lean (deg)', 8, 30, 0.5, 18),
+  margin: T('Balance', 'Margin', 0.1, 1.2, 0.01, 0.45),
+  zeta: T('Balance', 'Damping', 0.1, 1.2, 0.01, 0.4),
+  ankleMax: T('Balance', 'Ankle strength', 2, 9, 0.1, 4.6),
+  fallAngle: T('Balance', 'Fall angle (deg)', 30, 70, 1, 45),
+  reflex: T('Balance', 'Reflex', 3, 25, 0.5, 10),
+  flailBoost: T('Balance', 'Flail boost', 1, 3, 0.05, 1.9),
+  flailCooldown: T('Balance', 'Flail cooldown (s)', 0.5, 6, 0.1, 2),
+  swayScale: T('Balance', 'Sway scale', 0, 3, 0.05, 1),
+  tremorScale: T('Balance', 'Tremor scale', 0, 3, 0.05, 1),
+  recoverTime: T('Balance', 'Recover time (s)', 0.5, 6, 0.1, 2.2),
+  gravity: T('World', 'Gravity', 3, 20, 0.1, 9.81),
+  islandWeight: T('World', 'Island weight (deg at rim)', 0, 12, 0.1, 4),
+  islandRest: T('World', 'Island rest tilt (deg)', 0, 14, 0.1, 9),
+  islandSpring: T('World', 'Island spring', 0.5, 6, 0.1, 2.2),
+  walkSpeed: T('World', 'Walk speed', 1.5, 8, 0.1, 4),
+  fruitMass: T('Events', 'Fruit mass', 0.005, 0.05, 0.001, 0.015),
+  fruitInterval: T('Events', 'Fruit interval (s)', 0.5, 4, 0.1, 1.6),
+  landingRadius: T('Events', 'Landing radius', 0.2, 1, 0.01, 0.45),
+  stoneMass: T('Events', 'Stone mass', 0.005, 0.08, 0.001, 0.02),
+  stoneInterval: T('Events', 'Stone interval (s)', 2, 9, 0.1, 5.5),
+  ringEnd: T('Events', 'Ring size at end', 0.05, 0.4, 0.01, 0.16),
+  gustForce: T('Events', 'Gust force', 0, 2, 0.05, 1),
+  plateDecay: T('Events', 'Plate decay', 0.02, 0.4, 0.01, 0.11),
+  plateGain: T('Events', 'Plate gain', 0.1, 1.2, 0.01, 0.45),
+  rhythmWindow: T('Events', 'Rhythm window scale', 0.5, 2.5, 0.05, 1),
+  repTempo: T('Events', 'Rep tempo scale', 0.6, 1.8, 0.05, 1),
+  boardGain: T('Events', 'Board pump', 2, 14, 0.5, 8),
+  airTorque: T('Events', 'Air spin (rad/s)', 1, 7, 0.1, 3.4),
+  marblesPerMinute: T('Rewards', 'Marbles per minute', 0, 6, 0.1, 2),
+  medalScale: T('Rewards', 'Medal scale', 0.5, 1.5, 0.01, 1),
+  hull: T('Ink', 'Hull', 0, 0.01, 0.0002, 0.0028),
+  lineWidth: T('Ink', 'Line width', 0.3, 4, 0.1, 1.4),
+  boil: T('Ink', 'Line boil', 0, 2, 0.05, 0.5),
+  grain: T('Ink', 'Grain', 0, 0.1, 0.002, 0.02),
+};
+export const tuning = {};
+export function resetTuning() { for (const k in TUNING_DEFS) tuning[k] = TUNING_DEFS[k].default; }
+resetTuning();
+export function tuningJSON() { const o = {}; for (const k in tuning) if (tuning[k] !== TUNING_DEFS[k].default) o[k] = tuning[k]; return JSON.stringify(o); }

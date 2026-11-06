@@ -1,0 +1,58 @@
+{
+ "sourceInformation": {
+  "date": "2026-11-04 22:16:55",
+  "source": "Wii Fit",
+  "plan": "PLAN.md",
+  "genre": "Sports (exercise minigame collection with a light life-sim routine)",
+  "perspective": "Per activity: fixed 2.5D brawler camera in the studio, three-quarter island, Mode 7 slalom, pseudo-3D road jog, steep tray view, side view laundry line",
+  "tech": "my-3D2dge handoff engine v0.89.0 (Canvas 2D; Road, Mode7, Physics and Rhythm modules; Mocap clips from Mesh2Motion, Quaternius and CMU), plain JavaScript scripts on one global G bundled by build.mjs into one HTML file, AI Hub session client (session.js), Playwright 1.63.0 for tests",
+  "artDirection": "Engine-native 3D skeleton puppets drawn as crisp pixel art at PS1 resolution, moved into bright daylight; hand-drawn Tare, Gerald, Plate and props",
+  "animation": "Engine Humanoid rigs with motion-capture clips (Mesh2Motion, CMU) plus hand-posed IK bodies for hoop, step and lunge",
+  "audio": "All music, sound effects and Animalese-style voices synthesized in code with Web Audio; music at 10% volume by default",
+  "online": "AI Hub ghost session (1 to 4 players) through the hub client; local Class for 2 to 4 players on one screen",
+  "testing": "Headless Node tests (lean model bands on 12 seeds; every activity and tier with passive, average, good and expert bots; attract, dev, class, saves, data lint; a scripted full playthrough with real input taps for a bot player and a passive player), Playwright in Chromium, Firefox and WebKit (controller stand-in, keyboard and mouse, touch-only phone profile, sound analysers, no network requests), and the AI Hub harness at five settings. Final run: 689 checks passed, 0 failed.",
+  "research": "Read the supplied plan (PLAN.md), the engine API card and the AI Hub session protocol README. No other research.",
+  "environment": "Claude Code CLI (headless); Linux",
+  "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+  "usage": "added on import"
+ },
+ "testingFeedback": [
+  "About 12: a slalom crash in the short Gentle Games course, a stale dialog that froze the Class countdown, a laundry line nobody could finish, attract mode not restoring the save it touched, attract walking into a real activity, a camera that kept following the island hero, ghost data not sent before play, Stork tier 2 too hard for the expert bot, a rhythm cadence estimate that read low, a dev reset that cleared the test bot, a quick key tap not read as keyboard, and a rope band that no longer matched the plan.",
+  "3 critical: the slalom crash (it took down the Day 5 festival), the stale dialog blocking Class, and the laundry line that could not be finished.",
+  "The scripted full playthrough: real input taps and bots from New Member to the Ending, once as a good player and once as a passive one. It exercised every scene, the day loop, saves and unlocks together, and it found most of the flow bugs.",
+  "The engine's check.mjs look notes and the screenshot checks: they found nothing the scripts had not, and a script cannot judge layout, so most layout fixes came from reading a few screenshots by eye."
+ ],
+ "engineFeedback": [
+  "The skeleton puppets drawn as crisp pixel art with real motion capture on them, and the ready modules (Road, Mode7, Physics, Rhythm). A headless game that can still run draw on a stand-in meant draw errors showed up in plain Node tests.",
+  "A few guesses were wrong: game.go lags a step so the scene name is old right after it; follow() and cam.bounds carry over to the next scene; E.Rhythm reads game.input directly so per-player lanes needed a proxy game object; a rig's size is set through rig.o.size after it is built; and a scene's view cannot differ per activity without game.setView.",
+  "The Lean: one balance model feeding twelve activities from a stick, keys or a mouse, plus bots that use the same model. Also the bright canvas UI (Pills, captions, prompts), Tare and Gerald, the generated songs and Animalese voices, and the ActRun framework that lets one activity run in a scene, in Class, in attract or in a hub round.",
+  "Mixing six ways of drawing in one game (brawler, three-quarter, Mode 7, pseudo-3D road, a tilted tray, a side view) and keeping the camera, coordinates and input state straight when one scene hands over to another.",
+  "Only the Dialog shadow patch: the name, text and choices used a fixed near-black shadow; they now read this.shadow so a bright dialog box can turn it off.",
+  "Reset the camera (follow target, bounds, offset) on every scene change, or make game.go take effect at once in headless runs. Both would have saved debugging time."
+ ],
+ "promptFeedback": [
+  "The tested recipes marked with a tick, with exact numbers and traps already found, plus a build order and a cut order. It made a very large game feel doable one milestone at a time.",
+  "The title rule asks for a riff on the source's name while the plan says to avoid Wii names; the random pick was 'Wii Stork', so I kept the pick. The Lean tables were measured with a centred ring, but the Stork ring moves. The plan says engine v0.88.0 and the handoff was v0.89.0.",
+  "The scope: twelve activities in six views, a local Class, an AI Hub ghost round, attract, dev mode, About, saves and a full test suite, all inside one session and its context.",
+  "Mark which parts are required and which are stretch, give a rough size budget, and ship a small sample of the test harness (the vm loader, a bot loop and the brawler screen coordinates) so those do not have to be rediscovered."
+ ],
+ "aiHub": {
+  "name": "Wii Stork",
+  "tagline": "Gently, or not at all",
+  "description": "A deadpan five-day stay at a wellness retreat where one skill, your balance, drives twelve short exercises, coached by a needy talking scale and two wooden instructors. Local Class for up to four, and an AI Hub ghost round.",
+  "type": "Game",
+  "genre": "Sports",
+  "source": "Wii Fit",
+  "series": "",
+  "players": "1–4",
+  "controls": "Lean with the left stick, WASD or mouse; breathe with R2, Space or click",
+  "tags": [
+   "pixel art",
+   "comedy",
+   "versus",
+   "arcade",
+   "story",
+   "2d"
+  ]
+ }
+}

@@ -1,0 +1,63 @@
+// The one source for the About screen and exit-interview.json. Text uses only HUD font characters.
+import { TITLE, TAGLINE } from '../config.js';
+
+export const SOURCE_INFO = {
+  date: '2026-11-05 16:20:51',
+  source: 'Resident Evil 4',
+  plan: 'PLAN.md',
+  genre: 'Third-person action-horror shooter with crowd control, resource management and an escort',
+  perspective: 'Over-the-shoulder third person with a laser sight; letterboxed cinematic cameras for cutscenes and quick-time events; one on-rails shooting finale',
+  tech: 'Pixel Engine kit 0.46.0 (pixel-engine.js, three.js r186, Rapier 0.20), esbuild 0.28.2 bundle, JavaScript ES modules, Node headless tests, Playwright 1.63.0',
+  artDirection: 'Engine-native 480x270 pixel pipeline with palette toon materials and a vignette; puppets built from box parts on the hero rig; glowing orange eye bands as the infected signature',
+  animation: "Engine clip system (ClipDef data, compileClips, gaitClip) with masked upper and lower layers on one mixer; new clips for aiming, reloading, kicks, vaults, shambling gaits and bosses; procedural aim pitch",
+  audio: 'All code: engine SoundDef layers for effects, Song data for ten original tracks, and Animalese-style syllable voices per speaker. Music defaults to 10% volume. No audio files.',
+  online: 'AI Hub shared-world session (1-4 players, own card) via the vendored session client, plus same-computer parties over BroadcastChannel and WebRTC invite codes outside the hub',
+  testing: 'Headless scripted tests in Node (Engine.headless), a bot playthrough (god mode on; the quay is also played with no cheats), browser checks on file:// with Playwright WebGPU Chromium, gamepad stub, phone profile, hub harness; no subagents or workflows used to review',
+  research: 'Read the plan, the engine kit guide, asset guide and API, and the AI Hub session protocol. No outside research on the source.',
+  environment: 'Claude Code CLI (headless); Linux',
+  model: 'Anthropic, claude-sonnet-5-5, reasoning effort medium',
+  usage: 'added on import',
+};
+export const FEEDBACK = {
+  testing: [
+    'About 16 real defects were caught by scripts: clip poses that came out as NaN, shots that went high because recoil was applied before the ray, scripts that never resumed after the Claim Form, props that blocked the camera, enemies stuck inside cover, a Foghorn that left stragglers, a tide gauge, message rates over 20 a second, and a few smaller ones.',
+    'Four were game breaking: every custom animation was NaN, every shot missed high, no chapter could end after its Claim Form, and an enemy stuck in cover could stop the Foghorn from clearing the quay.',
+    'The whole-game bot playthrough from Arrival to the credits: it found the bugs that only show when systems meet.',
+    'The browser screenshots taken by hand: slow to read, and they only showed layout problems that a layout test could have caught.',
+  ],
+  engine: [
+    'Engine.headless: the same game, models and animation mixers run in Node in under a second, so most of the game could be tested without a browser.',
+    'Yes. Key ease names in ClipDef are in, out and inOut, not the long names in the type docs; a wrong name made every pose NaN with no error. Also step() puts the engine in manual time, so awaited transitions never finish until manual is set back to false.',
+    'The shoulder camera, the Intent layer, the aiming and hit zones, the Case, the UI kit and glyphs, the enemy AI with attack tokens, the cutscene and quick-time glue, the bosses, the multiplayer layer and the bot.',
+    'Posing a puppet in a way that can be trusted: clips are data and validateClip passes, but only a pose test in Node showed the NaN problem.',
+    'Nothing. pixel-engine.js ships as downloaded; the camera step is replaced on the rig instance at runtime.',
+    'Make a bad ease name or a clip with a missing joint throw an error instead of poisoning the pose with NaN.',
+  ],
+  prompt: [
+    'The plan was specific where it mattered: numbers, maps, a script, a build order, and which engine facts were already verified.',
+    'The size of the scope against one working session: every system is described, so choosing what to cut was the real work.',
+    'Keeping three kinds of code in step at once: a 3D action game, a hub multiplayer protocol and a whole-game test, with no way to listen or play.',
+    'Mark which parts are must-haves for a first pass and which are polish, and say how deep each animation and prop list should go.',
+  ],
+};
+export const AI_HUB = {
+  name: TITLE, tagline: TAGLINE,
+  description: 'An over-the-shoulder action-horror shooter. Max Ransom, claims adjuster, plants her feet and shoots her way across a cursed island to recover a very rude policyholder.',
+  type: 'Game', genre: 'Horror', source: 'Resident Evil 4', series: 'Resident Evil', players: '1–4',
+  controls: 'Pad: stick move, L2 aim, R2 fire, Cross action, Circle run, Square reload, Triangle Case. Keys: WASD, right mouse aim, left mouse fire, E action, Shift run, R reload, Tab Case.',
+  tags: ['3d', 'third-person', 'horror', 'co-op', 'boss fights', 'pixel art'],
+};
+export const CREDITS = [
+  'ENGINE: PIXEL ENGINE 0.46.0 (RIFTLIGHT KIT)',
+  'THREE.JS R186 (MIT)  RAPIER 0.20 (APACHE-2.0)',
+  'LIBRARY MODELS AND TEXTURES: PIXEL ENGINE, SEE CREDITS.MD',
+  'KENNEY NATURE KIT CLIFFS (CC0): KENNEY.NL',
+  'MUSIC, SOUND AND VOICES: WRITTEN IN CODE FOR THIS GAME',
+  'AI HUB SESSION PROTOCOL V1 CLIENT 1.4.0',
+  'USAGE: ADDED ON IMPORT',
+];
+export const EXIT_INTERVIEW = {
+  sourceInformation: SOURCE_INFO,
+  testingFeedback: FEEDBACK.testing, engineFeedback: FEEDBACK.engine, promptFeedback: FEEDBACK.prompt,
+  aiHub: AI_HUB,
+};

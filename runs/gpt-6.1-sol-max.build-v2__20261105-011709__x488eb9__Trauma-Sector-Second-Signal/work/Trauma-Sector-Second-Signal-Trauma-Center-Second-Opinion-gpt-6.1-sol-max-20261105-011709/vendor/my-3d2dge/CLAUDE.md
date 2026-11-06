@@ -1,0 +1,45 @@
+# my-3D2dge: rules for every change
+
+my-3D2dge is a 2D game engine for AI models (`engine/my-3d2dge.js`), its agent edition (`engine/my-3d2dge-agent.js`), the 3D engine that puts a real 3D world under a game (`engine/my-3d2dge-3d.js`, `docs/ENGINE-3D.md`), the starter games (`src/starter/`, `src/starter3d/`), the labs, and Emberdeep, the signature game (`src/emberdeep/`). Start with `README.md`; Emberdeep's contract is `src/emberdeep/DESIGN.md`.
+
+These rules are for changes to this repository: what merges into its `main`. An agent that clones it to build a game of its own may change the engine in any way it sees fit, and needn't follow them (the owner's word, D76).
+
+## The doctrine
+
+`DOCTRINE.md` says what this engine optimizes and why; these rules are how. Its last section says how each principle applies here and what was grandfathered when it was adopted.
+
+- **Two tiers.** Prototypes are the Temporary labs (`src/labs.json`, Temporary: each with its date and the question it answers). Everything else is the engine tier: the engine, the agent edition, the starters and kits, Emberdeep, the kept labs and demos, the mocap store, the tools and the docs.
+- **A prototype** carries only what makes it fast to build and easy to judge: a page that plays at a link, and its `labs.json` entry as its pitch. It may reach past the engine's API, and may deviate from any principle except binary assets (say so in one line, `deviates` in its entry). It graduates by leaving Temporary, and is then held to the engine tier.
+- **Feedback from a builder** (a model or person who made a game on the engine): check each point against the code, put what you adopt in a plan (`docs/HANDOFF-*.md`), and log every point you don't act on in `docs/FEEDBACK-LOG.md`, counted by theme so patterns show. That log is never cleaned up.
+- **Deviating in the engine tier:** a reversible call (anything a revert undoes: code, design, a dependency, a doc) is made at once, in its own commit, flagged in the pull request and logged; whoever disagrees reverts it. A call that is hard to undo (it reaches outside the repository: deleting what others rely on, publishing, spending, a license) waits: escalate (which principle, your recommendation, why), arm a 15-minute wake-up (in cloud sessions `send_later` with `delay_minutes: 15`; `delete_trigger` cancels it if a human answers first) and keep working on what doesn't depend on the answer, ending your turn when nothing is left; when the wake-up arrives with no answer, make the call in its own commit and say so in the pull request. Every such call, and every exception, goes in `docs/DECISIONS.md`, which is never cleaned up. A deviation with a case is welcome: variation is how discovery works.
+
+## Sources and built files
+
+- Edit the sources: `engine/`, `src/`, `tools/`, the docs. Never edit `examples/`, `dist/` or `API-INDEX.md` by hand: run `node tools/build.mjs` and commit what it writes (the site serves those files as they are). Every public name in the engine needs a doc comment (`node tools/api-index.mjs --missing` lists those without), or a `_` to make it private.
+- A rebuild of an unchanged tree changes nothing: the build is byte for byte repeatable.
+- No dependencies in the engine or the games, no binary files (images, sounds, models; `node tools/doctrine-check.mjs` lists the approved ones), no network. Match the code around you (dense, commented, plain JavaScript).
+- Outside `engine/`, use the engine's public API, not its private members (names starting with `_`); a prototype may. Gameplay takes time only from `dt` and the game's clocks, and randomness only from `Math.random` or `E.rng`, so the test harness can replay it exactly.
+- `vendor/` holds the two pinned libraries of the 3D engine (three.js r182, Rapier 0.19.3; `docs/ENGINE-3D.md`, D27), loaded by its pages only (the 3D starter and kits, which are served for it). Never edit them: `node tools/vendor-3d.mjs` fetches them, `--check` verifies them. The 3D engine's header is its manual (a budget of 8,000 tokens, D60); keep it true when the engine changes.
+- A system several genres share, that the core doesn't need, is a module: `engine/modules/<name>.js`, loaded after the core, its header its manual (a budget of 1,500 tokens), only the public API (`engine/modules/README.md`). A kit carries the modules its slice names (`@modules` in its header).
+
+## Versioning: every engine-tier change merged to main
+
+A change confined to prototypes (a Temporary lab's own sources and its `labs.json` entry) skips these steps; the commit stamped on the Labs page says which build it is.
+
+1. Bump the version: `node tools/version.mjs X.Y.Z` (minor for features, patch for fixes, while the major number is 0). It writes the number everywhere it lives and opens a section in `CHANGELOG.md`.
+2. Fill in that section: one line for each change, under the parts it touched (**Rendering**, **Animation**, **Art**, **Mocap**, **Engine**, **Emberdeep**, **Characters**, **Tools**, **Docs**).
+3. Rebuild (`node tools/build.mjs`). `npm test` fails while any place disagrees with `package.json` or the changelog has no section.
+4. When you report work, give the version and the commit (`v0.7.0`, `a1b2c3d`). The deployed site shows its own build: `My3D2dge.versionLabel()`, the Emberdeep title, its Settings (Keys & help), the Labs page.
+
+## Checks
+
+- Before pushing: `npm run test:changed`. It runs the version, syntax and doctrine checks and every suite that covers a file you changed (read from git against main; a change that only bumps version numbers doesn't count), says why it chose each and how long each took. A change to the engine, the build or the dependencies runs them all (the 3D engine alone runs the 3D kits' suite: only its pages load it; a module runs contract, agent, modules and the phone test of the kits that carry it). `npm run test:which` shows the choice without running it.
+- Push and merge as soon as it passes (squash merge; the Vercel preview needn't finish first). Then run the full `npm test` (every suite, about 40 minutes) in the background: a failure there is fixed forward at once, or the merge reverted. In cloud sessions `CHROMIUM_PATH` is set for you.
+- Fast ones while working: `node tools/ed-syntax.mjs --all`, `npm run version:check`, `npm run doctrine:check` (binaries, the manuals' token budgets, the API boundary, the decisions log), `node tools/check.mjs <page>`, `npm run test:phone` (the kits on an emulated phone, about seven minutes: what a player finds in ten).
+- A bug report with a session file (Settings → Tools → Record a session in Emberdeep; anywhere else `?record=1`, then the pause menu's Save session): `node tools/replay.mjs <file> --shots <frames> --log "<js>"` plays it back exactly, headless (`--pacing`: the device's refreshes, missed ones second by second, for choppy play); replay it again after the fix.
+- Look at what you changed: read the screenshots, record a filmstrip for any animation (`node tools/filmstrip.mjs ... --seed 1`, `--compare <the page before>` to prove a change touches only what it should).
+
+## Emberdeep
+
+- New parts plug into the registries with `def(kind, id, spec)` (`DESIGN.md`); shared files stay as they are wherever a registry or a BUS event will do.
+- A new playable character: `docs/CHARACTERS.md`, `npm run new:character -- <id>`, then `npm run character:check -- <id>` after every change.

@@ -1,0 +1,9 @@
+import { MEDLEY } from '../data/week.js';
+export class Network {
+ constructor(app,info){this.app=app;this.info=info;this.card={left:10000,ready:[]};this.started=false;this.ended=false;this.resultSent=false;this.ghosts=new Map();this.left=new Set();this.timer=null;if(!info)return;const h=globalThis.AIHub;this.unsub=[h.on('card',c=>this.card=c),h.on('start',()=>{this.started=true;this.app.go('medley',{session:true});this.timer=setInterval(()=>this.send(),100);}),h.on('message',(p,from)=>{if(p&&Number.isFinite(p.x)&&Number.isFinite(p.s))this.ghosts.set(from,p);}),h.on('leave',({id})=>this.left.add(id)),h.on('time-up',()=>this.finish()),h.on('end',()=>{this.ended=true;clearInterval(this.timer);this.app.engine?.audio.stopMusic();this.app.voice.stop();this.app.menu=null;})];}
+ get time(){return this.info?Math.max(-3,globalThis.AIHub.time()/1000):0;}
+ score(){const scene=this.app.scene,r=scene?.lanes?.find(l=>l.local)?.run;if(!r)return 0;const max=r.data.kind==='hoop'?140:r.data.kind==='header'?1000:100;return Math.round((scene.totals?.[this.info.me]||0)+(scene.scoredEvent===scene.eventIndex?0:Math.min(1,r.score/max)*1000));}
+ send(){if(!this.started||this.ended||this.resultSent)return;const scene=this.app.scene,lane=scene?.lanes?.find(l=>l.local),r=lane?.run;const score=this.score();globalThis.AIHub.send({a:scene?.eventIndex||0,x:r?.data.kind==='header'?r.x:r?.dot?.x||0,y:r?.dot?.y||0,c:0,t:r?.t||0,s:score},{reliable:false});globalThis.AIHub.progress({score,label:`Event ${(scene?.eventIndex||0)+1} / 3`});}
+ finish(){if(this.resultSent||this.ended)return;this.resultSent=true;const score=this.score();globalThis.AIHub.result({score,stats:{Events:3},awards:[{title:'Politely noted',detail:'Thank you for bringing your knees.'}]});clearInterval(this.timer);this.app.scene.phase='podium';}
+ dispose(){clearInterval(this.timer);this.unsub?.forEach(f=>f());}
+}

@@ -1,0 +1,12 @@
+import { boot, go, play, wait } from '../../tools/lib-node.mjs';
+import { newSlot } from '../../src/core/save.js';
+const { app, engine } = await boot('title');
+engine.step(30);
+app.openSlot(0, newSlot('Tester', 0));
+app.startMedley([{ kind: 'bot', skill: 'sloppy', name: 'A' }, { kind: 'bot', skill: 'average', name: 'B' }, { kind: 'bot', skill: 'good', name: 'C' }, { kind: 'bot', skill: 'expert', name: 'D' }]);
+let last = '';
+const ok = await play(engine, () => { const s = app.scene?.status?.(); if (s !== last && s?.split('|')[0] !== last.split('|')[0]) { console.log(Math.round(engine.time), s); } last = s ?? ''; return app.scene?.constructor?.id === 'podium'; }, 400);
+await wait(engine, 3);
+console.log('podium', ok, app.scene?.status?.(), engine.errors);
+console.log(JSON.stringify(app.medley.scores), app.medley.picks);
+process.exit(0);

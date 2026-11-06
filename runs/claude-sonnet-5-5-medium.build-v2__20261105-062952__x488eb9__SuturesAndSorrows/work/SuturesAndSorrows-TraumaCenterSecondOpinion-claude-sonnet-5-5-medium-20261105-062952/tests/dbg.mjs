@@ -1,0 +1,10 @@
+import { playCase } from './lib.mjs';
+import vm from 'node:vm'; import { readFileSync } from 'node:fs';
+const root = new URL('..', import.meta.url).pathname;
+const ctx = { console, performance, structuredClone, Math, JSON }; ctx.window = ctx; vm.createContext(ctx);
+const man = JSON.parse(readFileSync(root + 'src/manifest.json', 'utf8'));
+for (const f of man.engine.concat(man.game)) vm.runInContext(readFileSync(root + 'src/' + f, 'utf8'), ctx, { filename: f });
+const G = ctx.GAME; const id = process.argv[2] || 'c2';
+let last = 0;
+const r = playCase(G, id, { maxT: +(process.argv[3] || 30), hook: (S, bots, t) => { if (t - last > 2) { last = t; const o = S.objs.find(o => !o.done && o.type === (process.argv[4] || 'incision')); console.log(t.toFixed(1), 'ph', S.ph, 'tool', S.pl[0].tool, 'cur', S.pl[0].x.toFixed(0), S.pl[0].y.toFixed(0), 'trig', S.pl[0].trig, 'g', JSON.stringify(S.pl[0].g), o ? JSON.stringify({ x: o.x | 0, y: o.y | 0, prog: o.prog, len: o.len, st: o.state }) : '', 'plan', bots[0].lastPlan, bots[0].err ? bots[0].err.stack.slice(0, 200) : ''); } } });
+console.log(r.S.over, r.log.join(' '));

@@ -1,0 +1,12 @@
+# Testing feedback log: issues found by tests and how bad
+- (minor) Result screen focus defaulted to "Try again", so the bot looped one event forever: found by the playthrough test. Fixed.
+- (minor) Day-5 stamp missing after the finale: playthrough test (5 stamps). Fixed.
+- (minor) Breath/squat idle input scored 500+ stars-worth: event test (idle < 1 star). Rescaled scoring.
+- (minor) Paddle idle score 454 because the board paddles itself at cruising speed: slowed cruising, rescored.
+- (critical) script.toml had a duplicate table after I extended it: the whole script silently loaded as empty, so the morning check never started and the playthrough test ran 60 sim-minutes without finishing. Found by the playthrough test; fixed, plus `talk()` never drops what follows a missing line, plus a content lint.
+- (minor) status `screen` leaked Rust Debug text (`Guests { new: true }`): browser test. Fixed with `Screen::name()`.
+- (moderate) A set change sets that room's own camera over a cue given on the same tick, so hub events kept the island camera: found in 1080p captures. Cues are now applied two ticks after the change.
+- (moderate) The dive camera sat inside the tower (yaw 90 from the plan on my layout): capture. Moved the camera to the board's side axis.
+- (minor) Single-file pack script needs a manifest link in index.html: build error. Added.
+- (minor) Test bugs of mine (double confirm in the Play Together test, a tip test that could not tip) cost two runs; not counted as game issues.
+- Count so far: 12 issues, 1 critical.

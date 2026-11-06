@@ -1,0 +1,10 @@
+// Writes exit-interview.json in the work root, in exactly TASK.md's shape, from src/data/about.js + feedback.js.
+import { writeFileSync, readFileSync } from 'node:fs'; import { resolve, dirname } from 'node:path'; import { fileURLToPath } from 'node:url';
+import { ABOUT } from '../src/data/about.js'; import { FEEDBACK } from '../src/data/feedback.js';
+const root = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..'); const get = (k) => ABOUT.source.find(([a]) => a === k)[1];
+const out = {
+  sourceInformation: { date: get('Date'), source: get('Source'), plan: 'PLAN.md', genre: 'Life sim / social sim (AI Hub genre: Life Sim)', perspective: 'Isometric 3/4 orthographic diorama camera (engine iso preset, yaw 45, pitch 35) with 90-degree camera turns; same camera indoors as a dollhouse cutaway', tech: get('Tech'), artDirection: get('Art Direction'), animation: get('Animation'), audio: get('Audio'), online: get('Online'), testing: get('Testing'), research: get('Research'), environment: get('Environment'), model: get('Model'), usage: 'added on import' },
+  testingFeedback: FEEDBACK.testing.map(x => x.a), engineFeedback: FEEDBACK.engine.map(x => x.a), promptFeedback: FEEDBACK.prompt.map(x => x.a),
+  aiHub: { name: 'Creditor Creek', tagline: 'A village, a goose, a very large bill', description: 'Step off the last bus and owe a goose 8,000 beans: catch, dig, sell, befriend eight odd neighbours through a 16-day year, and ride the bus to a neon City of salons, auctions and a magpie. Also a five-minute shared-world fair for up to four.', type: 'Game', genre: 'Life Sim', source: 'Animal Crossing: City Folk', series: 'Animal Crossing', players: '1–4', controls: 'Move: stick or WASD. Talk and open: Cross or E. Tool: Square or Space. Pockets: Triangle or Tab. Run: hold Circle or Shift. Pause: Options or Esc.', tags: ['pixel art', '3d', 'comedy', 'exploration', 'versus', 'story'] },
+};
+writeFileSync(resolve(root, 'exit-interview.json'), JSON.stringify(out, null, 2)); JSON.parse(readFileSync(resolve(root, 'exit-interview.json'), 'utf8')); console.log('exit-interview.json written');

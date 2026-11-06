@@ -1,0 +1,5 @@
+import { RaceSim } from '../src/game/sim/race.js';
+import { installPart, defaultInstall } from '../src/game/sim/tuning.js';
+const ins = (parts, tyre) => { let i = { ...defaultInstall(), tyre }; for (const p of parts) i = installPart(i, p); return i; };
+const lap = (carId, track, inst, skill = 1) => { const s = new RaceSim({ track, laps: 3, start: 'flying', startS: 100, startSpeed: 30, contact: false, seed: 1, field: [{ id: 'a', carId, name: 'A', skill, install: inst }] }); s.state = 'racing'; s.greenAt = 0; for (let i = 0; i < 60 * 600 && !s.cars[0].finished; i++) s.step({}); return s.cars[0].lapTimes.map((x) => x.toFixed(1)).join(' ') + ' crossings ' + s.cars[0].crossings + ' prog ' + s.cars[0].prog.toFixed(0); };
+for (const [c, tr, parts, tyre] of [['moth', 'kestrel', [], null], ['moth', 'kestrel', ['intake', 'eng1'], 'semi'], ['moth', 'kestrel', ['intake', 'eng1', 'wt1', 'pads'], 'semi'], ['kite', 'kestrel', ['intake', 'eng1', 'wt1'], 'semi'], ['kite', 'kestrel', [], null], ['kiteCup', 'kestrel', [], null]]) console.log(c, tr, parts.join('+'), tyre, lap(c, tr, ins(parts, tyre)));

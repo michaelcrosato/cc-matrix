@@ -1,0 +1,4401 @@
+{
+  "kind": "look",
+  "description": "Looks: a material style plus a filter chain (post-processing), and the sky that lights it, as whole looks or one-filter presets.",
+  "fields": [
+    {
+      "key": "description",
+      "type": "string",
+      "description": "What it looks like, in plain sentences.",
+      "default": ""
+    },
+    {
+      "key": "group",
+      "type": "string",
+      "enum": [
+        "look",
+        "shading",
+        "ao",
+        "gi",
+        "ssr",
+        "air",
+        "bloom",
+        "aa",
+        "lens",
+        "dof",
+        "tiltshift",
+        "flare",
+        "streaks",
+        "sharpen",
+        "misregister",
+        "cel",
+        "pixel",
+        "palette",
+        "watercolor",
+        "outline",
+        "stylize",
+        "paper",
+        "grade",
+        "split",
+        "selective",
+        "duotone",
+        "scanlines",
+        "crt",
+        "vhs",
+        "speedlines",
+        "vignette",
+        "grain",
+        "chroma",
+        "letterbox",
+        "screen"
+      ],
+      "description": "Where a menu lists it: 'look' for a whole look, else the filter it presets ('shading' for a style).",
+      "default": "look"
+    },
+    {
+      "key": "style",
+      "type": "string",
+      "enum": [
+        "",
+        "lambert",
+        "toon",
+        "flat",
+        "pbr"
+      ],
+      "description": "The material style everything is drawn in (lambert, toon, flat, pbr); '' keeps the scene's own.",
+      "default": ""
+    },
+    {
+      "key": "sky",
+      "type": "string",
+      "description": "The sky preset that lights the scene (a 'sky' id: sky:hall, the torch-lit hall); '' keeps the scene's own lights.",
+      "default": ""
+    },
+    {
+      "key": "toon",
+      "type": "object",
+      "description": "The toon style's bands, rim, shade and dither, used when the style is 'toon'.",
+      "default": {
+        "bands": 3,
+        "rim": 0.25,
+        "shade": 0,
+        "dither": 0
+      },
+      "properties": [
+        {
+          "key": "bands",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 8,
+          "description": "Bands of light.",
+          "default": 3
+        },
+        {
+          "key": "rim",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "The rim light's strength.",
+          "default": 0.25
+        },
+        {
+          "key": "shade",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "How far each material's shadows shift in hue (cooler, more saturated) from its colour darkened.",
+          "default": 0
+        },
+        {
+          "key": "dither",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "The share of each band's step mixed by an ordered dither fixed to the world, edges hard; 0 smooths.",
+          "default": 0
+        }
+      ]
+    },
+    {
+      "key": "shells",
+      "type": "object",
+      "description": "Outline shells round the props and bodies (engine/gfx/stageShells.ts), drawn in front of the sky.",
+      "default": {
+        "width": 0,
+        "color": "#141018"
+      },
+      "properties": [
+        {
+          "key": "width",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 4,
+          "description": "Their width in pixels at 270 lines, scaled to the picture in whole pixels; 0 draws none.",
+          "default": 0
+        },
+        {
+          "key": "color",
+          "type": "string",
+          "description": "The shells' colour, hex.",
+          "default": "#141018"
+        }
+      ]
+    },
+    {
+      "key": "skyGradient",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "How much of the sky's dome is a clean gradient, horizon haze to zenith, instead of daylight's model.",
+      "default": 0
+    },
+    {
+      "key": "perspective",
+      "type": "string",
+      "description": "The look drawn instead while the camera is a perspective one (its variant: same style, sky, resolution and textures); '' keeps this.",
+      "default": ""
+    },
+    {
+      "key": "resolution",
+      "type": "string",
+      "enum": [
+        "",
+        "pixels",
+        "balanced",
+        "full"
+      ],
+      "description": "The resolution mode it is drawn at while gfx.resolution is 'auto' (pixels, balanced or full); '' keeps the engine's pixels.",
+      "default": ""
+    },
+    {
+      "key": "textures",
+      "type": "string",
+      "enum": [
+        "",
+        "pixel",
+        "smooth"
+      ],
+      "description": "How every material's textures are filtered: 'smooth' blends their texels, 'pixel' keeps them crisp; '' keeps each texture's own.",
+      "default": ""
+    },
+    {
+      "key": "filters",
+      "type": "object",
+      "description": "The filter chain: each filter it names, with its scope and numbers; the rest are off.",
+      "default": {
+        "ao": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 1,
+          "radius": 0.6
+        },
+        "gi": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 1,
+          "radius": 1.6
+        },
+        "ssr": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 1,
+          "distance": 6,
+          "thickness": 0.15
+        },
+        "air": {
+          "scope": "off",
+          "amount": 1,
+          "haze": 0.35,
+          "height": 4,
+          "shafts": 1,
+          "forward": 0.4,
+          "halos": 0.3
+        },
+        "bloom": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 0.6,
+          "threshold": 0.9,
+          "radius": 0.4
+        },
+        "aa": {
+          "scope": "off",
+          "amount": 1
+        },
+        "lens": {
+          "scope": "off",
+          "amount": 1,
+          "distortion": 0.12
+        },
+        "dof": {
+          "scope": "off",
+          "amount": 1,
+          "focus": 0,
+          "range": 8,
+          "blur": 6
+        },
+        "tiltshift": {
+          "scope": "off",
+          "amount": 1,
+          "center": 0.55,
+          "width": 0.18,
+          "blur": 8
+        },
+        "flare": {
+          "scope": "off",
+          "amount": 1,
+          "intensity": 0.6,
+          "threshold": 0.8,
+          "spacing": 0.25
+        },
+        "streaks": {
+          "scope": "off",
+          "amount": 1,
+          "intensity": 0.6,
+          "threshold": 0.75,
+          "length": 48,
+          "tint": "#5f8dff"
+        },
+        "sharpen": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 0.5,
+          "radius": 1
+        },
+        "misregister": {
+          "scope": "off",
+          "amount": 1,
+          "offset": 1.2,
+          "angle": 30
+        },
+        "cel": {
+          "scope": "off",
+          "amount": 1,
+          "bands": 4,
+          "punch": 1.3,
+          "ink": 0.9,
+          "inkWidth": 1.5
+        },
+        "pixel": {
+          "scope": "off",
+          "amount": 1,
+          "size": 4,
+          "levels": 0,
+          "outline": true,
+          "snap": true,
+          "smooth": false
+        },
+        "palette": {
+          "scope": "off",
+          "amount": 1,
+          "palette": "none",
+          "levels": 8,
+          "dither": 0
+        },
+        "watercolor": {
+          "scope": "off",
+          "amount": 1,
+          "wobble": 2.5,
+          "bleed": 0.3,
+          "edges": 0.45,
+          "granulation": 0.35
+        },
+        "outline": {
+          "scope": "off",
+          "amount": 1,
+          "width": 1,
+          "lines": 0,
+          "darken": 0.35,
+          "color": "",
+          "depth": 0.02,
+          "crease": 0.6,
+          "fade": 0,
+          "fadeStart": 25,
+          "fadeEnd": 120,
+          "wobble": 0,
+          "boil": 0
+        },
+        "stylize": {
+          "scope": "off",
+          "amount": 1,
+          "style": "paint",
+          "size": 4,
+          "mix": 1,
+          "color": 1
+        },
+        "paper": {
+          "scope": "off",
+          "amount": 1,
+          "kind": "newsprint",
+          "scale": 1,
+          "strength": 0.4,
+          "color": "#f3ead3"
+        },
+        "grade": {
+          "scope": "off",
+          "amount": 1,
+          "temperature": 0,
+          "tint": 0,
+          "contrast": 1,
+          "brightness": 1,
+          "saturation": 1,
+          "lift": 0,
+          "gamma": 1,
+          "vibrance": 0,
+          "hue": 0,
+          "sepia": 0,
+          "bleach": 0
+        },
+        "split": {
+          "scope": "off",
+          "amount": 1,
+          "shadows": "#2e5f8a",
+          "highlights": "#ffb46b",
+          "balance": 0
+        },
+        "selective": {
+          "scope": "off",
+          "amount": 1,
+          "hue": 0,
+          "range": 35
+        },
+        "duotone": {
+          "scope": "off",
+          "amount": 1,
+          "dark": "#1b1442",
+          "mid": "#b04a6f",
+          "light": "#fff1c9"
+        },
+        "scanlines": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 0.5,
+          "period": 3
+        },
+        "crt": {
+          "scope": "off",
+          "amount": 1,
+          "mask": 0.25,
+          "glow": 0.25,
+          "flicker": 0.1
+        },
+        "vhs": {
+          "scope": "off",
+          "amount": 1,
+          "jitter": 0.5,
+          "bleed": 0.5,
+          "noise": 0.3
+        },
+        "speedlines": {
+          "scope": "off",
+          "amount": 1,
+          "density": 0.6,
+          "clear": 0.35,
+          "x": 0.5,
+          "y": 0.5,
+          "color": "#ffffff"
+        },
+        "vignette": {
+          "scope": "off",
+          "amount": 1,
+          "strength": 0.45,
+          "softness": 0.5,
+          "roundness": 1,
+          "color": "#000000"
+        },
+        "grain": {
+          "scope": "off",
+          "amount": 0.35
+        },
+        "chroma": {
+          "scope": "off",
+          "amount": 0.5
+        },
+        "letterbox": {
+          "scope": "off",
+          "amount": 1,
+          "aspect": 2.39,
+          "color": "#000000"
+        },
+        "screen": {
+          "scope": "off",
+          "amount": 1,
+          "curvature": 0,
+          "vignette": 0,
+          "pixelate": 1
+        }
+      },
+      "properties": [
+        {
+          "key": "ao",
+          "type": "object",
+          "description": "Ambient occlusion (GTAO, engine/gfx/post/shading.ts): creases and corners darken; never scoped.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 1,
+            "radius": 0.6
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "How dark the occlusion gets (1 is its full measure).",
+              "default": 1
+            },
+            {
+              "key": "radius",
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 4,
+              "description": "How far round a point it looks for what hides it.",
+              "unit": "m",
+              "default": 0.6
+            }
+          ]
+        },
+        {
+          "key": "gi",
+          "type": "object",
+          "description": "Bounce light (12 taps a pixel): lit surfaces colour their neighbours, with soft occlusion; never scoped.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 1,
+            "radius": 1.6
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 4,
+              "description": "How much bounced light adds.",
+              "default": 1
+            },
+            {
+              "key": "radius",
+              "type": "number",
+              "minimum": 0.1,
+              "maximum": 6,
+              "description": "How far light bounces.",
+              "unit": "m",
+              "default": 1.6
+            }
+          ]
+        },
+        {
+          "key": "ssr",
+          "type": "object",
+          "description": "Screen-space reflections on metal surfaces (SSRNode), blurred on rough ones; never scoped.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 1,
+            "distance": 6,
+            "thickness": 0.15
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How strongly reflections show, 0 to 1.",
+              "default": 1
+            },
+            {
+              "key": "distance",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 50,
+              "description": "How far a reflected ray travels.",
+              "unit": "m",
+              "default": 6
+            },
+            {
+              "key": "thickness",
+              "type": "number",
+              "minimum": 0.01,
+              "maximum": 2,
+              "description": "How thick a surface counts as, for a ray passing behind it.",
+              "unit": "m",
+              "default": 0.15
+            }
+          ]
+        },
+        {
+          "key": "air",
+          "type": "object",
+          "description": "Hazy air with light shafts where the sun breaks through, and halos round lamps; never scoped.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "haze": 0.35,
+            "height": 4,
+            "shafts": 1,
+            "forward": 0.4,
+            "halos": 0.3
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "haze",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "How thick the haze is.",
+              "default": 0.35
+            },
+            {
+              "key": "height",
+              "type": "number",
+              "minimum": 0.2,
+              "maximum": 20,
+              "description": "How high the haze reaches above the ground before it thins.",
+              "unit": "m",
+              "default": 4
+            },
+            {
+              "key": "shafts",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "How bright sunlight shines through the haze (cut by shadows: light shafts).",
+              "default": 1
+            },
+            {
+              "key": "forward",
+              "type": "number",
+              "minimum": -0.9,
+              "maximum": 0.95,
+              "description": "How much the haze scatters light forward, toward the sun (0 evenly).",
+              "default": 0.4
+            },
+            {
+              "key": "halos",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "How strongly lamps glow in the air round them.",
+              "default": 0.3
+            }
+          ]
+        },
+        {
+          "key": "bloom",
+          "type": "object",
+          "description": "Bright parts glow (three.js's BloomNode), before the composite, never scoped.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 0.6,
+            "threshold": 0.9,
+            "radius": 0.4
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "How strongly the glow adds.",
+              "default": 0.6
+            },
+            {
+              "key": "threshold",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 4,
+              "description": "The luminance a pixel must pass to glow.",
+              "default": 0.9
+            },
+            {
+              "key": "radius",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far the glow spreads, 0 to 1.",
+              "default": 0.4
+            }
+          ]
+        },
+        {
+          "key": "aa",
+          "type": "object",
+          "description": "Edge smoothing over the picture before the filters (engine/gfx/post/aa.ts).",
+          "default": {
+            "scope": "off",
+            "amount": 1
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            }
+          ]
+        },
+        {
+          "key": "lens",
+          "type": "object",
+          "description": "Lens distortion: barrel (above 0) or pincushion (below), zoomed so the corners stay filled.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "distortion": 0.12
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "distortion",
+              "type": "number",
+              "minimum": -0.5,
+              "maximum": 0.5,
+              "description": "How far the picture bulges (above 0) or pinches (below).",
+              "default": 0.12
+            }
+          ]
+        },
+        {
+          "key": "dof",
+          "type": "object",
+          "description": "Depth of field: sharp round the focus, blurred nearer and farther, as a camera lens draws it.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "focus": 0,
+            "range": 8,
+            "blur": 6
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "focus",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 500,
+              "description": "The distance in focus; 0 focuses on what is at the screen's centre.",
+              "unit": "m",
+              "default": 0
+            },
+            {
+              "key": "range",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 60,
+              "description": "How deep the sharp zone is round the focus.",
+              "unit": "m",
+              "default": 8
+            },
+            {
+              "key": "blur",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 24,
+              "description": "The widest blur, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 6
+            }
+          ]
+        },
+        {
+          "key": "tiltshift",
+          "type": "object",
+          "description": "Tilt-shift: a sharp horizontal band, the rest blurred, so the scene looks like a miniature.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "center": 0.55,
+            "width": 0.18,
+            "blur": 8
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "center",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Where the sharp band sits, 0 the bottom of the screen and 1 its top.",
+              "default": 0.55
+            },
+            {
+              "key": "width",
+              "type": "number",
+              "minimum": 0.02,
+              "maximum": 0.8,
+              "description": "The sharp band's height, as a share of the screen's.",
+              "default": 0.18
+            },
+            {
+              "key": "blur",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 24,
+              "description": "The blur away from the band, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 8
+            }
+          ]
+        },
+        {
+          "key": "flare",
+          "type": "object",
+          "description": "Lens flare: ghosts of the brightest parts mirrored through the centre of the screen.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "intensity": 0.6,
+            "threshold": 0.8,
+            "spacing": 0.25
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "intensity",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "How bright the ghosts are.",
+              "default": 0.6
+            },
+            {
+              "key": "threshold",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "The brightness a part must pass to cast a ghost, 0 to 1.",
+              "default": 0.8
+            },
+            {
+              "key": "spacing",
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 0.6,
+              "description": "How far apart the ghosts are.",
+              "default": 0.25
+            }
+          ]
+        },
+        {
+          "key": "streaks",
+          "type": "object",
+          "description": "Anamorphic streaks: bright parts drawn out sideways in a tinted line.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "intensity": 0.6,
+            "threshold": 0.75,
+            "length": 48,
+            "tint": "#5f8dff"
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "intensity",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "How bright the streaks are.",
+              "default": 0.6
+            },
+            {
+              "key": "threshold",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "The brightness a part must pass to streak, 0 to 1.",
+              "default": 0.75
+            },
+            {
+              "key": "length",
+              "type": "number",
+              "minimum": 4,
+              "maximum": 160,
+              "description": "How far a streak reaches each side, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 48
+            },
+            {
+              "key": "tint",
+              "type": "string",
+              "description": "The streaks' colour.",
+              "unit": "#rrggbb",
+              "default": "#5f8dff"
+            }
+          ]
+        },
+        {
+          "key": "sharpen",
+          "type": "object",
+          "description": "Sharpen: an unsharp mask that crisps edges and texture.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 0.5,
+            "radius": 1
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 2,
+              "description": "How much the edges are pushed.",
+              "default": 0.5
+            },
+            {
+              "key": "radius",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 4,
+              "description": "How wide an edge counts, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 1
+            }
+          ]
+        },
+        {
+          "key": "misregister",
+          "type": "object",
+          "description": "Print misregistration: the red and blue plates offset, as on a cheap print.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "offset": 1.2,
+            "angle": 30
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "offset",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 8,
+              "description": "How far the plates are out, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 1.2
+            },
+            {
+              "key": "angle",
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "description": "Which way the plates are out.",
+              "unit": "°",
+              "default": 30
+            }
+          ]
+        },
+        {
+          "key": "cel",
+          "type": "object",
+          "description": "Comic cel: light in flat bands keeping each colour hue, pushed colour, ink at sharp changes.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "bands": 4,
+            "punch": 1.3,
+            "ink": 0.9,
+            "inkWidth": 1.5
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "bands",
+              "type": "integer",
+              "minimum": 2,
+              "maximum": 8,
+              "description": "Bands of brightness.",
+              "default": 4
+            },
+            {
+              "key": "punch",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "Colour saturation after banding (1 keeps it).",
+              "default": 1.3
+            },
+            {
+              "key": "ink",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How dark the ink lines are, 0 to 1 (the lines' opacity).",
+              "default": 0.9
+            },
+            {
+              "key": "inkWidth",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 4,
+              "description": "How far apart the ink compares pixels.",
+              "unit": "px",
+              "default": 1.5
+            }
+          ]
+        },
+        {
+          "key": "pixel",
+          "type": "object",
+          "description": "Pixel art: whole blocks on the scoped parts and on objects tagged pixel art.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "size": 4,
+            "levels": 0,
+            "outline": true,
+            "snap": true,
+            "smooth": false
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "size",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 32,
+              "description": "The block size; 0 takes the largest whole block giving the picture 240 to 360 lines (`artBlock`).",
+              "unit": "px",
+              "default": 4
+            },
+            {
+              "key": "levels",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64,
+              "description": "Shades per channel for the blocks: 0 keeps every colour, else 8 or more (24 suits pixel art).",
+              "default": 0
+            },
+            {
+              "key": "outline",
+              "type": "boolean",
+              "description": "A dark one-block rim outside pixel-art silhouettes.",
+              "default": true
+            },
+            {
+              "key": "snap",
+              "type": "boolean",
+              "description": "Snap the camera to the block grid while the environment is pixel art, so it does not shimmer.",
+              "default": true
+            },
+            {
+              "key": "smooth",
+              "type": "boolean",
+              "description": "Carry the snapped camera's sub-block remainder as a smooth offset of the whole picture on the page (its canvas needs a margin of two drawn pixels, `--my3dge-pixel` each).",
+              "default": false
+            }
+          ]
+        },
+        {
+          "key": "palette",
+          "type": "object",
+          "description": "Colour reduction: levels per channel or a fixed palette, with ordered (Bayer) dithering.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "palette": "none",
+            "levels": 8,
+            "dither": 0
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "palette",
+              "type": "string",
+              "enum": [
+                "none",
+                "gameboy",
+                "pico8",
+                "cga",
+                "1bit",
+                "amber"
+              ],
+              "description": "A fixed palette, or 'none' for levels.",
+              "default": "none"
+            },
+            {
+              "key": "levels",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 64,
+              "description": "Shades per channel without a palette: 0 keeps every colour, else 8 or more.",
+              "default": 8
+            },
+            {
+              "key": "dither",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much ordered dithering mixes neighbouring shades, 0 to 1.",
+              "default": 0
+            }
+          ]
+        },
+        {
+          "key": "watercolor",
+          "type": "object",
+          "description": "Watercolour: colour bleeds, darkens where washes meet, granulates in the paper and wobbles.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "wobble": 2.5,
+            "bleed": 0.3,
+            "edges": 0.45,
+            "granulation": 0.35
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "wobble",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 8,
+              "description": "How far a hand-drawn wobble moves the picture, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 2.5
+            },
+            {
+              "key": "bleed",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far colour bleeds, 0 to 1.",
+              "default": 0.3
+            },
+            {
+              "key": "edges",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How dark the pigment pools at the edges of a wash, 0 to 1.",
+              "default": 0.45
+            },
+            {
+              "key": "granulation",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much pigment settles in the paper's dips, most in dark washes, 0 to 1.",
+              "default": 0.35
+            }
+          ]
+        },
+        {
+          "key": "outline",
+          "type": "object",
+          "description": "Outlines where depth jumps, surfaces crease or outline groups meet.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "width": 1,
+            "lines": 0,
+            "darken": 0.35,
+            "color": "",
+            "depth": 0.02,
+            "crease": 0.6,
+            "fade": 0,
+            "fadeStart": 25,
+            "fadeEnd": 120,
+            "wobble": 0,
+            "boil": 0
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "width",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 4,
+              "description": "Line width.",
+              "unit": "px",
+              "default": 1
+            },
+            {
+              "key": "lines",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2160,
+              "description": "Scale the width with the picture: `width` px at this many lines, in whole pixels; 0 doesn't.",
+              "default": 0
+            },
+            {
+              "key": "darken",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "The line is the surface times this (0 is black), unless a colour is given.",
+              "default": 0.35
+            },
+            {
+              "key": "color",
+              "type": "string",
+              "unit": "#rrggbb",
+              "description": "The line's colour: hex ('#1a1a2e') or a CSS colour name ('black'); '' darkens the surface instead.",
+              "default": ""
+            },
+            {
+              "key": "depth",
+              "type": "number",
+              "minimum": 0.001,
+              "maximum": 1,
+              "description": "The depth jump that makes an edge, as a share of the distance.",
+              "default": 0.02
+            },
+            {
+              "key": "crease",
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Neighbouring normals whose dot product falls below this make an edge.",
+              "default": 0.6
+            },
+            {
+              "key": "fade",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much the lines fade with distance, 0 to 1, from fadeStart to fadeEnd.",
+              "default": 0
+            },
+            {
+              "key": "fadeStart",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 500,
+              "description": "Where the lines start to fade.",
+              "unit": "m",
+              "default": 25
+            },
+            {
+              "key": "fadeEnd",
+              "type": "number",
+              "minimum": 1,
+              "maximum": 2000,
+              "description": "Where they have faded by `fade`.",
+              "unit": "m",
+              "default": 120
+            },
+            {
+              "key": "wobble",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 4,
+              "description": "How far the lines wobble, hand-drawn, in pixels at 1080 lines.",
+              "unit": "px",
+              "default": 0
+            },
+            {
+              "key": "boil",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 24,
+              "description": "How many times a second the wobble is redrawn (line boil); 0 keeps it still.",
+              "default": 0
+            }
+          ]
+        },
+        {
+          "key": "stylize",
+          "type": "object",
+          "description": "Painterly and print styles: oil paint, CMYK halftone, ASCII and pencil.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "style": "paint",
+            "size": 4,
+            "mix": 1,
+            "color": 1
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "style",
+              "type": "string",
+              "enum": [
+                "paint",
+                "halftone",
+                "ascii",
+                "sketch"
+              ],
+              "description": "Which style.",
+              "default": "paint"
+            },
+            {
+              "key": "size",
+              "type": "number",
+              "minimum": 1,
+              "maximum": 24,
+              "description": "The stroke, dot, character or hatching size.",
+              "unit": "px",
+              "default": 4
+            },
+            {
+              "key": "mix",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the style shows over the picture, 0 to 1.",
+              "default": 1
+            },
+            {
+              "key": "color",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the picture's colour is kept, 0 to 1.",
+              "default": 1
+            }
+          ]
+        },
+        {
+          "key": "paper",
+          "type": "object",
+          "description": "Paper or canvas under the picture: it tints and textures the light areas, ink stays dark.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "kind": "newsprint",
+            "scale": 1,
+            "strength": 0.4,
+            "color": "#f3ead3"
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "kind",
+              "type": "string",
+              "enum": [
+                "newsprint",
+                "coldpress",
+                "canvas",
+                "kraft"
+              ],
+              "description": "Which paper.",
+              "default": "newsprint"
+            },
+            {
+              "key": "scale",
+              "type": "number",
+              "minimum": 0.25,
+              "maximum": 4,
+              "description": "The paper's grain size (1 is its own).",
+              "unit": "×",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much the paper shows, 0 to 1.",
+              "default": 0.4
+            },
+            {
+              "key": "color",
+              "type": "string",
+              "description": "The paper's colour.",
+              "unit": "#rrggbb",
+              "default": "#f3ead3"
+            }
+          ]
+        },
+        {
+          "key": "grade",
+          "type": "object",
+          "description": "Colour grading.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "temperature": 0,
+            "tint": 0,
+            "contrast": 1,
+            "brightness": 1,
+            "saturation": 1,
+            "lift": 0,
+            "gamma": 1,
+            "vibrance": 0,
+            "hue": 0,
+            "sepia": 0,
+            "bleach": 0
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "temperature",
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Warmer (above 0) or cooler (below).",
+              "default": 0
+            },
+            {
+              "key": "tint",
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Toward green (above 0) or away.",
+              "default": 0
+            },
+            {
+              "key": "contrast",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "Contrast round mid grey (1 keeps it).",
+              "default": 1
+            },
+            {
+              "key": "brightness",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "A multiplier on the colour (1 keeps it).",
+              "default": 1
+            },
+            {
+              "key": "saturation",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 3,
+              "description": "0 is grey, 1 keeps the colour, more pushes it.",
+              "default": 1
+            },
+            {
+              "key": "lift",
+              "type": "number",
+              "minimum": -0.3,
+              "maximum": 0.3,
+              "description": "Raises (above 0) or deepens (below) the shadows, an offset on every channel.",
+              "default": 0
+            },
+            {
+              "key": "gamma",
+              "type": "number",
+              "minimum": 0.5,
+              "maximum": 2,
+              "description": "The midtones: above 1 darker, below 1 lighter (1 keeps them).",
+              "default": 1
+            },
+            {
+              "key": "vibrance",
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Saturates the duller colours most (above 0), or mutes them (below).",
+              "default": 0
+            },
+            {
+              "key": "hue",
+              "type": "number",
+              "minimum": -180,
+              "maximum": 180,
+              "description": "Turns every hue round the colour wheel.",
+              "unit": "°",
+              "default": 0
+            },
+            {
+              "key": "sepia",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far toward old-photograph sepia, 0 to 1.",
+              "default": 0
+            },
+            {
+              "key": "bleach",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Bleach bypass: the picture overlaid with its own grey, film's crushed, silvery look, 0 to 1.",
+              "default": 0
+            }
+          ]
+        },
+        {
+          "key": "split",
+          "type": "object",
+          "description": "Split toning: the shadows toward one colour and the highlights toward another.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "shadows": "#2e5f8a",
+            "highlights": "#ffb46b",
+            "balance": 0
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "shadows",
+              "type": "string",
+              "description": "The shadows' colour.",
+              "unit": "#rrggbb",
+              "default": "#2e5f8a"
+            },
+            {
+              "key": "highlights",
+              "type": "string",
+              "description": "The highlights' colour.",
+              "unit": "#rrggbb",
+              "default": "#ffb46b"
+            },
+            {
+              "key": "balance",
+              "type": "number",
+              "minimum": -1,
+              "maximum": 1,
+              "description": "Where shadows end and highlights begin: below 0 more highlight, above 0 more shadow.",
+              "default": 0
+            }
+          ]
+        },
+        {
+          "key": "selective",
+          "type": "object",
+          "description": "Selective colour: every colour but one turned grey (a red coat in a grey film).",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "hue": 0,
+            "range": 35
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "hue",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 360,
+              "description": "The hue kept, on the colour wheel: 0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta.",
+              "unit": "°",
+              "default": 0
+            },
+            {
+              "key": "range",
+              "type": "number",
+              "minimum": 5,
+              "maximum": 120,
+              "description": "How far round the kept hue still counts as it.",
+              "unit": "°",
+              "default": 35
+            }
+          ]
+        },
+        {
+          "key": "duotone",
+          "type": "object",
+          "description": "Gradient map: brightness mapped onto a dark, a middle and a light colour (duotone, tritone).",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "dark": "#1b1442",
+            "mid": "#b04a6f",
+            "light": "#fff1c9"
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "dark",
+              "type": "string",
+              "description": "The colour of black.",
+              "unit": "#rrggbb",
+              "default": "#1b1442"
+            },
+            {
+              "key": "mid",
+              "type": "string",
+              "description": "The colour of mid grey.",
+              "unit": "#rrggbb",
+              "default": "#b04a6f"
+            },
+            {
+              "key": "light",
+              "type": "string",
+              "description": "The colour of white.",
+              "unit": "#rrggbb",
+              "default": "#fff1c9"
+            }
+          ]
+        },
+        {
+          "key": "scanlines",
+          "type": "object",
+          "description": "Dark lines across the screen, as on a tube.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 0.5,
+            "period": 3
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How dark the lines are, 0 to 1.",
+              "default": 0.5
+            },
+            {
+              "key": "period",
+              "type": "number",
+              "minimum": 1,
+              "maximum": 16,
+              "description": "Lines this far apart.",
+              "unit": "px",
+              "default": 3
+            }
+          ]
+        },
+        {
+          "key": "crt",
+          "type": "object",
+          "description": "A CRT's glass: phosphor glow, an aperture grille and a flicker (curvature: screen; lines: scanlines).",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "mask": 0.25,
+            "glow": 0.25,
+            "flicker": 0.1
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "mask",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How strongly the red, green and blue columns of the grille show, 0 to 1.",
+              "default": 0.25
+            },
+            {
+              "key": "glow",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much the phosphors glow into their neighbours, 0 to 1.",
+              "default": 0.25
+            },
+            {
+              "key": "flicker",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much the picture flickers, 0 to 1.",
+              "default": 0.1
+            }
+          ]
+        },
+        {
+          "key": "vhs",
+          "type": "object",
+          "description": "VHS tape: rows slipping sideways, colour bleeding to the right, snow in a rolling band.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "jitter": 0.5,
+            "bleed": 0.5,
+            "noise": 0.3
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "jitter",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far the rows slip, 0 to 1.",
+              "default": 0.5
+            },
+            {
+              "key": "bleed",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far colour smears, 0 to 1.",
+              "default": 0.5
+            },
+            {
+              "key": "noise",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How strong the snow is, 0 to 1.",
+              "default": 0.3
+            }
+          ]
+        },
+        {
+          "key": "speedlines",
+          "type": "object",
+          "description": "Speed lines: comic-book streaks round a clear centre, redrawn 12 times a second.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "density": 0.6,
+            "clear": 0.35,
+            "x": 0.5,
+            "y": 0.5,
+            "color": "#ffffff"
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "density",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How many lines are drawn, 0 to 1.",
+              "default": 0.6
+            },
+            {
+              "key": "clear",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.9,
+              "description": "How large the clear middle is, 0 to 0.9 of the way to the corners.",
+              "default": 0.35
+            },
+            {
+              "key": "x",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "The centre's place across the screen, 0 left to 1 right.",
+              "default": 0.5
+            },
+            {
+              "key": "y",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "The centre's place up the screen, 0 the bottom to 1 the top.",
+              "default": 0.5
+            },
+            {
+              "key": "color",
+              "type": "string",
+              "description": "The lines' colour.",
+              "unit": "#rrggbb",
+              "default": "#ffffff"
+            }
+          ]
+        },
+        {
+          "key": "vignette",
+          "type": "object",
+          "description": "A vignette: the corners toward a colour, round or following the screen, soft or hard.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "strength": 0.45,
+            "softness": 0.5,
+            "roundness": 1,
+            "color": "#000000"
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "strength",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far the corners go to the colour, 0 to 1.",
+              "default": 0.45
+            },
+            {
+              "key": "softness",
+              "type": "number",
+              "minimum": 0.05,
+              "maximum": 1,
+              "description": "How gradual it is: near 0 a hard edge, 1 the softest.",
+              "default": 0.5
+            },
+            {
+              "key": "roundness",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "1 a circle, 0 the screen's own shape.",
+              "default": 1
+            },
+            {
+              "key": "color",
+              "type": "string",
+              "description": "The corners' colour.",
+              "unit": "#rrggbb",
+              "default": "#000000"
+            }
+          ]
+        },
+        {
+          "key": "grain",
+          "type": "object",
+          "description": "Film grain that changes every frame.",
+          "default": {
+            "scope": "off",
+            "amount": 0.35
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How strong the grain is, 0 to 1.",
+              "default": 0.35
+            }
+          ]
+        },
+        {
+          "key": "chroma",
+          "type": "object",
+          "description": "Colour fringes: red and blue pulled apart toward the screen edges.",
+          "default": {
+            "scope": "off",
+            "amount": 0.5
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all",
+                "characters",
+                "objects",
+                "environment",
+                "characters+objects",
+                "characters+environment",
+                "objects+environment"
+              ],
+              "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How far apart, 0 to 1.",
+              "default": 0.5
+            }
+          ]
+        },
+        {
+          "key": "letterbox",
+          "type": "object",
+          "description": "Letterbox bars that crop the picture to a film aspect ratio.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "aspect": 2.39,
+            "color": "#000000"
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "aspect",
+              "type": "number",
+              "minimum": 1.2,
+              "maximum": 2.8,
+              "description": "The aspect ratio kept: 2.39 widescreen, 1.85 film, 1.33 old television.",
+              "default": 2.39
+            },
+            {
+              "key": "color",
+              "type": "string",
+              "description": "The bars' colour.",
+              "unit": "#rrggbb",
+              "default": "#000000"
+            }
+          ]
+        },
+        {
+          "key": "screen",
+          "type": "object",
+          "description": "The screen itself: CRT curvature, a vignette, low resolution.",
+          "default": {
+            "scope": "off",
+            "amount": 1,
+            "curvature": 0,
+            "vignette": 0,
+            "pixelate": 1
+          },
+          "properties": [
+            {
+              "key": "scope",
+              "type": "string",
+              "enum": [
+                "off",
+                "all"
+              ],
+              "description": "'all' turns it on over the whole picture; 'off' turns it off.",
+              "default": "off"
+            },
+            {
+              "key": "amount",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it.",
+              "default": 1
+            },
+            {
+              "key": "curvature",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 0.5,
+              "description": "Barrel curvature (0 is flat); black outside the tube.",
+              "default": 0
+            },
+            {
+              "key": "vignette",
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "How dark the corners are, 0 to 1.",
+              "default": 0
+            },
+            {
+              "key": "pixelate",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 16,
+              "description": "The whole screen in blocks this big (1 is off).",
+              "unit": "px",
+              "default": 1
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "combine",
+      "type": "array",
+      "description": "Looks laid on, in order, each { look, amount?, only?, filters? }: how much of it shows, which of its filters, and changes to them.",
+      "default": [],
+      "items": {
+        "key": "[]",
+        "type": "object",
+        "properties": [
+          {
+            "key": "look",
+            "type": "string",
+            "required": true,
+            "description": "The look laid on: a 'look' id."
+          },
+          {
+            "key": "amount",
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1,
+            "description": "How much of it shows, 0 to 1: its numbers move this far, its filters fade in this much.",
+            "default": 1
+          },
+          {
+            "key": "only",
+            "type": "array",
+            "description": "Only these of its filters; all of them when empty.",
+            "default": [],
+            "items": {
+              "key": "[]",
+              "type": "string",
+              "enum": [
+                "ao",
+                "gi",
+                "ssr",
+                "air",
+                "bloom",
+                "aa",
+                "lens",
+                "dof",
+                "tiltshift",
+                "flare",
+                "streaks",
+                "sharpen",
+                "misregister",
+                "cel",
+                "pixel",
+                "palette",
+                "watercolor",
+                "outline",
+                "stylize",
+                "paper",
+                "grade",
+                "split",
+                "selective",
+                "duotone",
+                "scanlines",
+                "crt",
+                "vhs",
+                "speedlines",
+                "vignette",
+                "grain",
+                "chroma",
+                "letterbox",
+                "screen"
+              ]
+            }
+          },
+          {
+            "key": "filters",
+            "type": "object",
+            "description": "Changes to its filters before it is laid on, field by field (the form of post.filters).",
+            "default": {},
+            "properties": [
+              {
+                "key": "ao",
+                "type": "object",
+                "description": "Ambient occlusion (GTAO, engine/gfx/post/shading.ts): creases and corners darken; never scoped.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2,
+                    "description": "How dark the occlusion gets (1 is its full measure)."
+                  },
+                  {
+                    "key": "radius",
+                    "type": "number",
+                    "minimum": 0.05,
+                    "maximum": 4,
+                    "description": "How far round a point it looks for what hides it.",
+                    "unit": "m"
+                  }
+                ]
+              },
+              {
+                "key": "gi",
+                "type": "object",
+                "description": "Bounce light (12 taps a pixel): lit surfaces colour their neighbours, with soft occlusion; never scoped.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 4,
+                    "description": "How much bounced light adds."
+                  },
+                  {
+                    "key": "radius",
+                    "type": "number",
+                    "minimum": 0.1,
+                    "maximum": 6,
+                    "description": "How far light bounces.",
+                    "unit": "m"
+                  }
+                ]
+              },
+              {
+                "key": "ssr",
+                "type": "object",
+                "description": "Screen-space reflections on metal surfaces (SSRNode), blurred on rough ones; never scoped.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How strongly reflections show, 0 to 1."
+                  },
+                  {
+                    "key": "distance",
+                    "type": "number",
+                    "minimum": 0.5,
+                    "maximum": 50,
+                    "description": "How far a reflected ray travels.",
+                    "unit": "m"
+                  },
+                  {
+                    "key": "thickness",
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 2,
+                    "description": "How thick a surface counts as, for a ray passing behind it.",
+                    "unit": "m"
+                  }
+                ]
+              },
+              {
+                "key": "air",
+                "type": "object",
+                "description": "Hazy air with light shafts where the sun breaks through, and halos round lamps; never scoped.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "haze",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "How thick the haze is."
+                  },
+                  {
+                    "key": "height",
+                    "type": "number",
+                    "minimum": 0.2,
+                    "maximum": 20,
+                    "description": "How high the haze reaches above the ground before it thins.",
+                    "unit": "m"
+                  },
+                  {
+                    "key": "shafts",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "How bright sunlight shines through the haze (cut by shadows: light shafts)."
+                  },
+                  {
+                    "key": "forward",
+                    "type": "number",
+                    "minimum": -0.9,
+                    "maximum": 0.95,
+                    "description": "How much the haze scatters light forward, toward the sun (0 evenly)."
+                  },
+                  {
+                    "key": "halos",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "How strongly lamps glow in the air round them."
+                  }
+                ]
+              },
+              {
+                "key": "bloom",
+                "type": "object",
+                "description": "Bright parts glow (three.js's BloomNode), before the composite, never scoped.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "How strongly the glow adds."
+                  },
+                  {
+                    "key": "threshold",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 4,
+                    "description": "The luminance a pixel must pass to glow."
+                  },
+                  {
+                    "key": "radius",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far the glow spreads, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "aa",
+                "type": "object",
+                "description": "Edge smoothing over the picture before the filters (engine/gfx/post/aa.ts).",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  }
+                ]
+              },
+              {
+                "key": "lens",
+                "type": "object",
+                "description": "Lens distortion: barrel (above 0) or pincushion (below), zoomed so the corners stay filled.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "distortion",
+                    "type": "number",
+                    "minimum": -0.5,
+                    "maximum": 0.5,
+                    "description": "How far the picture bulges (above 0) or pinches (below)."
+                  }
+                ]
+              },
+              {
+                "key": "dof",
+                "type": "object",
+                "description": "Depth of field: sharp round the focus, blurred nearer and farther, as a camera lens draws it.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "focus",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 500,
+                    "description": "The distance in focus; 0 focuses on what is at the screen's centre.",
+                    "unit": "m"
+                  },
+                  {
+                    "key": "range",
+                    "type": "number",
+                    "minimum": 0.5,
+                    "maximum": 60,
+                    "description": "How deep the sharp zone is round the focus.",
+                    "unit": "m"
+                  },
+                  {
+                    "key": "blur",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 24,
+                    "description": "The widest blur, in pixels at 1080 lines.",
+                    "unit": "px"
+                  }
+                ]
+              },
+              {
+                "key": "tiltshift",
+                "type": "object",
+                "description": "Tilt-shift: a sharp horizontal band, the rest blurred, so the scene looks like a miniature.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "center",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Where the sharp band sits, 0 the bottom of the screen and 1 its top."
+                  },
+                  {
+                    "key": "width",
+                    "type": "number",
+                    "minimum": 0.02,
+                    "maximum": 0.8,
+                    "description": "The sharp band's height, as a share of the screen's."
+                  },
+                  {
+                    "key": "blur",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 24,
+                    "description": "The blur away from the band, in pixels at 1080 lines.",
+                    "unit": "px"
+                  }
+                ]
+              },
+              {
+                "key": "flare",
+                "type": "object",
+                "description": "Lens flare: ghosts of the brightest parts mirrored through the centre of the screen.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "intensity",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "How bright the ghosts are."
+                  },
+                  {
+                    "key": "threshold",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "The brightness a part must pass to cast a ghost, 0 to 1."
+                  },
+                  {
+                    "key": "spacing",
+                    "type": "number",
+                    "minimum": 0.05,
+                    "maximum": 0.6,
+                    "description": "How far apart the ghosts are."
+                  }
+                ]
+              },
+              {
+                "key": "streaks",
+                "type": "object",
+                "description": "Anamorphic streaks: bright parts drawn out sideways in a tinted line.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "intensity",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "How bright the streaks are."
+                  },
+                  {
+                    "key": "threshold",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "The brightness a part must pass to streak, 0 to 1."
+                  },
+                  {
+                    "key": "length",
+                    "type": "number",
+                    "minimum": 4,
+                    "maximum": 160,
+                    "description": "How far a streak reaches each side, in pixels at 1080 lines.",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "tint",
+                    "type": "string",
+                    "description": "The streaks' colour.",
+                    "unit": "#rrggbb"
+                  }
+                ]
+              },
+              {
+                "key": "sharpen",
+                "type": "object",
+                "description": "Sharpen: an unsharp mask that crisps edges and texture.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2,
+                    "description": "How much the edges are pushed."
+                  },
+                  {
+                    "key": "radius",
+                    "type": "number",
+                    "minimum": 0.5,
+                    "maximum": 4,
+                    "description": "How wide an edge counts, in pixels at 1080 lines.",
+                    "unit": "px"
+                  }
+                ]
+              },
+              {
+                "key": "misregister",
+                "type": "object",
+                "description": "Print misregistration: the red and blue plates offset, as on a cheap print.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "offset",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 8,
+                    "description": "How far the plates are out, in pixels at 1080 lines.",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "angle",
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180,
+                    "description": "Which way the plates are out.",
+                    "unit": "°"
+                  }
+                ]
+              },
+              {
+                "key": "cel",
+                "type": "object",
+                "description": "Comic cel: light in flat bands keeping each colour hue, pushed colour, ink at sharp changes.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "bands",
+                    "type": "integer",
+                    "minimum": 2,
+                    "maximum": 8,
+                    "description": "Bands of brightness."
+                  },
+                  {
+                    "key": "punch",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "Colour saturation after banding (1 keeps it)."
+                  },
+                  {
+                    "key": "ink",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How dark the ink lines are, 0 to 1 (the lines' opacity)."
+                  },
+                  {
+                    "key": "inkWidth",
+                    "type": "number",
+                    "minimum": 0.5,
+                    "maximum": 4,
+                    "description": "How far apart the ink compares pixels.",
+                    "unit": "px"
+                  }
+                ]
+              },
+              {
+                "key": "pixel",
+                "type": "object",
+                "description": "Pixel art: whole blocks on the scoped parts and on objects tagged pixel art.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "size",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 32,
+                    "description": "The block size; 0 takes the largest whole block giving the picture 240 to 360 lines (`artBlock`).",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "levels",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 64,
+                    "description": "Shades per channel for the blocks: 0 keeps every colour, else 8 or more (24 suits pixel art)."
+                  },
+                  {
+                    "key": "outline",
+                    "type": "boolean",
+                    "description": "A dark one-block rim outside pixel-art silhouettes."
+                  },
+                  {
+                    "key": "snap",
+                    "type": "boolean",
+                    "description": "Snap the camera to the block grid while the environment is pixel art, so it does not shimmer."
+                  },
+                  {
+                    "key": "smooth",
+                    "type": "boolean",
+                    "description": "Carry the snapped camera's sub-block remainder as a smooth offset of the whole picture on the page (its canvas needs a margin of two drawn pixels, `--my3dge-pixel` each)."
+                  }
+                ]
+              },
+              {
+                "key": "palette",
+                "type": "object",
+                "description": "Colour reduction: levels per channel or a fixed palette, with ordered (Bayer) dithering.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "palette",
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "gameboy",
+                      "pico8",
+                      "cga",
+                      "1bit",
+                      "amber"
+                    ],
+                    "description": "A fixed palette, or 'none' for levels."
+                  },
+                  {
+                    "key": "levels",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 64,
+                    "description": "Shades per channel without a palette: 0 keeps every colour, else 8 or more."
+                  },
+                  {
+                    "key": "dither",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much ordered dithering mixes neighbouring shades, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "watercolor",
+                "type": "object",
+                "description": "Watercolour: colour bleeds, darkens where washes meet, granulates in the paper and wobbles.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "wobble",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 8,
+                    "description": "How far a hand-drawn wobble moves the picture, in pixels at 1080 lines.",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "bleed",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far colour bleeds, 0 to 1."
+                  },
+                  {
+                    "key": "edges",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How dark the pigment pools at the edges of a wash, 0 to 1."
+                  },
+                  {
+                    "key": "granulation",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much pigment settles in the paper's dips, most in dark washes, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "outline",
+                "type": "object",
+                "description": "Outlines where depth jumps, surfaces crease or outline groups meet.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "width",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 4,
+                    "description": "Line width.",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "lines",
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 2160,
+                    "description": "Scale the width with the picture: `width` px at this many lines, in whole pixels; 0 doesn't."
+                  },
+                  {
+                    "key": "darken",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "The line is the surface times this (0 is black), unless a colour is given."
+                  },
+                  {
+                    "key": "color",
+                    "type": "string",
+                    "unit": "#rrggbb",
+                    "description": "The line's colour: hex ('#1a1a2e') or a CSS colour name ('black'); '' darkens the surface instead."
+                  },
+                  {
+                    "key": "depth",
+                    "type": "number",
+                    "minimum": 0.001,
+                    "maximum": 1,
+                    "description": "The depth jump that makes an edge, as a share of the distance."
+                  },
+                  {
+                    "key": "crease",
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1,
+                    "description": "Neighbouring normals whose dot product falls below this make an edge."
+                  },
+                  {
+                    "key": "fade",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much the lines fade with distance, 0 to 1, from fadeStart to fadeEnd."
+                  },
+                  {
+                    "key": "fadeStart",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 500,
+                    "description": "Where the lines start to fade.",
+                    "unit": "m"
+                  },
+                  {
+                    "key": "fadeEnd",
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 2000,
+                    "description": "Where they have faded by `fade`.",
+                    "unit": "m"
+                  },
+                  {
+                    "key": "wobble",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 4,
+                    "description": "How far the lines wobble, hand-drawn, in pixels at 1080 lines.",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "boil",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 24,
+                    "description": "How many times a second the wobble is redrawn (line boil); 0 keeps it still."
+                  }
+                ]
+              },
+              {
+                "key": "stylize",
+                "type": "object",
+                "description": "Painterly and print styles: oil paint, CMYK halftone, ASCII and pencil.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "style",
+                    "type": "string",
+                    "enum": [
+                      "paint",
+                      "halftone",
+                      "ascii",
+                      "sketch"
+                    ],
+                    "description": "Which style."
+                  },
+                  {
+                    "key": "size",
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 24,
+                    "description": "The stroke, dot, character or hatching size.",
+                    "unit": "px"
+                  },
+                  {
+                    "key": "mix",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the style shows over the picture, 0 to 1."
+                  },
+                  {
+                    "key": "color",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the picture's colour is kept, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "paper",
+                "type": "object",
+                "description": "Paper or canvas under the picture: it tints and textures the light areas, ink stays dark.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "kind",
+                    "type": "string",
+                    "enum": [
+                      "newsprint",
+                      "coldpress",
+                      "canvas",
+                      "kraft"
+                    ],
+                    "description": "Which paper."
+                  },
+                  {
+                    "key": "scale",
+                    "type": "number",
+                    "minimum": 0.25,
+                    "maximum": 4,
+                    "description": "The paper's grain size (1 is its own).",
+                    "unit": "×"
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much the paper shows, 0 to 1."
+                  },
+                  {
+                    "key": "color",
+                    "type": "string",
+                    "description": "The paper's colour.",
+                    "unit": "#rrggbb"
+                  }
+                ]
+              },
+              {
+                "key": "grade",
+                "type": "object",
+                "description": "Colour grading.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "temperature",
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1,
+                    "description": "Warmer (above 0) or cooler (below)."
+                  },
+                  {
+                    "key": "tint",
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1,
+                    "description": "Toward green (above 0) or away."
+                  },
+                  {
+                    "key": "contrast",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "Contrast round mid grey (1 keeps it)."
+                  },
+                  {
+                    "key": "brightness",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "A multiplier on the colour (1 keeps it)."
+                  },
+                  {
+                    "key": "saturation",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 3,
+                    "description": "0 is grey, 1 keeps the colour, more pushes it."
+                  },
+                  {
+                    "key": "lift",
+                    "type": "number",
+                    "minimum": -0.3,
+                    "maximum": 0.3,
+                    "description": "Raises (above 0) or deepens (below) the shadows, an offset on every channel."
+                  },
+                  {
+                    "key": "gamma",
+                    "type": "number",
+                    "minimum": 0.5,
+                    "maximum": 2,
+                    "description": "The midtones: above 1 darker, below 1 lighter (1 keeps them)."
+                  },
+                  {
+                    "key": "vibrance",
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1,
+                    "description": "Saturates the duller colours most (above 0), or mutes them (below)."
+                  },
+                  {
+                    "key": "hue",
+                    "type": "number",
+                    "minimum": -180,
+                    "maximum": 180,
+                    "description": "Turns every hue round the colour wheel.",
+                    "unit": "°"
+                  },
+                  {
+                    "key": "sepia",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far toward old-photograph sepia, 0 to 1."
+                  },
+                  {
+                    "key": "bleach",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "Bleach bypass: the picture overlaid with its own grey, film's crushed, silvery look, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "split",
+                "type": "object",
+                "description": "Split toning: the shadows toward one colour and the highlights toward another.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "shadows",
+                    "type": "string",
+                    "description": "The shadows' colour.",
+                    "unit": "#rrggbb"
+                  },
+                  {
+                    "key": "highlights",
+                    "type": "string",
+                    "description": "The highlights' colour.",
+                    "unit": "#rrggbb"
+                  },
+                  {
+                    "key": "balance",
+                    "type": "number",
+                    "minimum": -1,
+                    "maximum": 1,
+                    "description": "Where shadows end and highlights begin: below 0 more highlight, above 0 more shadow."
+                  }
+                ]
+              },
+              {
+                "key": "selective",
+                "type": "object",
+                "description": "Selective colour: every colour but one turned grey (a red coat in a grey film).",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "hue",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 360,
+                    "description": "The hue kept, on the colour wheel: 0 red, 60 yellow, 120 green, 180 cyan, 240 blue, 300 magenta.",
+                    "unit": "°"
+                  },
+                  {
+                    "key": "range",
+                    "type": "number",
+                    "minimum": 5,
+                    "maximum": 120,
+                    "description": "How far round the kept hue still counts as it.",
+                    "unit": "°"
+                  }
+                ]
+              },
+              {
+                "key": "duotone",
+                "type": "object",
+                "description": "Gradient map: brightness mapped onto a dark, a middle and a light colour (duotone, tritone).",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "dark",
+                    "type": "string",
+                    "description": "The colour of black.",
+                    "unit": "#rrggbb"
+                  },
+                  {
+                    "key": "mid",
+                    "type": "string",
+                    "description": "The colour of mid grey.",
+                    "unit": "#rrggbb"
+                  },
+                  {
+                    "key": "light",
+                    "type": "string",
+                    "description": "The colour of white.",
+                    "unit": "#rrggbb"
+                  }
+                ]
+              },
+              {
+                "key": "scanlines",
+                "type": "object",
+                "description": "Dark lines across the screen, as on a tube.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How dark the lines are, 0 to 1."
+                  },
+                  {
+                    "key": "period",
+                    "type": "number",
+                    "minimum": 1,
+                    "maximum": 16,
+                    "description": "Lines this far apart.",
+                    "unit": "px"
+                  }
+                ]
+              },
+              {
+                "key": "crt",
+                "type": "object",
+                "description": "A CRT's glass: phosphor glow, an aperture grille and a flicker (curvature: screen; lines: scanlines).",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "mask",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How strongly the red, green and blue columns of the grille show, 0 to 1."
+                  },
+                  {
+                    "key": "glow",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much the phosphors glow into their neighbours, 0 to 1."
+                  },
+                  {
+                    "key": "flicker",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much the picture flickers, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "vhs",
+                "type": "object",
+                "description": "VHS tape: rows slipping sideways, colour bleeding to the right, snow in a rolling band.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "jitter",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far the rows slip, 0 to 1."
+                  },
+                  {
+                    "key": "bleed",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far colour smears, 0 to 1."
+                  },
+                  {
+                    "key": "noise",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How strong the snow is, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "speedlines",
+                "type": "object",
+                "description": "Speed lines: comic-book streaks round a clear centre, redrawn 12 times a second.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "density",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How many lines are drawn, 0 to 1."
+                  },
+                  {
+                    "key": "clear",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.9,
+                    "description": "How large the clear middle is, 0 to 0.9 of the way to the corners."
+                  },
+                  {
+                    "key": "x",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "The centre's place across the screen, 0 left to 1 right."
+                  },
+                  {
+                    "key": "y",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "The centre's place up the screen, 0 the bottom to 1 the top."
+                  },
+                  {
+                    "key": "color",
+                    "type": "string",
+                    "description": "The lines' colour.",
+                    "unit": "#rrggbb"
+                  }
+                ]
+              },
+              {
+                "key": "vignette",
+                "type": "object",
+                "description": "A vignette: the corners toward a colour, round or following the screen, soft or hard.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "strength",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far the corners go to the colour, 0 to 1."
+                  },
+                  {
+                    "key": "softness",
+                    "type": "number",
+                    "minimum": 0.05,
+                    "maximum": 1,
+                    "description": "How gradual it is: near 0 a hard edge, 1 the softest."
+                  },
+                  {
+                    "key": "roundness",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "1 a circle, 0 the screen's own shape."
+                  },
+                  {
+                    "key": "color",
+                    "type": "string",
+                    "description": "The corners' colour.",
+                    "unit": "#rrggbb"
+                  }
+                ]
+              },
+              {
+                "key": "grain",
+                "type": "object",
+                "description": "Film grain that changes every frame.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How strong the grain is, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "chroma",
+                "type": "object",
+                "description": "Colour fringes: red and blue pulled apart toward the screen edges.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all",
+                      "characters",
+                      "objects",
+                      "environment",
+                      "characters+objects",
+                      "characters+environment",
+                      "objects+environment"
+                    ],
+                    "description": "Where it applies: 'off', 'all', or 'characters', 'objects', 'environment' or two of them joined by '+'."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How far apart, 0 to 1."
+                  }
+                ]
+              },
+              {
+                "key": "letterbox",
+                "type": "object",
+                "description": "Letterbox bars that crop the picture to a film aspect ratio.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "aspect",
+                    "type": "number",
+                    "minimum": 1.2,
+                    "maximum": 2.8,
+                    "description": "The aspect ratio kept: 2.39 widescreen, 1.85 film, 1.33 old television."
+                  },
+                  {
+                    "key": "color",
+                    "type": "string",
+                    "description": "The bars' colour.",
+                    "unit": "#rrggbb"
+                  }
+                ]
+              },
+              {
+                "key": "screen",
+                "type": "object",
+                "description": "The screen itself: CRT curvature, a vignette, low resolution.",
+                "properties": [
+                  {
+                    "key": "scope",
+                    "type": "string",
+                    "enum": [
+                      "off",
+                      "all"
+                    ],
+                    "description": "'all' turns it on over the whole picture; 'off' turns it off."
+                  },
+                  {
+                    "key": "amount",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How much of the filter shows, 0 to 1: 0 is as if it were off, so a blend or a look's strength fades it."
+                  },
+                  {
+                    "key": "curvature",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 0.5,
+                    "description": "Barrel curvature (0 is flat); black outside the tube."
+                  },
+                  {
+                    "key": "vignette",
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1,
+                    "description": "How dark the corners are, 0 to 1."
+                  },
+                  {
+                    "key": "pixelate",
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 16,
+                    "description": "The whole screen in blocks this big (1 is off).",
+                    "unit": "px"
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "key": "strength",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "How much of the whole look shows, 0 to 1: every filter's amount is scaled by it, so 0 draws the scene clean.",
+      "default": 1
+    },
+    {
+      "key": "gallery",
+      "type": "object",
+      "description": "How the gallery shows it (engine/core/gallery.ts; x gallery, #gallery/<kind>/<id>): its camera, how long it plays and the states it is shown in.",
+      "default": {
+        "camera": "cam=iso",
+        "duration": 0,
+        "states": []
+      },
+      "properties": [
+        {
+          "key": "camera",
+          "type": "string",
+          "description": "How the gallery frames it: `turntable` (Four views round it, a quarter turn apart, from 25° up, fitted to its size.), `front` (One view from its front left, 25° up, fitted to its size.), or a camera code drawn as written.",
+          "default": "cam=iso"
+        },
+        {
+          "key": "duration",
+          "type": "number",
+          "minimum": 0,
+          "unit": "s",
+          "description": "How long it plays: four frames, one in each quarter's middle; 0 for a still (a move's or an emitter's: its own length).",
+          "default": 0
+        },
+        {
+          "key": "states",
+          "type": "array",
+          "description": "The states it is shown in, one frame each (a body's: a sample state, a pose or a stance).",
+          "default": [],
+          "items": {
+            "key": "[]",
+            "type": "string"
+          }
+        }
+      ]
+    }
+  ],
+  "ids": [
+    "look:16-bit",
+    "look:aa/smooth",
+    "look:air/clear-air",
+    "look:air/dusty-sunbeams",
+    "look:air/lamplight",
+    "look:air/light-haze",
+    "look:air/morning-mist",
+    "look:air/pea-soup",
+    "look:air/smoky-hall",
+    "look:anime-action",
+    "look:ao/corners",
+    "look:arcade-cabinet",
+    "look:arcade-crt",
+    "look:bloom/dreamy",
+    "look:bloom/neon",
+    "look:bloom/no-glow",
+    "look:bloom/soft",
+    "look:cartoon",
+    "look:cel/comic",
+    "look:cinematic",
+    "look:clean",
+    "look:comic-book",
+    "look:comic-noir",
+    "look:crt/arcade-tube",
+    "look:daylight",
+    "look:dof/portrait",
+    "look:duotone/dusk",
+    "look:duotone/ember",
+    "look:duotone/ocean",
+    "look:flare/sun",
+    "look:flat-paper",
+    "look:game-boy",
+    "look:game-boy-world",
+    "look:gi/bounce-light",
+    "look:grade/bleach-bypass",
+    "look:grade/cool",
+    "look:grade/faded",
+    "look:grade/lifted",
+    "look:grade/neutral",
+    "look:grade/night",
+    "look:grade/noir",
+    "look:grade/sepia",
+    "look:grade/vivid",
+    "look:grade/warm",
+    "look:grain/clean",
+    "look:grain/film",
+    "look:grain/glitch",
+    "look:grain/vhs",
+    "look:hacker-terminal",
+    "look:hd-2d",
+    "look:hologram-heroes",
+    "look:lamplit-fog",
+    "look:lens/barrel",
+    "look:lens/fisheye",
+    "look:letterbox/film",
+    "look:letterbox/widescreen",
+    "look:miniature",
+    "look:misregister/risograph",
+    "look:newspaper",
+    "look:oil-painting",
+    "look:outline/bold",
+    "look:outline/hand-drawn",
+    "look:outline/heavy-ink",
+    "look:outline/ink",
+    "look:outline/none",
+    "look:outline/thin",
+    "look:painted-world",
+    "look:palette/1-bit",
+    "look:palette/512-colours",
+    "look:palette/amber",
+    "look:palette/cga",
+    "look:palette/full-colour",
+    "look:palette/game-boy",
+    "look:palette/pico-8",
+    "look:palette/posterize",
+    "look:paper/canvas",
+    "look:paper/kraft",
+    "look:paper/newsprint",
+    "look:paper/watercolour-paper",
+    "look:pixel-heroes",
+    "look:pixel-world",
+    "look:pixel/16-bit",
+    "look:pixel/8-bit",
+    "look:pixel/bold",
+    "look:pixel/chunky",
+    "look:pixel/classic",
+    "look:pixel/dithered",
+    "look:pixel/fine",
+    "look:pixel/giant",
+    "look:posterized-world",
+    "look:red-coat",
+    "look:riso-print",
+    "look:scanlines/arcade",
+    "look:scanlines/fine",
+    "look:scanlines/heavy",
+    "look:scanlines/soft",
+    "look:screen/crt",
+    "look:screen/flat-screen",
+    "look:screen/low-res",
+    "look:screen/old-tv",
+    "look:screen/soft-vignette",
+    "look:selective/green",
+    "look:selective/red",
+    "look:shading/as-authored",
+    "look:shading/cartoon",
+    "look:shading/flat-2d",
+    "look:shading/smooth-lit",
+    "look:shading/toon-3-band",
+    "look:sharpen/crisp",
+    "look:sketchbook",
+    "look:sketched-world",
+    "look:speedlines/action",
+    "look:split/moonlight",
+    "look:split/teal-orange",
+    "look:ssr/metal",
+    "look:storybook",
+    "look:streaks/anamorphic",
+    "look:stylize/colour-ascii",
+    "look:stylize/coloured-pencil",
+    "look:stylize/comic-print",
+    "look:stylize/fine-print",
+    "look:stylize/gouache",
+    "look:stylize/loose-sketch",
+    "look:stylize/newsprint",
+    "look:stylize/off",
+    "look:stylize/oil-paint",
+    "look:stylize/pencil",
+    "look:stylize/terminal",
+    "look:stylize/thick-impasto",
+    "look:stylize/underpainting",
+    "look:sunbeams",
+    "look:tiltshift/miniature",
+    "look:torch-bloom",
+    "look:torch-cel",
+    "look:torch-fxaa",
+    "look:torch-lit",
+    "look:torch-pixel",
+    "look:torch-toon",
+    "look:vhs-tape",
+    "look:vhs/worn-tape",
+    "look:vignette/heavy",
+    "look:vignette/soft",
+    "look:watercolor/wash",
+    "look:watercolor/wet"
+  ],
+  "fallback": "look:clean"
+}

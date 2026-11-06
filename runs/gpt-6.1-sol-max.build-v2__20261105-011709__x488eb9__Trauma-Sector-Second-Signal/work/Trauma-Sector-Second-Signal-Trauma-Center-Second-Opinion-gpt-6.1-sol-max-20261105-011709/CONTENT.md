@@ -1,0 +1,17 @@
+# Content workshop
+
+Run `npm run build` to bake the sources into the single HTML in the parent folder. Open `index.dev.html` directly while editing. `node tests/run.mjs --fast` exercises the simulation, campaign and content without a browser; `npm test` also runs three browsers, mobile profiles and all four Hub harness scenarios. Browser reports and pictures stay in `tests/`.
+
+Cases live in `src/data.js`. Add a `defCase` entry with a unique numeric ID, patient, doctor, site, clock, starting pulse, drain, score par and phases. A phase has a short imperative name, a nurse tip and object recipes. The simulation supplies checkpoints and completion automatically. Optional phase fields include `tutorial`, `blackout`, `static`, `silent`, `refill`, `gauge`, `codeBlue`, `lurch` and co-op `scale`. Start a new phase from Dev Mode > Jump to inspect it immediately. Keep targets inside the ellipse centered at 213,116 with radii 171,91; leave the top and bottom margins clear.
+
+Object behavior is registered in `src/sim/op.js`. Give a type a tool, hazard drain, initializer, gesture transition and finish condition. The state must contain only JSON data. Drawing belongs in `src/art/operation.js`, and its virtual-stick bot plan in `src/sim/bot.js`. Strains use the same registry, with a stage and telegraph timers. Existing multi-stage examples are `legato`, `tremolo`, `lobe` and `fermata`. Do not draw from the simulation or mutate state while drawing. Add a positive and a failure-path check to `tests/suite.mjs`.
+
+Sites are baked once by `bakeSite` in `src/art/sites.js`. Use height blobs and tubes and named material ramps; pools and wounds stamp dynamic height before the shader. Add the site ID and a label to `G.sites`. All art uses engine pixel primitives; no external image files are required. The forearm, heart and brain recipes demonstrate fibers, pulsing vessels and gyri.
+
+Cast data is in `src/art/bust.js` and `src/art/people.js`. Add skin, hair, clothing and facial details, then request the portrait by ID. The shared painter supplies neutral, smile, angry, sad, shock and shout expressions, talking, blinking and masks. Small bodies use `makeRig` and custom native Humanoid poses. Stage backgrounds are registered in `src/art/stages.js`.
+
+Story nodes are in `src/story-data.js`: `N(id, stage, [[speaker, text, expression], ...])`. Each line is at most 90 characters. A case uses `pre<ID>` and `post<ID>`; the presentation feeds these into native `E.Story` and `E.Dialog`. The `ending` node leads to credits. Ward conversations are in `G.wardLines`. Every new patient should have a concrete human detail and a recovery line.
+
+Balance variables are centralized in `src/config.js`. The pause menu's Dev Mode exposes all tuning groups, cheats, case and phase jumps, object spawns and story jumps. Sliders apply immediately; reset marks show factory values. Changed tuning and cheats mark the result DEV and prevent rank saves. Copy tuning on the Info tab, then paste selected defaults into config. `node tools/balance.mjs` runs perfect and human-like surgeons at Intern and Resident. Presentation randomness must remain separate from the seeded simulation.
+
+`src/about-data.json` is the reporting source of truth. The build embeds it in About and writes `../exit-interview.json`. Add scripts to `src/manifest.json` in dependency order. The Hub client remains unmodified and is always the first head script. Network behavior lives in `src/net.js`; the host alone steps the same operation state used in solo play.

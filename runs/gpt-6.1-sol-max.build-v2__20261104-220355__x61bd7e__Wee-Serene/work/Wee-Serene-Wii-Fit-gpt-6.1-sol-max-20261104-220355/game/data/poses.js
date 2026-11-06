@@ -1,0 +1,3 @@
+window.G.POSES={
+ stork:{clip:'111_39_part1',a:3.6,b:7,tgt:1.57},knee:{clip:'111_39_part2',a:.5,b:2.4,tgt:1.57},triangle:{clip:'111_39_part3',a:2.2,b:5.2,tgt:1.2},warrior:{clip:'111_39_part3',a:6.6,b:7.6,tgt:1.57},lunge:{clip:'111_38_part1',a:2.9,b:5,tgt:.25},dog:{clip:'111_38_part2',a:2.8,b:5.2,tgt:.25},fold:{clip:'111_38_part2',a:8,b:8.8,tgt:.25},plank:{clip:'111_41_part3',a:3.4,b:6.4,tgt:.25},meditate:{clip:'Meditate',a:.5,b:1,tgt:1.57},squat:{clip:'22_14',a:1.1,b:1.72,tgt:1.2},pushup:{clip:'Pushup',a:0,b:.9,tgt:.1},idle:{clip:'Idle_Subtle',a:0,b:2,tgt:1.57},run:{clip:'Run_Loop',a:0,b:.8,tgt:-1.57},step:{clip:'Idle_Subtle',a:0,b:1,tgt:1.57},hoop:{clip:'Idle_Subtle',a:0,b:1,tgt:1.57},ski:{clip:'Idle_Subtle',a:0,b:1,tgt:-1.57},rope:{clip:'Walk_Loop',a:0,b:1,tgt:.1}
+};

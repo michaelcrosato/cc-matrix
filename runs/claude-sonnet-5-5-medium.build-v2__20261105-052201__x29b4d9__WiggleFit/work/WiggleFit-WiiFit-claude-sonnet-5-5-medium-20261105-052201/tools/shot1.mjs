@@ -1,0 +1,11 @@
+import { launch, url } from './lib.mjs';
+const b = await launch({ render: true });
+const p = await b.newPage({ viewport: { width: 1280, height: 720 } });
+const logs = []; p.on('console', (m) => logs.push(m.type() + ': ' + m.text())); p.on('pageerror', (e) => logs.push('PAGEERR ' + e.message));
+await p.goto(url('test=1'));
+await p.waitForFunction(() => window.__done || window.__err, null, { timeout: 90000 });
+await p.waitForTimeout(6000);
+console.log(await p.evaluate(() => JSON.stringify({ be: window.__gfx.backend, lost: window.__gfx.lost, frames: window.__gfx.frames, err: window.__gfx.lastError })));
+await p.screenshot({ path: process.argv[2] || 'notes/shot1.png' });
+console.log(logs.slice(0, 15).join('\n'));
+await b.close();

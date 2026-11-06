@@ -1,0 +1,3 @@
+# Designer data
+
+Activities are registry rows in activities.js. Set the family, discipline, unlock day, duration, two Lean parameter sets, instruction and room. Every family supplies setup, update, drawing, scoring and bot intent. Add poses in poses.js using a bundled mocap clip and a safe time window. Add dialogue in lines.js; arrays are line banks, selected with seeded randomness. Days and unlocks live in days.js. Charts use four lanes (left, down, up, right), one character per sixteenth note. Courses define gate offsets, water positions and peg progress. Trays are ASCII: # wall, o olive, g glass, B bumper, L gecko. The build embeds these files without a network dependency. Run `node tests/run.mjs rules` after edits.

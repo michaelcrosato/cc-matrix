@@ -1,0 +1,11 @@
+import { spawn } from 'node:child_process';
+import { launch, ROOT } from './lib.mjs';
+const srv = spawn('python3', ['-u', '-m', 'http.server', '0', '--bind', '127.0.0.1'], { cwd: ROOT + '/dist', stdio: ['ignore', 'pipe', 'pipe'] });
+const port = await new Promise((res) => srv.stdout.on('data', (d) => { const m = /port (\d+)/.exec(String(d)); if (m) res(+m[1]); }));
+const { browser, page, errs } = await launch({ viewport: { width: 1600, height: 1000 } });
+await page.goto(`http://127.0.0.1:${port}/harness.html?game=game.html&auto=1&${process.argv[2] || 'players=2'}`);
+await page.waitForFunction(() => document.body.dataset.complete === 'true', null, { timeout: 150000 }).catch(() => console.log('TIMEOUT'));
+const r = await page.evaluate(() => window.__hubCheck);
+for (const c of r.checks || []) if (!c.pass) console.log('FAILED CHECK:', c.name, '|', c.detail);
+console.log('pass', r.pass, 'errs', errs.slice(0, 5));
+await browser.close(); srv.kill();

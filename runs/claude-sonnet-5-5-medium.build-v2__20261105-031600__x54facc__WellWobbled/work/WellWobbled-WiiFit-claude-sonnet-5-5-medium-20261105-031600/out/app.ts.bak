@@ -1,0 +1,924 @@
+/**
+ * @file The page's game: the flow around the sim. It owns the save and settings, the screens (title, programme, noticeboard,
+ * results, evening, pause, settings, About), what the guest can use on the island, the cameras and input maps for each
+ * activity, the fades, attract mode and the touch-only rule. The sim does the rules; this sends menu picks as scene
+ * actions and reads components and events back. Page-side.
+ * @example
+ * const app = createApp(deps); app.frame(frameFromEngine);
+ */
+import type { Engine, EngineFrame } from '../../../engine';
+import { createAudio, type Audio } from '../../../engine';
+import { ACTIVITY_INFO, DAYS } from '../scenes/data/days';
+import { STATIONS, groundAt } from '../scenes/data/world';
+import { ageOf } from '../scenes/events/morning';
+import { PEBBLE_SITES } from '../scenes/dress';
+import { say as babble } from '../audio/voice';
+import '../audio/sound';
+import { createHud } from './hud';
+import { hudFor } from './hudfor';
+import { hint, type Device, type GlyphSet } from './glyphs';
+import { LINES, lineText } from './lines';
+import { Screens, SCREENS, type ScreenCtx } from './screens';
+import { loadSave, loadSettings, writeSave, writeSettings, makeStore } from './store';
+import { stageFx } from '../cameras/stage';
+import { lineOf } from './speech';
+import { insOf } from './ins';
+import { consumeEdge, markScreenChange, pollPads } from './edges';
+
+export interface Deps {
+  engine: () => Engine | null;
+  session: boolean;
+  touchOnly: boolean;
+}
+type Rec = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+const IDLE_S = 10;
+const CAMERA_OF: Record<string, string> = {
+  morning: 'front',
+  ring: 'mat',
+  pond: 'portrait',
+  poseA: 'mat',
+  poseB: 'mat',
+  poseC: 'mat',
+  poseH: 'mat',
+  reps: 'side',
+  step: 'behind',
+  line: 'line',
+  paddle: 'wide',
+  garden: 'topdown',
+  cliff: 'dive',
+  hoop: 'front',
+  jog: 'wide',
+  tilt: 'tilt',
+};
+
+export function createApp(deps: Deps) {
+  const store = makeStore(new URLSearchParams(location.search).has('sandbox') ? 'sandbox' : 'play');
+  let save = loadSave(store);
+  let settings = loadSettings(store);
+  let audio: Audio | null = null;
+  let hud: ReturnType<typeof createHud> | null = null;
+  let screens: Screens | null = null;
+  let root: HTMLElement | null = null;
+  let scr = 'boot';
+  let world: object | null = null;
+  let lastSeq = 0;
+  let idle = 0;
+  let attract = false;
+  let fadeEl: HTMLElement | null = null;
+  let seenPlan = 0,
+    seenWave = 0,
+    seenUse = 0;
+  let lastScr = '';
+  let page = 0;
+  let aboutPage = 0;
+  let current = '';
+  let lastFlowMode = '';
+  let said = 0;
+  let pebbleMsg = 0;
+  let freePlay = false;
+  let paused = false;
+  let lastDevice: Device = 'keyboard';
+  const eng = () => deps.engine();
+  const insNow = () => {
+    const e = eng();
+    return e ? insOf(e) : null;
+  };
+  const act = (name: string, args?: object) => {
+    const e = eng();
+    if (e) insOf(e).actions.run(name, args);
+  };
+  const device = (): Device => {
+    const d = eng()?.input?.lastDevice as string | undefined;
+    return d === 'gamepad' ? 'pad' : d === 'mouse' ? 'mouse' : 'keyboard';
+  };
+  const glyphs = (): GlyphSet => settings.glyphs;
+  const sfx = (id: string, vol = 0.8) => {
+    try {
+      audio?.play(`sfx:retreat.${id}`, { vol: vol * settings.effects } as never);
+    } catch {
+      /* sound is a bonus */
+    }
+  };
+  const ctx: ScreenCtx = {
+    settings: () => settings,
+    device,
+    set: glyphs,
+    pick: (s, id) => pick(s, id),
+    cancel: (s) => cancel(s),
+  };
+  const persist = () => {
+    writeSave(store, save);
+    writeSettings(store, settings);
+  };
+  const applyAudio = () => {
+    if (!audio) return;
+    audio.volume('music', settings.music);
+    audio.volume('effects', settings.effects);
+    audio.volume('ui', settings.voices);
+  };
+  function setCamera(code: string): void {
+    try {
+      const e = eng();
+      if (e) insOf(e).camera.set(code, { blend: true });
+    } catch {
+      /* cameras are presentation */
+    }
+  }
+  function fade(then: () => void): void {
+    if (!fadeEl) return then();
+    fadeEl.classList.add('on');
+    setTimeout(() => {
+      then();
+      setTimeout(() => fadeEl?.classList.remove('on'), 60);
+    }, 380);
+  }
+  function speak(who: string, id: string, vars: Record<string, string | number> = {}): void {
+    const text = lineText(id, vars, said++);
+    const sec = babble(audio, who === 'guest' ? 'tare' : who, text, settings.voices);
+    hud?.say(who === 'tare' ? 'Tare' : who[0].toUpperCase() + who.slice(1), text, sec);
+  }
+  const open = (spec: ReturnType<(typeof SCREENS)[keyof typeof SCREENS] & ((...a: any[]) => any)>) => {
+    screens?.open(spec as never);
+    scr = (spec as { id: string }).id;
+  };
+  const closeScreen = () => {
+    screens?.close();
+    scr = attract ? 'attract' : 'play';
+  };
+
+  // ---- the flow -------------------------------------------------------------------------------------------------
+  function titleScreen(): void {
+    setCamera('cam3=stage,title');
+    open(SCREENS.title(ctx, save.started, save.day > 1 || save.finished));
+  }
+  function begin(free = false): void {
+    freePlay = free;
+    closeScreen();
+    fade(() => {
+      act('game.begin', {
+        day: free ? 6 : save.day,
+        finds: save.finds,
+        pebbles: save.pebbles,
+        age: save.ages[save.ages.length - 1] ?? 18,
+      });
+      toIsland(!save.started);
+      save.started = true;
+      persist();
+    });
+  }
+  function toIsland(intro: boolean): void {
+    current = '';
+    act('game.leave');
+    const st = save.started ? STATIONS.plaza : STATIONS.pier;
+    act('game.go', { station: save.started ? 'plaza' : 'pier' });
+    void st;
+    setMap('actionMap:roam');
+    setCamera('cam3=stage,roam');
+    scr = 'play';
+    if (intro) {
+      speak('tare', 'tare.intro.1');
+      setTimeout(() => speak('tare', 'tare.intro.2'), 5500);
+      setTimeout(() => speak('tare', 'tare.intro.3'), 11500);
+    } else if (save.day > 1 || save.done.length) speak('tare', 'tare.back');
+  }
+  let currentMap = 'actionMap:menu';
+  /** The engine reads the map through `createEngine({ actionMap })` every sample, so the page only names it. */
+  function setMap(id: string): void {
+    currentMap = id;
+  }
+  function startActivity(id: string, round = false): void {
+    if (id === 'board') return openBoard();
+    closeScreen();
+    fade(() => {
+      current = id === 'group' ? 'group' : id;
+      if (id === 'group') {
+        act('game.round', { players: 1, cpu: settings.cpu });
+        setMap('actionMap:balance');
+        setCamera('cam3=stage,mat');
+      } else {
+        act('game.start', { event: id, short: round });
+        setMap(id === 'garden' ? 'actionMap:garden' : 'actionMap:balance');
+        setCamera(id === 'garden' ? 'cam=topdown' : `cam3=stage,${CAMERA_OF[id] ?? 'mat'}`);
+      }
+      stageFx.t = 0;
+      scr = 'play';
+    });
+  }
+  function goStation(where: string, id: string): void {
+    closeScreen();
+    fade(() => {
+      act('game.leave');
+      act('game.go', { station: where });
+      setMap('actionMap:roam');
+      setCamera('cam3=stage,roam');
+      scr = 'play';
+      setTimeout(() => startActivity(id), 350);
+    });
+  }
+  function openProgramme(): void {
+    const day = DAYS[Math.min(save.day, 5) - 1];
+    const rows = day.acts.map((a) => ({
+      label: `${save.done.includes(`${save.day}:${a}`) ? '✓ ' : ''}${a === 'board' ? 'Find the Noticeboard' : ACTIVITY_INFO[a].title}`,
+      id: a,
+    }));
+    rows.push({ label: 'Close', id: 'close' });
+    open(SCREENS.programme(ctx, day.n, day.title, rows.slice(0, 6), 'Pick one. "Go" takes you there.'));
+  }
+  function openBoard(): void {
+    const all = Object.keys(ACTIVITY_INFO).filter((a) => a !== 'tilt' || save.day >= 5);
+    const pages = Math.ceil(all.length / 5);
+    page = ((page % pages) + pages) % pages;
+    const slice = all.slice(page * 5, page * 5 + 5);
+    const rows = slice.map((a) => ({
+      label: `${ACTIVITY_INFO[a].title}${save.bests[a] ? ` · best ${save.bests[a]}` : ''}`,
+      id: a,
+      disabled:
+        save.day < 2 && !save.done.some((d) => d.endsWith(a)) && a !== 'morning' && a !== 'poseA' && a !== 'pond',
+    }));
+    rows.push({ label: 'Close', id: 'close', disabled: false });
+    open(SCREENS.board(ctx, page, pages, rows, 'Every activity you have met, to play again.'));
+  }
+  function onResult(r: { id: string; score: number; rank: string; pebbles: number }): void {
+    const key = `${save.day}:${r.id}`;
+    if (!save.done.includes(key)) save.done.push(key);
+    save.pebbles += r.pebbles;
+    save.bests[r.id] = Math.max(save.bests[r.id] ?? 0, r.score);
+    if (r.id === 'morning') {
+      const age = ageOf(r.score / 1000, 1.3);
+      save.ages.push(age);
+      save.checkDay = save.day;
+      const prev = save.ages[save.ages.length - 2];
+      speak(
+        'tare',
+        prev === undefined
+          ? 'tare.age.first'
+          : age < prev
+            ? 'tare.age.better'
+            : age > prev
+              ? 'tare.age.worse'
+              : 'tare.age.same',
+        { age, prev: prev ?? 0, diff: Math.abs(age - (prev ?? age)) },
+      );
+    }
+    persist();
+    act('game.cairn', { count: save.pebbles, age: save.ages[save.ages.length - 1] ?? 18 });
+    sfx('stamp');
+    open(SCREENS.results(ctx, ACTIVITY_INFO[r.id]?.title ?? r.id, r.rank, r.score, r.pebbles, said++));
+  }
+  function evening(): void {
+    const rem = lineText('evening.' + (1 + ((save.day - 1) % 5)), {}, 0);
+    open(SCREENS.evening(ctx, save.day, save.ages, rem));
+  }
+  function sleep(): void {
+    fade(() => {
+      closeScreen();
+      const last = save.day >= 5;
+      if (last) {
+        save.day = 6;
+        save.finished = true;
+        persist();
+        act('game.day', { day: 6 });
+        credits();
+        return;
+      }
+      save.day += 1;
+      persist();
+      act('game.day', { day: save.day });
+      act('game.leave');
+      act('game.go', { station: 'plaza' });
+      setMap('actionMap:roam');
+      setCamera('cam3=stage,roam');
+      scr = 'play';
+      if (save.day === 4) setTimeout(() => speak('tare', 'tare.rock'), 4000);
+      else speak('tare', 'tare.keep');
+    });
+  }
+  function credits(): void {
+    setCamera('cam3=stage,title');
+    open(SCREENS.credits(ctx));
+  }
+  const dayDone = () =>
+    DAYS[Math.min(save.day, 5) - 1].acts
+      .filter((a) => a !== 'board')
+      .every((a) => save.done.includes(`${save.day}:${a}`));
+
+  function pick(s: string, id: string): void {
+    sfx('tick');
+    if (s === 'title') {
+      if (id === 'begin') begin(false);
+      else if (id === 'free') begin(true);
+      else if (id === 'group') {
+        closeScreen();
+        fade(() => {
+          act('game.begin', { day: save.day, finds: save.finds, pebbles: save.pebbles });
+          startActivity('group');
+        });
+      } else if (id === 'settings') openSettings('title');
+      else if (id === 'about') openAbout('title');
+    } else if (s === 'programme') {
+      if (id === 'close') closeScreen();
+      else if (id === 'board') openBoard();
+      else goStation(ACTIVITY_INFO[id].where, id);
+    } else if (s === 'board') {
+      if (id === 'close') closeScreen();
+      else goStation(ACTIVITY_INFO[id].where, id);
+    } else if (s === 'results') {
+      if (id === 'again') startActivity(current);
+      else {
+        closeScreen();
+        fade(() => {
+          act('game.leave');
+          if (current === 'tilt') {
+            save.ages = save.ages;
+            speak('tare', 'tare.tilt.dawn');
+            credits();
+            return;
+          }
+          act('game.go', { station: 'plaza' });
+          setMap('actionMap:roam');
+          setCamera('cam3=stage,roam');
+          scr = 'play';
+          if (dayDone()) hud?.toast('The day is done. Go to your hut to sleep, or open the Programme.', 5);
+        });
+      }
+    } else if (s === 'evening') sleep();
+    else if (s === 'credits') {
+      closeScreen();
+      fade(() => {
+        save.finished = true;
+        persist();
+        toIsland(false);
+        speak('tare', 'tare.free');
+      });
+    } else if (s === 'pause') pausePick(id);
+    else if (s === 'more') {
+      if (id === 'controls') openControls();
+      else if (id === 'dev') openDev();
+      else if (id === 'about') openAbout('more');
+      else openPause();
+    } else if (s === 'settings') settingsPick(id);
+    else if (s.startsWith('sub-')) subPick(s, id);
+    else if (s === 'about') {
+      if (id === 'next') {
+        aboutPage++;
+        open(SCREENS.about(ctx, aboutPage));
+      } else back();
+    } else if (s === 'controls') back();
+    else if (s === 'confirm') {
+      if (id === 'yes') {
+        store.clear();
+        save = loadSave(store);
+        settings = loadSettings(store);
+        persist();
+        applyAudio();
+      }
+      openSettings(origin);
+    } else if (s === 'touch') openSettings('title');
+  }
+  let origin = 'title';
+  function back(): void {
+    if (origin === 'title') titleScreen();
+    else if (origin === 'more') openMore();
+    else openPause();
+  }
+  function cancel(s: string): void {
+    if (s === 'title' || s === 'evening' || s === 'credits' || s === 'results') return;
+    if (s === 'programme' || s === 'board') closeScreen();
+    else if (s === 'pause') resume();
+    else if (s === 'more') openPause();
+    else if (s === 'settings' || s === 'about' || s === 'controls' || s.startsWith('sub-')) {
+      if (s.startsWith('sub-')) openSettings(origin);
+      else back();
+    } else if (s === 'confirm') openSettings(origin);
+  }
+  function openPause(): void {
+    paused = true;
+    insNow()?.pause();
+    open(SCREENS.pause(ctx, (current !== '' && current !== 'group') || current === 'group', deps.session));
+  }
+  function openMore(): void {
+    open(SCREENS.more(ctx, !deps.session));
+  }
+  function resume(): void {
+    paused = false;
+    closeScreen();
+    insNow()?.resume();
+  }
+  function pausePick(id: string): void {
+    if (id === 'resume') resume();
+    else if (id === 'restart') {
+      resume();
+      startActivity(current);
+    } else if (id === 'island') {
+      resume();
+      closeScreen();
+      fade(() => {
+        act('game.leave');
+        act('game.go', { station: 'plaza' });
+        setMap('actionMap:roam');
+        setCamera('cam3=stage,roam');
+        current = '';
+        scr = 'play';
+      });
+    } else if (id === 'settings') openSettings('pause');
+    else if (id === 'more') openMore();
+    else if (id === 'icons') {
+      settings.glyphs = settings.glyphs === 'ps' ? 'xbox' : 'ps';
+      persist();
+      hud?.toast(`Button icons: ${settings.glyphs === 'ps' ? 'PlayStation' : 'Xbox'}`);
+    } else if (id === 'quit') {
+      resume();
+      fade(() => {
+        act('game.leave');
+        current = '';
+        titleScreen();
+      });
+    }
+  }
+  function openSettings(from: string): void {
+    origin = from;
+    open(SCREENS.settings(ctx, settings));
+  }
+  function openAbout(from: string): void {
+    origin = from;
+    aboutPage = 0;
+    open(SCREENS.about(ctx, 0));
+  }
+  function openControls(): void {
+    origin = 'more';
+    open(SCREENS.controls(ctx, [{ label: 'Back', id: 'back' }]));
+  }
+  let openDev = () => hud?.toast('Dev Mode is not loaded');
+  const pct = (v: number) => `${Math.round(v * 100)}%`;
+  function settingsPick(id: string): void {
+    if (id === 'back') return back();
+    if (id === 'erase')
+      return open(
+        SCREENS.confirm(
+          ctx,
+          'Erase Save',
+          'Everything you have done on the island will be forgotten. The island will not mind.',
+          'Erase',
+        ),
+      );
+    const rows =
+      id === 'sound'
+        ? [
+            { label: `Music ${pct(settings.music)}`, id: 'music' },
+            { label: `Effects ${pct(settings.effects)}`, id: 'effects' },
+            { label: `Voices ${pct(settings.voices)}`, id: 'voices' },
+            { label: 'Back', id: 'back' },
+          ]
+        : id === 'play'
+          ? [
+              { label: `Button icons: ${settings.glyphs === 'ps' ? 'PlayStation' : 'Xbox'}`, id: 'glyphs' },
+              { label: `Mouse sensitivity ${settings.mouse.toFixed(1)}`, id: 'mouse' },
+              { label: `Rumble: ${settings.rumble ? 'on' : 'off'}`, id: 'rumble' },
+              { label: `Steadier Hands: ${settings.steady ? 'on' : 'off'}`, id: 'steady' },
+              { label: `CPU guests: ${settings.cpu ? 'on' : 'off'}`, id: 'cpu' },
+              { label: 'Back', id: 'back' },
+            ]
+          : [
+              { label: `Reduced Motion: ${settings.reduced ? 'on' : 'off'}`, id: 'reduced' },
+              { label: `Invert look: ${settings.invertLook ? 'on' : 'off'}`, id: 'invert' },
+              { label: 'Fullscreen', id: 'fullscreen' },
+              { label: 'Back', id: 'back' },
+            ];
+    open(SCREENS.group(ctx, id === 'sound' ? 'Sound' : id === 'play' ? 'Play' : 'Display', rows));
+  }
+  function subPick(s: string, id: string): void {
+    const step = (v: number) => (v >= 0.99 ? 0 : Math.round((v + 0.1) * 100) / 100);
+    if (id === 'back') return openSettings(origin);
+    if (id === 'music') settings.music = step(settings.music);
+    else if (id === 'effects') settings.effects = step(settings.effects);
+    else if (id === 'voices') settings.voices = step(settings.voices);
+    else if (id === 'glyphs') settings.glyphs = settings.glyphs === 'ps' ? 'xbox' : 'ps';
+    else if (id === 'mouse') settings.mouse = settings.mouse >= 3 ? 0.5 : settings.mouse + 0.5;
+    else if (id === 'rumble') settings.rumble = !settings.rumble;
+    else if (id === 'steady') settings.steady = !settings.steady;
+    else if (id === 'cpu') settings.cpu = !settings.cpu;
+    else if (id === 'reduced') settings.reduced = !settings.reduced;
+    else if (id === 'invert') settings.invertLook = !settings.invertLook;
+    else if (id === 'fullscreen') {
+      void document.documentElement.requestFullscreen?.().catch(() => undefined);
+    }
+    persist();
+    applyAudio();
+    stageFx.reduced = settings.reduced;
+    insNow()?.set('game.assist', settings.steady ? 1 : 0);
+    settingsPick(s === 'sub-Sound' ? 'sound' : s === 'sub-Play' ? 'play' : 'display');
+    screens?.select(
+      [
+        'music',
+        'effects',
+        'voices',
+        'glyphs',
+        'mouse',
+        'rumble',
+        'steady',
+        'cpu',
+        'reduced',
+        'invert',
+        'fullscreen',
+      ].indexOf(id) % 6,
+    );
+  }
+  // ---- per frame ------------------------------------------------------------------------------------------------
+  function sim(frame: EngineFrame): { flow: Rec; guest: Rec | null; run: Rec | null; seat: Rec | null } {
+    const w = frame.world;
+    const flow = (w.query('flow')[0] as Rec | undefined)?.flow ?? {};
+    const g = (w.query('cast', 'wobble', 'act', 'seat') as Rec[]).find((e) => e.cast.who === 'guest') ?? null;
+    return { flow, guest: g, run: g?.act ?? null, seat: g?.seat ?? null };
+  }
+  function events(frame: EngineFrame, s: ReturnType<typeof sim>): void {
+    if (frame.world !== world) {
+      world = frame.world;
+      lastSeq = 0;
+    }
+    for (const r of frame.world.events.trace() as { seq: number; type: string; payload: Rec }[]) {
+      if (r.seq <= lastSeq) continue;
+      lastSeq = r.seq;
+      const p = r.payload ?? {};
+      if (attract && r.type === 'result') continue;
+      switch (r.type) {
+        case 'say':
+          if (!attract || r.payload.who === 'tare') speak(p.who, p.id);
+          break;
+        case 'result':
+          onResult(p as never);
+          break;
+        case 'topple':
+          sfx('creak', 0.7);
+          if (settings.rumble) rumble(0.5);
+          break;
+        case 'splash':
+          sfx(p.big ? 'splashHuge' : 'splashSmall');
+          break;
+        case 'moved':
+          sfx('ooh', 0.4);
+          hud?.toast('You moved.', 1.6);
+          break;
+        case 'lure':
+          hud?.lure(lineText(p.line));
+          if (p.kind === 'gull') sfx('gull');
+          if (p.kind === 'frog') sfx('ribbit');
+          break;
+        case 'lureEnd':
+          hud?.lure('');
+          break;
+        case 'beat':
+          sfx(p.grade === 'perfect' ? 'perfect' : 'clap');
+          if (settings.rumble) rumble(0.2);
+          break;
+        case 'miss':
+          sfx('miss', 0.5);
+          break;
+        case 'rep':
+          sfx('clack');
+          break;
+        case 'gate':
+          sfx('tick');
+          break;
+        case 'sink':
+          sfx('sink');
+          break;
+        case 'lineStep':
+          sfx('rope', 0.5);
+          break;
+        case 'gull':
+          sfx('gull');
+          break;
+        case 'gustWarn':
+          sfx('whoosh', 0.5);
+          break;
+        case 'storm':
+          sfx('thunder');
+          sfx('horn', 0.6);
+          break;
+        case 'lurch':
+          sfx('groan');
+          break;
+        case 'delivered':
+          sfx('ooh');
+          break;
+        case 'calm':
+          sfx('breathOut');
+          break;
+        case 'hoopCaught':
+          sfx('whoosh');
+          break;
+        case 'cards':
+          sfx('ooh');
+          break;
+        case 'classDone':
+          sfx('stamp');
+          break;
+        case 'roundDone': {
+          current = 'group';
+          const t = p.total as number[];
+          open(
+            SCREENS.results(
+              ctx,
+              'Group Class',
+              t[0] >= Math.max(...t.slice(0, 4)) ? 'Least Wobbly' : 'Composed',
+              Math.round(t[0]),
+              3,
+              said++,
+            ),
+          );
+          break;
+        }
+        default:
+          break;
+      }
+    }
+    void s;
+  }
+  function rumble(strength: number): void {
+    try {
+      const pads = navigator.getGamepads?.() ?? [];
+      for (const p of pads)
+        (p as any)?.vibrationActuator?.playEffect?.('dual-rumble', {
+          duration: 120,
+          strongMagnitude: strength,
+          weakMagnitude: strength,
+        });
+    } catch {
+      /* optional */
+    } // eslint-disable-line
+  }
+  function frame(f: EngineFrame): void {
+    const e = eng();
+    if (!e || !hud || !screens) return;
+    pollPads();
+    if ((screens.current || '') !== lastScr) {
+      lastScr = screens.current || '';
+      markScreenChange();
+    }
+    const s = sim(f);
+    const dt = f.dt;
+    events(f, s);
+    stageFx.t += dt;
+    lastDevice = device();
+    if (screens.current) screens.update(dt);
+    hud.update(dt);
+    const mode = s.flow.mode ?? 'roam';
+    if (deps.session) {
+      /* the hub scene drives its own card */
+    }
+    // pause and shortcuts
+    if (!screens.current && !attract && scr === 'play') {
+      if (consumeEdge('pause')) openPause();
+      else if (mode === 'roam' && s.flow.nPlan !== seenPlan) openProgramme();
+      else if (mode === 'roam' && s.flow.nWave !== seenWave) {
+        sfx('squeak');
+        hud.toast('You wave. Nothing waves back. That is also a wave.', 2.5);
+      }
+    }
+    if (screens.current === 'pause' && consumeEdge('pause')) resume();
+    seenPlan = s.flow.nPlan;
+    seenWave = s.flow.nWave; // consumed this frame
+    // HUD
+    const inEvent = mode === 'event' && s.run?.id;
+    if (inEvent && s.guest) {
+      const w = s.guest.wobble;
+      const ex = hudFor(s.run!.id, s.run as never, w, 3);
+      hud.disc({
+        x: w.x,
+        y: w.y,
+        calm: w.calm,
+        lungs: w.lungs,
+        guide: w.guide,
+        fl: s.seat?.fl ?? 0,
+        fr: s.seat?.fr ?? 0,
+        breath: ex.breath,
+        ring: ex.ring,
+        target: ex.target,
+        guideDot: ex.guideDot,
+        show: ex.disc && !attract,
+      });
+      hud.strip(ex.left, ex.right);
+    } else {
+      hud.disc({ x: 0, y: 0, calm: 0, lungs: 0, guide: 0, fl: 0, fr: 0, breath: false, show: false });
+      hud.strip('', '');
+    }
+    if (mode !== lastFlowMode) {
+      lastFlowMode = mode;
+      if (mode === 'roam') hud.clear();
+    }
+    // island prompts
+    if (mode === 'roam' && s.guest && !screens.current && !attract) island(f, s);
+    else if (!inEvent) hud.prompt('');
+    // attract
+    if (!deps.touchOnly || true) idleTick(dt);
+    // tilt: the camera banks
+    const isl = (f.world.query('island')[0] as Rec | undefined)?.island;
+    stageFx.roll = isl ? Math.atan2(isl.tiltX * 0.12, 1) : 0;
+    try {
+      audio?.update(f.camera as never, f.queries ?? undefined);
+    } catch {
+      /* audio is optional */
+    }
+    ambience(mode, isl?.storm ?? 0);
+    seenUse = s.flow.nUse;
+  }
+  type Loop = { volume(v: number): void };
+  const amb: { sea?: Loop | null; wind?: Loop | null; rain?: Loop | null } = {};
+  function ambience(mode: string, storm: number): void {
+    if (!audio || audio.state === ('blocked' as never)) return;
+    try {
+      if (!amb.sea) {
+        amb.sea = audio.play('sfx:retreat.seaLoop', { loop: true, vol: 0.5 * settings.effects });
+        amb.wind = audio.play('sfx:retreat.windLoop', { loop: true, vol: 0.2 * settings.effects });
+        amb.rain = audio.play('sfx:retreat.rainLoop', { loop: true, vol: 0 });
+      }
+      amb.rain?.volume(storm * 0.6 * settings.effects);
+      amb.wind?.volume((0.2 + storm * 0.6) * settings.effects);
+    } catch {
+      /* optional */
+    }
+    void mode;
+  }
+  function island(f: EngineFrame, s: ReturnType<typeof sim>): void {
+    const a = s.guest!.actor;
+    const near = (x: number, z: number, r: number) => Math.hypot(a.x - x, a.z - z) < r;
+    for (const p of f.world.query('pebble') as Rec[])
+      if (!p.pebble.found && near(p.pebble.x, p.pebble.z, 1.4)) {
+        save.finds.push(p.pebble.no);
+        save.pebbles += 1;
+        persist();
+        act('game.found', { no: p.pebble.no });
+        act('game.cairn', { count: save.pebbles, age: save.ages[save.ages.length - 1] ?? 18 });
+        sfx('clack');
+        speak('tare', 'tare.pebble');
+      }
+    let target: { label: string; run: () => void } | null = null;
+    const dev = device();
+    const set = glyphs();
+    const people: [string, string][] = [
+      ['plumb', 'Plumb'],
+      ['tare', 'Tare'],
+      ['gerald', 'Gerald'],
+      ['bex', 'Bex'],
+      ['nan', 'Nan'],
+    ];
+    for (const c of f.world.query('cast', 'actor') as Rec[]) {
+      const who = c.cast.who;
+      const hit = people.find((p) => p[0] === who);
+      if (hit && near(c.actor.x, c.actor.z, 3.2))
+        target = { label: `Talk to ${hit[1]}`, run: () => speak(who, `${who}.talk.${1 + (said++ % 4)}`) };
+    }
+    for (const [id, st] of Object.entries(STATIONS)) {
+      if (near(st.at[0], st.at[1], 5) && id !== 'pier' && id !== 'stone' && id !== 'east') {
+        const list = Object.entries(ACTIVITY_INFO).filter(
+          ([k, v]) => v.where === id && !(k === 'tilt') && (freePlay || save.day >= 1) && k !== 'tilt',
+        );
+        const fit =
+          list.find(
+            ([k]) => DAYS[Math.min(save.day, 5) - 1].acts.includes(k) && !save.done.includes(`${save.day}:${k}`),
+          ) ?? list[0];
+        if (fit) target = { label: `Play ${fit[1].title}`, run: () => startActivity(fit[0]) };
+      }
+    }
+    if (near(STATIONS.plaza.at[0] + 9, STATIONS.plaza.at[1] - 4, 4)) target = { label: 'Noticeboard', run: openBoard };
+    if (near(STATIONS.huts.at[0], STATIONS.huts.at[1], 6))
+      target = {
+        label: dayDone() ? 'Sleep' : 'Your hut',
+        run: () => (dayDone() ? (evening(), void 0) : hud?.toast('The day is not done yet. Open the Programme.', 3)),
+      };
+    if (save.day === 5 && dayDone() === false && near(STATIONS.stone.at[0], STATIONS.stone.at[1], 3)) target = null;
+    if (target) {
+      hud!.prompt(hint('use', target.label, dev, set));
+      if (s.flow.nUse !== seenUse) target.run();
+    } else hud!.prompt(hint('programme', 'Programme', dev, set));
+    for (const p of f.world.query('plaque') as Rec[])
+      if (
+        near(p.plaque.x, p.plaque.z, 2.2) &&
+        pebbleMsg !== p.plaque.no + 1 &&
+        !save.finds.includes(100 + p.plaque.no)
+      ) {
+        pebbleMsg = p.plaque.no + 1;
+        save.finds.push(100 + p.plaque.no);
+        persist();
+        speak('tare', `plaque.${p.plaque.no % 12}`);
+      }
+  }
+  function idleTick(dt: number): void {
+    const front = !!screens?.current && scr !== 'play' && scr !== 'pause' && !attract && !paused;
+    if (attract) return;
+    idle = front ? idle + dt : 0;
+    if (idle > IDLE_S) startAttract();
+  }
+  let bannerEl: HTMLElement | null = null;
+  function startAttract(): void {
+    attract = true;
+    scr = 'attract';
+    screens?.close();
+    const e = eng();
+    if (e) {
+      insOf(e).set('game.auto', true);
+      insOf(e).set('game.noTopple', true);
+    }
+    act('game.begin', { day: 5, finds: [], pebbles: 0 });
+    setMap('actionMap:balance');
+    hud!.clear();
+    bannerEl = document.createElement('div');
+    bannerEl.className = 'banner';
+    bannerEl.dataset.attract = '1';
+    bannerEl.innerHTML = `<div class="panel" style="display:inline-block"><h2>Well Wobbled · DEMO</h2><div>${hint('any', 'Press any button', device(), glyphs())}</div></div>`;
+    root?.appendChild(bannerEl);
+  }
+  function stopAttract(): void {
+    if (!attract) return;
+    attract = false;
+    idle = 0;
+    bannerEl?.remove();
+    bannerEl = null;
+    const e = eng();
+    if (e) {
+      insOf(e).set('game.auto', false);
+      insOf(e).set('game.noTopple', false);
+    }
+    act('game.leave');
+    act('game.begin', {
+      day: save.day,
+      finds: save.finds,
+      pebbles: save.pebbles,
+      age: save.ages[save.ages.length - 1] ?? 18,
+    });
+    act('game.go', { station: 'pier' });
+    setMap('actionMap:menu');
+    titleScreen();
+  }
+  function anyInput(): void {
+    idle = 0;
+    if (attract) stopAttract();
+  }
+  return {
+    store,
+    ctx,
+    frame,
+    mapId: () => currentMap,
+    anyInput,
+    speak,
+    sfx,
+    setCamera,
+    setMap,
+    fade,
+    get save() {
+      return save;
+    },
+    get settings() {
+      return settings;
+    },
+    get audio() {
+      return audio;
+    },
+    get attract() {
+      return attract;
+    },
+    get lastDevice() {
+      return lastDevice;
+    },
+    get modal() {
+      return () => !!screens?.current || paused;
+    },
+    get screenName() {
+      return scr;
+    },
+    mount(rootEl: HTMLElement, engine: Engine): void {
+      root = rootEl;
+      hud = createHud(rootEl);
+      screens = new Screens(rootEl, engine.input!, ctx);
+      fadeEl = document.createElement('div');
+      fadeEl.className = 'fade';
+      rootEl.appendChild(fadeEl);
+      audio = createAudio();
+      audio.volume('music', settings.music);
+      applyAudio();
+      stageFx.reduced = settings.reduced;
+      try {
+        audio.music('song:retreat.lobby');
+      } catch {
+        /* optional */
+      }
+      setMap('actionMap:menu');
+      if (deps.touchOnly) {
+        open(SCREENS.touch());
+        scr = 'touch';
+      } else titleScreen();
+    },
+    setOpenDev(fn: () => void) {
+      openDev = fn;
+    },
+    openPause,
+    titleScreen,
+    resume,
+    hud: () => hud,
+    lineOf,
+    LINES,
+    groundAt,
+    PEBBLE_SITES,
+  };
+}
+export type App = ReturnType<typeof createApp>;

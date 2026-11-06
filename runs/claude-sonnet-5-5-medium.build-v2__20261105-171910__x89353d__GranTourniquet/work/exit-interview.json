@@ -1,0 +1,51 @@
+{
+  "sourceInformation": {
+    "date": "2026-11-05 17:19:10",
+    "source": "Gran Turismo 3: A-Spec",
+    "plan": "PLAN.md",
+    "genre": "Racing simulation with a career, tuning and car collecting",
+    "perspective": "Third-person chase camera (near and far), bonnet view and television replay cameras; menus are a 3D diorama seen from a slow three-quarter camera",
+    "tech": "Pixel Engine 0.46.0 (three.js r186, Rapier), plain JavaScript modules bundled with esbuild into one HTML, AI Hub session client 1.4.0, Playwright 1.63 for tests",
+    "artDirection": "The engine's native 480x270 pixel-art look: low-poly toon materials in the 16-colour Sweetie palette, side-profile slab car models with separate wheels, procedural track meshes and dressing",
+    "animation": "The engine's rig and HERO_CLIPS plus ten new ClipDefs (pit crew, marshal, examiner, dealer, mechanic, podium, crowd), procedural car body motion, tweens, Timeline-style podium and prize reveal",
+    "audio": "All Web Audio in code: synthesised engines per car, tyre, wind and kerb loops, Animalese-style gibberish voices with subtitles, eight original chiptune songs, music defaults to 10 percent volume",
+    "online": "AI Hub ghost-mode session round with the game's own card, ghost cars, progress and result; local split-screen Couch Duel; no other network",
+    "testing": "Headless Node suites (simulation regression, data, career, headless engine, a whole-game bot), a Playwright browser suite from file:// with pad stub, mouse, touch, attract, dev mode and couch duel, offline audio rendering, and the AI Hub harness for 2 players, 4 players with latency and host-leave; screenshots only for visuals; no subagents",
+    "research": "none beyond reading the kit docs and the hub protocol README",
+    "environment": "Claude Code CLI (headless); Linux",
+    "model": "Anthropic, claude-sonnet-5-5, reasoning effort medium",
+    "usage": "added on import"
+  },
+  "testingFeedback": [
+    "About 14 issues: a headless crash on window, a null install in the tuning code, a pause menu that closed on the frame it opened, an idle timer tied to slow game time, attract exit lost during scene loads, HUD overlaps, a plan lap-table outlier, and several balance problems found by the bot.",
+    "2 were game breaking: the pause menu never stayed open, and attract mode never started at low frame rates. The rest were minor or balance.",
+    "The scripted whole-game bot and the AI Hub harness. The bot found tyre-wear and AI pace imbalances and a pit-stop bug; the harness proved the session protocol in one run.",
+    "The data and text-fit suite: it was cheap but nothing in it ever failed."
+  ],
+  "engineFeedback": [
+    "The pixel renderer reads a car at 480x270 straight away, the fixed camera preset leaves the camera to the game, models and clips as plain data, and Engine.headless makes a real scripted playthrough possible.",
+    "Yes. I shadowed the setup hook with my own class field, wasPressed does not work outside engine hooks, key presses are dropped across loadGame so attract exit needed raw listeners, and headless needed document and window guards.",
+    "The car simulation integration and a controller-first UI toolkit (focus navigation, glyphs, prompts, sliders) drawn on the HUD canvas, because the engine has no menu layer.",
+    "Menus and focus on a 5x7 uppercase HUD, analog triggers and a second pad not being exposed, and keeping night scenes readable with a small light pool.",
+    "none",
+    "Expose analog gamepad triggers and more than one pad as first-class input, and ship a controller-first menu toolkit."
+  ],
+  "promptFeedback": [
+    "The plan carried working simulation code, regression numbers and a list of engine facts already proven. It saved hours and let me start from tested ground.",
+    "The size of the scope against one session, and a few plan numbers that did not agree with each other (a Saltline lap time, the placement of file names between the plan and the brief).",
+    "Breadth: 14 cars, 6 tracks, 12 tests, 8 events, a diorama of menus, attract, dev mode, split screen and hub play, all with sound written in code.",
+    "Mark a smaller first slice as the floor with the extras as a second pass, and include a rough career economy so the bot can be checked early."
+  ],
+  "aiHub": {
+    "name": "Gran Tourniquet",
+    "tagline": "A slow and serious motoring life",
+    "description": "A calm pixel-art racing career on the Halcyon Peninsula: buy a tired hatchback, earn three licences, tune, and race for a prototype built in a shed.",
+    "type": "Game",
+    "genre": "Racing",
+    "source": "Gran Turismo 3: A-Spec",
+    "series": "Gran Turismo",
+    "players": "1–4",
+    "controls": "Stick or WASD to steer, R2 or W to go, L2 or S to brake",
+    "tags": ["3d", "pixel art", "vehicles", "retro", "third-person", "versus"]
+  }
+}

@@ -1,0 +1,14 @@
+# Decisions
+- Title: Wobble Wit, selected by a real random draw from 50 candidates; one title constant in game code.
+- Full eleven-event roster retained; the five-day stay, finale, hot-seat and Hub medley share the same deterministic activity implementations.
+- Engine UI stays in egui and art stays native primitive-based, so headless captures and browser rendering share the presentation.
+- About data stays plain JSON in the HTML, and is supplied to the sim once at boot so importers can update Usage.
+- Every prop's rounded radius is clamped to its thinnest half extent; native asset schema validation caught invalid radii before packaging.
+- Squat rest periods only earn points after an actual descent; Tray Trek has a readable slow tray drift that requires counterbalance. Both now distinguish active play from idle.
+- Rhythm input anchors to the synthesizer's sample position, rebasing after a track restarts so pausing cannot desynchronise notes.
+- Paddle forward/back lean now changes travel speed, with gate/tip penalties applied to the actual run time. Jog steps change travel pace; crabs and ribbons stay fixed on the route and can be hit/collected.
+- Pose Parade introduces the other three authored poses on later days and in Free Play. The dive has a large low-point timing cue.
+- Saved ghosts sample at 4 Hz and interpolate positions. This keeps four complete guest slots within ordinary localStorage quotas; the full-stay test enforces a 600 KB per-slot budget.
+- Morning Lap uses a higher chase camera (55 degrees, 16 m) to keep palms and pavilion roofs from blocking the runner on the island route.
+- While the Hub's own pre-round card is up, publish loaded simulation status and defer scene drawing until the round starts. This keeps four software-rendered copies from delaying readiness.
+- Wake events also emit small silent foam particles, so the paddle trail reads on the native flat pastel sea.

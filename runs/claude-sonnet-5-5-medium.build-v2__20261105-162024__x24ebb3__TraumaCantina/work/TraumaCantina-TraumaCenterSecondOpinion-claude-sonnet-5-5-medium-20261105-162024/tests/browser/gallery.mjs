@@ -1,0 +1,17 @@
+import { launch, ROOT, waitReady } from './lib.mjs';
+const [vw = '960', vh = '540'] = process.argv.slice(2);
+const { browser, page, errs } = await launch({ viewport: { width: +vw, height: +vh } });
+await page.goto('file://' + ROOT + '/dist/game.html'); await waitReady(page); await page.waitForTimeout(2500);
+const shot = async (name, ms = 2500) => { await page.waitForTimeout(ms); await page.screenshot({ path: `${ROOT}/check/g-${name}.png` }); console.log(name, await page.evaluate(() => { const s = window.__PIXEL_ENGINE__.state(); return s.game?.status ?? s.status; })); };
+const key = async (k) => { await page.keyboard.press(k); await page.waitForTimeout(250); };
+await key('Enter'); await shot('main', 1200);
+await page.evaluate(() => window.__GAME__.go.briefing(window.__GAME__.ctx, 'op5')); await shot('briefing', 3500);
+await page.evaluate(() => window.__GAME__.go.results(window.__GAME__.ctx, { opId: 'op5', res: { rank: 'A', total: 5200, timeLeft: 210, timeBonus: 1050, vit: 66, vitBonus: 660, clean: 22, good: 6, sloppy: 2, points: 3490, maxStreak: 9, mistakes: 1, pristine: false, capped: null }, sim: { per: {} }, a: { noSave: true } })); await shot('results', 9000);
+await page.evaluate(() => window.__GAME__.goto('consult')); await shot('consult', 2500);
+await page.evaluate(() => window.__GAME__.go.operation(window.__GAME__.ctx, { opId: 'op3', noDive: true, noSave: true, botAll: true })); await shot('op3', 9000);
+await page.evaluate(() => window.__GAME__.go.operation(window.__GAME__.ctx, { opId: 'op6', noDive: true, noSave: true, botAll: true, startStage: 7 })); await shot('op6', 6000);
+await page.evaluate(() => window.__GAME__.go.operation(window.__GAME__.ctx, { opId: 'op7', noDive: true, noSave: true, botAll: true, startStage: 1, cheats: { god: true } })); await shot('op7', 12000);
+await page.evaluate(() => window.__GAME__.go.operation(window.__GAME__.ctx, { opId: 'op9', noDive: true, noSave: true, botAll: true, startStage: 0, cheats: { god: true } })); await shot('op9', 9000);
+await page.evaluate(() => { const op = window.__GAME__.op; op.openPause(op.ctx); }); await shot('pause', 800);
+await page.evaluate(() => { const op = window.__GAME__.op; op.openDev(op.ctx); }); await shot('dev', 800);
+console.log('errs', errs.slice(0, 5)); await browser.close();

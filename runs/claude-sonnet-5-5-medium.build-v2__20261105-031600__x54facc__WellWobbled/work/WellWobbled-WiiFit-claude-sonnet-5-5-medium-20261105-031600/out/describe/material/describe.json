@@ -1,0 +1,192 @@
+{
+  "kind": "material",
+  "description": "Materials as data with three.js's classic parameters (color, map, roughness, emissive, flags); the engine decides how to draw them.",
+  "fields": [
+    {
+      "key": "description",
+      "type": "string",
+      "description": "What it is for, in plain sentences.",
+      "default": ""
+    },
+    {
+      "key": "color",
+      "type": "string",
+      "description": "The base colour, hex; it multiplies the map (three.js's color).",
+      "default": "#ffffff"
+    },
+    {
+      "key": "map",
+      "type": "any",
+      "description": "The texture generator that fills the maps: a texture id ('texture:brick'), or { texture, seed, params, size, look, repeat }; null for none. Its height becomes the normal map, its roughness the roughness map, its emissive the emissive map.",
+      "default": null
+    },
+    {
+      "key": "roughness",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Microfacet roughness, 0 (mirror) to 1 (matte), for the styles that shade with it (pbr, WP 7.2).",
+      "default": 1
+    },
+    {
+      "key": "metalness",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "How metallic, 0 to 1, for the styles that shade with it (pbr, WP 7.2).",
+      "default": 0
+    },
+    {
+      "key": "emissive",
+      "type": "string",
+      "description": "The colour it glows with, hex, unaffected by light; it multiplies the map's emissive, as three.js's emissiveMap does (write '#ffffff' to show a glowing texture as baked).",
+      "default": "#000000"
+    },
+    {
+      "key": "emissiveIntensity",
+      "type": "number",
+      "minimum": 0,
+      "description": "A multiplier on emissive.",
+      "default": 1
+    },
+    {
+      "key": "normalScale",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 8,
+      "description": "How deep the map's relief looks: scales the normal map from its height (0 turns it off).",
+      "default": 1
+    },
+    {
+      "key": "unlit",
+      "type": "boolean",
+      "description": "Drawn without lights (glTF unlit, three.js MeshBasicMaterial): color × map as it is; for glows, skies and markers.",
+      "default": false
+    },
+    {
+      "key": "transparent",
+      "type": "boolean",
+      "description": "Blended with what is behind it, by opacity.",
+      "default": false
+    },
+    {
+      "key": "opacity",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Its opacity when transparent.",
+      "default": 1
+    },
+    {
+      "key": "alphaTest",
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Texels with alpha below this are not drawn (cut-outs).",
+      "default": 0
+    },
+    {
+      "key": "side",
+      "type": "string",
+      "enum": [
+        "front",
+        "back",
+        "double"
+      ],
+      "description": "Which faces are drawn.",
+      "default": "front"
+    },
+    {
+      "key": "flatShading",
+      "type": "boolean",
+      "description": "Faceted: one normal per triangle.",
+      "default": false
+    },
+    {
+      "key": "vertexColors",
+      "type": "boolean",
+      "description": "Multiplies by the geometry's color attribute.",
+      "default": false
+    },
+    {
+      "key": "fog",
+      "type": "boolean",
+      "description": "Whether the scene's fog applies.",
+      "default": true
+    },
+    {
+      "key": "depthWrite",
+      "type": "boolean",
+      "description": "Whether it writes depth (off for some transparent layers).",
+      "default": true
+    },
+    {
+      "key": "gallery",
+      "type": "object",
+      "description": "How the gallery shows it (engine/core/gallery.ts; x gallery, #gallery/<kind>/<id>): its camera, how long it plays and the states it is shown in.",
+      "default": {
+        "camera": "front",
+        "duration": 0,
+        "states": []
+      },
+      "properties": [
+        {
+          "key": "camera",
+          "type": "string",
+          "description": "How the gallery frames it: `turntable` (Four views round it, a quarter turn apart, from 25° up, fitted to its size.), `front` (One view from its front left, 25° up, fitted to its size.), or a camera code drawn as written.",
+          "default": "front"
+        },
+        {
+          "key": "duration",
+          "type": "number",
+          "minimum": 0,
+          "unit": "s",
+          "description": "How long it plays: four frames, one in each quarter's middle; 0 for a still (a move's or an emitter's: its own length).",
+          "default": 0
+        },
+        {
+          "key": "states",
+          "type": "array",
+          "description": "The states it is shown in, one frame each (a body's: a sample state, a pose or a stance).",
+          "default": [],
+          "items": {
+            "key": "[]",
+            "type": "string"
+          }
+        }
+      ]
+    }
+  ],
+  "ids": [
+    "material:asphalt",
+    "material:barrel",
+    "material:barrelLid",
+    "material:barrelStaves",
+    "material:blobShadow",
+    "material:brick",
+    "material:carpet",
+    "material:checker",
+    "material:cloth",
+    "material:concrete",
+    "material:crate",
+    "material:default",
+    "material:flagstone",
+    "material:flame",
+    "material:glass",
+    "material:glow",
+    "material:hallFloor",
+    "material:iron",
+    "material:paint",
+    "material:planks",
+    "material:puppet",
+    "material:puppetGlow",
+    "material:puppetHalo",
+    "material:shingles",
+    "material:siding",
+    "material:stone",
+    "material:tiles",
+    "material:wallpaper",
+    "material:wood"
+  ],
+  "fallback": "material:default"
+}

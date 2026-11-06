@@ -1,0 +1,11 @@
+Built **Fit of Stillness** with 17 activities, the seven-day story, local Family Hour and AI Hub multiplayer. **114/114 checks passed.**
+
+[Open the game](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261104-221722__x6981e3/work/Fit-of-Stillness-Wii-Fit-gpt-6.1-sol-max-20261104-221722.html) · [Exit interview](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261104-221722__x6981e3/work/exit-interview.json) · [Progress log](/home/micha/dev/cc-matrix/runs/gpt-6.1-sol-max.build-v2__20261104-221722__x6981e3/work/PROGRESS.md)
+
+**Source Information:** Date: 2026-11-04 22:17:22. Source: Wii Fit. Plan: `PLAN.md`. Genre: Sports/fitness comedy. Perspective: isometric island and fixed activity views. Tech: unchanged Pixel Engine 0.46.0, three.js 0.186.0, Rapier 0.20.0, esbuild 0.28.2. Art: original models in the native pixel/toon style. Animation: ClipDef and AnimationMixer. Audio: original synthesized music, effects and gibberish voices; music defaults to 10%. Online: AI Hub ghost Medley, 1–4 players; local Family Hour. Testing: headless playthrough, browser/input/audio/layout checks and four Hub cases. Controllers and touch used stand-ins; Firefox/WebKit verified graceful WebGPU failure. Research: supplied plan and engine/Hub documentation. Environment: Codex CLI, headless Linux. Model: OpenAI gpt-6.1-sol, reasoning effort max. Usage: added on import.
+
+**Testing Feedback:** Fixed 22 grouped functional and visual issues, including two potential flow blockers. The complete story playthrough was most helpful; title-only smoke checks provided the least coverage.
+
+**Engine Feedback:** Data authoring and headless execution worked well. A posed test rig and paused UI timing caused initial mistakes. I built the Dot, activity framework, HUD and progression systems. Scene timing and animation feet were hardest. No engine changes. I would add an explicit unscaled UI clock.
+
+**Prompt Feedback:** The tone, pillars and verified recipes were useful. The full-week scope exceeded the usual meaning of “vertical slice.” Consistent controls across activities and multiplayer were hardest. I would distinguish core acceptance criteria from optional polish.
